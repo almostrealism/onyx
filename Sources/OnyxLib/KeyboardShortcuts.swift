@@ -1,0 +1,73 @@
+import AppKit
+
+public class ShortcutManager {
+    /// Set by ContentView when monitor overlay is shown/hidden
+    public static var monitorVisible = false
+    /// Set by ContentView when notes panel is open — suppresses bare-key shortcuts
+    public static var notesVisible = false
+
+    public static func setupMenuShortcuts() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let chars = event.charactersIgnoringModifiers ?? ""
+
+            // Cmd+Shift+E → new note (check shift combo first, before plain Cmd+E)
+            if flags.contains([.command, .shift]) && chars.lowercased() == "e" {
+                NotificationCenter.default.post(name: .createNote, object: nil)
+                return nil
+            }
+
+            // Cmd+E → toggle notes
+            if flags == .command && chars == "e" {
+                NotificationCenter.default.post(name: .toggleNotes, object: nil)
+                return nil
+            }
+
+            // Cmd+K → command palette
+            if flags == .command && chars == "k" {
+                NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
+                return nil
+            }
+
+            // Cmd+O → toggle file browser
+            if flags == .command && chars == "o" {
+                NotificationCenter.default.post(name: .toggleFileBrowser, object: nil)
+                return nil
+            }
+
+            // Shift+Tab → cycle tmux sessions
+            if flags == .shift && event.keyCode == 48 {
+                NotificationCenter.default.post(name: .cycleTmuxSession, object: nil)
+                return nil
+            }
+
+            // Cmd+, → settings
+            if flags == .command && chars == "," {
+                NotificationCenter.default.post(name: .openSettings, object: nil)
+                return nil
+            }
+
+            // Single-key shortcuts — disabled when notes are open
+            if !notesVisible {
+                // Backtick/tilde key (keyCode 50) → toggle monitor overlay
+                if event.keyCode == 50 && flags.isEmpty {
+                    NotificationCenter.default.post(name: .toggleMonitor, object: nil)
+                    return nil
+                }
+
+                // T key (keyCode 17) → toggle monitor time interval (only when overlay is visible)
+                if event.keyCode == 17 && flags.isEmpty && monitorVisible {
+                    NotificationCenter.default.post(name: .toggleMonitorInterval, object: nil)
+                    return nil
+                }
+            }
+
+            // Escape → dismiss top overlay
+            if event.keyCode == 53 && flags.isEmpty {
+                NotificationCenter.default.post(name: .escapePressed, object: nil)
+            }
+
+            return event
+        }
+    }
+}

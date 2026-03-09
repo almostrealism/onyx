@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+.DS_Store
+*.dSYM
+Onyx.app
