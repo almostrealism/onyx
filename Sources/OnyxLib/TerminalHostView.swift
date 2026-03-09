@@ -250,7 +250,7 @@ class OnyxTerminalView: NSView {
 
     /// Query the target for existing tmux sessions
     private func enumerateTmuxSessions(then completion: @escaping () -> Void) {
-        let script = "tmux ls -F '#{session_name}' 2>/dev/null || true"
+        let script = "tmux ls -F \"#{session_name}\" 2>/dev/null || true"
         let (cmd, args) = appState.remoteCommand(script)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -259,15 +259,16 @@ class OnyxTerminalView: NSView {
             process.executableURL = URL(fileURLWithPath: cmd)
             process.arguments = args
             process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
+            process.standardError = pipe
             try? process.run()
             process.waitUntilExit()
 
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(data: data, encoding: .utf8) ?? ""
+            // Filter out error/noise lines — session names are simple strings
             let sessions = output.components(separatedBy: "\n")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
+                .filter { !$0.isEmpty && !$0.hasPrefix("no ") && !$0.hasPrefix("error") }
 
             DispatchQueue.main.async {
                 guard let self = self else { return }
