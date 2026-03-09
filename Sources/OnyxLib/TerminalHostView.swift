@@ -255,31 +255,41 @@ class OnyxTerminalView: NSView {
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let process = Process()
-            let pipe = Pipe()
+            let stdoutPipe = Pipe()
             process.executableURL = URL(fileURLWithPath: cmd)
             process.arguments = args
-            process.standardOutput = pipe
-            process.standardError = pipe
-            try? process.run()
+            process.standardOutput = stdoutPipe
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+            } catch {
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.appState.tmuxSessions = [self.appState.sshConfig.tmuxSession]
+                    self.appState.activeSession = self.appState.sshConfig.tmuxSession
+                    completion()
+                }
+                return
+            }
+
+            // Read stdout synchronously — output is small, no pipe buffer concern
+            let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            // Filter out error/noise lines — session names are simple strings
+            let output = String(data: outputData, encoding: .utf8) ?? ""
             let sessions = output.components(separatedBy: "\n")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty && !$0.hasPrefix("no ") && !$0.hasPrefix("error") }
+                .filter { !$0.isEmpty }
 
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 let defaultSession = self.appState.sshConfig.tmuxSession
                 if sessions.isEmpty {
-                    // No sessions yet — we'll create the default one on connect
                     self.appState.tmuxSessions = [defaultSession]
                     self.appState.activeSession = defaultSession
                 } else {
                     self.appState.tmuxSessions = sessions
-                    // If we don't have an active session yet, pick the default or first
                     if self.appState.activeSession.isEmpty || !sessions.contains(self.appState.activeSession) {
                         self.appState.activeSession = sessions.contains(defaultSession) ? defaultSession : sessions[0]
                     }
