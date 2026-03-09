@@ -179,7 +179,7 @@ public class AppState: ObservableObject {
     public func remoteCommand(_ script: String) -> (String, [String]) {
         if isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-            return (shell, ["-lc", script])
+            return (shell, ["-lc", "\(extraPath) \(script)"])
         }
 
         var args = [String]()
@@ -194,9 +194,12 @@ public class AppState: ObservableObject {
         }
         let userHost = sshConfig.user.isEmpty ? sshConfig.host : "\(sshConfig.user)@\(sshConfig.host)"
         args.append(userHost)
-        args.append("exec $SHELL -lc '\(script)'")
+        args.append("exec $SHELL -lc '\(extraPath) \(script)'")
         return ("/usr/bin/ssh", args)
     }
+
+    /// Extra PATH entries so tmux is found even when login profile doesn't set it
+    private let extraPath = "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:/snap/bin\""
 
     /// Sanitize a session name for safe shell interpolation:
     /// replace any character that isn't alphanumeric, dash, or underscore with `_`.
@@ -218,7 +221,7 @@ public class AppState: ObservableObject {
         // Local: skip SSH, just run tmux directly
         if isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-            return (shell, ["-lc", "tmux new-session -A -s \(sess)"])
+            return (shell, ["-lc", "\(extraPath) tmux new-session -A -s \(sess)"])
         }
 
         var args = [String]()
@@ -235,7 +238,7 @@ public class AppState: ObservableObject {
         args.append("-t")
         let userHost = sshConfig.user.isEmpty ? sshConfig.host : "\(sshConfig.user)@\(sshConfig.host)"
         args.append(userHost)
-        args.append("exec $SHELL -lc 'tmux new-session -A -s \(sess)'")
+        args.append("exec $SHELL -lc '\(extraPath) tmux new-session -A -s \(sess)'")
         return ("/usr/bin/ssh", args)
     }
 
@@ -318,7 +321,7 @@ public class AppState: ObservableObject {
             echo ""; \
             sleep 1; \
             exec ssh \(portFlag)\(identityFlag)-t -o StrictHostKeyChecking=accept-new \(userHost) \
-                "exec \\$SHELL -lc 'tmux new-session -A -s \(sanitizedSession(activeSession.isEmpty ? sshConfig.tmuxSession : activeSession))'"; \
+                "exec \\$SHELL -lc '\(extraPath) tmux new-session -A -s \(sanitizedSession(activeSession.isEmpty ? sshConfig.tmuxSession : activeSession))'"; \
         else \
             echo ""; \
             echo "✗ Key installation failed."; \
