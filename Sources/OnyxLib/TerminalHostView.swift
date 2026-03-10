@@ -11,7 +11,7 @@ struct TerminalHostView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: OnyxTerminalView, context: Context) {
-        if !appState.showSetup && !nsView.hasStarted {
+        if appState.configLoaded && !appState.showSetup && !nsView.hasStarted {
             nsView.startSSH()
         }
         if appState.reconnectRequested {

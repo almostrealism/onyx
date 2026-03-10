@@ -67,6 +67,7 @@ public class AppState: ObservableObject {
     @Published public var activeSession: String = ""
     @Published public var switchToSession: String?
     @Published public var createNewSession = false
+    @Published public var configLoaded = false
 
     private var monitorCancellable: AnyCancellable?
     public lazy var monitor: MonitorManager = {
@@ -138,6 +139,8 @@ public class AppState: ObservableObject {
                 appearance = config
             }
         }
+
+        configLoaded = true
 
         // Start background monitoring immediately
         monitor.startPolling()
