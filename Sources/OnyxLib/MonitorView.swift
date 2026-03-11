@@ -623,8 +623,14 @@ struct RemindersSection: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.3))
             } else {
-                ForEach(reminders.todayReminders, id: \.calendarItemIdentifier) { reminder in
+                let visible = Array(reminders.todayReminders.prefix(7))
+                ForEach(visible, id: \.calendarItemIdentifier) { reminder in
                     ReminderRow(reminder: reminder, appState: appState, manager: reminders)
+                }
+                if reminders.todayReminders.count > 7 {
+                    Text("+\(reminders.todayReminders.count - 7) more")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.3))
                 }
             }
         }
