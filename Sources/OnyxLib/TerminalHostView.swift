@@ -361,7 +361,8 @@ class OnyxTerminalView: NSView {
             script = "tmux ls -F \"#{session_name}\" 2>/dev/null || true"
         case .docker(let containerName):
             let safe = appState.sanitizedContainer(containerName)
-            script = "docker exec \(safe) tmux ls -F \"#{session_name}\" 2>/dev/null || true"
+            // Don't use `|| true` — we need the exit code to detect missing tmux
+            script = "docker exec \(safe) tmux ls -F '#{session_name}' 2>&1"
         }
 
         let (cmd, args) = appState.remoteCommand(script)
@@ -383,10 +384,18 @@ class OnyxTerminalView: NSView {
         let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
+        // For docker sources, non-zero exit means tmux isn't available
+        if case .docker = source, process.terminationStatus != 0 {
+            completion([])
+            return
+        }
+
         let output = String(data: outputData, encoding: .utf8) ?? ""
         let sessions = output.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+            // Filter out lines that look like error messages rather than session names
+            .filter { line in !line.contains(" ") || line.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." } }
             .map { TmuxSession(name: $0, source: source) }
 
         completion(sessions)
@@ -436,12 +445,8 @@ class OnyxTerminalView: NSView {
             let source = SessionSource.docker(containerName: containerName)
             fetchTmuxSessions(source: source) { sessions in
                 lock.lock()
-                if sessions.isEmpty {
-                    // tmux not available or no sessions — show placeholder
-                    allDockerSessions.append(TmuxSession(
-                        name: "no tmux", source: source, unavailable: true
-                    ))
-                } else {
+                // Only include containers that actually have tmux sessions
+                if !sessions.isEmpty {
                     allDockerSessions.append(contentsOf: sessions)
                 }
                 lock.unlock()
