@@ -158,10 +158,10 @@ public struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .cycleTmuxSession)) { _ in
-            let sessions = appState.allSessions
-            guard sessions.count > 1, let current = appState.activeSession else { return }
-            if let idx = sessions.firstIndex(where: { $0.id == current.id }) {
-                let next = sessions[(idx + 1) % sessions.count]
+            let favorites = appState.favoriteSessions
+            guard favorites.count > 1, let current = appState.activeSession else { return }
+            if let idx = favorites.firstIndex(where: { $0.id == current.id }) {
+                let next = favorites[(idx + 1) % favorites.count]
                 appState.switchToSession = next
             }
         }
@@ -347,7 +347,7 @@ struct FavoritesBar: View {
                 .foregroundColor(.gray.opacity(0.25))
                 .padding(.trailing, 4)
 
-            if appState.allSessions.count > 1 {
+            if appState.favoriteSessions.count > 1 {
                 Text("⇧⇥ switch")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.25))
