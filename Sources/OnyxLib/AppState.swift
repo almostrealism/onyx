@@ -37,14 +37,16 @@ public struct AppearanceConfig: Codable {
     public var windowOpacity: Double = 0.82
     public var accentHex: String = "66CCFF"
     public var windowTitle: String = "Onyx"
+    public var remindersList: String = ""  // empty = all lists
 
     public static let accentOptions = ["66CCFF", "FF6B6B", "6BFF8E", "FFD06B", "C06BFF", "FF6BCD"]
 
-    public init(fontSize: Double = 13, windowOpacity: Double = 0.82, accentHex: String = "66CCFF", windowTitle: String = "Onyx") {
+    public init(fontSize: Double = 13, windowOpacity: Double = 0.82, accentHex: String = "66CCFF", windowTitle: String = "Onyx", remindersList: String = "") {
         self.fontSize = fontSize
         self.windowOpacity = windowOpacity
         self.accentHex = accentHex
         self.windowTitle = windowTitle
+        self.remindersList = remindersList
     }
 }
 

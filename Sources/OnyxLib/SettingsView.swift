@@ -1,8 +1,10 @@
 import SwiftUI
+import EventKit
 
 struct SettingsView: View {
     @ObservedObject var appState: AppState
     @FocusState private var focusedField: Field?
+    @StateObject private var remindersManager = RemindersManager()
 
     enum Field: Hashable {
         case host, user, port, tmux, identity, fontSize, opacity, windowTitle
@@ -95,6 +97,48 @@ struct SettingsView: View {
                                         .onTapGesture {
                                             appState.appearance.accentHex = hex
                                         }
+                                }
+                            }
+                        }
+
+                        // Reminders list picker
+                        if remindersManager.accessGranted {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("REMINDERS LIST")
+                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                    .tracking(2)
+
+                                HStack(spacing: 6) {
+                                    let isAll = appState.appearance.remindersList.isEmpty
+                                    Button(action: { appState.appearance.remindersList = "" }) {
+                                        Text("All")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(isAll ? .white : .gray.opacity(0.5))
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 4)
+                                            .background(isAll ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
+                                            .cornerRadius(4)
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 6) {
+                                            ForEach(remindersManager.availableLists, id: \.self) { list in
+                                                let selected = appState.appearance.remindersList == list
+                                                Button(action: { appState.appearance.remindersList = list }) {
+                                                    Text(list)
+                                                        .font(.system(size: 11, design: .monospaced))
+                                                        .foregroundColor(selected ? .white : .gray.opacity(0.5))
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 4)
+                                                        .background(selected ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
+                                                        .cornerRadius(4)
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

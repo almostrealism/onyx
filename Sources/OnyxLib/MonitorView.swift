@@ -315,8 +315,10 @@ public class MonitorManager: ObservableObject {
 public class RemindersManager: ObservableObject {
     @Published public var todayReminders: [EKReminder] = []
     @Published public var accessGranted = false
+    @Published public var availableLists: [String] = []
 
     private let store = EKEventStore()
+    public var selectedList: String = ""  // empty = all lists
 
     public init() {
         requestAccess()
@@ -326,13 +328,29 @@ public class RemindersManager: ObservableObject {
         store.requestFullAccessToReminders { [weak self] granted, _ in
             DispatchQueue.main.async {
                 self?.accessGranted = granted
-                if granted { self?.fetchToday() }
+                if granted {
+                    self?.refreshLists()
+                    self?.fetchToday()
+                }
             }
         }
     }
 
+    public func refreshLists() {
+        let calendars = store.calendars(for: .reminder)
+        availableLists = calendars.map(\.title).sorted()
+    }
+
     public func fetchToday() {
         guard accessGranted else { return }
+
+        let filterCalendars: [EKCalendar]?
+        if !selectedList.isEmpty {
+            let match = store.calendars(for: .reminder).filter { $0.title == selectedList }
+            filterCalendars = match.isEmpty ? nil : match
+        } else {
+            filterCalendars = nil
+        }
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
@@ -343,7 +361,7 @@ public class RemindersManager: ObservableObject {
             let predicate = self.store.predicateForIncompleteReminders(
                 withDueDateStarting: nil,
                 ending: endOfDay,
-                calendars: nil
+                calendars: filterCalendars
             )
 
             self.store.fetchReminders(matching: predicate) { reminders in
@@ -645,7 +663,14 @@ struct RemindersSection: View {
         }
         .padding(.horizontal, 40)
         .padding(.top, 8)
-        .onAppear { reminders.fetchToday() }
+        .onAppear {
+            reminders.selectedList = appState.appearance.remindersList
+            reminders.fetchToday()
+        }
+        .onChange(of: appState.appearance.remindersList) { _, newValue in
+            reminders.selectedList = newValue
+            reminders.fetchToday()
+        }
     }
 }
 
