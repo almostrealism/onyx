@@ -83,8 +83,18 @@ public class MonitorManager: ObservableObject {
 
     private func bucket(_ data: [(Date, Double)]) -> [Double] {
         guard !data.isEmpty else { return [] }
-        let interval: TimeInterval = useShortInterval ? 5 : 60
         let bucketCount = 60
+
+        if useShortInterval {
+            // 5s polling ≈ 1 sample per column — use values directly to avoid
+            // timer-jitter gaps from time-based bucketing
+            let recent = data.suffix(bucketCount).map { $0.1 }
+            let padding = Array(repeating: 0.0, count: max(0, bucketCount - recent.count))
+            return padding + recent
+        }
+
+        // 1-minute buckets: aggregate multiple 5s samples
+        let interval: TimeInterval = 60
         let now = Date()
         var buckets: [Double] = Array(repeating: -1, count: bucketCount)
 
@@ -97,7 +107,6 @@ public class MonitorManager: ObservableObject {
             }
         }
 
-        // Replace -1 (no data) with 0 only if there's at least some data
         return buckets.map { $0 < 0 ? 0 : $0 }
     }
 
