@@ -249,7 +249,7 @@ final class AppStateTests: XCTestCase {
         let state = AppState()
         state.sshConfig.host = "myserver.com"
         state.sshConfig.tmuxSession = "default"
-        let (_, args) = state.sshCommand(session: "custom")
+        let (_, args) = state.sshCommand(sessionName: "custom")
 
         XCTAssertTrue(args.last?.contains("tmux new-session -A -s custom") ?? false)
     }
@@ -258,10 +258,48 @@ final class AppStateTests: XCTestCase {
         let state = AppState()
         state.sshConfig.host = "myserver.com"
         state.sshConfig.tmuxSession = "default"
-        state.activeSession = "running"
+        state.activeSession = TmuxSession(name: "running", source: .host)
         let (_, args) = state.sshCommand()
 
         XCTAssertTrue(args.last?.contains("tmux new-session -A -s running") ?? false)
+    }
+
+    // MARK: - Docker command
+
+    func testDockerTmuxCommand_local() {
+        let state = AppState()
+        state.sshConfig.host = "localhost"
+        let (cmd, args) = state.dockerTmuxCommand(container: "my-app", sessionName: "dev")
+        XCTAssertFalse(cmd.contains("ssh"))
+        XCTAssertTrue(args.last?.contains("docker exec -it my-app tmux new-session -A -s dev") ?? false)
+    }
+
+    func testDockerTmuxCommand_remote() {
+        let state = AppState()
+        state.sshConfig.host = "myserver.com"
+        state.sshConfig.user = "admin"
+        let (cmd, args) = state.dockerTmuxCommand(container: "my-app", sessionName: "dev")
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        XCTAssertTrue(args.last?.contains("docker exec -it my-app tmux new-session -A -s dev") ?? false)
+    }
+
+    func testCommandForSession_host() {
+        let state = AppState()
+        state.sshConfig.host = "myserver.com"
+        let session = TmuxSession(name: "main", source: .host)
+        let (cmd, args) = state.commandForSession(session)
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        XCTAssertTrue(args.last?.contains("tmux new-session -A -s main") ?? false)
+        XCTAssertFalse(args.last?.contains("docker") ?? true)
+    }
+
+    func testCommandForSession_docker() {
+        let state = AppState()
+        state.sshConfig.host = "myserver.com"
+        let session = TmuxSession(name: "dev", source: .docker(containerName: "webapp"))
+        let (cmd, args) = state.commandForSession(session)
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        XCTAssertTrue(args.last?.contains("docker exec -it webapp tmux new-session -A -s dev") ?? false)
     }
 
     // MARK: - effectiveWindowTitle
@@ -273,9 +311,15 @@ final class AppStateTests: XCTestCase {
 
     func testEffectiveWindowTitle_withSession() {
         let state = AppState()
-        state.activeSession = "dev"
+        state.activeSession = TmuxSession(name: "dev", source: .host)
         XCTAssertTrue(state.effectiveWindowTitle.contains("dev"))
         XCTAssertTrue(state.effectiveWindowTitle.hasPrefix("Onyx"))
+    }
+
+    func testEffectiveWindowTitle_withDockerSession() {
+        let state = AppState()
+        state.activeSession = TmuxSession(name: "dev", source: .docker(containerName: "webapp"))
+        XCTAssertTrue(state.effectiveWindowTitle.contains("webapp/dev"))
     }
 
     func testEffectiveWindowTitle_withMonitor() {
@@ -286,7 +330,7 @@ final class AppStateTests: XCTestCase {
 
     func testEffectiveWindowTitle_withSessionAndMonitor() {
         let state = AppState()
-        state.activeSession = "prod"
+        state.activeSession = TmuxSession(name: "prod", source: .host)
         state.showMonitor = true
         let title = state.effectiveWindowTitle
         XCTAssertTrue(title.contains("prod"))
@@ -317,6 +361,255 @@ final class AppStateTests: XCTestCase {
         state.dismissTopOverlay()
         XCTAssertFalse(state.showSettings)
         XCTAssertTrue(state.showNotes) // not dismissed yet
+    }
+}
+
+final class SessionModelTests: XCTestCase {
+
+    // MARK: - SessionSource
+
+    func testSessionSource_hostStableKey() {
+        XCTAssertEqual(SessionSource.host.stableKey, "host")
+    }
+
+    func testSessionSource_dockerStableKey() {
+        let source = SessionSource.docker(containerName: "my-app")
+        XCTAssertEqual(source.stableKey, "docker:my-app")
+    }
+
+    func testSessionSource_hostDisplayName() {
+        XCTAssertEqual(SessionSource.host.displayName, "Host")
+    }
+
+    func testSessionSource_dockerDisplayName() {
+        let source = SessionSource.docker(containerName: "webapp")
+        XCTAssertEqual(source.displayName, "webapp")
+    }
+
+    func testSessionSource_equality() {
+        XCTAssertEqual(SessionSource.host, SessionSource.host)
+        XCTAssertEqual(
+            SessionSource.docker(containerName: "a"),
+            SessionSource.docker(containerName: "a")
+        )
+        XCTAssertNotEqual(SessionSource.host, SessionSource.docker(containerName: "a"))
+        XCTAssertNotEqual(
+            SessionSource.docker(containerName: "a"),
+            SessionSource.docker(containerName: "b")
+        )
+    }
+
+    // MARK: - TmuxSession
+
+    func testTmuxSession_id_host() {
+        let s = TmuxSession(name: "dev", source: .host)
+        XCTAssertEqual(s.id, "host:dev")
+    }
+
+    func testTmuxSession_id_docker() {
+        let s = TmuxSession(name: "dev", source: .docker(containerName: "webapp"))
+        XCTAssertEqual(s.id, "docker:webapp:dev")
+    }
+
+    func testTmuxSession_displayLabel_host() {
+        let s = TmuxSession(name: "main", source: .host)
+        XCTAssertEqual(s.displayLabel, "main")
+    }
+
+    func testTmuxSession_displayLabel_docker() {
+        let s = TmuxSession(name: "main", source: .docker(containerName: "api"))
+        XCTAssertEqual(s.displayLabel, "api/main")
+    }
+
+    func testTmuxSession_equality() {
+        let a = TmuxSession(name: "dev", source: .host)
+        let b = TmuxSession(name: "dev", source: .host)
+        let c = TmuxSession(name: "dev", source: .docker(containerName: "x"))
+        let d = TmuxSession(name: "prod", source: .host)
+
+        XCTAssertEqual(a, b)
+        XCTAssertNotEqual(a, c) // same name, different source
+        XCTAssertNotEqual(a, d) // same source, different name
+    }
+
+    // MARK: - groupedSessions
+
+    func testGroupedSessions_empty() {
+        let state = AppState()
+        state.allSessions = []
+        XCTAssertTrue(state.groupedSessions.isEmpty)
+    }
+
+    func testGroupedSessions_hostOnly() {
+        let state = AppState()
+        state.allSessions = [
+            TmuxSession(name: "a", source: .host),
+            TmuxSession(name: "b", source: .host),
+        ]
+        let groups = state.groupedSessions
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].source, .host)
+        XCTAssertEqual(groups[0].sessions.count, 2)
+    }
+
+    func testGroupedSessions_hostFirstThenDocker() {
+        let state = AppState()
+        state.allSessions = [
+            TmuxSession(name: "x", source: .docker(containerName: "zzz")),
+            TmuxSession(name: "a", source: .host),
+            TmuxSession(name: "y", source: .docker(containerName: "aaa")),
+        ]
+        let groups = state.groupedSessions
+        XCTAssertEqual(groups.count, 3)
+        XCTAssertEqual(groups[0].source, .host) // host always first
+        // Docker groups sorted by key
+        XCTAssertEqual(groups[1].source, .docker(containerName: "aaa"))
+        XCTAssertEqual(groups[2].source, .docker(containerName: "zzz"))
+    }
+
+    func testGroupedSessions_dockerOnly() {
+        let state = AppState()
+        state.allSessions = [
+            TmuxSession(name: "s1", source: .docker(containerName: "app")),
+            TmuxSession(name: "s2", source: .docker(containerName: "app")),
+        ]
+        let groups = state.groupedSessions
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].source, .docker(containerName: "app"))
+        XCTAssertEqual(groups[0].sessions.count, 2)
+    }
+
+    // MARK: - Favorites
+
+    func testToggleFavorite_addsAndRemoves() {
+        let state = AppState()
+        let session = TmuxSession(name: "dev", source: .host)
+
+        XCTAssertFalse(state.isFavorited(session))
+
+        state.toggleFavorite(session)
+        XCTAssertTrue(state.isFavorited(session))
+
+        state.toggleFavorite(session)
+        XCTAssertFalse(state.isFavorited(session))
+    }
+
+    func testFavoriteSessions_filtersCorrectly() {
+        let state = AppState()
+        let s1 = TmuxSession(name: "a", source: .host)
+        let s2 = TmuxSession(name: "b", source: .host)
+        let s3 = TmuxSession(name: "c", source: .docker(containerName: "app"))
+        state.allSessions = [s1, s2, s3]
+
+        state.toggleFavorite(s1)
+        state.toggleFavorite(s3)
+
+        let favs = state.favoriteSessions
+        XCTAssertEqual(favs.count, 2)
+        XCTAssertTrue(favs.contains(s1))
+        XCTAssertTrue(favs.contains(s3))
+        XCTAssertFalse(favs.contains(s2))
+    }
+
+    func testFavoriteSessions_removedSessionDisappears() {
+        let state = AppState()
+        let s1 = TmuxSession(name: "a", source: .host)
+        state.allSessions = [s1]
+        state.toggleFavorite(s1)
+        XCTAssertEqual(state.favoriteSessions.count, 1)
+
+        // Session disappears (container stopped, etc.)
+        state.allSessions = []
+        XCTAssertEqual(state.favoriteSessions.count, 0)
+        // But the ID is still in the set (will reappear if session comes back)
+        XCTAssertTrue(state.favoritedSessionIDs.contains(s1.id))
+    }
+
+    // MARK: - hostSessionNames
+
+    func testHostSessionNames_filtersDockerSessions() {
+        let state = AppState()
+        state.allSessions = [
+            TmuxSession(name: "onyx", source: .host),
+            TmuxSession(name: "dev", source: .host),
+            TmuxSession(name: "main", source: .docker(containerName: "app")),
+        ]
+        let names = state.hostSessionNames
+        XCTAssertEqual(names, ["onyx", "dev"])
+    }
+
+    // MARK: - sanitizedContainer
+
+    func testSanitizedContainer_allowsValidChars() {
+        let state = AppState()
+        XCTAssertEqual(state.sanitizedContainer("my-app_v2.0"), "my-app_v2.0")
+    }
+
+    func testSanitizedContainer_replacesInvalidChars() {
+        let state = AppState()
+        XCTAssertEqual(state.sanitizedContainer("my app!@#"), "my_app___")
+    }
+
+    func testSanitizedContainer_shellInjection() {
+        let state = AppState()
+        let result = state.sanitizedContainer("$(rm -rf /)")
+        XCTAssertFalse(result.contains("$"))
+        XCTAssertFalse(result.contains("("))
+        XCTAssertFalse(result.contains(")"))
+        XCTAssertFalse(result.contains("/"))
+    }
+
+    // MARK: - sanitizedSession (already tested implicitly but verify edge cases)
+
+    func testSanitizedSession_allowsAlphanumericDashUnderscore() {
+        let state = AppState()
+        XCTAssertEqual(state.sanitizedSession("my-session_2"), "my-session_2")
+    }
+
+    func testSanitizedSession_replacesSpecialChars() {
+        let state = AppState()
+        XCTAssertEqual(state.sanitizedSession("my session!"), "my_session_")
+    }
+
+    func testSanitizedSession_shellInjection() {
+        let state = AppState()
+        let result = state.sanitizedSession("; rm -rf /")
+        XCTAssertFalse(result.contains(";"))
+        XCTAssertFalse(result.contains(" "))
+        XCTAssertFalse(result.contains("/"))
+    }
+
+    // MARK: - dismissTopOverlay with sessionManager
+
+    func testDismissTopOverlay_sessionManagerBeforeFileBrowser() {
+        let state = AppState()
+        state.showSessionManager = true
+        state.showFileBrowser = true
+        state.dismissTopOverlay()
+        XCTAssertFalse(state.showSessionManager)
+        XCTAssertTrue(state.showFileBrowser) // not dismissed yet
+    }
+
+    func testDismissTopOverlay_commandPaletteBeforeSessionManager() {
+        let state = AppState()
+        state.showCommandPalette = true
+        state.showSessionManager = true
+        state.dismissTopOverlay()
+        XCTAssertFalse(state.showCommandPalette)
+        XCTAssertTrue(state.showSessionManager) // not dismissed yet
+    }
+
+    // MARK: - activeSessionName
+
+    func testActiveSessionName_nil() {
+        let state = AppState()
+        XCTAssertEqual(state.activeSessionName, "")
+    }
+
+    func testActiveSessionName_set() {
+        let state = AppState()
+        state.activeSession = TmuxSession(name: "prod", source: .host)
+        XCTAssertEqual(state.activeSessionName, "prod")
     }
 }
 

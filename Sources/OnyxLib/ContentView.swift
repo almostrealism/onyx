@@ -6,7 +6,8 @@ public struct ContentView: View {
     public init() {}
 
     private var hasOverlay: Bool {
-        appState.showNotes || appState.showSetup || appState.showSettings || appState.showCommandPalette || appState.showFileBrowser
+        appState.showNotes || appState.showSetup || appState.showSettings
+            || appState.showCommandPalette || appState.showFileBrowser || appState.showSessionManager
     }
 
     public var body: some View {
@@ -59,6 +60,15 @@ public struct ContentView: View {
                     ))
             }
 
+            // Session manager slides from left
+            if appState.showSessionManager {
+                SessionManagerView(appState: appState)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .leading).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+            }
+
             // Setup screen
             if appState.showSetup {
                 SetupView(appState: appState)
@@ -83,11 +93,11 @@ public struct ContentView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            // Session bar — bottom
+            // Favorites bar — bottom
             if !appState.showSetup && !hasOverlay {
                 VStack {
                     Spacer()
-                    SessionBar(appState: appState)
+                    FavoritesBar(appState: appState)
                         .padding(.bottom, 28)
                 }
             }
@@ -98,6 +108,7 @@ public struct ContentView: View {
         .animation(.easeInOut(duration: 0.15), value: appState.showCommandPalette)
         .animation(.easeInOut(duration: 0.2), value: appState.showSetup)
         .animation(.easeInOut(duration: 0.2), value: appState.showFileBrowser)
+        .animation(.easeInOut(duration: 0.2), value: appState.showSessionManager)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             appState.loadConfig()
@@ -128,6 +139,11 @@ public struct ContentView: View {
             appState.showSettings = false
             appState.showFileBrowser.toggle()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleSessionManager)) { _ in
+            appState.showCommandPalette = false
+            appState.showSettings = false
+            appState.showSessionManager.toggle()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             appState.showCommandPalette = false
             appState.showSettings = true
@@ -142,9 +158,9 @@ public struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .cycleTmuxSession)) { _ in
-            let sessions = appState.tmuxSessions
-            guard sessions.count > 1 else { return }
-            if let idx = sessions.firstIndex(of: appState.activeSession) {
+            let sessions = appState.allSessions
+            guard sessions.count > 1, let current = appState.activeSession else { return }
+            if let idx = sessions.firstIndex(where: { $0.id == current.id }) {
                 let next = sessions[(idx + 1) % sessions.count]
                 appState.switchToSession = next
             }
@@ -155,7 +171,7 @@ public struct ContentView: View {
         .onChange(of: appState.appearance.windowTitle) { _, _ in
             updateWindowTitle()
         }
-        .onChange(of: appState.activeSession) { _, _ in
+        .onChange(of: appState.activeSession?.id) { _, _ in
             updateWindowTitle()
         }
     }
@@ -261,11 +277,25 @@ struct ConnectionErrorOverlay: View {
     }
 }
 
-struct SessionBar: View {
+struct FavoritesBar: View {
     @ObservedObject var appState: AppState
 
     var body: some View {
         HStack(spacing: 0) {
+            // Session manager toggle
+            Button(action: {
+                appState.showSessionManager.toggle()
+            }) {
+                Image(systemName: "list.bullet")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(appState.accentColor.opacity(0.6))
+                    .frame(width: 22, height: 18)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(4)
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 6)
+
             // Connection indicator + host
             HStack(spacing: 5) {
                 Circle()
@@ -277,17 +307,17 @@ struct SessionBar: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.5))
             }
-            .padding(.horizontal, 8)
+            .padding(.trailing, 6)
 
-            // Session tabs
-            ForEach(appState.tmuxSessions, id: \.self) { session in
-                let isActive = session == appState.activeSession
+            // Favorite session tabs
+            ForEach(appState.favoriteSessions, id: \.id) { session in
+                let isActive = appState.activeSession?.id == session.id
                 Button(action: {
                     if !isActive {
                         appState.switchToSession = session
                     }
                 }) {
-                    Text(session)
+                    Text(session.displayLabel)
                         .font(.system(size: 10, weight: isActive ? .medium : .regular, design: .monospaced))
                         .foregroundColor(isActive ? appState.accentColor : .gray.opacity(0.5))
                         .padding(.horizontal, 8)
@@ -298,28 +328,30 @@ struct SessionBar: View {
                 .buttonStyle(.plain)
             }
 
-            // New session button
-            Button(action: {
-                appState.createNewSession = true
-            }) {
-                Image(systemName: "plus")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(.gray.opacity(0.4))
-                    .frame(width: 18, height: 18)
-                    .background(Color.white.opacity(0.05))
+            // Active session indicator (if not in favorites)
+            if let active = appState.activeSession, !appState.isFavorited(active) {
+                Text(active.displayLabel)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(appState.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(appState.accentColor.opacity(0.12))
                     .cornerRadius(4)
             }
-            .buttonStyle(.plain)
-            .padding(.leading, 4)
 
             Spacer()
 
-            // Shift+Tab hint
-            if appState.tmuxSessions.count > 1 {
+            // Hint
+            Text("⌘J sessions")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.25))
+                .padding(.trailing, 4)
+
+            if appState.allSessions.count > 1 {
                 Text("⇧⇥ switch")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.25))
-                    .padding(.trailing, 8)
+                    .padding(.trailing, 4)
             }
         }
         .padding(.horizontal, 8)

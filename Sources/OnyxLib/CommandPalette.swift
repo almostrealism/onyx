@@ -27,6 +27,10 @@ struct CommandPaletteView: View {
                 appState.showCommandPalette = false
                 appState.showFileBrowser.toggle()
             },
+            PaletteAction(title: "Session Manager", shortcut: "⌘J") {
+                appState.showCommandPalette = false
+                appState.showSessionManager.toggle()
+            },
             PaletteAction(title: "Toggle Monitor", shortcut: "`") {
                 appState.showCommandPalette = false
                 appState.showMonitor.toggle()

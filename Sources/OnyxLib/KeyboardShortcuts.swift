@@ -35,6 +35,12 @@ public class ShortcutManager {
                 return nil
             }
 
+            // Cmd+J → toggle session manager
+            if flags == .command && chars == "j" {
+                NotificationCenter.default.post(name: .toggleSessionManager, object: nil)
+                return nil
+            }
+
             // Shift+Tab → cycle tmux sessions
             if flags == .shift && event.keyCode == 48 {
                 NotificationCenter.default.post(name: .cycleTmuxSession, object: nil)

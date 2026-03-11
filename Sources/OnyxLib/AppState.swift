@@ -13,6 +13,7 @@ public extension Notification.Name {
     static let toggleFileBrowser = Notification.Name("toggleFileBrowser")
     static let cycleTmuxSession = Notification.Name("cycleTmuxSession")
     static let createTmuxSession = Notification.Name("createTmuxSession")
+    static let toggleSessionManager = Notification.Name("toggleSessionManager")
 }
 
 public struct SSHConfig: Codable {
@@ -47,6 +48,47 @@ public struct AppearanceConfig: Codable {
     }
 }
 
+// MARK: - Session Model
+
+public enum SessionSource: Codable, Hashable {
+    case host
+    case docker(containerName: String)
+
+    public var stableKey: String {
+        switch self {
+        case .host: return "host"
+        case .docker(let name): return "docker:\(name)"
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .host: return "Host"
+        case .docker(let name): return name
+        }
+    }
+}
+
+public struct TmuxSession: Identifiable, Hashable {
+    public let name: String
+    public let source: SessionSource
+
+    public var id: String { "\(source.stableKey):\(name)" }
+
+    public var displayLabel: String {
+        switch source {
+        case .host: return name
+        case .docker(let container): return "\(container)/\(name)"
+        }
+    }
+}
+
+public struct SessionGroup: Identifiable {
+    public var id: String { source.stableKey }
+    public let source: SessionSource
+    public let sessions: [TmuxSession]
+}
+
 public class AppState: ObservableObject {
     @Published public var sshConfig = SSHConfig()
     @Published public var appearance = AppearanceConfig()
@@ -63,11 +105,15 @@ public class AppState: ObservableObject {
     @Published public var needsKeySetup = false
     @Published public var keySetupInProgress = false
     @Published public var showFileBrowser = false
-    @Published public var tmuxSessions: [String] = []
-    @Published public var activeSession: String = ""
-    @Published public var switchToSession: String?
-    @Published public var createNewSession = false
+    @Published public var showSessionManager = false
     @Published public var configLoaded = false
+
+    // Session state
+    @Published public var allSessions: [TmuxSession] = []
+    @Published public var activeSession: TmuxSession?
+    @Published public var switchToSession: TmuxSession?
+    @Published public var createNewSession = false
+    @Published public var favoritedSessionIDs: Set<String> = []
 
     private var monitorCancellable: AnyCancellable?
     public lazy var monitor: MonitorManager = {
@@ -80,17 +126,69 @@ public class AppState: ObservableObject {
 
     public init() {}
 
-    /// The effective window title, incorporating session name and monitoring state
+    // MARK: - Session Helpers
+
+    public var activeSessionName: String {
+        activeSession?.name ?? ""
+    }
+
+    /// Sessions grouped by source for the session manager overlay
+    public var groupedSessions: [SessionGroup] {
+        var groups: [String: [TmuxSession]] = [:]
+        for s in allSessions {
+            groups[s.source.stableKey, default: []].append(s)
+        }
+        var result: [SessionGroup] = []
+        // Host group first
+        if let hostSessions = groups["host"], !hostSessions.isEmpty {
+            result.append(SessionGroup(source: .host, sessions: hostSessions))
+        }
+        // Docker groups sorted by container name
+        for (key, sessions) in groups.sorted(by: { $0.key < $1.key }) {
+            if key != "host" {
+                result.append(SessionGroup(source: sessions[0].source, sessions: sessions))
+            }
+        }
+        return result
+    }
+
+    /// Only favorited sessions, for the bottom bar
+    public var favoriteSessions: [TmuxSession] {
+        allSessions.filter { favoritedSessionIDs.contains($0.id) }
+    }
+
+    /// Host-only session names (backward compat for createNewTmuxSession naming)
+    public var hostSessionNames: [String] {
+        allSessions.filter { $0.source == .host }.map(\.name)
+    }
+
+    public func toggleFavorite(_ session: TmuxSession) {
+        if favoritedSessionIDs.contains(session.id) {
+            favoritedSessionIDs.remove(session.id)
+        } else {
+            favoritedSessionIDs.insert(session.id)
+        }
+        saveFavorites()
+    }
+
+    public func isFavorited(_ session: TmuxSession) -> Bool {
+        favoritedSessionIDs.contains(session.id)
+    }
+
+    // MARK: - Window Title
+
     public var effectiveWindowTitle: String {
         var title = appearance.windowTitle
-        if !activeSession.isEmpty {
-            title += " — \(activeSession)"
+        if let session = activeSession {
+            title += " — \(session.displayLabel)"
         }
         if showMonitor {
             title += " — Monitoring"
         }
         return title
     }
+
+    // MARK: - Persistence
 
     private var appSupportDir: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -105,6 +203,10 @@ public class AppState: ObservableObject {
 
     private var appearanceURL: URL {
         appSupportDir.appendingPathComponent("appearance.json")
+    }
+
+    private var favoritesURL: URL {
+        appSupportDir.appendingPathComponent("favorites.json")
     }
 
     public var notesDirectory: URL {
@@ -140,6 +242,7 @@ public class AppState: ObservableObject {
             }
         }
 
+        loadFavorites()
         configLoaded = true
 
         // Start background monitoring immediately
@@ -162,6 +265,19 @@ public class AppState: ObservableObject {
         }
     }
 
+    private func loadFavorites() {
+        if let data = try? Data(contentsOf: favoritesURL),
+           let ids = try? JSONDecoder().decode([String].self, from: data) {
+            favoritedSessionIDs = Set(ids)
+        }
+    }
+
+    private func saveFavorites() {
+        if let data = try? JSONEncoder().encode(Array(favoritedSessionIDs)) {
+            try? data.write(to: favoritesURL)
+        }
+    }
+
     public func dismissTopOverlay() {
         if showCommandPalette {
             showCommandPalette = false
@@ -169,6 +285,8 @@ public class AppState: ObservableObject {
             showWindowRename = false
         } else if showSettings {
             showSettings = false
+        } else if showSessionManager {
+            showSessionManager = false
         } else if showFileBrowser {
             showFileBrowser = false
         } else if showMonitor {
@@ -177,6 +295,8 @@ public class AppState: ObservableObject {
             showNotes = false
         }
     }
+
+    // MARK: - Command Builders
 
     /// Run a shell command on the remote (or locally) and return stdout
     public func remoteCommand(_ script: String) -> (String, [String]) {
@@ -201,13 +321,18 @@ public class AppState: ObservableObject {
         return ("/usr/bin/ssh", args)
     }
 
-    /// Extra PATH entries so tmux is found even when login profile doesn't set it
-    private let extraPath = "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:/snap/bin\""
+    /// Extra PATH entries so tmux/docker are found even when login profile doesn't set it
+    let extraPath = "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:/snap/bin\""
 
-    /// Sanitize a session name for safe shell interpolation:
-    /// replace any character that isn't alphanumeric, dash, or underscore with `_`.
-    private func sanitizedSession(_ name: String) -> String {
+    /// Sanitize a session name for safe shell interpolation
+    func sanitizedSession(_ name: String) -> String {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        return String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : Character("_") })
+    }
+
+    /// Sanitize a container name for safe shell interpolation
+    func sanitizedContainer(_ name: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
         return String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : Character("_") })
     }
 
@@ -216,12 +341,21 @@ public class AppState: ObservableObject {
         return h == "localhost" || h == "127.0.0.1" || h == "::1" || h.isEmpty
     }
 
-    /// Build the command for the terminal session
-    public func sshCommand(session: String? = nil) -> (String, [String]) {
-        let rawSess = session ?? (activeSession.isEmpty ? sshConfig.tmuxSession : activeSession)
+    /// Build the command for a session based on its source
+    public func commandForSession(_ session: TmuxSession) -> (String, [String]) {
+        switch session.source {
+        case .host:
+            return sshCommand(sessionName: session.name)
+        case .docker(let containerName):
+            return dockerTmuxCommand(container: containerName, sessionName: session.name)
+        }
+    }
+
+    /// Build the command for a host tmux session
+    public func sshCommand(sessionName: String? = nil) -> (String, [String]) {
+        let rawSess = sessionName ?? (activeSession?.name ?? sshConfig.tmuxSession)
         let sess = sanitizedSession(rawSess)
 
-        // Local: skip SSH, just run tmux directly
         if isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
             return (shell, ["-lc", "\(extraPath) tmux new-session -A -s \(sess)"])
@@ -242,6 +376,35 @@ public class AppState: ObservableObject {
         let userHost = sshConfig.user.isEmpty ? sshConfig.host : "\(sshConfig.user)@\(sshConfig.host)"
         args.append(userHost)
         args.append("exec $SHELL -lc '\(extraPath) tmux new-session -A -s \(sess)'")
+        return ("/usr/bin/ssh", args)
+    }
+
+    /// Build the command to attach to a tmux session inside a docker container
+    public func dockerTmuxCommand(container: String, sessionName: String) -> (String, [String]) {
+        let safeContainer = sanitizedContainer(container)
+        let safeSess = sanitizedSession(sessionName)
+        let dockerCmd = "docker exec -it \(safeContainer) tmux new-session -A -s \(safeSess)"
+
+        if isLocal {
+            let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+            return (shell, ["-lc", "\(extraPath) \(dockerCmd)"])
+        }
+
+        var args = [String]()
+        args.append("-o"); args.append("ServerAliveInterval=10")
+        args.append("-o"); args.append("ServerAliveCountMax=3")
+        args.append("-o"); args.append("ConnectTimeout=10")
+        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
+        if sshConfig.port != 22 {
+            args.append("-p"); args.append("\(sshConfig.port)")
+        }
+        if !sshConfig.identityFile.isEmpty {
+            args.append("-i"); args.append(sshConfig.identityFile)
+        }
+        args.append("-t")
+        let userHost = sshConfig.user.isEmpty ? sshConfig.host : "\(sshConfig.user)@\(sshConfig.host)"
+        args.append(userHost)
+        args.append("exec $SHELL -lc '\(extraPath) \(dockerCmd)'")
         return ("/usr/bin/ssh", args)
     }
 
@@ -277,8 +440,7 @@ public class AppState: ObservableObject {
         return ("/usr/bin/ssh", args)
     }
 
-    /// Build a shell command that generates a key (if needed) and runs ssh-copy-id,
-    /// then connects normally on success. Runs in the terminal so the user can type their password.
+    /// Build a shell command that generates a key (if needed) and runs ssh-copy-id
     public func keySetupCommand() -> (String, [String]) {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let userHost = sshConfig.user.isEmpty ? sshConfig.host : "\(sshConfig.user)@\(sshConfig.host)"
@@ -293,7 +455,8 @@ public class AppState: ObservableObject {
             identityFlag = "-i \(sshConfig.identityFile) "
         }
 
-        // Script: check for key, generate if missing, then ssh-copy-id, then signal success
+        let sessName = sanitizedSession(activeSession?.name ?? sshConfig.tmuxSession)
+
         let script = """
         echo ""; \
         echo "╔══════════════════════════════════════════╗"; \
@@ -324,7 +487,7 @@ public class AppState: ObservableObject {
             echo ""; \
             sleep 1; \
             exec ssh \(portFlag)\(identityFlag)-t -o StrictHostKeyChecking=accept-new \(userHost) \
-                "exec \\$SHELL -lc '\(extraPath) tmux new-session -A -s \(sanitizedSession(activeSession.isEmpty ? sshConfig.tmuxSession : activeSession))'"; \
+                "exec \\$SHELL -lc '\(extraPath) tmux new-session -A -s \(sessName)'"; \
         else \
             echo ""; \
             echo "✗ Key installation failed."; \

@@ -68,6 +68,13 @@ class OnyxTerminalView: NSView {
     }
 
     private func setupTerminal() {
+        let tv = createTerminalView()
+        addSubview(tv)
+        terminalView = tv
+    }
+
+    /// Create a fresh LocalProcessTerminalView with our styling applied
+    private func createTerminalView() -> LocalProcessTerminalView {
         let tv = LocalProcessTerminalView(frame: bounds)
         tv.autoresizingMask = [.width, .height]
 
@@ -80,8 +87,7 @@ class OnyxTerminalView: NSView {
         tv.layer?.isOpaque = false
         tv.layer?.backgroundColor = CGColor.clear
 
-        let size = CGFloat(appState.appearance.fontSize)
-        currentFontSize = appState.appearance.fontSize
+        let size = CGFloat(currentFontSize)
         if let sfMono = NSFont(name: "SF Mono", size: size) {
             tv.font = sfMono
         } else {
@@ -101,6 +107,15 @@ class OnyxTerminalView: NSView {
         tv.installColors(palette)
 
         tv.processDelegate = self
+        return tv
+    }
+
+    /// Replace the terminal view with a fresh one (needed because
+    /// LocalProcessTerminalView can't start a new process after the old one exits)
+    private func resetTerminalView() {
+        terminalView?.removeFromSuperview()
+        terminalView = nil
+        let tv = createTerminalView()
         addSubview(tv)
         terminalView = tv
     }
@@ -124,24 +139,20 @@ class OnyxTerminalView: NSView {
 
         DispatchQueue.main.async { self.appState.connectionError = nil }
 
-        // For remote hosts, probe key auth first
         if !appState.isLocal {
             probeAndConnect()
         } else {
-            enumerateTmuxSessions {
-                DispatchQueue.main.async {
-                    let (cmd, args) = self.appState.sshCommand()
-                    self.terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
-                }
+            enumerateAllSessions {
+                self.connectToActiveSession()
             }
         }
     }
 
     func forceReconnect() {
-        terminalView?.terminate()
         reconnectAttempt = 0
         lastStartTime = Date()
         isKeySetup = false
+        resetTerminalView()
         DispatchQueue.main.async {
             self.appState.connectionError = nil
             self.appState.needsKeySetup = false
@@ -150,17 +161,23 @@ class OnyxTerminalView: NSView {
         if !appState.isLocal {
             probeAndConnect()
         } else {
-            enumerateTmuxSessions {
-                DispatchQueue.main.async {
-                    let (cmd, args) = self.appState.sshCommand()
-                    self.terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
-                }
+            enumerateAllSessions {
+                self.connectToActiveSession()
             }
         }
     }
 
+    private func connectToActiveSession() {
+        DispatchQueue.main.async {
+            self.resetTerminalView()
+            self.lastStartTime = Date()
+            let session = self.appState.activeSession ?? TmuxSession(name: self.appState.sshConfig.tmuxSession, source: .host)
+            let (cmd, args) = self.appState.commandForSession(session)
+            self.terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
+        }
+    }
+
     /// Probe SSH with BatchMode=yes. If key auth works, connect normally.
-    /// If it fails, check why and show the appropriate error/key setup prompt.
     private func probeAndConnect() {
         let host = appState.sshConfig.host.trimmingCharacters(in: .whitespacesAndNewlines)
         let port = appState.sshConfig.port
@@ -212,16 +229,10 @@ class OnyxTerminalView: NSView {
             probe.waitUntilExit()
 
             if probe.terminationStatus == 0 {
-                // Key auth works — enumerate sessions, then connect
-                self.enumerateTmuxSessions {
-                    DispatchQueue.main.async {
-                        self.lastStartTime = Date()
-                        let (cmd, args) = self.appState.sshCommand()
-                        self.terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
-                    }
+                self.enumerateAllSessions {
+                    self.connectToActiveSession()
                 }
             } else {
-                // Key auth failed — offer key setup
                 DispatchQueue.main.async {
                     self.appState.needsKeySetup = true
                     self.appState.connectionError = """
@@ -236,10 +247,10 @@ class OnyxTerminalView: NSView {
     }
 
     func startKeySetup() {
-        terminalView?.terminate()
         isKeySetup = true
         reconnectAttempt = 0
         lastStartTime = Date()
+        resetTerminalView()
         DispatchQueue.main.async {
             self.appState.connectionError = nil
             self.appState.needsKeySetup = false
@@ -248,50 +259,51 @@ class OnyxTerminalView: NSView {
         terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
     }
 
-    /// Query the target for existing tmux sessions
-    private func enumerateTmuxSessions(then completion: @escaping () -> Void) {
-        let script = "tmux ls -F \"#{session_name}\" 2>/dev/null || true"
-        let (cmd, args) = appState.remoteCommand(script)
+    // MARK: - Session Enumeration
 
+    /// Enumerate host tmux sessions + docker container tmux sessions
+    private func enumerateAllSessions(then completion: @escaping () -> Void) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let process = Process()
-            let stdoutPipe = Pipe()
-            process.executableURL = URL(fileURLWithPath: cmd)
-            process.arguments = args
-            process.standardOutput = stdoutPipe
-            process.standardError = FileHandle.nullDevice
+            guard let self = self else { return }
 
-            do {
-                try process.run()
-            } catch {
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    self.appState.tmuxSessions = [self.appState.sshConfig.tmuxSession]
-                    self.appState.activeSession = self.appState.sshConfig.tmuxSession
-                    completion()
-                }
-                return
+            let group = DispatchGroup()
+            var hostSessions: [TmuxSession] = []
+            var dockerSessions: [TmuxSession] = []
+
+            // 1. Host tmux sessions
+            group.enter()
+            self.fetchTmuxSessions(source: .host) { sessions in
+                hostSessions = sessions
+                group.leave()
             }
 
-            // Read stdout synchronously — output is small, no pipe buffer concern
-            let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
+            // 2. Docker container sessions
+            group.enter()
+            self.fetchDockerContainerSessions { sessions in
+                dockerSessions = sessions
+                group.leave()
+            }
 
-            let output = String(data: outputData, encoding: .utf8) ?? ""
-            let sessions = output.components(separatedBy: "\n")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
+            group.wait()
+
+            let allSessions = hostSessions + dockerSessions
 
             DispatchQueue.main.async {
-                guard let self = self else { return }
                 let defaultSession = self.appState.sshConfig.tmuxSession
-                if sessions.isEmpty {
-                    self.appState.tmuxSessions = [defaultSession]
-                    self.appState.activeSession = defaultSession
+                if allSessions.isEmpty {
+                    let fallback = TmuxSession(name: defaultSession, source: .host)
+                    self.appState.allSessions = [fallback]
+                    self.appState.activeSession = fallback
                 } else {
-                    self.appState.tmuxSessions = sessions
-                    if self.appState.activeSession.isEmpty || !sessions.contains(self.appState.activeSession) {
-                        self.appState.activeSession = sessions.contains(defaultSession) ? defaultSession : sessions[0]
+                    self.appState.allSessions = allSessions
+                    // Keep current active if still valid
+                    if let current = self.appState.activeSession,
+                       allSessions.contains(where: { $0.id == current.id }) {
+                        // still valid
+                    } else {
+                        // Pick default host session or first available
+                        let defaultMatch = allSessions.first { $0.source == .host && $0.name == defaultSession }
+                        self.appState.activeSession = defaultMatch ?? allSessions.first
                     }
                 }
                 completion()
@@ -299,45 +311,143 @@ class OnyxTerminalView: NSView {
         }
     }
 
-    func switchToSession(_ session: String) {
-        terminalView?.terminate()
+    /// Fetch tmux sessions for a given source (host or docker container)
+    private func fetchTmuxSessions(source: SessionSource, completion: @escaping ([TmuxSession]) -> Void) {
+        let script: String
+        switch source {
+        case .host:
+            script = "tmux ls -F \"#{session_name}\" 2>/dev/null || true"
+        case .docker(let containerName):
+            let safe = appState.sanitizedContainer(containerName)
+            script = "docker exec \(safe) tmux ls -F \"#{session_name}\" 2>/dev/null || true"
+        }
+
+        let (cmd, args) = appState.remoteCommand(script)
+
+        let process = Process()
+        let stdoutPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: cmd)
+        process.arguments = args
+        process.standardOutput = stdoutPipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            completion([])
+            return
+        }
+
+        let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        let output = String(data: outputData, encoding: .utf8) ?? ""
+        let sessions = output.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { TmuxSession(name: $0, source: source) }
+
+        completion(sessions)
+    }
+
+    /// Discover docker containers and their tmux sessions
+    private func fetchDockerContainerSessions(completion: @escaping ([TmuxSession]) -> Void) {
+        // Step 1: List running containers
+        let listScript = "docker ps --format \"{{.Names}}\" 2>/dev/null || true"
+        let (cmd, args) = appState.remoteCommand(listScript)
+
+        let process = Process()
+        let stdoutPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: cmd)
+        process.arguments = args
+        process.standardOutput = stdoutPipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            completion([])
+            return
+        }
+
+        let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        let output = String(data: outputData, encoding: .utf8) ?? ""
+        let containerNames = output.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !containerNames.isEmpty else {
+            completion([])
+            return
+        }
+
+        // Step 2: For each container, check if tmux exists and list sessions
+        var allDockerSessions: [TmuxSession] = []
+        let group = DispatchGroup()
+        let lock = NSLock()
+
+        for containerName in containerNames {
+            group.enter()
+
+            let source = SessionSource.docker(containerName: containerName)
+            fetchTmuxSessions(source: source) { sessions in
+                if !sessions.isEmpty {
+                    lock.lock()
+                    allDockerSessions.append(contentsOf: sessions)
+                    lock.unlock()
+                }
+                group.leave()
+            }
+        }
+
+        group.wait()
+        completion(allDockerSessions)
+    }
+
+    // MARK: - Session Switching
+
+    func switchToSession(_ session: TmuxSession) {
         reconnectAttempt = 0
         lastStartTime = Date()
         isKeySetup = false
+        resetTerminalView()
 
         DispatchQueue.main.async {
             self.appState.activeSession = session
             self.appState.connectionError = nil
         }
 
-        let (cmd, args) = appState.sshCommand(session: session)
+        let (cmd, args) = appState.commandForSession(session)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
         }
     }
 
     func createNewTmuxSession() {
-        // Generate a name like "onyx-2", "onyx-3", etc.
         let base = appState.sshConfig.tmuxSession
+        let existingNames = appState.hostSessionNames
         var idx = 2
         var name = "\(base)-\(idx)"
-        while appState.tmuxSessions.contains(name) {
+        while existingNames.contains(name) {
             idx += 1
             name = "\(base)-\(idx)"
         }
 
-        terminalView?.terminate()
         reconnectAttempt = 0
         lastStartTime = Date()
         isKeySetup = false
+        resetTerminalView()
 
+        let newSession = TmuxSession(name: name, source: .host)
         DispatchQueue.main.async {
-            self.appState.tmuxSessions.append(name)
-            self.appState.activeSession = name
+            self.appState.allSessions.append(newSession)
+            self.appState.activeSession = newSession
             self.appState.connectionError = nil
         }
 
-        let (cmd, args) = appState.sshCommand(session: name)
+        let (cmd, args) = appState.commandForSession(newSession)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
         }
@@ -356,12 +466,8 @@ class OnyxTerminalView: NSView {
             self.appState.isReconnecting = false
             self.lastStartTime = Date()
 
-            // Re-enumerate sessions so we connect to one that still exists
-            self.enumerateTmuxSessions {
-                DispatchQueue.main.async {
-                    let (cmd, args) = self.appState.sshCommand()
-                    self.terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
-                }
+            self.enumerateAllSessions {
+                self.connectToActiveSession()
             }
         }
     }
@@ -383,7 +489,6 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
         let wasKeySetup = isKeySetup
         isKeySetup = false
 
-        // If key setup script failed, show error
         if wasKeySetup && exitCode != 0 {
             DispatchQueue.main.async { [weak self] in
                 self?.appState.connectionError = "SSH key setup failed. Use ⌘K → Reconnect to try again."
