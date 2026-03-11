@@ -393,11 +393,16 @@ class OnyxTerminalView: NSView {
 
             let source = SessionSource.docker(containerName: containerName)
             fetchTmuxSessions(source: source) { sessions in
-                if !sessions.isEmpty {
-                    lock.lock()
+                lock.lock()
+                if sessions.isEmpty {
+                    // tmux not available or no sessions — show placeholder
+                    allDockerSessions.append(TmuxSession(
+                        name: "no tmux", source: source, unavailable: true
+                    ))
+                } else {
                     allDockerSessions.append(contentsOf: sessions)
-                    lock.unlock()
                 }
+                lock.unlock()
                 group.leave()
             }
         }

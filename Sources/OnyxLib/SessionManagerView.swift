@@ -110,9 +110,12 @@ private struct SessionGroupHeader: View {
 
             Spacer()
 
-            Text("\(group.sessions.count)")
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundColor(.gray.opacity(0.3))
+            let available = group.sessions.filter { !$0.unavailable }.count
+            if available > 0 {
+                Text("\(available)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.3))
+            }
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
@@ -141,32 +144,47 @@ private struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            // Active indicator
-            Circle()
-                .fill(isActive ? appState.accentColor : Color.clear)
-                .frame(width: 4, height: 4)
+            if session.unavailable {
+                // Unavailable placeholder — tmux not installed in container
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 9))
+                    .foregroundColor(Color(hex: "FF6B6B").opacity(0.6))
 
-            Text(session.name)
-                .font(.system(size: 12, weight: isActive ? .medium : .regular, design: .monospaced))
-                .foregroundColor(isActive ? appState.accentColor : .white.opacity(0.7))
-                .lineLimit(1)
+                Text(session.name)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.35))
+                    .italic()
+                    .lineLimit(1)
 
-            Spacer()
+                Spacer()
+            } else {
+                // Active indicator
+                Circle()
+                    .fill(isActive ? appState.accentColor : Color.clear)
+                    .frame(width: 4, height: 4)
 
-            // Favorite toggle
-            Button(action: { appState.toggleFavorite(session) }) {
-                Image(systemName: isFavorited ? "star.fill" : "star")
-                    .font(.system(size: 10))
-                    .foregroundColor(isFavorited ? Color(hex: "FFD06B") : .gray.opacity(0.3))
+                Text(session.name)
+                    .font(.system(size: 12, weight: isActive ? .medium : .regular, design: .monospaced))
+                    .foregroundColor(isActive ? appState.accentColor : .white.opacity(0.7))
+                    .lineLimit(1)
+
+                Spacer()
+
+                // Favorite toggle
+                Button(action: { appState.toggleFavorite(session) }) {
+                    Image(systemName: isFavorited ? "star.fill" : "star")
+                        .font(.system(size: 10))
+                        .foregroundColor(isFavorited ? Color(hex: "FFD06B") : .gray.opacity(0.3))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
         .background(isActive ? appState.accentColor.opacity(0.08) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture {
-            if !isActive {
+            if !session.unavailable && !isActive {
                 appState.switchToSession = session
             }
         }

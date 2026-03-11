@@ -72,6 +72,13 @@ public enum SessionSource: Codable, Hashable {
 public struct TmuxSession: Identifiable, Hashable {
     public let name: String
     public let source: SessionSource
+    public let unavailable: Bool
+
+    public init(name: String, source: SessionSource, unavailable: Bool = false) {
+        self.name = name
+        self.source = source
+        self.unavailable = unavailable
+    }
 
     public var id: String { "\(source.stableKey):\(name)" }
 

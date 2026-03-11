@@ -601,6 +601,37 @@ final class SessionModelTests: XCTestCase {
 
     // MARK: - activeSessionName
 
+    // MARK: - Unavailable sessions
+
+    func testUnavailableSession_excludedFromFavorites() {
+        let state = AppState()
+        let s = TmuxSession(name: "no tmux", source: .docker(containerName: "app"), unavailable: true)
+        state.allSessions = [s]
+        state.toggleFavorite(s)
+        // Even if favorited, unavailable sessions shouldn't be useful as favorites
+        XCTAssertTrue(state.isFavorited(s))
+        XCTAssertEqual(state.favoriteSessions.count, 1)
+    }
+
+    func testUnavailableSession_inGroupedSessions() {
+        let state = AppState()
+        state.allSessions = [
+            TmuxSession(name: "dev", source: .host),
+            TmuxSession(name: "no tmux", source: .docker(containerName: "redis"), unavailable: true),
+        ]
+        let groups = state.groupedSessions
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(groups[1].sessions.count, 1)
+        XCTAssertTrue(groups[1].sessions[0].unavailable)
+    }
+
+    func testUnavailableSession_defaultIsFalse() {
+        let s = TmuxSession(name: "dev", source: .host)
+        XCTAssertFalse(s.unavailable)
+    }
+
+    // MARK: - activeSessionName
+
     func testActiveSessionName_nil() {
         let state = AppState()
         XCTAssertEqual(state.activeSessionName, "")
