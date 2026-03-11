@@ -361,8 +361,8 @@ class OnyxTerminalView: NSView {
             script = "tmux ls -F \"#{session_name}\" 2>/dev/null || true"
         case .docker(let containerName):
             let safe = appState.sanitizedContainer(containerName)
-            // Don't use `|| true` — we need the exit code to detect missing tmux
-            script = "docker exec \(safe) tmux ls -F '#{session_name}' 2>&1"
+            // Discard stderr (OCI errors, "no server running", etc.) and mask exit code
+            script = "docker exec \(safe) tmux ls -F '#{session_name}' 2>/dev/null || true"
         }
 
         let (cmd, args) = appState.remoteCommand(script)
@@ -384,18 +384,12 @@ class OnyxTerminalView: NSView {
         let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
-        // For docker sources, non-zero exit means tmux isn't available
-        if case .docker = source, process.terminationStatus != 0 {
-            completion([])
-            return
-        }
-
         let output = String(data: outputData, encoding: .utf8) ?? ""
         let sessions = output.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            // Filter out lines that look like error messages rather than session names
-            .filter { line in !line.contains(" ") || line.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." } }
+            // Only accept lines that look like valid tmux session names (no spaces/colons)
+            .filter { line in line.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." || $0 == " " } && !line.contains("  ") && line.count < 100 }
             .map { TmuxSession(name: $0, source: source) }
 
         completion(sessions)
@@ -445,8 +439,12 @@ class OnyxTerminalView: NSView {
             let source = SessionSource.docker(containerName: containerName)
             fetchTmuxSessions(source: source) { sessions in
                 lock.lock()
-                // Only include containers that actually have tmux sessions
-                if !sessions.isEmpty {
+                if sessions.isEmpty {
+                    // Container has no tmux or no sessions — show as unavailable placeholder
+                    allDockerSessions.append(TmuxSession(
+                        name: "no sessions", source: source, unavailable: true
+                    ))
+                } else {
                     allDockerSessions.append(contentsOf: sessions)
                 }
                 lock.unlock()
