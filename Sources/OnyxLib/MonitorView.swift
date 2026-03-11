@@ -1,4 +1,5 @@
 import SwiftUI
+import EventKit
 
 public struct MonitorSample: Identifiable {
     public let id = UUID()
@@ -302,6 +303,60 @@ public class MonitorManager: ObservableObject {
     }
 }
 
+public class RemindersManager: ObservableObject {
+    @Published public var todayReminders: [EKReminder] = []
+    @Published public var accessGranted = false
+
+    private let store = EKEventStore()
+
+    public init() {
+        requestAccess()
+    }
+
+    private func requestAccess() {
+        store.requestFullAccessToReminders { [weak self] granted, _ in
+            DispatchQueue.main.async {
+                self?.accessGranted = granted
+                if granted { self?.fetchToday() }
+            }
+        }
+    }
+
+    public func fetchToday() {
+        guard accessGranted else { return }
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let cal = Calendar.current
+            let startOfDay = cal.startOfDay(for: Date())
+            let endOfDay = cal.date(byAdding: .day, value: 1, to: startOfDay)!
+
+            let predicate = self.store.predicateForIncompleteReminders(
+                withDueDateStarting: nil,
+                ending: endOfDay,
+                calendars: nil
+            )
+
+            self.store.fetchReminders(matching: predicate) { reminders in
+                let sorted = (reminders ?? []).sorted { a, b in
+                    let da = a.dueDateComponents?.date ?? .distantFuture
+                    let db = b.dueDateComponents?.date ?? .distantFuture
+                    return da < db
+                }
+                DispatchQueue.main.async {
+                    self.todayReminders = sorted
+                }
+            }
+        }
+    }
+
+    public func toggleComplete(_ reminder: EKReminder) {
+        reminder.isCompleted = !reminder.isCompleted
+        try? store.save(reminder, commit: true)
+        fetchToday()
+    }
+}
+
 private func formatMB(_ mb: Double) -> String {
     if mb >= 1024 {
         return String(format: "%.1f GB", mb / 1024)
@@ -370,7 +425,8 @@ struct MonitorView: View {
                             GridChart(
                                 title: "MEMORY",
                                 values: memData,
-                                accentColor: Color(hex: "FFD06B")
+                                accentColor: Color(hex: "FFD06B"),
+                                height: 50
                             )
                         }
 
@@ -384,6 +440,9 @@ struct MonitorView: View {
                         }
                     }
                     .padding(.horizontal, 40)
+
+                    // Today's reminders
+                    RemindersSection(appState: appState)
 
                 } else if let error = monitor.lastError {
                     VStack(spacing: 8) {
@@ -476,11 +535,13 @@ struct StatChip: View {
 }
 
 /// Activity Monitor-style grid chart: each time bucket is a column of small squares.
-/// More squares "lit" = higher usage.
+/// More squares "lit" = higher usage. Drawn with Canvas to avoid sub-pixel gaps
+/// from SwiftUI layout rounding of individual Rectangle views.
 struct GridChart: View {
     let title: String
     let values: [Double] // 0-100 per bucket
     let accentColor: Color
+    var height: CGFloat = 100
     let rows = 20
 
     var body: some View {
@@ -490,31 +551,37 @@ struct GridChart: View {
                 .foregroundColor(accentColor)
                 .tracking(2)
 
-            GeometryReader { geo in
+            Canvas { context, size in
                 let cols = values.count
-                guard cols > 0 else { return AnyView(EmptyView()) }
-                let spacing: CGFloat = 1
-                let totalSpacing = spacing * CGFloat(cols - 1)
-                let cellW = max((geo.size.width - totalSpacing) / CGFloat(cols), 2)
-                let cellH = max((geo.size.height - spacing * CGFloat(rows - 1)) / CGFloat(rows), 2)
+                guard cols > 0 else { return }
+                let gap: CGFloat = 1
+                let cellW = (size.width - gap * CGFloat(cols - 1)) / CGFloat(cols)
+                let cellH = (size.height - gap * CGFloat(rows - 1)) / CGFloat(rows)
+                guard cellW > 0 && cellH > 0 else { return }
 
-                return AnyView(
-                    HStack(spacing: spacing) {
-                        ForEach(0..<cols, id: \.self) { col in
-                            let litCount = Int((values[col] / 100.0) * Double(rows))
-                            VStack(spacing: spacing) {
-                                ForEach(0..<rows, id: \.self) { row in
-                                    let isLit = row >= (rows - litCount)
-                                    Rectangle()
-                                        .fill(isLit ? colorForLevel(values[col]) : Color.white.opacity(0.03))
-                                        .frame(width: cellW, height: cellH)
-                                }
-                            }
-                        }
+                let dimColor = Color.white.opacity(0.03)
+
+                for col in 0..<cols {
+                    let litCount = Int((values[col] / 100.0) * Double(rows))
+                    let x = CGFloat(col) * (cellW + gap)
+
+                    for row in 0..<rows {
+                        let y = CGFloat(row) * (cellH + gap)
+                        let isLit = row >= (rows - litCount)
+                        let rect = CGRect(
+                            x: x.rounded(.down),
+                            y: y.rounded(.down),
+                            width: (x + cellW).rounded(.down) - x.rounded(.down),
+                            height: (y + cellH).rounded(.down) - y.rounded(.down)
+                        )
+                        context.fill(
+                            Path(rect),
+                            with: .color(isLit ? colorForLevel(values[col]) : dimColor)
+                        )
                     }
-                )
+                }
             }
-            .frame(height: 100)
+            .frame(height: height)
             .clipped()
         }
     }
@@ -523,5 +590,84 @@ struct GridChart: View {
         if pct > 90 { return Color(hex: "FF6B6B").opacity(0.9) }
         if pct > 70 { return Color(hex: "FFD06B").opacity(0.8) }
         return accentColor.opacity(0.7)
+    }
+}
+
+struct RemindersSection: View {
+    @ObservedObject var appState: AppState
+    @StateObject private var reminders = RemindersManager()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("TODAY")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(appState.accentColor)
+                    .tracking(2)
+
+                Spacer()
+
+                if !reminders.todayReminders.isEmpty {
+                    Text("\(reminders.todayReminders.count)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.4))
+                }
+            }
+
+            if !reminders.accessGranted {
+                Text("Reminders access not granted")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+            } else if reminders.todayReminders.isEmpty {
+                Text("No reminders due today")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.3))
+            } else {
+                ForEach(reminders.todayReminders, id: \.calendarItemIdentifier) { reminder in
+                    ReminderRow(reminder: reminder, appState: appState, manager: reminders)
+                }
+            }
+        }
+        .padding(.horizontal, 40)
+        .padding(.top, 8)
+        .onAppear { reminders.fetchToday() }
+    }
+}
+
+private struct ReminderRow: View {
+    let reminder: EKReminder
+    @ObservedObject var appState: AppState
+    let manager: RemindersManager
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: { manager.toggleComplete(reminder) }) {
+                Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 12))
+                    .foregroundColor(reminder.isCompleted ? appState.accentColor : .gray.opacity(0.4))
+            }
+            .buttonStyle(.plain)
+
+            Text(reminder.title ?? "Untitled")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(reminder.isCompleted ? .gray.opacity(0.3) : .white.opacity(0.8))
+                .strikethrough(reminder.isCompleted)
+                .lineLimit(1)
+
+            Spacer()
+
+            if let due = reminder.dueDateComponents, let hour = due.hour, let minute = due.minute {
+                let isOverdue = isReminderOverdue(due)
+                Text(String(format: "%d:%02d", hour, minute))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(isOverdue && !reminder.isCompleted ? Color(hex: "FF6B6B") : .gray.opacity(0.4))
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func isReminderOverdue(_ components: DateComponents) -> Bool {
+        guard let date = Calendar.current.date(from: components) else { return false }
+        return date < Date()
     }
 }
