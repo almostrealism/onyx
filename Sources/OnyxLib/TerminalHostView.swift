@@ -68,6 +68,11 @@ class OnyxTerminalView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Pass all hit testing through to the terminal view
+        return terminalView?.hitTest(point) ?? super.hitTest(point)
+    }
+
     private var scrollMonitor: Any?
 
     private func installScrollMonitor() {
@@ -82,15 +87,17 @@ class OnyxTerminalView: NSView {
                 return event
             }
 
-            // If the application (e.g. tmux) has requested mouse events, forward
-            // the scroll as button 4/5 presses instead of local buffer scrolling
-            guard tv.allowMouseReporting && tv.terminal.mouseMode != .off else {
+            // Forward scroll to the terminal app when mouse reporting is active
+            guard tv.terminal.mouseMode != .off else {
                 return event
             }
 
             let point = tv.convert(event.locationInWindow, from: nil)
             let cols = CGFloat(tv.terminal.cols)
             let rows = CGFloat(tv.terminal.rows)
+            guard cols > 0 && rows > 0 && tv.frame.width > 0 && tv.frame.height > 0 else {
+                return event
+            }
             let col = max(0, min(Int(point.x / (tv.frame.width / cols)), tv.terminal.cols - 1))
             let row = max(0, min(Int((tv.frame.height - point.y) / (tv.frame.height / rows)), tv.terminal.rows - 1))
 
@@ -160,6 +167,10 @@ class OnyxTerminalView: NSView {
         let tv = createTerminalView()
         addSubview(tv)
         terminalView = tv
+        // Ensure the new terminal view becomes first responder for keyboard and mouse
+        DispatchQueue.main.async {
+            tv.window?.makeFirstResponder(tv)
+        }
     }
 
     func updateFontSize(_ newSize: Double) {
