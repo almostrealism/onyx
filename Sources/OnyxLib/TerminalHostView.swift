@@ -61,10 +61,52 @@ class OnyxTerminalView: NSView {
         layer?.isOpaque = false
         layer?.backgroundColor = CGColor.clear
         setupTerminal()
+        installScrollMonitor()
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not implemented")
+    }
+
+    private var scrollMonitor: Any?
+
+    private func installScrollMonitor() {
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self = self, let tv = self.terminalView else { return event }
+            guard event.deltaY != 0 else { return event }
+
+            // Only handle if the scroll targets our terminal view
+            guard let window = tv.window,
+                  let targetView = window.contentView?.hitTest(event.locationInWindow),
+                  targetView === tv || targetView.isDescendant(of: tv) else {
+                return event
+            }
+
+            // If the application (e.g. tmux) has requested mouse events, forward
+            // the scroll as button 4/5 presses instead of local buffer scrolling
+            guard tv.allowMouseReporting && tv.terminal.mouseMode != .off else {
+                return event
+            }
+
+            let point = tv.convert(event.locationInWindow, from: nil)
+            let cols = CGFloat(tv.terminal.cols)
+            let rows = CGFloat(tv.terminal.rows)
+            let col = max(0, min(Int(point.x / (tv.frame.width / cols)), tv.terminal.cols - 1))
+            let row = max(0, min(Int((tv.frame.height - point.y) / (tv.frame.height / rows)), tv.terminal.rows - 1))
+
+            let lines = max(1, Int(abs(event.deltaY)))
+            let button = event.deltaY > 0 ? 64 : 65  // Cb: 64 = scroll up, 65 = scroll down
+            for _ in 0..<lines {
+                tv.terminal.sendEvent(buttonFlags: button, x: col, y: row)
+            }
+            return nil  // consume the event
+        }
+    }
+
+    deinit {
+        if let monitor = scrollMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
     }
 
     private func setupTerminal() {

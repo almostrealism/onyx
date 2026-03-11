@@ -11,95 +11,93 @@ public struct ContentView: View {
     }
 
     public var body: some View {
-        ZStack {
-            // Dark tint — opacity driven by settings, desktop shows through
-            Color(nsColor: NSColor(white: 0.04, alpha: 1.0))
-                .opacity(appState.appearance.windowOpacity)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-
-            // Terminal always underneath
-            TerminalHostView(appState: appState)
-                .opacity(hasOverlay ? 0.3 : 1.0)
-                .allowsHitTesting(!hasOverlay)
-
-            // Monitor overlay — blur terminal for privacy, then show stats
-            if appState.showMonitor {
-                VibrancyBackground()
+        VStack(spacing: 0) {
+            ZStack {
+                // Dark tint — opacity driven by settings, desktop shows through
+                Color(nsColor: NSColor(white: 0.04, alpha: 1.0))
+                    .opacity(appState.appearance.windowOpacity)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
-                MonitorView(appState: appState)
-                    .transition(.opacity)
-            }
 
-            // Connection error overlay
-            if appState.connectionError != nil {
-                ConnectionErrorOverlay(appState: appState)
-            }
+                // Terminal always underneath
+                TerminalHostView(appState: appState)
+                    .opacity(hasOverlay ? 0.3 : 1.0)
+                    .allowsHitTesting(!hasOverlay)
 
-            // Reconnecting indicator
-            if appState.isReconnecting && appState.connectionError == nil {
-                ReconnectingOverlay(accentColor: appState.accentColor)
-            }
-
-            // Notes panel slides from right
-            if appState.showNotes {
-                NotesView(appState: appState)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .move(edge: .trailing).combined(with: .opacity)
-                    ))
-            }
-
-            // File browser slides from left
-            if appState.showFileBrowser {
-                FileBrowserView(appState: appState)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .leading).combined(with: .opacity),
-                        removal: .move(edge: .leading).combined(with: .opacity)
-                    ))
-            }
-
-            // Session manager slides from left
-            if appState.showSessionManager {
-                SessionManagerView(appState: appState)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .leading).combined(with: .opacity),
-                        removal: .move(edge: .leading).combined(with: .opacity)
-                    ))
-            }
-
-            // Setup screen
-            if appState.showSetup {
-                SetupView(appState: appState)
-                    .transition(.opacity)
-            }
-
-            // Settings
-            if appState.showSettings {
-                SettingsView(appState: appState)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-            }
-
-            // Window rename dialog
-            if appState.showWindowRename {
-                WindowRenameView(appState: appState)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-            }
-
-            // Command palette
-            if appState.showCommandPalette {
-                CommandPaletteView(appState: appState)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            // Favorites bar — bottom
-            if !appState.showSetup && !hasOverlay {
-                VStack {
-                    Spacer()
-                    FavoritesBar(appState: appState)
-                        .padding(.bottom, 28)
+                // Monitor overlay — blur terminal for privacy, then show stats
+                if appState.showMonitor {
+                    VibrancyBackground()
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                    MonitorView(appState: appState)
+                        .transition(.opacity)
                 }
+
+                // Connection error overlay
+                if appState.connectionError != nil {
+                    ConnectionErrorOverlay(appState: appState)
+                }
+
+                // Reconnecting indicator
+                if appState.isReconnecting && appState.connectionError == nil {
+                    ReconnectingOverlay(accentColor: appState.accentColor)
+                }
+
+                // Notes panel slides from right
+                if appState.showNotes {
+                    NotesView(appState: appState)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .trailing).combined(with: .opacity)
+                        ))
+                }
+
+                // File browser slides from left
+                if appState.showFileBrowser {
+                    FileBrowserView(appState: appState)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .leading).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        ))
+                }
+
+                // Session manager slides from left
+                if appState.showSessionManager {
+                    SessionManagerView(appState: appState)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .leading).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        ))
+                }
+
+                // Setup screen
+                if appState.showSetup {
+                    SetupView(appState: appState)
+                        .transition(.opacity)
+                }
+
+                // Settings
+                if appState.showSettings {
+                    SettingsView(appState: appState)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                }
+
+                // Window rename dialog
+                if appState.showWindowRename {
+                    WindowRenameView(appState: appState)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                }
+
+                // Command palette
+                if appState.showCommandPalette {
+                    CommandPaletteView(appState: appState)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+
+            // Favorites bar — outside terminal area at the bottom
+            if !appState.showSetup {
+                FavoritesBar(appState: appState)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: appState.showNotes)
@@ -354,10 +352,8 @@ struct FavoritesBar: View {
                     .padding(.trailing, 4)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Color.black.opacity(0.5))
-        .cornerRadius(8)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color(nsColor: NSColor(white: 0.04, alpha: 1.0)))
     }
 }
