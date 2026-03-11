@@ -362,7 +362,8 @@ class OnyxTerminalView: NSView {
         case .docker(let containerName):
             let safe = appState.sanitizedContainer(containerName)
             // Discard stderr (OCI errors, "no server running", etc.) and mask exit code
-            script = "docker exec \(safe) tmux ls -F '#{session_name}' 2>/dev/null || true"
+            // Use escaped double quotes (not single) so they nest inside remoteCommand's outer single quotes
+            script = "docker exec \(safe) tmux ls -F \"#{session_name}\" 2>/dev/null || true"
         }
 
         let (cmd, args) = appState.remoteCommand(script)
