@@ -313,14 +313,24 @@ public class MonitorManager: ObservableObject {
 }
 
 public class RemindersManager: ObservableObject {
-    @Published public var todayReminders: [EKReminder] = []
+    @Published public var reminders: [EKReminder] = []
     @Published public var accessGranted = false
     @Published public var availableLists: [String] = []
 
     private let store = EKEventStore()
     private var refreshTimer: Timer?
     private var changeObserver: Any?
-    public var selectedList: String = ""  // empty = all lists
+    public var selectedList: String = ""  // empty = "Today" (due today across all lists)
+
+    /// Display name for the header
+    public var displayName: String {
+        selectedList.isEmpty ? "TODAY" : selectedList.uppercased()
+    }
+
+    /// Empty-state message
+    public var emptyMessage: String {
+        selectedList.isEmpty ? "No reminders due today" : "No reminders"
+    }
 
     public init() {
         requestAccess()
@@ -330,7 +340,7 @@ public class RemindersManager: ObservableObject {
             forName: .EKEventStoreChanged, object: store, queue: .main
         ) { [weak self] _ in
             self?.refreshLists()
-            self?.fetchToday()
+            self?.fetchReminders()
         }
     }
 
@@ -347,7 +357,7 @@ public class RemindersManager: ObservableObject {
                 self?.accessGranted = granted
                 if granted {
                     self?.refreshLists()
-                    self?.fetchToday()
+                    self?.fetchReminders()
                     self?.startTimer()
                 }
             }
@@ -356,7 +366,7 @@ public class RemindersManager: ObservableObject {
 
     private func startTimer() {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            self?.fetchToday()
+            self?.fetchReminders()
         }
     }
 
@@ -365,17 +375,24 @@ public class RemindersManager: ObservableObject {
         availableLists = calendars.map(\.title).sorted()
     }
 
-    public func fetchToday() {
+    public func fetchReminders() {
         guard accessGranted else { return }
 
-        let filterCalendars: [EKCalendar]?
-        if !selectedList.isEmpty {
-            let match = store.calendars(for: .reminder).filter { $0.title == selectedList }
-            filterCalendars = match.isEmpty ? nil : match
+        if selectedList.isEmpty {
+            // "Today" mode: incomplete reminders due by end of today, across all lists
+            fetchTodayReminders(calendars: nil)
         } else {
-            filterCalendars = nil
+            // Specific list: all incomplete reminders from that calendar
+            let match = store.calendars(for: .reminder).filter { $0.title == selectedList }
+            if match.isEmpty {
+                DispatchQueue.main.async { self.reminders = [] }
+            } else {
+                fetchListReminders(calendars: match)
+            }
         }
+    }
 
+    private func fetchTodayReminders(calendars: [EKCalendar]?) {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
             let cal = Calendar.current
@@ -385,7 +402,7 @@ public class RemindersManager: ObservableObject {
             let predicate = self.store.predicateForIncompleteReminders(
                 withDueDateStarting: nil,
                 ending: endOfDay,
-                calendars: filterCalendars
+                calendars: calendars
             )
 
             self.store.fetchReminders(matching: predicate) { reminders in
@@ -395,7 +412,36 @@ public class RemindersManager: ObservableObject {
                     return da < db
                 }
                 DispatchQueue.main.async {
-                    self.todayReminders = sorted
+                    self.reminders = sorted
+                }
+            }
+        }
+    }
+
+    private func fetchListReminders(calendars: [EKCalendar]) {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+
+            let predicate = self.store.predicateForIncompleteReminders(
+                withDueDateStarting: nil,
+                ending: nil,
+                calendars: calendars
+            )
+
+            self.store.fetchReminders(matching: predicate) { reminders in
+                let sorted = (reminders ?? []).sorted { a, b in
+                    let pa = a.priority
+                    let pb = b.priority
+                    // Sort by priority (1=high, 5=medium, 9=low, 0=none→last)
+                    let normA = pa == 0 ? 100 : pa
+                    let normB = pb == 0 ? 100 : pb
+                    if normA != normB { return normA < normB }
+                    let da = a.dueDateComponents?.date ?? .distantFuture
+                    let db = b.dueDateComponents?.date ?? .distantFuture
+                    return da < db
+                }
+                DispatchQueue.main.async {
+                    self.reminders = sorted
                 }
             }
         }
@@ -404,7 +450,7 @@ public class RemindersManager: ObservableObject {
     public func toggleComplete(_ reminder: EKReminder) {
         reminder.isCompleted = !reminder.isCompleted
         try? store.save(reminder, commit: true)
-        fetchToday()
+        fetchReminders()
     }
 }
 
@@ -651,15 +697,15 @@ struct RemindersSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("TODAY")
+                Text(reminders.displayName)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(appState.accentColor)
                     .tracking(2)
 
                 Spacer()
 
-                if !reminders.todayReminders.isEmpty {
-                    Text("\(reminders.todayReminders.count)")
+                if !reminders.reminders.isEmpty {
+                    Text("\(reminders.reminders.count)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.4))
                 }
@@ -669,17 +715,17 @@ struct RemindersSection: View {
                 Text("Reminders access not granted")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.4))
-            } else if reminders.todayReminders.isEmpty {
-                Text("No reminders due today")
+            } else if reminders.reminders.isEmpty {
+                Text(reminders.emptyMessage)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.3))
             } else {
-                let visible = Array(reminders.todayReminders.prefix(7))
+                let visible = Array(reminders.reminders.prefix(7))
                 ForEach(visible, id: \.calendarItemIdentifier) { reminder in
                     ReminderRow(reminder: reminder, appState: appState, manager: reminders)
                 }
-                if reminders.todayReminders.count > 7 {
-                    Text("+\(reminders.todayReminders.count - 7) more")
+                if reminders.reminders.count > 7 {
+                    Text("+\(reminders.reminders.count - 7) more")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.3))
                 }
@@ -689,11 +735,11 @@ struct RemindersSection: View {
         .padding(.top, 8)
         .onAppear {
             reminders.selectedList = appState.appearance.remindersList
-            reminders.fetchToday()
+            reminders.fetchReminders()
         }
         .onChange(of: appState.appearance.remindersList) { _, newValue in
             reminders.selectedList = newValue
-            reminders.fetchToday()
+            reminders.fetchReminders()
         }
     }
 }

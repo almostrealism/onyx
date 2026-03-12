@@ -47,6 +47,7 @@ struct SessionManagerView: View {
 
                             ForEach(Array(appState.favoriteSessions.enumerated()), id: \.element.id) { index, session in
                                 FavoriteRow(session: session, index: index, total: appState.favoriteSessions.count, appState: appState)
+                                    .id("fav-\(session.id)")
                             }
 
                             Divider()
@@ -60,6 +61,7 @@ struct SessionManagerView: View {
 
                             ForEach(group.sessions, id: \.id) { session in
                                 SessionRow(session: session, appState: appState)
+                                    .id("row-\(session.id)")
                             }
                         }
 
