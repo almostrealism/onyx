@@ -47,6 +47,12 @@ public class ShortcutManager {
                 return nil
             }
 
+            // Cmd+1 through Cmd+9 → switch to favorite by index
+            if flags == .command, let n = Int(chars), n >= 1 && n <= 9 {
+                NotificationCenter.default.post(name: .switchToFavorite, object: n)
+                return nil
+            }
+
             // Cmd+, → settings
             if flags == .command && chars == "," {
                 NotificationCenter.default.post(name: .openSettings, object: nil)

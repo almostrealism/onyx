@@ -166,6 +166,15 @@ public struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .createTmuxSession)) { _ in
             appState.createNewSession = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .switchToFavorite)) { notification in
+            guard let index = notification.object as? Int else { return }
+            let favorites = appState.favoriteSessions
+            guard index <= favorites.count else { return }
+            let session = favorites[index - 1]
+            if appState.activeSession?.id != session.id {
+                appState.switchToSession = session
+            }
+        }
         .onChange(of: appState.appearance.windowTitle) { _, _ in
             updateWindowTitle()
         }
@@ -308,20 +317,27 @@ struct FavoritesBar: View {
             .padding(.trailing, 6)
 
             // Favorite session tabs
-            ForEach(appState.favoriteSessions, id: \.id) { session in
+            ForEach(Array(appState.favoriteSessions.enumerated()), id: \.element.id) { index, session in
                 let isActive = appState.activeSession?.id == session.id
                 Button(action: {
                     if !isActive {
                         appState.switchToSession = session
                     }
                 }) {
-                    Text(session.displayLabel)
-                        .font(.system(size: 10, weight: isActive ? .medium : .regular, design: .monospaced))
-                        .foregroundColor(isActive ? appState.accentColor : .gray.opacity(0.5))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(isActive ? appState.accentColor.opacity(0.12) : Color.clear)
-                        .cornerRadius(4)
+                    HStack(spacing: 4) {
+                        if index < 9 {
+                            Text("⌘\(index + 1)")
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundColor(.gray.opacity(0.3))
+                        }
+                        Text(session.displayLabel)
+                            .font(.system(size: 10, weight: isActive ? .medium : .regular, design: .monospaced))
+                            .foregroundColor(isActive ? appState.accentColor : .gray.opacity(0.5))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(isActive ? appState.accentColor.opacity(0.12) : Color.clear)
+                    .cornerRadius(4)
                 }
                 .buttonStyle(.plain)
             }
