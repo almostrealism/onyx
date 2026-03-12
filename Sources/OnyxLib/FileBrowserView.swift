@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 public struct RemoteEntry: Identifiable, Comparable {
     public let id = UUID()
@@ -222,6 +223,97 @@ public class FileBrowserManager: ObservableObject {
         return results.sorted()
     }
 
+    // MARK: - Upload
+
+    @Published public var uploadStatus: String?
+    @Published public var isUploading = false
+
+    public func uploadFiles(_ urls: [URL]) {
+        guard let dest = currentPath else { return }
+        isUploading = true
+        uploadStatus = "Uploading \(urls.count) item\(urls.count == 1 ? "" : "s")..."
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            var errors: [String] = []
+
+            for (i, url) in urls.enumerated() {
+                DispatchQueue.main.async {
+                    self.uploadStatus = "Uploading (\(i + 1)/\(urls.count)): \(url.lastPathComponent)"
+                }
+
+                let success: Bool
+                if self.appState.isLocal {
+                    success = self.copyLocal(url, toDir: dest)
+                } else {
+                    success = self.scpUpload(url, toDir: dest)
+                }
+                if !success {
+                    errors.append(url.lastPathComponent)
+                }
+            }
+
+            DispatchQueue.main.async {
+                self.isUploading = false
+                if errors.isEmpty {
+                    self.uploadStatus = "Upload complete"
+                } else {
+                    self.uploadStatus = "Failed: \(errors.joined(separator: ", "))"
+                }
+                // Refresh directory listing
+                self.listDirectory(dest)
+                // Clear status after a delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    if self.uploadStatus?.hasPrefix("Upload") == true || self.uploadStatus?.hasPrefix("Failed") == true {
+                        self.uploadStatus = nil
+                    }
+                }
+            }
+        }
+    }
+
+    private func copyLocal(_ url: URL, toDir dest: String) -> Bool {
+        let destPath = (dest as NSString).appendingPathComponent(url.lastPathComponent)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/cp")
+        process.arguments = ["-R", url.path, destPath]
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
+    private func scpUpload(_ url: URL, toDir dest: String) -> Bool {
+        var args = [String]()
+        args.append("-r")  // recursive for directories
+        args.append("-o"); args.append("BatchMode=yes")
+        args.append("-o"); args.append("ConnectTimeout=10")
+        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
+        if appState.sshConfig.port != 22 {
+            args.append("-P"); args.append("\(appState.sshConfig.port)")
+        }
+        if !appState.sshConfig.identityFile.isEmpty {
+            args.append("-i"); args.append(appState.sshConfig.identityFile)
+        }
+        args.append(url.path)
+        let userHost = appState.sshConfig.user.isEmpty ? appState.sshConfig.host : "\(appState.sshConfig.user)@\(appState.sshConfig.host)"
+        args.append("\(userHost):\(dest)/")
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
+        process.arguments = args
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
     /// Escape a path for safe use inside a double-quoted shell string
     public func escapeForShell(_ s: String) -> String {
         // Wrap in double quotes, escaping the chars that are special inside double quotes
@@ -239,6 +331,7 @@ public class FileBrowserManager: ObservableObject {
 struct FileBrowserView: View {
     @ObservedObject var appState: AppState
     @StateObject private var browser: FileBrowserManager
+    @State private var isDragOver = false
 
     init(appState: AppState) {
         self.appState = appState
@@ -254,56 +347,128 @@ struct FileBrowserView: View {
             Divider().background(Color.white.opacity(0.1))
 
             // Main content
-            VStack(spacing: 0) {
-                // Breadcrumb / navigation bar
-                NavigationBar(appState: appState, browser: browser)
+            ZStack {
+                VStack(spacing: 0) {
+                    // Breadcrumb / navigation bar
+                    NavigationBar(appState: appState, browser: browser)
 
-                Divider().background(Color.white.opacity(0.1))
+                    Divider().background(Color.white.opacity(0.1))
 
-                // Content area
-                if browser.isLoading {
-                    Spacer()
-                    HStack(spacing: 8) {
-                        ProgressView().scaleEffect(0.7).colorScheme(.dark)
-                        Text("Loading...")
+                    // Content area
+                    if browser.isLoading && !browser.isUploading {
+                        Spacer()
+                        HStack(spacing: 8) {
+                            ProgressView().scaleEffect(0.7).colorScheme(.dark)
+                            Text("Loading...")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(.gray.opacity(0.5))
+                        }
+                        Spacer()
+                    } else if let error = browser.error {
+                        Spacer()
+                        Text(error)
                             .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(.gray.opacity(0.5))
+                            .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
+                        Spacer()
+                    } else if let content = browser.fileContent {
+                        FileContentView(
+                            fileName: browser.viewingFileName ?? "file",
+                            content: content,
+                            accentColor: appState.accentColor,
+                            onClose: { browser.closeFile() }
+                        )
+                    } else if browser.currentPath != nil {
+                        DirectoryListView(appState: appState, browser: browser)
+                    } else {
+                        Spacer()
+                        VStack(spacing: 8) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 28))
+                                .foregroundColor(.gray.opacity(0.3))
+                            Text("Select a folder to browse")
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(.gray.opacity(0.5))
+                            Text("⌘O to toggle  ·  Add folders with +")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundColor(.gray.opacity(0.3))
+                        }
+                        Spacer()
                     }
-                    Spacer()
-                } else if let error = browser.error {
-                    Spacer()
-                    Text(error)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
-                    Spacer()
-                } else if let content = browser.fileContent {
-                    FileContentView(
-                        fileName: browser.viewingFileName ?? "file",
-                        content: content,
-                        accentColor: appState.accentColor,
-                        onClose: { browser.closeFile() }
-                    )
-                } else if browser.currentPath != nil {
-                    DirectoryListView(appState: appState, browser: browser)
-                } else {
-                    Spacer()
-                    VStack(spacing: 8) {
-                        Image(systemName: "folder")
-                            .font(.system(size: 28))
-                            .foregroundColor(.gray.opacity(0.3))
-                        Text("Select a folder to browse")
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundColor(.gray.opacity(0.5))
-                        Text("⌘O to toggle  ·  Add folders with +")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundColor(.gray.opacity(0.3))
+
+                    // Upload status bar
+                    if let status = browser.uploadStatus {
+                        HStack(spacing: 8) {
+                            if browser.isUploading {
+                                ProgressView().scaleEffect(0.6).colorScheme(.dark)
+                            } else if status.hasPrefix("Failed") {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(Color(hex: "FF6B6B"))
+                            } else {
+                                Image(systemName: "checkmark.circle")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(Color(hex: "6BFF8E"))
+                            }
+                            Text(status)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.7))
+                            Spacer()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.05))
                     }
-                    Spacer()
+                }
+
+                // Drop zone overlay
+                if isDragOver && browser.currentPath != nil {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(appState.accentColor, style: StrokeStyle(lineWidth: 2, dash: [8, 4]))
+                        .background(appState.accentColor.opacity(0.08))
+                        .cornerRadius(8)
+                        .padding(8)
+                        .overlay(
+                            VStack(spacing: 8) {
+                                Image(systemName: "arrow.down.doc")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(appState.accentColor)
+                                Text("Drop to upload")
+                                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                                    .foregroundColor(appState.accentColor)
+                            }
+                        )
+                        .allowsHitTesting(false)
                 }
             }
             .frame(maxWidth: .infinity)
+            .onDrop(of: [.fileURL], isTargeted: $isDragOver) { providers in
+                guard browser.currentPath != nil else { return false }
+                handleDrop(providers)
+                return true
+            }
         }
         .background(Color(nsColor: NSColor(white: 0.06, alpha: 0.95)))
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) {
+        var urls: [URL] = []
+        let group = DispatchGroup()
+
+        for provider in providers {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                defer { group.leave() }
+                if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                    urls.append(url)
+                }
+            }
+        }
+
+        group.notify(queue: .main) {
+            if !urls.isEmpty {
+                browser.uploadFiles(urls)
+            }
+        }
     }
 }
 
