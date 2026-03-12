@@ -44,9 +44,16 @@ struct TerminalHostView: NSViewRepresentable {
     }
 }
 
+// MARK: - Connection Pool
+
+private struct PoolEntry {
+    let terminalView: LocalProcessTerminalView
+    var lastActiveTime: Date
+    var processRunning: Bool
+}
+
 class OnyxTerminalView: NSView {
     let appState: AppState
-    private var terminalView: LocalProcessTerminalView?
     var hasStarted = false
     private var reconnectAttempt = 0
     private let maxBackoff: TimeInterval = 15.0
@@ -54,14 +61,26 @@ class OnyxTerminalView: NSView {
     private var lastStartTime: Date?
     private var isKeySetup = false
 
+    // Connection pool: session ID -> pooled terminal view
+    private var pool: [String: PoolEntry] = [:]
+    private var activeSessionID: String?
+    private var evictionTimer: Timer?
+    private let evictionTimeout: TimeInterval = 300  // 5 minutes
+
+    /// The currently active terminal view (used by scroll monitor and hitTest)
+    private var terminalView: LocalProcessTerminalView? {
+        guard let id = activeSessionID else { return nil }
+        return pool[id]?.terminalView
+    }
+
     init(appState: AppState) {
         self.appState = appState
         super.init(frame: .zero)
         wantsLayer = true
         layer?.isOpaque = false
         layer?.backgroundColor = CGColor.clear
-        setupTerminal()
         installScrollMonitor()
+        startEvictionTimer()
     }
 
     required init?(coder: NSCoder) {
@@ -69,9 +88,76 @@ class OnyxTerminalView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        // Pass all hit testing through to the terminal view
         return terminalView?.hitTest(point) ?? super.hitTest(point)
     }
+
+    // MARK: - Pool Management
+
+    /// Activate a session: hide current view, show (or create) the target view
+    @discardableResult
+    private func activateSession(_ session: TmuxSession) -> LocalProcessTerminalView {
+        // Hide the currently active view and stamp its last-active time
+        if let currentID = activeSessionID, let entry = pool[currentID] {
+            entry.terminalView.isHidden = true
+            pool[currentID]?.lastActiveTime = Date()
+        }
+
+        // Reuse existing pool entry
+        if let entry = pool[session.id] {
+            entry.terminalView.isHidden = false
+            entry.terminalView.frame = bounds
+            activeSessionID = session.id
+            hideScroller(on: entry.terminalView)
+            DispatchQueue.main.async {
+                entry.terminalView.window?.makeFirstResponder(entry.terminalView)
+            }
+            return entry.terminalView
+        }
+
+        // Create new entry
+        let tv = createTerminalView()
+        tv.frame = bounds
+        addSubview(tv)
+        // Hide the scroller after layout creates it
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.hideScroller(on: tv)
+        }
+        pool[session.id] = PoolEntry(
+            terminalView: tv,
+            lastActiveTime: Date(),
+            processRunning: false
+        )
+        activeSessionID = session.id
+        DispatchQueue.main.async {
+            tv.window?.makeFirstResponder(tv)
+        }
+        return tv
+    }
+
+    private func destroyPoolEntry(_ sessionID: String) {
+        guard let entry = pool.removeValue(forKey: sessionID) else { return }
+        entry.terminalView.removeFromSuperview()
+    }
+
+    private func startEvictionTimer() {
+        evictionTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.evictStaleEntries()
+        }
+    }
+
+    private func evictStaleEntries() {
+        let now = Date()
+        let staleIDs = pool.keys.filter { id in
+            guard id != activeSessionID else { return false }
+            guard let entry = pool[id] else { return false }
+            return now.timeIntervalSince(entry.lastActiveTime) > evictionTimeout
+        }
+        for id in staleIDs {
+            destroyPoolEntry(id)
+        }
+    }
+
+    // MARK: - Scroll Monitor
 
     private var scrollMonitor: Any?
 
@@ -80,14 +166,12 @@ class OnyxTerminalView: NSView {
             guard let self = self, let tv = self.terminalView else { return event }
             guard event.deltaY != 0 else { return event }
 
-            // Only handle if the scroll targets our terminal view
             guard let window = tv.window,
                   let targetView = window.contentView?.hitTest(event.locationInWindow),
                   targetView === tv || targetView.isDescendant(of: tv) else {
                 return event
             }
 
-            // Forward scroll to the terminal app when mouse reporting is active
             guard tv.terminal.mouseMode != .off else {
                 return event
             }
@@ -102,11 +186,11 @@ class OnyxTerminalView: NSView {
             let row = max(0, min(Int((tv.frame.height - point.y) / (tv.frame.height / rows)), tv.terminal.rows - 1))
 
             let lines = max(1, Int(abs(event.deltaY)))
-            let button = event.deltaY > 0 ? 64 : 65  // Cb: 64 = scroll up, 65 = scroll down
+            let button = event.deltaY > 0 ? 64 : 65
             for _ in 0..<lines {
                 tv.terminal.sendEvent(buttonFlags: button, x: col, y: row)
             }
-            return nil  // consume the event
+            return nil
         }
     }
 
@@ -114,15 +198,14 @@ class OnyxTerminalView: NSView {
         if let monitor = scrollMonitor {
             NSEvent.removeMonitor(monitor)
         }
+        evictionTimer?.invalidate()
+        for id in Array(pool.keys) {
+            destroyPoolEntry(id)
+        }
     }
 
-    private func setupTerminal() {
-        let tv = createTerminalView()
-        addSubview(tv)
-        terminalView = tv
-    }
+    // MARK: - Terminal View Factory
 
-    /// Create a fresh LocalProcessTerminalView with our styling applied
     private func createTerminalView() -> LocalProcessTerminalView {
         let tv = LocalProcessTerminalView(frame: bounds)
         tv.autoresizingMask = [.width, .height]
@@ -130,8 +213,6 @@ class OnyxTerminalView: NSView {
         tv.nativeBackgroundColor = NSColor(white: 0.04, alpha: 0.0)
         tv.nativeForegroundColor = NSColor(white: 0.9, alpha: 1.0)
 
-        // SwiftTerm only sets layer?.backgroundColor during init, not when
-        // nativeBackgroundColor changes — force the layer transparent
         tv.wantsLayer = true
         tv.layer?.isOpaque = false
         tv.layer?.backgroundColor = CGColor.clear
@@ -159,30 +240,31 @@ class OnyxTerminalView: NSView {
         return tv
     }
 
-    /// Replace the terminal view with a fresh one (needed because
-    /// LocalProcessTerminalView can't start a new process after the old one exits)
-    private func resetTerminalView() {
-        terminalView?.removeFromSuperview()
-        terminalView = nil
-        let tv = createTerminalView()
-        addSubview(tv)
-        terminalView = tv
-        // Ensure the new terminal view becomes first responder for keyboard and mouse
-        DispatchQueue.main.async {
-            tv.window?.makeFirstResponder(tv)
+    /// Hide SwiftTerm's built-in scroller on a terminal view
+    private func hideScroller(on tv: LocalProcessTerminalView) {
+        for subview in tv.subviews {
+            if subview is NSScroller {
+                subview.isHidden = true
+            }
         }
     }
 
     func updateFontSize(_ newSize: Double) {
-        guard newSize != currentFontSize, let tv = terminalView else { return }
+        guard newSize != currentFontSize else { return }
         currentFontSize = newSize
         let size = CGFloat(newSize)
+        let font: NSFont
         if let sfMono = NSFont(name: "SF Mono", size: size) {
-            tv.font = sfMono
+            font = sfMono
         } else {
-            tv.font = NSFont(name: "Menlo", size: size) ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+            font = NSFont(name: "Menlo", size: size) ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        }
+        for entry in pool.values {
+            entry.terminalView.font = font
         }
     }
+
+    // MARK: - Connection Lifecycle
 
     func startSSH() {
         guard !appState.showSetup else { return }
@@ -205,7 +287,13 @@ class OnyxTerminalView: NSView {
         reconnectAttempt = 0
         lastStartTime = Date()
         isKeySetup = false
-        resetTerminalView()
+
+        // Destroy only the current session's pool entry for a fresh start
+        if let id = activeSessionID {
+            destroyPoolEntry(id)
+            activeSessionID = nil
+        }
+
         DispatchQueue.main.async {
             self.appState.connectionError = nil
             self.appState.needsKeySetup = false
@@ -222,11 +310,12 @@ class OnyxTerminalView: NSView {
 
     private func connectToActiveSession() {
         DispatchQueue.main.async {
-            self.resetTerminalView()
-            self.lastStartTime = Date()
             let session = self.appState.activeSession ?? TmuxSession(name: self.appState.sshConfig.tmuxSession, source: .host)
+            let tv = self.activateSession(session)
+            self.lastStartTime = Date()
             let (cmd, args) = self.appState.commandForSession(session)
-            self.terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
+            tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
+            self.pool[session.id]?.processRunning = true
         }
     }
 
@@ -240,7 +329,6 @@ class OnyxTerminalView: NSView {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
 
-            // 1. Check if port is open
             let nc = Process()
             nc.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
             nc.arguments = ["-z", "-w", "3", host, "\(port)"]
@@ -266,7 +354,6 @@ class OnyxTerminalView: NSView {
                 return
             }
 
-            // 2. Probe key-based auth with BatchMode
             let probe = Process()
             probe.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
             var probeArgs = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
@@ -303,18 +390,29 @@ class OnyxTerminalView: NSView {
         isKeySetup = true
         reconnectAttempt = 0
         lastStartTime = Date()
-        resetTerminalView()
+
+        // Use a dedicated non-pooled view for key setup
+        if let id = activeSessionID {
+            destroyPoolEntry(id)
+            activeSessionID = nil
+        }
+        let tv = createTerminalView()
+        addSubview(tv)
+        // Store temporarily under a synthetic key
+        let setupKey = "__key_setup__"
+        pool[setupKey] = PoolEntry(terminalView: tv, lastActiveTime: Date(), processRunning: true)
+        activeSessionID = setupKey
+
         DispatchQueue.main.async {
             self.appState.connectionError = nil
             self.appState.needsKeySetup = false
         }
         let (cmd, args) = appState.keySetupCommand()
-        terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
+        tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
     }
 
     // MARK: - Session Enumeration
 
-    /// Enumerate host tmux sessions + docker container tmux sessions
     private func enumerateAllSessions(then completion: @escaping () -> Void) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -323,14 +421,12 @@ class OnyxTerminalView: NSView {
             var hostSessions: [TmuxSession] = []
             var dockerSessions: [TmuxSession] = []
 
-            // 1. Host tmux sessions
             group.enter()
             self.fetchTmuxSessions(source: .host) { sessions in
                 hostSessions = sessions
                 group.leave()
             }
 
-            // 2. Docker container sessions
             group.enter()
             self.fetchDockerContainerSessions { sessions in
                 dockerSessions = sessions
@@ -349,12 +445,10 @@ class OnyxTerminalView: NSView {
                     self.appState.activeSession = fallback
                 } else {
                     self.appState.allSessions = allSessions
-                    // Keep current active if still valid
                     if let current = self.appState.activeSession,
                        allSessions.contains(where: { $0.id == current.id }) {
                         // still valid
                     } else {
-                        // Pick default host session or first available
                         let defaultMatch = allSessions.first { $0.source == .host && $0.name == defaultSession }
                         self.appState.activeSession = defaultMatch ?? allSessions.first
                     }
@@ -364,7 +458,6 @@ class OnyxTerminalView: NSView {
         }
     }
 
-    /// Fetch tmux sessions for a given source (host or docker container)
     private func fetchTmuxSessions(source: SessionSource, completion: @escaping ([TmuxSession]) -> Void) {
         let script: String
         switch source {
@@ -372,8 +465,6 @@ class OnyxTerminalView: NSView {
             script = "tmux ls -F \"#{session_name}\" 2>/dev/null || true"
         case .docker(let containerName):
             let safe = appState.sanitizedContainer(containerName)
-            // Discard stderr (OCI errors, "no server running", etc.) and mask exit code
-            // Use escaped double quotes (not single) so they nest inside remoteCommand's outer single quotes
             script = "docker exec \(safe) tmux ls -F \"#{session_name}\" 2>/dev/null || true"
         }
 
@@ -400,16 +491,13 @@ class OnyxTerminalView: NSView {
         let sessions = output.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            // Only accept lines that look like valid tmux session names (no spaces/colons)
             .filter { line in line.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." || $0 == " " } && !line.contains("  ") && line.count < 100 }
             .map { TmuxSession(name: $0, source: source) }
 
         completion(sessions)
     }
 
-    /// Discover docker containers and their tmux sessions
     private func fetchDockerContainerSessions(completion: @escaping ([TmuxSession]) -> Void) {
-        // Step 1: List running containers
         let listScript = "docker ps --format \"{{.Names}}\" 2>/dev/null || true"
         let (cmd, args) = appState.remoteCommand(listScript)
 
@@ -440,7 +528,6 @@ class OnyxTerminalView: NSView {
             return
         }
 
-        // Step 2: For each container, check if tmux exists and list sessions
         var allDockerSessions: [TmuxSession] = []
         let group = DispatchGroup()
         let lock = NSLock()
@@ -452,7 +539,6 @@ class OnyxTerminalView: NSView {
             fetchTmuxSessions(source: source) { sessions in
                 lock.lock()
                 if sessions.isEmpty {
-                    // Container has no tmux or no sessions — show as unavailable placeholder
                     allDockerSessions.append(TmuxSession(
                         name: "no sessions", source: source, unavailable: true
                     ))
@@ -474,16 +560,24 @@ class OnyxTerminalView: NSView {
         reconnectAttempt = 0
         lastStartTime = Date()
         isKeySetup = false
-        resetTerminalView()
 
         DispatchQueue.main.async {
             self.appState.activeSession = session
             self.appState.connectionError = nil
         }
 
+        let tv = activateSession(session)
+
+        // If the pooled view already has a running process, instant switch
+        if let entry = pool[session.id], entry.processRunning {
+            return
+        }
+
+        // Otherwise start a new SSH process (reuses the terminal view)
         let (cmd, args) = appState.commandForSession(session)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
+            tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
+            self.pool[session.id]?.processRunning = true
         }
     }
 
@@ -491,7 +585,6 @@ class OnyxTerminalView: NSView {
         reconnectAttempt = 0
         lastStartTime = Date()
         isKeySetup = false
-        resetTerminalView()
 
         DispatchQueue.main.async {
             self.appState.allSessions.append(session)
@@ -499,9 +592,11 @@ class OnyxTerminalView: NSView {
             self.appState.connectionError = nil
         }
 
+        let tv = activateSession(session)
         let (cmd, args) = appState.commandForSession(session)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
+            tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
+            self.pool[session.id]?.processRunning = true
         }
     }
 
@@ -518,13 +613,20 @@ class OnyxTerminalView: NSView {
             self.appState.isReconnecting = false
             self.lastStartTime = Date()
 
+            // Destroy the dead entry so we get a fresh terminal view
+            if let id = self.activeSessionID {
+                self.destroyPoolEntry(id)
+                self.activeSessionID = nil
+            }
+
             self.enumerateAllSessions {
                 self.connectToActiveSession()
             }
         }
     }
-
 }
+
+// MARK: - Terminal Delegate
 
 extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
@@ -541,6 +643,13 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
         let wasKeySetup = isKeySetup
         isKeySetup = false
 
+        // Find which pool entry this view belongs to
+        let terminatedSessionID = pool.first(where: { $0.value.terminalView === source })?.key
+
+        if let id = terminatedSessionID {
+            pool[id]?.processRunning = false
+        }
+
         if wasKeySetup && exitCode != 0 {
             DispatchQueue.main.async { [weak self] in
                 self?.appState.connectionError = "SSH key setup failed. Use ⌘K → Reconnect to try again."
@@ -548,6 +657,9 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
             }
             return
         }
+
+        // Only auto-reconnect if this is the active session
+        guard terminatedSessionID == activeSessionID else { return }
 
         DispatchQueue.main.async { [weak self] in
             if self?.appState.connectionError != nil {
