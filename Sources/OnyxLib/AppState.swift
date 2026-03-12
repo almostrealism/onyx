@@ -122,8 +122,9 @@ public class AppState: ObservableObject {
     @Published public var allSessions: [TmuxSession] = []
     @Published public var activeSession: TmuxSession?
     @Published public var switchToSession: TmuxSession?
-    @Published public var createNewSession = false
-    @Published public var favoritedSessionIDs: Set<String> = []
+    @Published public var createNewSession: TmuxSession?  // session to create, nil = none
+    @Published public var showNewSessionPrompt = false
+    @Published public var favoritedSessionIDs: [String] = []  // ordered list
 
     private var monitorCancellable: AnyCancellable?
     public lazy var monitor: MonitorManager = {
@@ -162,9 +163,10 @@ public class AppState: ObservableObject {
         return result
     }
 
-    /// Only favorited sessions, for the bottom bar
+    /// Only favorited sessions, ordered by their position in favoritedSessionIDs
     public var favoriteSessions: [TmuxSession] {
-        allSessions.filter { favoritedSessionIDs.contains($0.id) }
+        let sessionMap = Dictionary(allSessions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return favoritedSessionIDs.compactMap { sessionMap[$0] }
     }
 
     /// Host-only session names (backward compat for createNewTmuxSession naming)
@@ -172,17 +174,34 @@ public class AppState: ObservableObject {
         allSessions.filter { $0.source == .host }.map(\.name)
     }
 
+    /// Unique docker container names from discovered sessions
+    public var dockerContainerNames: [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for s in allSessions {
+            if case .docker(let name) = s.source, seen.insert(name).inserted {
+                result.append(name)
+            }
+        }
+        return result.sorted()
+    }
+
     public func toggleFavorite(_ session: TmuxSession) {
-        if favoritedSessionIDs.contains(session.id) {
-            favoritedSessionIDs.remove(session.id)
+        if let idx = favoritedSessionIDs.firstIndex(of: session.id) {
+            favoritedSessionIDs.remove(at: idx)
         } else {
-            favoritedSessionIDs.insert(session.id)
+            favoritedSessionIDs.append(session.id)
         }
         saveFavorites()
     }
 
     public func isFavorited(_ session: TmuxSession) -> Bool {
         favoritedSessionIDs.contains(session.id)
+    }
+
+    public func moveFavorite(from source: IndexSet, to destination: Int) {
+        favoritedSessionIDs.move(fromOffsets: source, toOffset: destination)
+        saveFavorites()
     }
 
     // MARK: - Window Title
@@ -278,12 +297,12 @@ public class AppState: ObservableObject {
     private func loadFavorites() {
         if let data = try? Data(contentsOf: favoritesURL),
            let ids = try? JSONDecoder().decode([String].self, from: data) {
-            favoritedSessionIDs = Set(ids)
+            favoritedSessionIDs = ids
         }
     }
 
     private func saveFavorites() {
-        if let data = try? JSONEncoder().encode(Array(favoritedSessionIDs)) {
+        if let data = try? JSONEncoder().encode(favoritedSessionIDs) {
             try? data.write(to: favoritesURL)
         }
     }

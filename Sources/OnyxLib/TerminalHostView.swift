@@ -34,11 +34,11 @@ struct TerminalHostView: NSViewRepresentable {
             }
             nsView.switchToSession(session)
         }
-        if appState.createNewSession {
+        if let newSession = appState.createNewSession {
             DispatchQueue.main.async {
-                appState.createNewSession = false
+                appState.createNewSession = nil
             }
-            nsView.createNewTmuxSession()
+            nsView.createNewTmuxSession(newSession)
         }
         nsView.updateFontSize(appState.appearance.fontSize)
     }
@@ -487,29 +487,19 @@ class OnyxTerminalView: NSView {
         }
     }
 
-    func createNewTmuxSession() {
-        let base = appState.sshConfig.tmuxSession
-        let existingNames = appState.hostSessionNames
-        var idx = 2
-        var name = "\(base)-\(idx)"
-        while existingNames.contains(name) {
-            idx += 1
-            name = "\(base)-\(idx)"
-        }
-
+    func createNewTmuxSession(_ session: TmuxSession) {
         reconnectAttempt = 0
         lastStartTime = Date()
         isKeySetup = false
         resetTerminalView()
 
-        let newSession = TmuxSession(name: name, source: .host)
         DispatchQueue.main.async {
-            self.appState.allSessions.append(newSession)
-            self.appState.activeSession = newSession
+            self.appState.allSessions.append(session)
+            self.appState.activeSession = session
             self.appState.connectionError = nil
         }
 
-        let (cmd, args) = appState.commandForSession(newSession)
+        let (cmd, args) = appState.commandForSession(session)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.terminalView?.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
         }

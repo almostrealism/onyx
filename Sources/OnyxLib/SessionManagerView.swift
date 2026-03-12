@@ -2,6 +2,9 @@ import SwiftUI
 
 struct SessionManagerView: View {
     @ObservedObject var appState: AppState
+    @State private var newSessionName = ""
+    @State private var newSessionSource: SessionSource = .host
+    @FocusState private var nameFieldFocused: Bool
 
     var body: some View {
         HStack(spacing: 0) {
@@ -35,9 +38,23 @@ struct SessionManagerView: View {
 
                 Divider().background(Color.white.opacity(0.1))
 
-                // Session groups
+                // Session list
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
+                        // Favorites section (reorderable)
+                        if !appState.favoriteSessions.isEmpty {
+                            FavoritesHeader(count: appState.favoriteSessions.count, appState: appState)
+
+                            ForEach(Array(appState.favoriteSessions.enumerated()), id: \.element.id) { index, session in
+                                FavoriteRow(session: session, index: index, total: appState.favoriteSessions.count, appState: appState)
+                            }
+
+                            Divider()
+                                .background(Color.white.opacity(0.06))
+                                .padding(.vertical, 4)
+                        }
+
+                        // All sessions grouped by source
                         ForEach(appState.groupedSessions) { group in
                             SessionGroupHeader(group: group, appState: appState)
 
@@ -58,27 +75,84 @@ struct SessionManagerView: View {
                 Divider().background(Color.white.opacity(0.1))
 
                 // Footer
-                HStack {
-                    // New host session button
-                    Button(action: { appState.createNewSession = true }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 9))
-                            Text("New Session")
-                                .font(.system(size: 10, design: .monospaced))
+                if appState.showNewSessionPrompt {
+                    VStack(spacing: 6) {
+                        // Source picker
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 4) {
+                                SourceButton(label: "Host", icon: "desktopcomputer",
+                                             selected: newSessionSource == .host, accentColor: appState.accentColor) {
+                                    newSessionSource = .host
+                                }
+
+                                ForEach(appState.dockerContainerNames, id: \.self) { container in
+                                    let source = SessionSource.docker(containerName: container)
+                                    SourceButton(label: container, icon: "shippingbox",
+                                                 selected: newSessionSource == source, accentColor: appState.accentColor) {
+                                        newSessionSource = source
+                                    }
+                                }
+                            }
                         }
-                        .foregroundColor(.gray.opacity(0.5))
+
+                        // Name + actions
+                        HStack(spacing: 6) {
+                            TextField("Session name", text: $newSessionName)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(Color.white.opacity(0.08))
+                                .cornerRadius(4)
+                                .focused($nameFieldFocused)
+                                .onSubmit { submitNewSession() }
+
+                            Button(action: { submitNewSession() }) {
+                                Image(systemName: "return")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(appState.accentColor)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(newSessionName.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                            Button(action: { cancelNewSession() }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.gray.opacity(0.5))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .onAppear {
+                        newSessionName = ""
+                        newSessionSource = .host
+                        nameFieldFocused = true
+                    }
+                } else {
+                    HStack {
+                        Button(action: { appState.showNewSessionPrompt = true }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 9))
+                                Text("New Session")
+                                    .font(.system(size: 10, design: .monospaced))
+                            }
+                            .foregroundColor(.gray.opacity(0.5))
+                        }
+                        .buttonStyle(.plain)
 
-                    Spacer()
+                        Spacer()
 
-                    Text("⌘J close")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.gray.opacity(0.25))
+                        Text("⌘J close")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.25))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
             }
             .frame(width: 260)
             .background(Color(nsColor: NSColor(white: 0.06, alpha: 0.95)))
@@ -90,6 +164,147 @@ struct SessionManagerView: View {
 
             Spacer()
         }
+    }
+
+    private func submitNewSession() {
+        let name = newSessionName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        appState.createNewSession = TmuxSession(name: name, source: newSessionSource)
+        appState.showNewSessionPrompt = false
+        newSessionName = ""
+    }
+
+    private func cancelNewSession() {
+        appState.showNewSessionPrompt = false
+        newSessionName = ""
+    }
+}
+
+private struct FavoritesHeader: View {
+    let count: Int
+    @ObservedObject var appState: AppState
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "star.fill")
+                .font(.system(size: 9))
+                .foregroundColor(Color(hex: "FFD06B").opacity(0.6))
+
+            Text("FAVORITES")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.5))
+                .tracking(1)
+
+            Spacer()
+
+            Text("\(count)")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.3))
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+}
+
+private struct FavoriteRow: View {
+    let session: TmuxSession
+    let index: Int
+    let total: Int
+    @ObservedObject var appState: AppState
+
+    private var isActive: Bool {
+        appState.activeSession?.id == session.id
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            // Move up/down
+            VStack(spacing: 0) {
+                Button(action: {
+                    appState.moveFavorite(from: IndexSet(integer: index), to: index - 1)
+                }) {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundColor(index > 0 ? .gray.opacity(0.4) : .gray.opacity(0.1))
+                }
+                .buttonStyle(.plain)
+                .disabled(index == 0)
+
+                Button(action: {
+                    appState.moveFavorite(from: IndexSet(integer: index), to: index + 2)
+                }) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundColor(index < total - 1 ? .gray.opacity(0.4) : .gray.opacity(0.1))
+                }
+                .buttonStyle(.plain)
+                .disabled(index >= total - 1)
+            }
+            .frame(width: 12)
+
+            // Position number
+            if index < 9 {
+                Text("\(index + 1)")
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.3))
+                    .frame(width: 10)
+            }
+
+            Circle()
+                .fill(isActive ? appState.accentColor : Color.clear)
+                .frame(width: 4, height: 4)
+
+            Text(session.displayLabel)
+                .font(.system(size: 11, weight: isActive ? .medium : .regular, design: .monospaced))
+                .foregroundColor(isActive ? appState.accentColor : .white.opacity(0.7))
+                .lineLimit(1)
+
+            Spacer()
+
+            // Remove from favorites
+            Button(action: { appState.toggleFavorite(session) }) {
+                Image(systemName: "star.slash")
+                    .font(.system(size: 9))
+                    .foregroundColor(.gray.opacity(0.3))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+        .background(isActive ? appState.accentColor.opacity(0.08) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if !isActive {
+                appState.switchToSession = session
+            }
+        }
+    }
+}
+
+private struct SourceButton: View {
+    let label: String
+    let icon: String
+    let selected: Bool
+    let accentColor: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 8))
+                Text(label)
+                    .font(.system(size: 10, design: .monospaced))
+                    .lineLimit(1)
+            }
+            .foregroundColor(selected ? .white : .gray.opacity(0.5))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(selected ? accentColor.opacity(0.3) : Color.white.opacity(0.06))
+            .cornerRadius(4)
+        }
+        .buttonStyle(.plain)
     }
 }
 

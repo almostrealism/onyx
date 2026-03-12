@@ -318,10 +318,27 @@ public class RemindersManager: ObservableObject {
     @Published public var availableLists: [String] = []
 
     private let store = EKEventStore()
+    private var refreshTimer: Timer?
+    private var changeObserver: Any?
     public var selectedList: String = ""  // empty = all lists
 
     public init() {
         requestAccess()
+
+        // Refresh when reminders change externally (other apps, iCloud sync)
+        changeObserver = NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged, object: store, queue: .main
+        ) { [weak self] _ in
+            self?.refreshLists()
+            self?.fetchToday()
+        }
+    }
+
+    deinit {
+        refreshTimer?.invalidate()
+        if let obs = changeObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
     }
 
     private func requestAccess() {
@@ -331,8 +348,15 @@ public class RemindersManager: ObservableObject {
                 if granted {
                     self?.refreshLists()
                     self?.fetchToday()
+                    self?.startTimer()
                 }
             }
+        }
+    }
+
+    private func startTimer() {
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            self?.fetchToday()
         }
     }
 

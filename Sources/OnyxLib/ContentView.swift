@@ -164,7 +164,8 @@ public struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .createTmuxSession)) { _ in
-            appState.createNewSession = true
+            appState.showSessionManager = true
+            appState.showNewSessionPrompt = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .switchToFavorite)) { notification in
             guard let index = notification.object as? Int else { return }
