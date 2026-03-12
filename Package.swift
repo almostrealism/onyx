@@ -21,7 +21,8 @@ let package = Package(
             name: "Onyx",
             dependencies: ["OnyxLib"],
             path: "Sources/OnyxApp",
-            exclude: ["Info.plist"]
+            exclude: ["Info.plist"],
+            resources: [.copy("AppIcon.icns")]
         ),
         .testTarget(
             name: "OnyxTests",

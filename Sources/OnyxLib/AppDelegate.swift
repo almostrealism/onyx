@@ -11,6 +11,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         // Activate and bring to front
         NSApplication.shared.activate(ignoringOtherApps: true)
 
+        // Set app icon from bundled resource
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApplication.shared.applicationIconImage = icon
+        }
+
         DispatchQueue.main.async {
             // Load the persisted window title
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
