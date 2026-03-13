@@ -7,13 +7,15 @@ struct SessionManagerView: View {
     @State private var newSessionSource: SessionSource?
     @FocusState private var nameFieldFocused: Bool
 
+    private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
+
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 // Header
                 HStack {
                     Text("SESSIONS")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(.system(size: sz(11), weight: .medium, design: .monospaced))
                         .foregroundColor(appState.accentColor)
                         .tracking(2)
 
@@ -48,7 +50,7 @@ struct SessionManagerView: View {
 
                             ForEach(Array(appState.favoriteSessions.enumerated()), id: \.element.id) { index, session in
                                 FavoriteRow(session: session, index: index, total: appState.favoriteSessions.count, appState: appState)
-                                    .id("fav-\(session.id)")
+                                    .id("fav-\(index)-\(session.id)")
                             }
 
                             Divider()
@@ -73,7 +75,7 @@ struct SessionManagerView: View {
 
                             if hostGroup.groups.isEmpty {
                                 Text("No sessions")
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .font(.system(size: sz(11), design: .monospaced))
                                     .foregroundColor(.gray.opacity(0.3))
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 4)
@@ -82,7 +84,7 @@ struct SessionManagerView: View {
 
                         if appState.allSessions.isEmpty {
                             Text("No sessions found")
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(.system(size: sz(12), design: .monospaced))
                                 .foregroundColor(.gray.opacity(0.4))
                                 .padding(14)
                         }
@@ -107,9 +109,9 @@ struct SessionManagerView: View {
                         Button(action: { appState.showNewSessionPrompt = true }) {
                             HStack(spacing: 4) {
                                 Image(systemName: "plus")
-                                    .font(.system(size: 9))
+                                    .font(.system(size: sz(9)))
                                 Text("New Session")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(.system(size: sz(10), design: .monospaced))
                             }
                             .foregroundColor(.gray.opacity(0.5))
                         }
@@ -118,7 +120,7 @@ struct SessionManagerView: View {
                         Spacer()
 
                         Text("⌘J close")
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(.system(size: sz(9), design: .monospaced))
                             .foregroundColor(.gray.opacity(0.25))
                     }
                     .padding(.horizontal, 14)
@@ -162,6 +164,8 @@ private struct NewSessionPrompt: View {
     var nameFieldFocused: FocusState<Bool>.Binding
     let onSubmit: () -> Void
     let onCancel: () -> Void
+
+    private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
 
     private var effectiveHostID: UUID {
         newSessionHostID ?? appState.hosts.first?.id ?? HostConfig.localhostID
@@ -211,7 +215,7 @@ private struct NewSessionPrompt: View {
             HStack(spacing: 6) {
                 TextField("Session name", text: $newSessionName)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: sz(11), design: .monospaced))
                     .foregroundColor(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
@@ -222,7 +226,7 @@ private struct NewSessionPrompt: View {
 
                 Button(action: { onSubmit() }) {
                     Image(systemName: "return")
-                        .font(.system(size: 10))
+                        .font(.system(size: sz(10)))
                         .foregroundColor(appState.accentColor)
                 }
                 .buttonStyle(.plain)
@@ -230,7 +234,7 @@ private struct NewSessionPrompt: View {
 
                 Button(action: { onCancel() }) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 10))
+                        .font(.system(size: sz(10)))
                         .foregroundColor(.gray.opacity(0.5))
                 }
                 .buttonStyle(.plain)
@@ -255,14 +259,16 @@ private struct HostHeader: View {
     let hostGroup: HostGroup
     @ObservedObject var appState: AppState
 
+    private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
+
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: hostGroup.host.isLocal ? "desktopcomputer" : "network")
-                .font(.system(size: 9))
+                .font(.system(size: sz(9)))
                 .foregroundColor(appState.accentColor.opacity(0.6))
 
             Text(hostGroup.host.label.uppercased())
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .font(.system(size: sz(9), weight: .bold, design: .monospaced))
                 .foregroundColor(appState.accentColor.opacity(0.7))
                 .tracking(1)
 
@@ -271,7 +277,7 @@ private struct HostHeader: View {
             let available = hostGroup.groups.flatMap(\.sessions).filter { !$0.unavailable }.count
             if available > 0 {
                 Text("\(available)")
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(.system(size: sz(9), design: .monospaced))
                     .foregroundColor(.gray.opacity(0.3))
             }
         }
@@ -285,21 +291,23 @@ private struct FavoritesHeader: View {
     let count: Int
     @ObservedObject var appState: AppState
 
+    private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
+
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "star.fill")
-                .font(.system(size: 9))
+                .font(.system(size: sz(9)))
                 .foregroundColor(Color(hex: "FFD06B").opacity(0.6))
 
             Text("FAVORITES")
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .font(.system(size: sz(9), weight: .medium, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.5))
                 .tracking(1)
 
             Spacer()
 
             Text("\(count)")
-                .font(.system(size: 9, design: .monospaced))
+                .font(.system(size: sz(9), design: .monospaced))
                 .foregroundColor(.gray.opacity(0.3))
         }
         .padding(.horizontal, 14)
@@ -314,6 +322,8 @@ private struct FavoriteRow: View {
     let total: Int
     @ObservedObject var appState: AppState
 
+    private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
+
     private var isActive: Bool {
         appState.activeSession?.id == session.id
     }
@@ -326,7 +336,7 @@ private struct FavoriteRow: View {
                     appState.moveFavorite(from: IndexSet(integer: index), to: index - 1)
                 }) {
                     Image(systemName: "chevron.up")
-                        .font(.system(size: 7, weight: .bold))
+                        .font(.system(size: sz(7), weight: .bold))
                         .foregroundColor(index > 0 ? .gray.opacity(0.4) : .gray.opacity(0.1))
                 }
                 .buttonStyle(.plain)
@@ -336,7 +346,7 @@ private struct FavoriteRow: View {
                     appState.moveFavorite(from: IndexSet(integer: index), to: index + 2)
                 }) {
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 7, weight: .bold))
+                        .font(.system(size: sz(7), weight: .bold))
                         .foregroundColor(index < total - 1 ? .gray.opacity(0.4) : .gray.opacity(0.1))
                 }
                 .buttonStyle(.plain)
@@ -347,7 +357,7 @@ private struct FavoriteRow: View {
             // Position number
             if index < 9 {
                 Text("\(index + 1)")
-                    .font(.system(size: 8, design: .monospaced))
+                    .font(.system(size: sz(8), design: .monospaced))
                     .foregroundColor(.gray.opacity(0.3))
                     .frame(width: 10)
             }
@@ -357,7 +367,7 @@ private struct FavoriteRow: View {
                 .frame(width: 4, height: 4)
 
             Text(session.displayLabel)
-                .font(.system(size: 11, weight: isActive ? .medium : .regular, design: .monospaced))
+                .font(.system(size: sz(11), weight: isActive ? .medium : .regular, design: .monospaced))
                 .foregroundColor(isActive ? appState.accentColor : .white.opacity(0.7))
                 .lineLimit(1)
 
@@ -366,7 +376,7 @@ private struct FavoriteRow: View {
             // Remove from favorites
             Button(action: { appState.toggleFavorite(session) }) {
                 Image(systemName: "star.slash")
-                    .font(.system(size: 9))
+                    .font(.system(size: sz(9)))
                     .foregroundColor(.gray.opacity(0.3))
             }
             .buttonStyle(.plain)
@@ -413,14 +423,16 @@ private struct SessionGroupHeader: View {
     let group: SessionGroup
     @ObservedObject var appState: AppState
 
+    private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
+
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "shippingbox")
-                .font(.system(size: 8))
+                .font(.system(size: sz(8)))
                 .foregroundColor(appState.accentColor.opacity(0.4))
 
             Text(group.source.displayName.uppercased())
-                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                .font(.system(size: sz(8), weight: .medium, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.4))
                 .tracking(1)
 
@@ -429,7 +441,7 @@ private struct SessionGroupHeader: View {
             let available = group.sessions.filter { !$0.unavailable }.count
             if available > 0 {
                 Text("\(available)")
-                    .font(.system(size: 8, design: .monospaced))
+                    .font(.system(size: sz(8), design: .monospaced))
                     .foregroundColor(.gray.opacity(0.3))
             }
         }
@@ -443,6 +455,8 @@ private struct SessionRow: View {
     let session: TmuxSession
     @ObservedObject var appState: AppState
 
+    private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
+
     private var isActive: Bool {
         appState.activeSession?.id == session.id
     }
@@ -454,35 +468,32 @@ private struct SessionRow: View {
     var body: some View {
         HStack(spacing: 6) {
             if session.unavailable {
-                // Unavailable placeholder — tmux not installed in container
                 Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 9))
+                    .font(.system(size: sz(9)))
                     .foregroundColor(Color(hex: "FF6B6B").opacity(0.6))
 
                 Text(session.name)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: sz(11), design: .monospaced))
                     .foregroundColor(.gray.opacity(0.35))
                     .italic()
                     .lineLimit(1)
 
                 Spacer()
             } else {
-                // Active indicator
                 Circle()
                     .fill(isActive ? appState.accentColor : Color.clear)
                     .frame(width: 4, height: 4)
 
                 Text(session.name)
-                    .font(.system(size: 12, weight: isActive ? .medium : .regular, design: .monospaced))
+                    .font(.system(size: sz(12), weight: isActive ? .medium : .regular, design: .monospaced))
                     .foregroundColor(isActive ? appState.accentColor : .white.opacity(0.7))
                     .lineLimit(1)
 
                 Spacer()
 
-                // Favorite toggle
                 Button(action: { appState.toggleFavorite(session) }) {
                     Image(systemName: isFavorited ? "star.fill" : "star")
-                        .font(.system(size: 10))
+                        .font(.system(size: sz(10)))
                         .foregroundColor(isFavorited ? Color(hex: "FFD06B") : .gray.opacity(0.3))
                 }
                 .buttonStyle(.plain)

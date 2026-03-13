@@ -291,6 +291,8 @@ struct ConnectionErrorOverlay: View {
 struct FavoritesBar: View {
     @ObservedObject var appState: AppState
 
+    private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
+
     var body: some View {
         HStack(spacing: 0) {
             // Session manager toggle
@@ -298,9 +300,9 @@ struct FavoritesBar: View {
                 appState.showSessionManager.toggle()
             }) {
                 Image(systemName: "list.bullet")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: sz(10), weight: .medium))
                     .foregroundColor(appState.accentColor.opacity(0.6))
-                    .frame(width: 22, height: 18)
+                    .frame(width: sz(22), height: sz(18))
                     .background(Color.white.opacity(0.05))
                     .cornerRadius(4)
             }
@@ -315,7 +317,7 @@ struct FavoritesBar: View {
                     .frame(width: 5, height: 5)
 
                 Text(appState.activeHost?.label ?? "local")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: sz(10), design: .monospaced))
                     .foregroundColor(.gray.opacity(0.5))
             }
             .padding(.trailing, 6)
@@ -331,11 +333,11 @@ struct FavoritesBar: View {
                     HStack(spacing: 4) {
                         if index < 9 {
                             Text("⌘\(index + 1)")
-                                .font(.system(size: 8, design: .monospaced))
+                                .font(.system(size: sz(8), design: .monospaced))
                                 .foregroundColor(.gray.opacity(0.3))
                         }
                         Text(session.displayLabel)
-                            .font(.system(size: 10, weight: isActive ? .medium : .regular, design: .monospaced))
+                            .font(.system(size: sz(10), weight: isActive ? .medium : .regular, design: .monospaced))
                             .foregroundColor(isActive ? appState.accentColor : .gray.opacity(0.5))
                     }
                     .padding(.horizontal, 8)
@@ -349,7 +351,7 @@ struct FavoritesBar: View {
             // Active session indicator (if not in favorites)
             if let active = appState.activeSession, !appState.isFavorited(active) {
                 Text(active.displayLabel)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.system(size: sz(10), weight: .medium, design: .monospaced))
                     .foregroundColor(appState.accentColor)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -361,18 +363,18 @@ struct FavoritesBar: View {
 
             // Hint
             Text("⌘R refresh")
-                .font(.system(size: 9, design: .monospaced))
+                .font(.system(size: sz(9), design: .monospaced))
                 .foregroundColor(.gray.opacity(0.25))
                 .padding(.trailing, 4)
 
             Text("⌘J sessions")
-                .font(.system(size: 9, design: .monospaced))
+                .font(.system(size: sz(9), design: .monospaced))
                 .foregroundColor(.gray.opacity(0.25))
                 .padding(.trailing, 4)
 
             if appState.favoriteSessions.count > 1 {
                 Text("⇧⇥ switch")
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(.system(size: sz(9), design: .monospaced))
                     .foregroundColor(.gray.opacity(0.25))
                     .padding(.trailing, 4)
             }

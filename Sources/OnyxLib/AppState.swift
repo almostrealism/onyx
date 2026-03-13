@@ -373,6 +373,16 @@ public class AppState: ObservableObject {
         Color(hex: appearance.accentHex)
     }
 
+    /// Scale factor for UI text relative to default size of 12
+    public var uiScale: CGFloat {
+        CGFloat(appearance.uiFontSize / 12.0)
+    }
+
+    /// Scaled UI font size — multiply a base size by the UI scale factor
+    public func uiSize(_ base: CGFloat) -> CGFloat {
+        (base * uiScale).rounded()
+    }
+
     public func loadConfig() {
         // Try loading multi-host config
         if FileManager.default.fileExists(atPath: hostsURL.path) {
