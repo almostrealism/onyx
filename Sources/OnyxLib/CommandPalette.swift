@@ -43,7 +43,7 @@ struct CommandPaletteView: View {
                 appState.showCommandPalette = false
                 appState.showWindowRename = true
             },
-            PaletteAction(title: "Reconnect SSH", shortcut: "") {
+            PaletteAction(title: "Refresh Session", shortcut: "⌘R") {
                 appState.showCommandPalette = false
                 appState.reconnectRequested = true
             },

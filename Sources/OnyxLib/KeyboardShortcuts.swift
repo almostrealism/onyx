@@ -53,6 +53,12 @@ public class ShortcutManager {
                 return nil
             }
 
+            // Cmd+R → refresh/reconnect active session
+            if flags == .command && chars == "r" {
+                NotificationCenter.default.post(name: .refreshSession, object: nil)
+                return nil
+            }
+
             // Cmd+, → settings
             if flags == .command && chars == "," {
                 NotificationCenter.default.post(name: .openSettings, object: nil)

@@ -566,14 +566,16 @@ class OnyxTerminalView: NSView {
             self.appState.connectionError = nil
         }
 
-        let tv = activateSession(session)
-
         // If the pooled view already has a running process, instant switch
         if let entry = pool[session.id], entry.processRunning {
+            activateSession(session)
             return
         }
 
-        // Otherwise start a new SSH process (reuses the terminal view)
+        // Dead or missing session — destroy stale entry so we get a fresh terminal
+        destroyPoolEntry(session.id)
+        let tv = activateSession(session)
+
         let (cmd, args) = appState.commandForSession(session)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
@@ -597,6 +599,27 @@ class OnyxTerminalView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
             self.pool[session.id]?.processRunning = true
+        }
+    }
+
+    /// Manual refresh: tear down and reconnect the active session
+    func refreshActiveSession() {
+        reconnectAttempt = 0
+        lastStartTime = Date()
+        isKeySetup = false
+
+        if let id = activeSessionID {
+            destroyPoolEntry(id)
+            activeSessionID = nil
+        }
+
+        DispatchQueue.main.async {
+            self.appState.connectionError = nil
+            self.appState.isReconnecting = false
+        }
+
+        enumerateAllSessions {
+            self.connectToActiveSession()
         }
     }
 
@@ -650,17 +673,38 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
             pool[id]?.processRunning = false
         }
 
-        if wasKeySetup && exitCode != 0 {
-            DispatchQueue.main.async { [weak self] in
-                self?.appState.connectionError = "SSH key setup failed. Use ⌘K → Reconnect to try again."
-                self?.appState.isReconnecting = false
+        if wasKeySetup {
+            if exitCode != 0 {
+                DispatchQueue.main.async { [weak self] in
+                    self?.appState.connectionError = "SSH key setup failed. Use ⌘K → Reconnect to try again."
+                    self?.appState.isReconnecting = false
+                }
+            } else {
+                // Key setup succeeded — clean up and start a fresh connection
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    if let id = self.activeSessionID {
+                        self.destroyPoolEntry(id)
+                        self.activeSessionID = nil
+                    }
+                    self.reconnectAttempt = 0
+                    self.enumerateAllSessions {
+                        self.connectToActiveSession()
+                    }
+                }
             }
             return
         }
 
-        // Only auto-reconnect if this is the active session
-        guard terminatedSessionID == activeSessionID else { return }
+        // Background session died — destroy its pool entry so next switch gets a fresh view
+        guard terminatedSessionID == activeSessionID else {
+            if let id = terminatedSessionID {
+                destroyPoolEntry(id)
+            }
+            return
+        }
 
+        // Active session died — auto-reconnect
         DispatchQueue.main.async { [weak self] in
             if self?.appState.connectionError != nil {
                 self?.appState.isReconnecting = false

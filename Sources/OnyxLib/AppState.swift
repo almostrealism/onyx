@@ -15,6 +15,7 @@ public extension Notification.Name {
     static let createTmuxSession = Notification.Name("createTmuxSession")
     static let toggleSessionManager = Notification.Name("toggleSessionManager")
     static let switchToFavorite = Notification.Name("switchToFavorite")
+    static let refreshSession = Notification.Name("refreshSession")
 }
 
 public struct SSHConfig: Codable {

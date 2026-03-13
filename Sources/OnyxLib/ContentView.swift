@@ -167,6 +167,9 @@ public struct ContentView: View {
             appState.showSessionManager = true
             appState.showNewSessionPrompt = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .refreshSession)) { _ in
+            appState.reconnectRequested = true
+        }
         .onReceive(NotificationCenter.default.publisher(for: .switchToFavorite)) { notification in
             guard let index = notification.object as? Int else { return }
             let favorites = appState.favoriteSessions
@@ -357,6 +360,11 @@ struct FavoritesBar: View {
             Spacer()
 
             // Hint
+            Text("⌘R refresh")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.25))
+                .padding(.trailing, 4)
+
             Text("⌘J sessions")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.25))
