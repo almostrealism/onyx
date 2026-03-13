@@ -332,65 +332,72 @@ private struct FavoriteRow: View {
         HStack(spacing: 5) {
             // Move up/down
             VStack(spacing: 0) {
-                Image(systemName: "chevron.up")
-                    .font(.system(size: sz(7), weight: .bold))
-                    .foregroundColor(index > 0 ? .gray.opacity(0.4) : .gray.opacity(0.1))
-                    .frame(width: 16, height: 12)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        guard index > 0 else { return }
-                        appState.moveFavorite(from: IndexSet(integer: index), to: index - 1)
-                    }
+                Button(action: {
+                    appState.moveFavorite(from: IndexSet(integer: index), to: index - 1)
+                }) {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: sz(7), weight: .bold))
+                        .foregroundColor(index > 0 ? .gray.opacity(0.4) : .gray.opacity(0.1))
+                        .frame(width: 16, height: 12)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(index == 0)
 
-                Image(systemName: "chevron.down")
-                    .font(.system(size: sz(7), weight: .bold))
-                    .foregroundColor(index < total - 1 ? .gray.opacity(0.4) : .gray.opacity(0.1))
-                    .frame(width: 16, height: 12)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        guard index < total - 1 else { return }
-                        appState.moveFavorite(from: IndexSet(integer: index), to: index + 2)
-                    }
+                Button(action: {
+                    appState.moveFavorite(from: IndexSet(integer: index), to: index + 2)
+                }) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: sz(7), weight: .bold))
+                        .foregroundColor(index < total - 1 ? .gray.opacity(0.4) : .gray.opacity(0.1))
+                        .frame(width: 16, height: 12)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(index >= total - 1)
             }
 
-            // Position number
-            if index < 9 {
-                Text("\(index + 1)")
-                    .font(.system(size: sz(8), design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.3))
-                    .frame(width: 10)
+            // Tappable session label area
+            HStack(spacing: 5) {
+                // Position number
+                if index < 9 {
+                    Text("\(index + 1)")
+                        .font(.system(size: sz(8), design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.3))
+                        .frame(width: 10)
+                }
+
+                Circle()
+                    .fill(isActive ? appState.accentColor : Color.clear)
+                    .frame(width: 4, height: 4)
+
+                Text(session.displayLabel)
+                    .font(.system(size: sz(11), weight: isActive ? .medium : .regular, design: .monospaced))
+                    .foregroundColor(isActive ? appState.accentColor : .white.opacity(0.7))
+                    .lineLimit(1)
+
+                Spacer()
             }
-
-            Circle()
-                .fill(isActive ? appState.accentColor : Color.clear)
-                .frame(width: 4, height: 4)
-
-            Text(session.displayLabel)
-                .font(.system(size: sz(11), weight: isActive ? .medium : .regular, design: .monospaced))
-                .foregroundColor(isActive ? appState.accentColor : .white.opacity(0.7))
-                .lineLimit(1)
-
-            Spacer()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if !isActive {
+                    appState.switchToSession = session
+                }
+            }
 
             // Remove from favorites
-            Image(systemName: "star.slash")
-                .font(.system(size: sz(9)))
-                .foregroundColor(.gray.opacity(0.3))
-                .frame(width: 20, height: 20)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    appState.toggleFavorite(session)
-                }
+            Button(action: { appState.toggleFavorite(session) }) {
+                Image(systemName: "star.slash")
+                    .font(.system(size: sz(9)))
+                    .foregroundColor(.gray.opacity(0.3))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
         .background(isActive ? appState.accentColor.opacity(0.08) : Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if !isActive {
-                appState.switchToSession = session
-            }
-        }
     }
 }
 
