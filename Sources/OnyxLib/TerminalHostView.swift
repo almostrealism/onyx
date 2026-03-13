@@ -40,7 +40,10 @@ struct TerminalHostView: NSViewRepresentable {
             }
             nsView.createNewTmuxSession(newSession)
         }
-        nsView.updateFontSize(appState.appearance.fontSize)
+        nsView.updateTerminalFont(
+            name: appState.appearance.terminalFontName,
+            size: appState.appearance.effectiveTerminalFontSize
+        )
     }
 }
 
@@ -58,6 +61,7 @@ class OnyxTerminalView: NSView {
     private var reconnectAttempt = 0
     private let maxBackoff: TimeInterval = 15.0
     private var currentFontSize: Double = 13
+    private var currentFontName: String = "SF Mono"
     private var lastStartTime: Date?
     private var isKeySetup = false
 
@@ -218,11 +222,7 @@ class OnyxTerminalView: NSView {
         tv.layer?.backgroundColor = CGColor.clear
 
         let size = CGFloat(currentFontSize)
-        if let sfMono = NSFont(name: "SF Mono", size: size) {
-            tv.font = sfMono
-        } else {
-            tv.font = NSFont(name: "Menlo", size: size) ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
-        }
+        tv.font = resolveFont(name: currentFontName, size: size)
 
         func c(_ r: Double, _ g: Double, _ b: Double) -> SwiftTerm.Color {
             SwiftTerm.Color(red: UInt16(r * 65535), green: UInt16(g * 65535), blue: UInt16(b * 65535))
@@ -249,19 +249,24 @@ class OnyxTerminalView: NSView {
         }
     }
 
-    func updateFontSize(_ newSize: Double) {
-        guard newSize != currentFontSize else { return }
-        currentFontSize = newSize
-        let size = CGFloat(newSize)
-        let font: NSFont
-        if let sfMono = NSFont(name: "SF Mono", size: size) {
-            font = sfMono
-        } else {
-            font = NSFont(name: "Menlo", size: size) ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
-        }
+    func updateTerminalFont(name: String, size: Double) {
+        guard name != currentFontName || size != currentFontSize else { return }
+        currentFontName = name
+        currentFontSize = size
+        let font = resolveFont(name: name, size: CGFloat(size))
         for entry in pool.values {
             entry.terminalView.font = font
         }
+    }
+
+    private func resolveFont(name: String, size: CGFloat) -> NSFont {
+        if let font = NSFont(name: name, size: size) {
+            return font
+        }
+        // Fallback chain
+        return NSFont(name: "SF Mono", size: size)
+            ?? NSFont(name: "Menlo", size: size)
+            ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
     // MARK: - Connection Lifecycle

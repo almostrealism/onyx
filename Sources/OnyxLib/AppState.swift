@@ -60,13 +60,26 @@ public struct HostConfig: Codable, Identifiable, Hashable {
 }
 
 public struct AppearanceConfig: Codable {
-    public var fontSize: Double = 13
+    public var fontSize: Double = 13           // legacy, maps to terminalFontSize
+    public var terminalFontSize: Double?        // nil = use fontSize for backward compat
+    public var terminalFontName: String = "SF Mono"
+    public var uiFontSize: Double = 12
     public var windowOpacity: Double = 0.82
     public var accentHex: String = "66CCFF"
     public var windowTitle: String = "Onyx"
     public var remindersList: String = ""  // empty = all lists
 
+    public var effectiveTerminalFontSize: Double {
+        terminalFontSize ?? fontSize
+    }
+
     public static let accentOptions = ["66CCFF", "FF6B6B", "6BFF8E", "FFD06B", "C06BFF", "FF6BCD"]
+
+    public static let terminalFontOptions = [
+        "SF Mono", "Menlo", "Monaco", "Courier New", "Andale Mono",
+        "JetBrains Mono", "Fira Code", "Source Code Pro", "IBM Plex Mono",
+        "Hack", "Inconsolata"
+    ]
 
     public init(fontSize: Double = 13, windowOpacity: Double = 0.82, accentHex: String = "66CCFF", windowTitle: String = "Onyx", remindersList: String = "") {
         self.fontSize = fontSize

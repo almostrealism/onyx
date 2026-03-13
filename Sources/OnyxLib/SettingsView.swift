@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import EventKit
 
 struct SettingsView: View {
@@ -68,9 +69,40 @@ struct SettingsView: View {
                                 OnyxTextField(label: "Window title", text: $appState.appearance.windowTitle, placeholder: "Onyx")
                                     .focused($focusedField, equals: .windowTitle)
 
-                                OnyxTextField(label: "Font size", text: fontSizeBinding, placeholder: "13")
-                                    .focused($focusedField, equals: .fontSize)
-                                    .frame(width: 100)
+                                // Terminal font
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("TERMINAL FONT")
+                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .tracking(2)
+
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 6) {
+                                            ForEach(availableMonoFonts, id: \.self) { fontName in
+                                                let selected = appState.appearance.terminalFontName == fontName
+                                                Button(action: { appState.appearance.terminalFontName = fontName }) {
+                                                    Text(fontName)
+                                                        .font(.system(size: 11, design: .monospaced))
+                                                        .foregroundColor(selected ? .white : .gray.opacity(0.5))
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 4)
+                                                        .background(selected ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
+                                                        .cornerRadius(4)
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                HStack(spacing: 12) {
+                                    OnyxTextField(label: "Terminal font size", text: terminalFontSizeBinding, placeholder: "13")
+                                        .focused($focusedField, equals: .fontSize)
+                                        .frame(width: 130)
+
+                                    OnyxTextField(label: "UI font size", text: uiFontSizeBinding, placeholder: "12")
+                                        .frame(width: 130)
+                                }
 
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("WINDOW OPACITY")
@@ -195,11 +227,25 @@ struct SettingsView: View {
         }
     }
 
-    private var fontSizeBinding: Binding<String> {
+    private var terminalFontSizeBinding: Binding<String> {
         Binding(
-            get: { String(Int(appState.appearance.fontSize)) },
-            set: { appState.appearance.fontSize = Double(Int($0) ?? 13) }
+            get: { String(Int(appState.appearance.effectiveTerminalFontSize)) },
+            set: { appState.appearance.terminalFontSize = Double(Int($0) ?? 13) }
         )
+    }
+
+    private var uiFontSizeBinding: Binding<String> {
+        Binding(
+            get: { String(Int(appState.appearance.uiFontSize)) },
+            set: { appState.appearance.uiFontSize = max(8, Double(Int($0) ?? 12)) }
+        )
+    }
+
+    /// Monospaced fonts that are actually installed on this system
+    private var availableMonoFonts: [String] {
+        AppearanceConfig.terminalFontOptions.filter { name in
+            NSFont(name: name, size: 13) != nil
+        }
     }
 
     private func addHost() {
