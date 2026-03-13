@@ -286,11 +286,16 @@ public class MonitorManager: ObservableObject {
                         $0.trimmingCharacters(in: .whitespaces)
                             .replacingOccurrences(of: " %", with: "")
                     }
-                    if parts.count >= 4 {
+                    if parts.count >= 4, Double(parts[0]) != nil {
+                        // nvidia-smi format: "usage%, memUsage%, temp, name"
                         gpuUsage = Double(parts[0])
                         gpuMemUsage = Double(parts[1])
                         gpuTemp = Int(parts[2])
                         gpuName = parts[3]
+                    } else if parts.count == 2, let pct = Double(parts[1]) {
+                        // Apple Silicon format: "AGX,42"
+                        gpuName = parts[0]
+                        gpuUsage = pct
                     }
                 }
             }
@@ -482,7 +487,7 @@ struct MonitorView: View {
                     // Current values row
                     HStack(spacing: 30) {
                         if let cpu = sample.cpuUsage {
-                            StatChip(label: "CPU", value: "\(Int(cpu))%", accentColor: appState.accentColor)
+                            StatChip(label: "CPU", value: "\(Int(cpu))%", accentColor: Color(hex: "66CCFF"))
                         }
                         if let used = sample.memUsed, let total = sample.memTotal, total > 0 {
                             StatChip(label: "MEM", value: "\(formatMB(used)) / \(formatMB(total))", accentColor: Color(hex: "FFD06B"))
@@ -513,7 +518,7 @@ struct MonitorView: View {
                             GridChart(
                                 title: "CPU",
                                 values: cpuData,
-                                accentColor: appState.accentColor
+                                accentColor: Color(hex: "66CCFF")
                             )
                         }
 
@@ -686,7 +691,7 @@ struct GridChart: View {
     private func colorForLevel(_ pct: Double) -> Color {
         if pct > 90 { return Color(hex: "FF6B6B").opacity(0.9) }
         if pct > 70 { return Color(hex: "FFD06B").opacity(0.8) }
-        return accentColor.opacity(0.7)
+        return Color(hex: "66CCFF").opacity(0.7)
     }
 }
 
