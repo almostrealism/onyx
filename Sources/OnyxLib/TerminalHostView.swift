@@ -274,12 +274,8 @@ class OnyxTerminalView: NSView {
 
         DispatchQueue.main.async { self.appState.connectionError = nil }
 
-        if !appState.isLocal {
-            probeAndConnect()
-        } else {
-            enumerateAllSessions {
-                self.connectToActiveSession()
-            }
+        enumerateAllSessions {
+            self.connectToActiveSession()
         }
     }
 
@@ -299,18 +295,19 @@ class OnyxTerminalView: NSView {
             self.appState.needsKeySetup = false
         }
 
-        if !appState.isLocal {
-            probeAndConnect()
-        } else {
-            enumerateAllSessions {
-                self.connectToActiveSession()
-            }
+        enumerateAllSessions {
+            self.connectToActiveSession()
         }
     }
 
     private func connectToActiveSession() {
         DispatchQueue.main.async {
-            let session = self.appState.activeSession ?? TmuxSession(name: self.appState.sshConfig.tmuxSession, source: .host)
+            let defaultHost = self.appState.hosts.first ?? .localhost
+            let defaultSession = TmuxSession(
+                name: defaultHost.ssh.tmuxSession,
+                source: .host(hostID: defaultHost.id)
+            )
+            let session = self.appState.activeSession ?? defaultSession
             let tv = self.activateSession(session)
             self.lastStartTime = Date()
             let (cmd, args) = self.appState.commandForSession(session)
@@ -319,74 +316,39 @@ class OnyxTerminalView: NSView {
         }
     }
 
-    /// Probe SSH with BatchMode=yes. If key auth works, connect normally.
-    private func probeAndConnect() {
-        let host = appState.sshConfig.host.trimmingCharacters(in: .whitespacesAndNewlines)
-        let port = appState.sshConfig.port
-        let user = appState.sshConfig.user
-        let identityFile = appState.sshConfig.identityFile
+    /// Probe a remote host with BatchMode=yes. Returns true if key auth works.
+    private func probeHost(_ host: HostConfig) -> Bool {
+        guard !host.isLocal else { return true }
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
+        let nc = Process()
+        nc.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
+        nc.arguments = ["-z", "-w", "3", host.ssh.host, "\(host.ssh.port)"]
+        nc.standardOutput = FileHandle.nullDevice
+        nc.standardError = FileHandle.nullDevice
+        try? nc.run()
+        nc.waitUntilExit()
+        guard nc.terminationStatus == 0 else { return false }
 
-            let nc = Process()
-            nc.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
-            nc.arguments = ["-z", "-w", "3", host, "\(port)"]
-            nc.standardOutput = FileHandle.nullDevice
-            nc.standardError = FileHandle.nullDevice
-            try? nc.run()
-            nc.waitUntilExit()
-
-            guard nc.terminationStatus == 0 else {
-                DispatchQueue.main.async {
-                    self.appState.needsKeySetup = false
-                    self.appState.connectionError = """
-                    Connection refused on \(host):\(port).
-
-                    SSH (Remote Login) may not be enabled.
-
-                    To enable it:
-                    System Settings → General → Sharing → Remote Login → turn ON
-
-                    Then use ⌘K → Reconnect SSH.
-                    """
-                }
-                return
-            }
-
-            let probe = Process()
-            probe.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-            var probeArgs = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-                             "-o", "StrictHostKeyChecking=accept-new"]
-            if port != 22 { probeArgs += ["-p", "\(port)"] }
-            if !identityFile.isEmpty { probeArgs += ["-i", identityFile] }
-            let userHost = user.isEmpty ? host : "\(user)@\(host)"
-            probeArgs += [userHost, "true"]
-            probe.arguments = probeArgs
-            probe.standardOutput = FileHandle.nullDevice
-            probe.standardError = FileHandle.nullDevice
-            try? probe.run()
-            probe.waitUntilExit()
-
-            if probe.terminationStatus == 0 {
-                self.enumerateAllSessions {
-                    self.connectToActiveSession()
-                }
-            } else {
-                DispatchQueue.main.async {
-                    self.appState.needsKeySetup = true
-                    self.appState.connectionError = """
-                    SSH key authentication failed for \(host).
-
-                    Your SSH key needs to be installed on the remote host.
-                    Onyx can do this for you — you'll enter your password once.
-                    """
-                }
-            }
-        }
+        let probe = Process()
+        probe.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        var probeArgs = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+                         "-o", "StrictHostKeyChecking=accept-new"]
+        if host.ssh.port != 22 { probeArgs += ["-p", "\(host.ssh.port)"] }
+        if !host.ssh.identityFile.isEmpty { probeArgs += ["-i", host.ssh.identityFile] }
+        let userHost = host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
+        probeArgs += [userHost, "true"]
+        probe.arguments = probeArgs
+        probe.standardOutput = FileHandle.nullDevice
+        probe.standardError = FileHandle.nullDevice
+        try? probe.run()
+        probe.waitUntilExit()
+        return probe.terminationStatus == 0
     }
 
     func startKeySetup() {
+        guard let hostID = appState.keySetupHostID,
+              let host = appState.host(for: hostID) else { return }
+
         isKeySetup = true
         reconnectAttempt = 0
         lastStartTime = Date()
@@ -407,7 +369,7 @@ class OnyxTerminalView: NSView {
             self.appState.connectionError = nil
             self.appState.needsKeySetup = false
         }
-        let (cmd, args) = appState.keySetupCommand()
+        let (cmd, args) = appState.keySetupCommand(host: host)
         tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
     }
 
@@ -416,41 +378,44 @@ class OnyxTerminalView: NSView {
     private func enumerateAllSessions(then completion: @escaping () -> Void) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
+            let hosts = self.appState.hosts
 
             let group = DispatchGroup()
-            var hostSessions: [TmuxSession] = []
-            var dockerSessions: [TmuxSession] = []
+            var allResults: [TmuxSession] = []
+            let lock = NSLock()
 
-            group.enter()
-            self.fetchTmuxSessions(source: .host) { sessions in
-                hostSessions = sessions
-                group.leave()
-            }
-
-            group.enter()
-            self.fetchDockerContainerSessions { sessions in
-                dockerSessions = sessions
-                group.leave()
+            for host in hosts {
+                group.enter()
+                self.enumerateHostSessions(host) { sessions in
+                    lock.lock()
+                    allResults.append(contentsOf: sessions)
+                    lock.unlock()
+                    group.leave()
+                }
             }
 
             group.wait()
 
-            let allSessions = hostSessions + dockerSessions
-
             DispatchQueue.main.async {
-                let defaultSession = self.appState.sshConfig.tmuxSession
-                if allSessions.isEmpty {
-                    let fallback = TmuxSession(name: defaultSession, source: .host)
+                if allResults.isEmpty {
+                    let defaultHost = self.appState.hosts.first ?? .localhost
+                    let fallback = TmuxSession(
+                        name: defaultHost.ssh.tmuxSession,
+                        source: .host(hostID: defaultHost.id)
+                    )
                     self.appState.allSessions = [fallback]
                     self.appState.activeSession = fallback
                 } else {
-                    self.appState.allSessions = allSessions
+                    self.appState.allSessions = allResults
                     if let current = self.appState.activeSession,
-                       allSessions.contains(where: { $0.id == current.id }) {
+                       allResults.contains(where: { $0.id == current.id }) {
                         // still valid
                     } else {
-                        let defaultMatch = allSessions.first { $0.source == .host && $0.name == defaultSession }
-                        self.appState.activeSession = defaultMatch ?? allSessions.first
+                        let defaultHost = self.appState.hosts.first ?? .localhost
+                        let defaultMatch = allResults.first {
+                            $0.source.hostID == defaultHost.id && $0.name == defaultHost.ssh.tmuxSession
+                        }
+                        self.appState.activeSession = defaultMatch ?? allResults.first
                     }
                 }
                 completion()
@@ -458,17 +423,50 @@ class OnyxTerminalView: NSView {
         }
     }
 
-    private func fetchTmuxSessions(source: SessionSource, completion: @escaping ([TmuxSession]) -> Void) {
+    private func enumerateHostSessions(_ host: HostConfig, completion: @escaping ([TmuxSession]) -> Void) {
+        // For remote hosts, probe first
+        if !host.isLocal && !probeHost(host) {
+            // Host unreachable — return empty (don't block other hosts)
+            completion([])
+            return
+        }
+
+        let group = DispatchGroup()
+        var hostSessions: [TmuxSession] = []
+        var dockerSessions: [TmuxSession] = []
+        let lock = NSLock()
+
+        group.enter()
+        fetchTmuxSessions(host: host, source: .host(hostID: host.id)) { sessions in
+            lock.lock()
+            hostSessions = sessions
+            lock.unlock()
+            group.leave()
+        }
+
+        group.enter()
+        fetchDockerContainerSessions(host: host) { sessions in
+            lock.lock()
+            dockerSessions = sessions
+            lock.unlock()
+            group.leave()
+        }
+
+        group.wait()
+        completion(hostSessions + dockerSessions)
+    }
+
+    private func fetchTmuxSessions(host: HostConfig, source: SessionSource, completion: @escaping ([TmuxSession]) -> Void) {
         let script: String
         switch source {
         case .host:
             script = "tmux ls -F \"#{session_name}\" 2>/dev/null || true"
-        case .docker(let containerName):
+        case .docker(_, let containerName):
             let safe = appState.sanitizedContainer(containerName)
             script = "docker exec \(safe) tmux ls -F \"#{session_name}\" 2>/dev/null || true"
         }
 
-        let (cmd, args) = appState.remoteCommand(script)
+        let (cmd, args) = appState.remoteCommand(script, host: host)
 
         let process = Process()
         let stdoutPipe = Pipe()
@@ -497,9 +495,9 @@ class OnyxTerminalView: NSView {
         completion(sessions)
     }
 
-    private func fetchDockerContainerSessions(completion: @escaping ([TmuxSession]) -> Void) {
+    private func fetchDockerContainerSessions(host: HostConfig, completion: @escaping ([TmuxSession]) -> Void) {
         let listScript = "docker ps --format \"{{.Names}}\" 2>/dev/null || true"
-        let (cmd, args) = appState.remoteCommand(listScript)
+        let (cmd, args) = appState.remoteCommand(listScript, host: host)
 
         let process = Process()
         let stdoutPipe = Pipe()
@@ -535,8 +533,8 @@ class OnyxTerminalView: NSView {
         for containerName in containerNames {
             group.enter()
 
-            let source = SessionSource.docker(containerName: containerName)
-            fetchTmuxSessions(source: source) { sessions in
+            let source = SessionSource.docker(hostID: host.id, containerName: containerName)
+            fetchTmuxSessions(host: host, source: source) { sessions in
                 lock.lock()
                 if sessions.isEmpty {
                     allDockerSessions.append(TmuxSession(

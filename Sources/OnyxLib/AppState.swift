@@ -18,7 +18,9 @@ public extension Notification.Name {
     static let refreshSession = Notification.Name("refreshSession")
 }
 
-public struct SSHConfig: Codable {
+// MARK: - Host Config
+
+public struct SSHConfig: Codable, Hashable {
     public var host: String = ""
     public var user: String = ""
     public var port: Int = 22
@@ -31,6 +33,29 @@ public struct SSHConfig: Codable {
         self.port = port
         self.tmuxSession = tmuxSession
         self.identityFile = identityFile
+    }
+}
+
+public struct HostConfig: Codable, Identifiable, Hashable {
+    public var id: UUID
+    public var label: String
+    public var ssh: SSHConfig
+
+    public init(id: UUID = UUID(), label: String, ssh: SSHConfig = SSHConfig()) {
+        self.id = id
+        self.label = label
+        self.ssh = ssh
+    }
+
+    public var isLocal: Bool {
+        let h = ssh.host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return h == "localhost" || h == "127.0.0.1" || h == "::1" || h.isEmpty
+    }
+
+    public static let localhostID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+
+    public static var localhost: HostConfig {
+        HostConfig(id: localhostID, label: "localhost", ssh: SSHConfig())
     }
 }
 
@@ -55,21 +80,38 @@ public struct AppearanceConfig: Codable {
 // MARK: - Session Model
 
 public enum SessionSource: Codable, Hashable {
-    case host
-    case docker(containerName: String)
+    case host(hostID: UUID)
+    case docker(hostID: UUID, containerName: String)
+
+    public var hostID: UUID {
+        switch self {
+        case .host(let id): return id
+        case .docker(let id, _): return id
+        }
+    }
 
     public var stableKey: String {
         switch self {
-        case .host: return "host"
-        case .docker(let name): return "docker:\(name)"
+        case .host(let id): return "host:\(id.uuidString)"
+        case .docker(let id, let name): return "docker:\(id.uuidString):\(name)"
         }
     }
 
     public var displayName: String {
         switch self {
         case .host: return "Host"
-        case .docker(let name): return name
+        case .docker(_, let name): return name
         }
+    }
+
+    public var isDocker: Bool {
+        if case .docker = self { return true }
+        return false
+    }
+
+    public var containerName: String? {
+        if case .docker(_, let name) = self { return name }
+        return nil
     }
 }
 
@@ -89,7 +131,7 @@ public struct TmuxSession: Identifiable, Hashable {
     public var displayLabel: String {
         switch source {
         case .host: return name
-        case .docker(let container): return "\(container)/\(name)"
+        case .docker(_, let container): return "\(container)/\(name)"
         }
     }
 }
@@ -100,8 +142,14 @@ public struct SessionGroup: Identifiable {
     public let sessions: [TmuxSession]
 }
 
+public struct HostGroup: Identifiable {
+    public var id: UUID { host.id }
+    public let host: HostConfig
+    public let groups: [SessionGroup]
+}
+
 public class AppState: ObservableObject {
-    @Published public var sshConfig = SSHConfig()
+    @Published public var hosts: [HostConfig] = []
     @Published public var appearance = AppearanceConfig()
     @Published public var showSetup = false
     @Published public var showNotes = false
@@ -127,6 +175,9 @@ public class AppState: ObservableObject {
     @Published public var showNewSessionPrompt = false
     @Published public var favoritedSessionIDs: [String] = []  // ordered list
 
+    // Host being edited for key setup
+    @Published public var keySetupHostID: UUID?
+
     private var monitorCancellable: AnyCancellable?
     public lazy var monitor: MonitorManager = {
         let m = MonitorManager(appState: self)
@@ -138,28 +189,85 @@ public class AppState: ObservableObject {
 
     public init() {}
 
+    // MARK: - Host Helpers
+
+    public func host(for id: UUID) -> HostConfig? {
+        hosts.first { $0.id == id }
+    }
+
+    public var activeHost: HostConfig? {
+        if let session = activeSession {
+            return host(for: session.source.hostID)
+        }
+        return hosts.first
+    }
+
+    /// The SSH config for the active host (convenience for monitor, file browser, etc.)
+    public var activeSSHConfig: SSHConfig {
+        activeHost?.ssh ?? SSHConfig()
+    }
+
+    public func hostForSession(_ session: TmuxSession) -> HostConfig? {
+        host(for: session.source.hostID)
+    }
+
+    public func addHost(_ host: HostConfig) {
+        hosts.append(host)
+        saveHosts()
+    }
+
+    public func removeHost(_ hostID: UUID) {
+        guard hostID != HostConfig.localhostID else { return }
+        hosts.removeAll { $0.id == hostID }
+        // Remove sessions belonging to this host
+        allSessions.removeAll { $0.source.hostID == hostID }
+        favoritedSessionIDs.removeAll { id in
+            allSessions.first(where: { $0.id == id }) == nil
+        }
+        saveHosts()
+        saveFavorites()
+    }
+
+    public func updateHost(_ host: HostConfig) {
+        if let idx = hosts.firstIndex(where: { $0.id == host.id }) {
+            hosts[idx] = host
+            saveHosts()
+        }
+    }
+
     // MARK: - Session Helpers
 
     public var activeSessionName: String {
         activeSession?.name ?? ""
     }
 
-    /// Sessions grouped by source for the session manager overlay
-    public var groupedSessions: [SessionGroup] {
-        var groups: [String: [TmuxSession]] = [:]
-        for s in allSessions {
-            groups[s.source.stableKey, default: []].append(s)
-        }
-        var result: [SessionGroup] = []
-        // Host group first
-        if let hostSessions = groups["host"], !hostSessions.isEmpty {
-            result.append(SessionGroup(source: .host, sessions: hostSessions))
-        }
-        // Docker groups sorted by container name
-        for (key, sessions) in groups.sorted(by: { $0.key < $1.key }) {
-            if key != "host" {
-                result.append(SessionGroup(source: sessions[0].source, sessions: sessions))
+    /// Sessions grouped by host, then by source within each host
+    public var hostGroupedSessions: [HostGroup] {
+        var result: [HostGroup] = []
+        for host in hosts {
+            let hostSessions = allSessions.filter { $0.source.hostID == host.id }
+            guard !hostSessions.isEmpty else {
+                // Show host with empty group so it's still visible
+                result.append(HostGroup(host: host, groups: []))
+                continue
             }
+            var groups: [String: [TmuxSession]] = [:]
+            for s in hostSessions {
+                groups[s.source.stableKey, default: []].append(s)
+            }
+            var sessionGroups: [SessionGroup] = []
+            // Host sessions first
+            let hostKey = SessionSource.host(hostID: host.id).stableKey
+            if let sessions = groups[hostKey], !sessions.isEmpty {
+                sessionGroups.append(SessionGroup(source: .host(hostID: host.id), sessions: sessions))
+            }
+            // Docker groups sorted by container name
+            for (key, sessions) in groups.sorted(by: { $0.key < $1.key }) {
+                if key != hostKey {
+                    sessionGroups.append(SessionGroup(source: sessions[0].source, sessions: sessions))
+                }
+            }
+            result.append(HostGroup(host: host, groups: sessionGroups))
         }
         return result
     }
@@ -170,17 +278,12 @@ public class AppState: ObservableObject {
         return favoritedSessionIDs.compactMap { sessionMap[$0] }
     }
 
-    /// Host-only session names (backward compat for createNewTmuxSession naming)
-    public var hostSessionNames: [String] {
-        allSessions.filter { $0.source == .host }.map(\.name)
-    }
-
-    /// Unique docker container names from discovered sessions
-    public var dockerContainerNames: [String] {
+    /// Docker container names for a specific host
+    public func dockerContainerNames(forHost hostID: UUID) -> [String] {
         var seen = Set<String>()
         var result: [String] = []
-        for s in allSessions {
-            if case .docker(let name) = s.source, seen.insert(name).inserted {
+        for s in allSessions where s.source.hostID == hostID {
+            if let name = s.source.containerName, seen.insert(name).inserted {
                 result.append(name)
             }
         }
@@ -227,7 +330,11 @@ public class AppState: ObservableObject {
         return dir
     }
 
-    private var configURL: URL {
+    private var hostsURL: URL {
+        appSupportDir.appendingPathComponent("hosts.json")
+    }
+
+    private var legacyConfigURL: URL {
         appSupportDir.appendingPathComponent("config.json")
     }
 
@@ -254,16 +361,33 @@ public class AppState: ObservableObject {
     }
 
     public func loadConfig() {
-        if FileManager.default.fileExists(atPath: configURL.path) {
-            do {
-                let data = try Data(contentsOf: configURL)
-                sshConfig = try JSONDecoder().decode(SSHConfig.self, from: data)
-            } catch {
-                showSetup = true
+        // Try loading multi-host config
+        if FileManager.default.fileExists(atPath: hostsURL.path) {
+            if let data = try? Data(contentsOf: hostsURL),
+               let loaded = try? JSONDecoder().decode([HostConfig].self, from: data) {
+                hosts = loaded
             }
-        } else {
+        } else if FileManager.default.fileExists(atPath: legacyConfigURL.path) {
+            // Migrate from single-host config
+            if let data = try? Data(contentsOf: legacyConfigURL),
+               let sshConfig = try? JSONDecoder().decode(SSHConfig.self, from: data) {
+                let label = sshConfig.host.isEmpty ? "localhost" : sshConfig.host
+                let migrated = HostConfig(id: UUID(), label: label, ssh: sshConfig)
+                hosts = [migrated]
+            }
+        }
+
+        // Ensure localhost is always present
+        if !hosts.contains(where: { $0.id == HostConfig.localhostID }) {
+            hosts.insert(.localhost, at: 0)
+        }
+
+        // If we only have localhost, show setup to add a remote host
+        if hosts.count <= 1 && !FileManager.default.fileExists(atPath: hostsURL.path) && !FileManager.default.fileExists(atPath: legacyConfigURL.path) {
             showSetup = true
         }
+
+        saveHosts()
 
         if FileManager.default.fileExists(atPath: appearanceURL.path) {
             if let data = try? Data(contentsOf: appearanceURL),
@@ -279,14 +403,16 @@ public class AppState: ObservableObject {
         monitor.startPolling()
     }
 
-    public func saveConfig() {
-        do {
-            let data = try JSONEncoder().encode(sshConfig)
-            try data.write(to: configURL)
-            showSetup = false
-        } catch {
-            print("Failed to save config: \(error)")
+    public func saveHosts() {
+        if let data = try? JSONEncoder().encode(hosts) {
+            try? data.write(to: hostsURL)
         }
+    }
+
+    /// Legacy compat: called by SetupView after first host is configured
+    public func saveConfig() {
+        saveHosts()
+        showSetup = false
     }
 
     public func saveAppearance() {
@@ -328,9 +454,13 @@ public class AppState: ObservableObject {
 
     // MARK: - Command Builders
 
-    /// Run a shell command on the remote (or locally) and return stdout
-    public func remoteCommand(_ script: String) -> (String, [String]) {
-        if isLocal {
+    /// Extra PATH entries so tmux/docker are found even when login profile doesn't set it
+    let extraPath = "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:/snap/bin\""
+
+    /// Run a shell command on a host and return (executable, args)
+    public func remoteCommand(_ script: String, host: HostConfig? = nil) -> (String, [String]) {
+        let h = host ?? activeHost ?? .localhost
+        if h.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
             return (shell, ["-lc", "\(extraPath) \(script)"])
         }
@@ -339,20 +469,17 @@ public class AppState: ObservableObject {
         args.append("-o"); args.append("BatchMode=yes")
         args.append("-o"); args.append("ConnectTimeout=5")
         args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if sshConfig.port != 22 {
-            args.append("-p"); args.append("\(sshConfig.port)")
+        if h.ssh.port != 22 {
+            args.append("-p"); args.append("\(h.ssh.port)")
         }
-        if !sshConfig.identityFile.isEmpty {
-            args.append("-i"); args.append(sshConfig.identityFile)
+        if !h.ssh.identityFile.isEmpty {
+            args.append("-i"); args.append(h.ssh.identityFile)
         }
-        let userHost = sshConfig.user.isEmpty ? sshConfig.host : "\(sshConfig.user)@\(sshConfig.host)"
+        let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
         args.append(userHost)
         args.append("exec $SHELL -lc '\(extraPath) \(script)'")
         return ("/usr/bin/ssh", args)
     }
-
-    /// Extra PATH entries so tmux/docker are found even when login profile doesn't set it
-    let extraPath = "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:/snap/bin\""
 
     /// Sanitize a session name for safe shell interpolation
     func sanitizedSession(_ name: String) -> String {
@@ -366,27 +493,22 @@ public class AppState: ObservableObject {
         return String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : Character("_") })
     }
 
-    public var isLocal: Bool {
-        let h = sshConfig.host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return h == "localhost" || h == "127.0.0.1" || h == "::1" || h.isEmpty
-    }
-
     /// Build the command for a session based on its source
     public func commandForSession(_ session: TmuxSession) -> (String, [String]) {
+        let h = host(for: session.source.hostID) ?? .localhost
         switch session.source {
         case .host:
-            return sshCommand(sessionName: session.name)
-        case .docker(let containerName):
-            return dockerTmuxCommand(container: containerName, sessionName: session.name)
+            return sshCommand(host: h, sessionName: session.name)
+        case .docker(_, let containerName):
+            return dockerTmuxCommand(host: h, container: containerName, sessionName: session.name)
         }
     }
 
     /// Build the command for a host tmux session
-    public func sshCommand(sessionName: String? = nil) -> (String, [String]) {
-        let rawSess = sessionName ?? (activeSession?.name ?? sshConfig.tmuxSession)
-        let sess = sanitizedSession(rawSess)
+    public func sshCommand(host h: HostConfig, sessionName: String) -> (String, [String]) {
+        let sess = sanitizedSession(sessionName)
 
-        if isLocal {
+        if h.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
             return (shell, ["-lc", "\(extraPath) tmux new-session -A -s \(sess)"])
         }
@@ -396,26 +518,26 @@ public class AppState: ObservableObject {
         args.append("-o"); args.append("ServerAliveCountMax=3")
         args.append("-o"); args.append("ConnectTimeout=10")
         args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if sshConfig.port != 22 {
-            args.append("-p"); args.append("\(sshConfig.port)")
+        if h.ssh.port != 22 {
+            args.append("-p"); args.append("\(h.ssh.port)")
         }
-        if !sshConfig.identityFile.isEmpty {
-            args.append("-i"); args.append(sshConfig.identityFile)
+        if !h.ssh.identityFile.isEmpty {
+            args.append("-i"); args.append(h.ssh.identityFile)
         }
         args.append("-t")
-        let userHost = sshConfig.user.isEmpty ? sshConfig.host : "\(sshConfig.user)@\(sshConfig.host)"
+        let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
         args.append(userHost)
         args.append("exec $SHELL -lc '\(extraPath) tmux new-session -A -s \(sess)'")
         return ("/usr/bin/ssh", args)
     }
 
     /// Build the command to attach to a tmux session inside a docker container
-    public func dockerTmuxCommand(container: String, sessionName: String) -> (String, [String]) {
+    public func dockerTmuxCommand(host h: HostConfig, container: String, sessionName: String) -> (String, [String]) {
         let safeContainer = sanitizedContainer(container)
         let safeSess = sanitizedSession(sessionName)
         let dockerCmd = "docker exec -it \(safeContainer) tmux new-session -A -s \(safeSess)"
 
-        if isLocal {
+        if h.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
             return (shell, ["-lc", "\(extraPath) \(dockerCmd)"])
         }
@@ -425,21 +547,22 @@ public class AppState: ObservableObject {
         args.append("-o"); args.append("ServerAliveCountMax=3")
         args.append("-o"); args.append("ConnectTimeout=10")
         args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if sshConfig.port != 22 {
-            args.append("-p"); args.append("\(sshConfig.port)")
+        if h.ssh.port != 22 {
+            args.append("-p"); args.append("\(h.ssh.port)")
         }
-        if !sshConfig.identityFile.isEmpty {
-            args.append("-i"); args.append(sshConfig.identityFile)
+        if !h.ssh.identityFile.isEmpty {
+            args.append("-i"); args.append(h.ssh.identityFile)
         }
         args.append("-t")
-        let userHost = sshConfig.user.isEmpty ? sshConfig.host : "\(sshConfig.user)@\(sshConfig.host)"
+        let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
         args.append(userHost)
         args.append("exec $SHELL -lc '\(extraPath) \(dockerCmd)'")
         return ("/usr/bin/ssh", args)
     }
 
     /// Build the command + args to run a one-off stats collection
-    public func statsCommand() -> (String, [String]) {
+    public func statsCommand(host h: HostConfig? = nil) -> (String, [String]) {
+        let host = h ?? activeHost ?? .localhost
         let statsScript = """
         echo "---UPTIME---"; uptime; \
         echo "---CPU---"; CPU_OUT=$(top -bn1 2>/dev/null | head -5); \
@@ -449,7 +572,7 @@ public class AppState: ObservableObject {
         echo "---GPU---"; nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null || echo "N/A"
         """
 
-        if isLocal {
+        if host.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
             return (shell, ["-lc", statsScript])
         }
@@ -458,34 +581,34 @@ public class AppState: ObservableObject {
         args.append("-o"); args.append("BatchMode=yes")
         args.append("-o"); args.append("ConnectTimeout=5")
         args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if sshConfig.port != 22 {
-            args.append("-p"); args.append("\(sshConfig.port)")
+        if host.ssh.port != 22 {
+            args.append("-p"); args.append("\(host.ssh.port)")
         }
-        if !sshConfig.identityFile.isEmpty {
-            args.append("-i"); args.append(sshConfig.identityFile)
+        if !host.ssh.identityFile.isEmpty {
+            args.append("-i"); args.append(host.ssh.identityFile)
         }
-        let userHost = sshConfig.user.isEmpty ? sshConfig.host : "\(sshConfig.user)@\(sshConfig.host)"
+        let userHost = host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
         args.append(userHost)
         args.append("exec $SHELL -lc '\(statsScript)'")
         return ("/usr/bin/ssh", args)
     }
 
     /// Build a shell command that generates a key (if needed) and runs ssh-copy-id
-    public func keySetupCommand() -> (String, [String]) {
+    public func keySetupCommand(host h: HostConfig) -> (String, [String]) {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let userHost = sshConfig.user.isEmpty ? sshConfig.host : "\(sshConfig.user)@\(sshConfig.host)"
+        let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
         var portFlag = ""
-        if sshConfig.port != 22 {
-            portFlag = "-p \(sshConfig.port) "
+        if h.ssh.port != 22 {
+            portFlag = "-p \(h.ssh.port) "
         }
         var identityFlag = ""
         var keyPath = "~/.ssh/id_ed25519"
-        if !sshConfig.identityFile.isEmpty {
-            keyPath = sshConfig.identityFile
-            identityFlag = "-i \(sshConfig.identityFile) "
+        if !h.ssh.identityFile.isEmpty {
+            keyPath = h.ssh.identityFile
+            identityFlag = "-i \(h.ssh.identityFile) "
         }
 
-        let sessName = sanitizedSession(activeSession?.name ?? sshConfig.tmuxSession)
+        let sessName = sanitizedSession(activeSession?.name ?? h.ssh.tmuxSession)
 
         let script = """
         echo ""; \

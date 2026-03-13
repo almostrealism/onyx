@@ -4,8 +4,15 @@ struct SetupView: View {
     @ObservedObject var appState: AppState
     @FocusState private var focusedField: Field?
 
+    @State private var label = ""
+    @State private var host = ""
+    @State private var user = ""
+    @State private var port = "22"
+    @State private var tmuxSession = "onyx"
+    @State private var identityFile = ""
+
     enum Field: Hashable {
-        case host, user, port, tmux, identity
+        case label, host, user, port, tmux, identity
     }
 
     var body: some View {
@@ -19,43 +26,59 @@ struct SetupView: View {
                     .foregroundColor(appState.accentColor)
                     .tracking(12)
 
-                Text("Configure your connection")
+                Text("Add your first remote host")
                     .font(.system(.caption, design: .monospaced))
                     .foregroundColor(.gray)
 
                 VStack(spacing: 12) {
-                    OnyxTextField(label: "Host", text: $appState.sshConfig.host, placeholder: "192.168.1.100")
+                    OnyxTextField(label: "Label", text: $label, placeholder: "My Server")
+                        .focused($focusedField, equals: .label)
+
+                    OnyxTextField(label: "Host", text: $host, placeholder: "192.168.1.100")
                         .focused($focusedField, equals: .host)
 
-                    OnyxTextField(label: "User", text: $appState.sshConfig.user, placeholder: "root")
+                    OnyxTextField(label: "User", text: $user, placeholder: "root")
                         .focused($focusedField, equals: .user)
 
                     HStack(spacing: 12) {
-                        OnyxTextField(label: "Port", text: portBinding, placeholder: "22")
+                        OnyxTextField(label: "Port", text: $port, placeholder: "22")
                             .focused($focusedField, equals: .port)
                             .frame(width: 100)
 
-                        OnyxTextField(label: "tmux session", text: $appState.sshConfig.tmuxSession, placeholder: "onyx")
+                        OnyxTextField(label: "tmux session", text: $tmuxSession, placeholder: "onyx")
                             .focused($focusedField, equals: .tmux)
                     }
 
-                    OnyxTextField(label: "Identity file (optional)", text: $appState.sshConfig.identityFile, placeholder: "~/.ssh/id_ed25519")
+                    OnyxTextField(label: "Identity file (optional)", text: $identityFile, placeholder: "~/.ssh/id_ed25519")
                         .focused($focusedField, equals: .identity)
                 }
                 .frame(maxWidth: 400)
 
-                Button(action: connect) {
-                    Text("Connect")
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundColor(.black)
-                        .padding(.horizontal, 32)
-                        .padding(.vertical, 8)
-                        .background(Color(hex: "66CCFF"))
-                        .cornerRadius(4)
+                HStack(spacing: 12) {
+                    Button(action: skipSetup) {
+                        Text("Skip (localhost only)")
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundColor(.gray)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 8)
+                            .background(Color.white.opacity(0.06))
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: connect) {
+                        Text("Connect")
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 32)
+                            .padding(.vertical, 8)
+                            .background(Color(hex: "66CCFF"))
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.return, modifiers: [])
+                    .disabled(host.isEmpty)
                 }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.return, modifiers: [])
-                .disabled(appState.sshConfig.host.isEmpty)
             }
             .padding(40)
         }
@@ -64,15 +87,22 @@ struct SetupView: View {
         }
     }
 
-    private var portBinding: Binding<String> {
-        Binding(
-            get: { String(appState.sshConfig.port) },
-            set: { appState.sshConfig.port = Int($0) ?? 22 }
+    private func connect() {
+        guard !host.isEmpty else { return }
+        let ssh = SSHConfig(
+            host: host,
+            user: user,
+            port: Int(port) ?? 22,
+            tmuxSession: tmuxSession.isEmpty ? "onyx" : tmuxSession,
+            identityFile: identityFile
         )
+        let hostLabel = label.isEmpty ? host : label
+        let newHost = HostConfig(label: hostLabel, ssh: ssh)
+        appState.addHost(newHost)
+        appState.saveConfig()
     }
 
-    private func connect() {
-        guard !appState.sshConfig.host.isEmpty else { return }
+    private func skipSetup() {
         appState.saveConfig()
     }
 }

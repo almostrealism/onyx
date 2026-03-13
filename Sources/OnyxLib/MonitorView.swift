@@ -560,7 +560,7 @@ struct MonitorView: View {
                         ProgressView()
                             .scaleEffect(0.7)
                             .colorScheme(.dark)
-                        Text("Fetching stats from \(appState.sshConfig.host)...")
+                        Text("Fetching stats from \(appState.activeHost?.label ?? "host")...")
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.5))
                     }

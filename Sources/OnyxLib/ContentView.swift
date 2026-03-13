@@ -314,7 +314,7 @@ struct FavoritesBar: View {
                           appState.isReconnecting ? Color(hex: "FFD06B") : Color(hex: "6BFF8E"))
                     .frame(width: 5, height: 5)
 
-                Text(appState.sshConfig.host.isEmpty ? "local" : appState.sshConfig.host)
+                Text(appState.activeHost?.label ?? "local")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.5))
             }

@@ -243,7 +243,7 @@ public class FileBrowserManager: ObservableObject {
                 }
 
                 let success: Bool
-                if self.appState.isLocal {
+                if self.appState.activeHost?.isLocal ?? true {
                     success = self.copyLocal(url, toDir: dest)
                 } else {
                     success = self.scpUpload(url, toDir: dest)
@@ -287,19 +287,20 @@ public class FileBrowserManager: ObservableObject {
     }
 
     private func scpUpload(_ url: URL, toDir dest: String) -> Bool {
+        let ssh = appState.activeSSHConfig
         var args = [String]()
         args.append("-r")  // recursive for directories
         args.append("-o"); args.append("BatchMode=yes")
         args.append("-o"); args.append("ConnectTimeout=10")
         args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if appState.sshConfig.port != 22 {
-            args.append("-P"); args.append("\(appState.sshConfig.port)")
+        if ssh.port != 22 {
+            args.append("-P"); args.append("\(ssh.port)")
         }
-        if !appState.sshConfig.identityFile.isEmpty {
-            args.append("-i"); args.append(appState.sshConfig.identityFile)
+        if !ssh.identityFile.isEmpty {
+            args.append("-i"); args.append(ssh.identityFile)
         }
         args.append(url.path)
-        let userHost = appState.sshConfig.user.isEmpty ? appState.sshConfig.host : "\(appState.sshConfig.user)@\(appState.sshConfig.host)"
+        let userHost = ssh.user.isEmpty ? ssh.host : "\(ssh.user)@\(ssh.host)"
         args.append("\(userHost):\(dest)/")
 
         let process = Process()
