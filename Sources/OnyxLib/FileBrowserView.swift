@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import Combine
 
 public struct RemoteEntry: Identifiable, Comparable {
     public let id = UUID()
@@ -33,6 +34,15 @@ public class FileBrowserManager: ObservableObject {
     @Published public var pathHistory: [String] = []
 
     private let appState: AppState
+    private var gitCancellable: AnyCancellable?
+
+    public lazy var gitManager: GitManager = {
+        let g = GitManager(appState: appState)
+        gitCancellable = g.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        return g
+    }()
 
     public init(appState: AppState) {
         self.appState = appState
@@ -67,6 +77,7 @@ public class FileBrowserManager: ObservableObject {
             currentPath = nil
             entries = []
             fileContent = nil
+            gitManager.clear()
         }
     }
 
@@ -80,6 +91,7 @@ public class FileBrowserManager: ObservableObject {
         }
         currentPath = path
         listDirectory(path)
+        gitManager.checkAndLoad(path: path)
     }
 
     public func navigateBack() {
@@ -88,9 +100,11 @@ public class FileBrowserManager: ObservableObject {
         if let prev = pathHistory.popLast() {
             currentPath = prev
             listDirectory(prev)
+            gitManager.checkAndLoad(path: prev)
         } else {
             currentPath = nil
             entries = []
+            gitManager.clear()
         }
     }
 
@@ -171,7 +185,7 @@ public class FileBrowserManager: ObservableObject {
         }
     }
 
-    private static func runProcess(cmd: String, args: [String]) -> String? {
+    static func runProcess(cmd: String, args: [String]) -> String? {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: cmd)
@@ -379,7 +393,13 @@ struct FileBrowserView: View {
                             onClose: { browser.closeFile() }
                         )
                     } else if browser.currentPath != nil {
-                        DirectoryListView(appState: appState, browser: browser)
+                        VStack(spacing: 0) {
+                            if browser.gitManager.isGitRepo, let status = browser.gitManager.repoStatus {
+                                GitLandingView(status: status, accentColor: appState.accentColor)
+                                Divider().background(Color.white.opacity(0.1))
+                            }
+                            DirectoryListView(appState: appState, browser: browser)
+                        }
                     } else {
                         Spacer()
                         VStack(spacing: 8) {
