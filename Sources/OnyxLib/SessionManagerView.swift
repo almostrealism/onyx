@@ -332,27 +332,26 @@ private struct FavoriteRow: View {
         HStack(spacing: 5) {
             // Move up/down
             VStack(spacing: 0) {
-                Button(action: {
-                    appState.moveFavorite(from: IndexSet(integer: index), to: index - 1)
-                }) {
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: sz(7), weight: .bold))
-                        .foregroundColor(index > 0 ? .gray.opacity(0.4) : .gray.opacity(0.1))
-                }
-                .buttonStyle(.plain)
-                .disabled(index == 0)
+                Image(systemName: "chevron.up")
+                    .font(.system(size: sz(7), weight: .bold))
+                    .foregroundColor(index > 0 ? .gray.opacity(0.4) : .gray.opacity(0.1))
+                    .frame(width: 16, height: 12)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard index > 0 else { return }
+                        appState.moveFavorite(from: IndexSet(integer: index), to: index - 1)
+                    }
 
-                Button(action: {
-                    appState.moveFavorite(from: IndexSet(integer: index), to: index + 2)
-                }) {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: sz(7), weight: .bold))
-                        .foregroundColor(index < total - 1 ? .gray.opacity(0.4) : .gray.opacity(0.1))
-                }
-                .buttonStyle(.plain)
-                .disabled(index >= total - 1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: sz(7), weight: .bold))
+                    .foregroundColor(index < total - 1 ? .gray.opacity(0.4) : .gray.opacity(0.1))
+                    .frame(width: 16, height: 12)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard index < total - 1 else { return }
+                        appState.moveFavorite(from: IndexSet(integer: index), to: index + 2)
+                    }
             }
-            .frame(width: 12)
 
             // Position number
             if index < 9 {
@@ -374,12 +373,14 @@ private struct FavoriteRow: View {
             Spacer()
 
             // Remove from favorites
-            Button(action: { appState.toggleFavorite(session) }) {
-                Image(systemName: "star.slash")
-                    .font(.system(size: sz(9)))
-                    .foregroundColor(.gray.opacity(0.3))
-            }
-            .buttonStyle(.plain)
+            Image(systemName: "star.slash")
+                .font(.system(size: sz(9)))
+                .foregroundColor(.gray.opacity(0.3))
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    appState.toggleFavorite(session)
+                }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
