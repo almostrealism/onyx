@@ -104,11 +104,13 @@ public struct AppearanceConfig: Codable {
 public enum SessionSource: Codable, Hashable {
     case host(hostID: UUID)
     case docker(hostID: UUID, containerName: String)
+    case dockerLogs(hostID: UUID, containerName: String)
 
     public var hostID: UUID {
         switch self {
         case .host(let id): return id
         case .docker(let id, _): return id
+        case .dockerLogs(let id, _): return id
         }
     }
 
@@ -116,6 +118,7 @@ public enum SessionSource: Codable, Hashable {
         switch self {
         case .host(let id): return "host:\(id.uuidString)"
         case .docker(let id, let name): return "docker:\(id.uuidString):\(name)"
+        case .dockerLogs(let id, let name): return "dockerlogs:\(id.uuidString):\(name)"
         }
     }
 
@@ -123,17 +126,28 @@ public enum SessionSource: Codable, Hashable {
         switch self {
         case .host: return "Host"
         case .docker(_, let name): return name
+        case .dockerLogs(_, let name): return "\(name) logs"
         }
     }
 
     public var isDocker: Bool {
-        if case .docker = self { return true }
+        switch self {
+        case .docker, .dockerLogs: return true
+        default: return false
+        }
+    }
+
+    public var isDockerLogs: Bool {
+        if case .dockerLogs = self { return true }
         return false
     }
 
     public var containerName: String? {
-        if case .docker(_, let name) = self { return name }
-        return nil
+        switch self {
+        case .docker(_, let name): return name
+        case .dockerLogs(_, let name): return name
+        default: return nil
+        }
     }
 }
 
@@ -154,6 +168,7 @@ public struct TmuxSession: Identifiable, Hashable {
         switch source {
         case .host: return name
         case .docker(_, let container): return "\(container)/\(name)"
+        case .dockerLogs(_, let container): return "\(container)/logs"
         }
     }
 }
@@ -289,30 +304,37 @@ public class AppState: ObservableObject {
         activeSession?.name ?? ""
     }
 
-    /// Sessions grouped by host, then by source within each host
+    /// Sessions grouped by host, then by source within each host.
+    /// Docker logs sessions are merged into the same group as their container's docker sessions.
     public var hostGroupedSessions: [HostGroup] {
         var result: [HostGroup] = []
         for host in hosts {
             let hostSessions = allSessions.filter { $0.source.hostID == host.id }
             guard !hostSessions.isEmpty else {
-                // Show host with empty group so it's still visible
                 result.append(HostGroup(host: host, groups: []))
                 continue
             }
+            // Group by container name for docker/dockerLogs, by stableKey for host
             var groups: [String: [TmuxSession]] = [:]
             for s in hostSessions {
-                groups[s.source.stableKey, default: []].append(s)
+                let key: String
+                switch s.source {
+                case .host: key = SessionSource.host(hostID: host.id).stableKey
+                case .docker(_, let name), .dockerLogs(_, let name):
+                    key = SessionSource.docker(hostID: host.id, containerName: name).stableKey
+                }
+                groups[key, default: []].append(s)
             }
             var sessionGroups: [SessionGroup] = []
-            // Host sessions first
             let hostKey = SessionSource.host(hostID: host.id).stableKey
             if let sessions = groups[hostKey], !sessions.isEmpty {
                 sessionGroups.append(SessionGroup(source: .host(hostID: host.id), sessions: sessions))
             }
-            // Docker groups sorted by container name
             for (key, sessions) in groups.sorted(by: { $0.key < $1.key }) {
                 if key != hostKey {
-                    sessionGroups.append(SessionGroup(source: sessions[0].source, sessions: sessions))
+                    // Use the first docker (non-logs) source as the group source
+                    let groupSource = sessions.first(where: { !$0.source.isDockerLogs })?.source ?? sessions[0].source
+                    sessionGroups.append(SessionGroup(source: groupSource, sessions: sessions))
                 }
             }
             result.append(HostGroup(host: host, groups: sessionGroups))
@@ -553,6 +575,16 @@ public class AppState: ObservableObject {
         return String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : Character("_") })
     }
 
+    /// SSH flags and env export for MCP remote port forwarding
+    private func mcpForwardingArgs() -> (sshFlags: [String], envExport: String) {
+        guard let localPort = mcpServer?.tcpPort else { return ([], "") }
+        let remotePort = MCPSocketServer.defaultRemotePort
+        return (
+            ["-R", "\(remotePort):127.0.0.1:\(localPort)"],
+            "export ONYX_MCP_PORT=\(remotePort); tmux set-environment ONYX_MCP_PORT \(remotePort) 2>/dev/null; "
+        )
+    }
+
     /// Build the command for a session based on its source
     public func commandForSession(_ session: TmuxSession) -> (String, [String]) {
         let h = host(for: session.source.hostID) ?? .localhost
@@ -561,7 +593,37 @@ public class AppState: ObservableObject {
             return sshCommand(host: h, sessionName: session.name)
         case .docker(_, let containerName):
             return dockerTmuxCommand(host: h, container: containerName, sessionName: session.name)
+        case .dockerLogs(_, let containerName):
+            return dockerLogsCommand(host: h, container: containerName)
         }
+    }
+
+    /// Build the command to stream docker container logs (read-only)
+    public func dockerLogsCommand(host h: HostConfig, container: String) -> (String, [String]) {
+        let safeContainer = sanitizedContainer(container)
+        let dockerCmd = "docker logs -f --tail 1000 \(safeContainer)"
+
+        if h.isLocal {
+            let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+            return (shell, ["-lc", dockerCmd])
+        }
+
+        var args = [String]()
+        args.append("-o"); args.append("ServerAliveInterval=10")
+        args.append("-o"); args.append("ServerAliveCountMax=3")
+        args.append("-o"); args.append("ConnectTimeout=10")
+        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
+        if h.ssh.port != 22 {
+            args.append("-p"); args.append("\(h.ssh.port)")
+        }
+        if !h.ssh.identityFile.isEmpty {
+            args.append("-i"); args.append(h.ssh.identityFile)
+        }
+        args.append("-t")
+        let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
+        args.append(userHost)
+        args.append(dockerCmd)
+        return ("/usr/bin/ssh", args)
     }
 
     /// Build the command for a host tmux session
@@ -584,10 +646,13 @@ public class AppState: ObservableObject {
         if !h.ssh.identityFile.isEmpty {
             args.append("-i"); args.append(h.ssh.identityFile)
         }
+        // MCP remote port forwarding — allows remote agents to talk back to Onyx
+        let mcpArgs = mcpForwardingArgs()
+        args.append(contentsOf: mcpArgs.sshFlags)
         args.append("-t")
         let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
         args.append(userHost)
-        args.append("exec $SHELL -lc '\(extraPath) tmux new-session -A -s \(sess)'")
+        args.append("exec $SHELL -lc '\(mcpArgs.envExport)\(extraPath) tmux new-session -A -s \(sess)'")
         return ("/usr/bin/ssh", args)
     }
 
@@ -613,10 +678,13 @@ public class AppState: ObservableObject {
         if !h.ssh.identityFile.isEmpty {
             args.append("-i"); args.append(h.ssh.identityFile)
         }
+        // MCP remote port forwarding
+        let mcpArgs = mcpForwardingArgs()
+        args.append(contentsOf: mcpArgs.sshFlags)
         args.append("-t")
         let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
         args.append(userHost)
-        args.append("exec $SHELL -lc '\(extraPath) \(dockerCmd)'")
+        args.append("exec $SHELL -lc '\(mcpArgs.envExport)\(extraPath) \(dockerCmd)'")
         return ("/usr/bin/ssh", args)
     }
 

@@ -384,9 +384,16 @@ public class MCPMessageHandler {
 // MARK: - MCP Socket Server
 
 public class MCPSocketServer {
-    private var listener: NWListener?
+    private var unixListener: NWListener?
+    private var tcpListener: NWListener?
     private let handler: MCPMessageHandler
     private let socketPath: String
+
+    /// The TCP port assigned by the OS after the listener starts (loopback only)
+    public private(set) var tcpPort: UInt16?
+
+    /// Default remote-side port for SSH -R forwarding
+    public static let defaultRemotePort: UInt16 = 19432
 
     public init(artifactManager: ArtifactManager) {
         self.handler = MCPMessageHandler(artifactManager: artifactManager)
@@ -397,27 +404,54 @@ public class MCPSocketServer {
     }
 
     public func start() {
-        // Remove stale socket
-        unlink(socketPath)
+        startUnixSocket()
+        startTCPListener()
+    }
 
+    private func startUnixSocket() {
+        unlink(socketPath)
         do {
             let params = NWParameters()
             params.defaultProtocolStack.transportProtocol = NWProtocolTCP.Options()
             params.requiredLocalEndpoint = NWEndpoint.unix(path: socketPath)
 
-            listener = try NWListener(using: params)
-            listener?.newConnectionHandler = { [weak self] connection in
+            unixListener = try NWListener(using: params)
+            unixListener?.newConnectionHandler = { [weak self] connection in
                 self?.handleConnection(connection)
             }
-            listener?.start(queue: .global(qos: .utility))
+            unixListener?.start(queue: .global(qos: .utility))
         } catch {
-            print("MCP server failed to start: \(error)")
+            print("MCP Unix socket failed to start: \(error)")
+        }
+    }
+
+    private func startTCPListener() {
+        do {
+            let params = NWParameters.tcp
+            params.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: .any)
+
+            tcpListener = try NWListener(using: params)
+            tcpListener?.stateUpdateHandler = { [weak self] state in
+                if case .ready = state, let port = self?.tcpListener?.port {
+                    self?.tcpPort = port.rawValue
+                    print("MCP TCP listener ready on 127.0.0.1:\(port.rawValue)")
+                }
+            }
+            tcpListener?.newConnectionHandler = { [weak self] connection in
+                self?.handleConnection(connection)
+            }
+            tcpListener?.start(queue: .global(qos: .utility))
+        } catch {
+            print("MCP TCP listener failed to start: \(error)")
         }
     }
 
     public func stop() {
-        listener?.cancel()
-        listener = nil
+        unixListener?.cancel()
+        unixListener = nil
+        tcpListener?.cancel()
+        tcpListener = nil
+        tcpPort = nil
         unlink(socketPath)
     }
 
@@ -427,11 +461,9 @@ public class MCPSocketServer {
     }
 
     private func receiveMessage(on connection: NWConnection) {
-        // Read until newline (JSON-RPC messages are newline-delimited)
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1_000_000) { [weak self] content, _, isComplete, error in
             guard let self = self else { return }
             if let data = content, !data.isEmpty {
-                // Handle each line as a separate message
                 if let text = String(data: data, encoding: .utf8) {
                     for line in text.components(separatedBy: "\n") where !line.isEmpty {
                         if let msgData = line.data(using: .utf8),

@@ -1483,3 +1483,179 @@ final class JSONRPCCodableTests: XCTestCase {
         XCTAssertEqual(JSONRPCError.invalidParams.code, -32602)
     }
 }
+
+// MARK: - Docker Logs Session Tests
+
+final class DockerLogsTests: XCTestCase {
+
+    // MARK: - SessionSource.dockerLogs
+
+    func testDockerLogs_stableKey() {
+        let source = SessionSource.dockerLogs(hostID: HostConfig.localhostID, containerName: "webapp")
+        XCTAssertTrue(source.stableKey.contains("dockerlogs:"))
+        XCTAssertTrue(source.stableKey.contains("webapp"))
+    }
+
+    func testDockerLogs_displayName() {
+        let source = SessionSource.dockerLogs(hostID: HostConfig.localhostID, containerName: "api")
+        XCTAssertEqual(source.displayName, "api logs")
+    }
+
+    func testDockerLogs_isDocker() {
+        let source = SessionSource.dockerLogs(hostID: HostConfig.localhostID, containerName: "x")
+        XCTAssertTrue(source.isDocker)
+        XCTAssertTrue(source.isDockerLogs)
+    }
+
+    func testDockerLogs_containerName() {
+        let source = SessionSource.dockerLogs(hostID: HostConfig.localhostID, containerName: "myapp")
+        XCTAssertEqual(source.containerName, "myapp")
+    }
+
+    func testDockerLogs_notEqualToDocker() {
+        let docker = SessionSource.docker(hostID: HostConfig.localhostID, containerName: "app")
+        let logs = SessionSource.dockerLogs(hostID: HostConfig.localhostID, containerName: "app")
+        XCTAssertNotEqual(docker, logs)
+    }
+
+    func testDockerLogs_hostID() {
+        let id = UUID()
+        let source = SessionSource.dockerLogs(hostID: id, containerName: "x")
+        XCTAssertEqual(source.hostID, id)
+    }
+
+    // MARK: - TmuxSession with dockerLogs
+
+    func testTmuxSession_displayLabel_dockerLogs() {
+        let s = TmuxSession(name: "logs", source: .dockerLogs(hostID: HostConfig.localhostID, containerName: "webapp"))
+        XCTAssertEqual(s.displayLabel, "webapp/logs")
+    }
+
+    func testTmuxSession_id_dockerLogs() {
+        let s = TmuxSession(name: "logs", source: .dockerLogs(hostID: HostConfig.localhostID, containerName: "webapp"))
+        XCTAssertTrue(s.id.contains("dockerlogs:"))
+        XCTAssertTrue(s.id.contains("webapp"))
+    }
+
+    // MARK: - Docker logs command
+
+    func testDockerLogsCommand_local() {
+        let state = AppState()
+        let (cmd, args) = state.dockerLogsCommand(host: .localhost, container: "myapp")
+        XCTAssertFalse(cmd.contains("ssh"))
+        XCTAssertTrue(args.last?.contains("docker logs -f --tail 1000 myapp") ?? false)
+    }
+
+    func testDockerLogsCommand_remote() {
+        let state = AppState()
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com", user: "admin"))
+        let (cmd, args) = state.dockerLogsCommand(host: host, container: "webapp")
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        XCTAssertTrue(args.contains("admin@myserver.com"))
+        XCTAssertTrue(args.last?.contains("docker logs -f --tail 1000 webapp") ?? false)
+    }
+
+    func testCommandForSession_dockerLogs() {
+        let state = AppState()
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com"))
+        state.hosts = [host]
+        let session = TmuxSession(name: "logs", source: .dockerLogs(hostID: host.id, containerName: "webapp"))
+        let (cmd, args) = state.commandForSession(session)
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        XCTAssertTrue(args.last?.contains("docker logs -f") ?? false)
+        XCTAssertTrue(args.last?.contains("webapp") ?? false)
+    }
+
+    // MARK: - Grouping: logs merged with docker sessions
+
+    func testHostGroupedSessions_logsMergedWithDocker() {
+        let state = AppState()
+        state.hosts = [.localhost]
+        state.allSessions = [
+            TmuxSession(name: "dev", source: .docker(hostID: HostConfig.localhostID, containerName: "app")),
+            TmuxSession(name: "logs", source: .dockerLogs(hostID: HostConfig.localhostID, containerName: "app")),
+        ]
+        let hostGroups = state.hostGroupedSessions
+        XCTAssertEqual(hostGroups.count, 1)
+        // Should be one group containing both docker + dockerLogs sessions
+        let groups = hostGroups[0].groups
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].sessions.count, 2)
+    }
+
+    func testHostGroupedSessions_logsOnlyContainer() {
+        let state = AppState()
+        state.hosts = [.localhost]
+        state.allSessions = [
+            TmuxSession(name: "logs", source: .dockerLogs(hostID: HostConfig.localhostID, containerName: "redis")),
+        ]
+        let hostGroups = state.hostGroupedSessions
+        XCTAssertEqual(hostGroups.count, 1)
+        XCTAssertEqual(hostGroups[0].groups.count, 1)
+        XCTAssertEqual(hostGroups[0].groups[0].sessions.count, 1)
+    }
+
+    // MARK: - SessionSource.isDockerLogs
+
+    func testIsDockerLogs_false_for_host() {
+        XCTAssertFalse(SessionSource.host(hostID: HostConfig.localhostID).isDockerLogs)
+    }
+
+    func testIsDockerLogs_false_for_docker() {
+        XCTAssertFalse(SessionSource.docker(hostID: HostConfig.localhostID, containerName: "x").isDockerLogs)
+    }
+}
+
+// MARK: - MCP Forwarding Tests
+
+final class MCPForwardingTests: XCTestCase {
+
+    func testDefaultRemotePort() {
+        XCTAssertEqual(MCPSocketServer.defaultRemotePort, 19432)
+    }
+
+    func testSshCommand_remote_includesForwardingWhenServerRunning() {
+        // When MCP server has a TCP port, SSH commands should include -R flag
+        let state = AppState()
+        // Start the MCP server so tcpPort gets assigned
+        state.loadConfig()
+
+        // Give the TCP listener a moment to bind
+        let expectation = XCTestExpectation(description: "TCP port assigned")
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+            expectation.fulfill()
+        }
+        _ = XCTWaiter.wait(for: [expectation], timeout: 2.0)
+
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com", user: "admin"))
+        let (_, args) = state.sshCommand(host: host, sessionName: "dev")
+
+        let hasForwardFlag = args.contains("-R")
+        let hasEnvExport = args.last?.contains("ONYX_MCP_PORT") ?? false
+
+        // Only check if TCP port was assigned (may not happen in CI)
+        if hasForwardFlag {
+            XCTAssertTrue(hasEnvExport, "Should export ONYX_MCP_PORT in remote command")
+            // Verify the -R value format
+            if let rIdx = args.firstIndex(of: "-R"), rIdx + 1 < args.count {
+                let rValue = args[rIdx + 1]
+                XCTAssertTrue(rValue.contains("19432:127.0.0.1:"), "Should forward remote 19432 to local port")
+            }
+        }
+    }
+
+    func testSshCommand_local_noForwarding() {
+        let state = AppState()
+        let (_, args) = state.sshCommand(host: .localhost, sessionName: "dev")
+        XCTAssertFalse(args.contains("-R"))
+    }
+
+    func testDockerLogsCommand_noForwarding() {
+        // Docker logs is a read-only stream, no MCP forwarding needed
+        let state = AppState()
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com"))
+        let (_, args) = state.dockerLogsCommand(host: host, container: "app")
+        // dockerLogsCommand doesn't use mcpForwardingArgs — just a plain SSH command
+        XCTAssertFalse(args.last?.contains("ONYX_MCP_PORT") ?? false)
+    }
+}

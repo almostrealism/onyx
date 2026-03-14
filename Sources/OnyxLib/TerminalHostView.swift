@@ -469,6 +469,9 @@ class OnyxTerminalView: NSView {
         case .docker(_, let containerName):
             let safe = appState.sanitizedContainer(containerName)
             script = "docker exec \(safe) tmux ls -F \"#{session_name}\" 2>/dev/null || true"
+        case .dockerLogs:
+            completion([]) // logs sessions are not fetched via tmux
+            return
         }
 
         let (cmd, args) = appState.remoteCommand(script, host: host)
@@ -541,6 +544,11 @@ class OnyxTerminalView: NSView {
             let source = SessionSource.docker(hostID: host.id, containerName: containerName)
             fetchTmuxSessions(host: host, source: source) { sessions in
                 lock.lock()
+                // Always add a logs stream session for each container
+                allDockerSessions.append(TmuxSession(
+                    name: "logs",
+                    source: .dockerLogs(hostID: host.id, containerName: containerName)
+                ))
                 if sessions.isEmpty {
                     allDockerSessions.append(TmuxSession(
                         name: "no sessions", source: source, unavailable: true

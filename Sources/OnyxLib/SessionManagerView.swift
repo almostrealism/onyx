@@ -473,6 +473,10 @@ private struct SessionRow: View {
         appState.isFavorited(session)
     }
 
+    private var isLogs: Bool {
+        session.source.isDockerLogs
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             if session.unavailable {
@@ -487,6 +491,25 @@ private struct SessionRow: View {
                     .lineLimit(1)
 
                 Spacer()
+            } else if isLogs {
+                Image(systemName: "doc.text")
+                    .font(.system(size: sz(9)))
+                    .foregroundColor(isActive ? appState.accentColor.opacity(0.7) : .gray.opacity(0.4))
+
+                Text("logs")
+                    .font(.system(size: sz(11), weight: isActive ? .medium : .regular, design: .monospaced))
+                    .foregroundColor(isActive ? appState.accentColor : .gray.opacity(0.5))
+                    .italic()
+                    .lineLimit(1)
+
+                Spacer()
+
+                Button(action: { appState.toggleFavorite(session) }) {
+                    Image(systemName: isFavorited ? "star.fill" : "star")
+                        .font(.system(size: sz(10)))
+                        .foregroundColor(isFavorited ? Color(hex: "FFD06B") : .gray.opacity(0.3))
+                }
+                .buttonStyle(.plain)
             } else {
                 Circle()
                     .fill(isActive ? appState.accentColor : Color.clear)
