@@ -16,16 +16,20 @@ struct CommandPaletteView: View {
         let all = [
             PaletteAction(title: "Toggle Notes", shortcut: "⌘E") {
                 appState.showCommandPalette = false
-                appState.showNotes.toggle()
+                appState.activeRightPanel = appState.activeRightPanel == .notes ? nil : .notes
             },
             PaletteAction(title: "New Note", shortcut: "⇧⌘E") {
                 appState.showCommandPalette = false
-                appState.showNotes = true
+                appState.activeRightPanel = .notes
                 appState.createNoteRequested = true
             },
             PaletteAction(title: "File Browser", shortcut: "⌘O") {
                 appState.showCommandPalette = false
-                appState.showFileBrowser.toggle()
+                appState.activeRightPanel = appState.activeRightPanel == .fileBrowser ? nil : .fileBrowser
+            },
+            PaletteAction(title: "Artifacts", shortcut: "⌘D") {
+                appState.showCommandPalette = false
+                appState.activeRightPanel = appState.activeRightPanel == .artifacts ? nil : .artifacts
             },
             PaletteAction(title: "Session Manager", shortcut: "⌘J") {
                 appState.showCommandPalette = false

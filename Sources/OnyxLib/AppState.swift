@@ -16,6 +16,15 @@ public extension Notification.Name {
     static let toggleSessionManager = Notification.Name("toggleSessionManager")
     static let switchToFavorite = Notification.Name("switchToFavorite")
     static let refreshSession = Notification.Name("refreshSession")
+    static let toggleArtifacts = Notification.Name("toggleArtifacts")
+}
+
+// MARK: - Right Panel
+
+public enum RightPanel: Equatable {
+    case notes
+    case fileBrowser
+    case artifacts
 }
 
 // MARK: - Host Config
@@ -165,7 +174,7 @@ public class AppState: ObservableObject {
     @Published public var hosts: [HostConfig] = []
     @Published public var appearance = AppearanceConfig()
     @Published public var showSetup = false
-    @Published public var showNotes = false
+    @Published public var activeRightPanel: RightPanel? = nil
     @Published public var showSettings = false
     @Published public var showCommandPalette = false
     @Published public var showMonitor = false
@@ -176,8 +185,23 @@ public class AppState: ObservableObject {
     @Published public var connectionError: String?
     @Published public var needsKeySetup = false
     @Published public var keySetupInProgress = false
-    @Published public var showFileBrowser = false
     @Published public var showSessionManager = false
+
+    // Convenience accessors for right panel types
+    public var showNotes: Bool {
+        get { activeRightPanel == .notes }
+        set { activeRightPanel = newValue ? .notes : nil }
+    }
+
+    public var showFileBrowser: Bool {
+        get { activeRightPanel == .fileBrowser }
+        set { activeRightPanel = newValue ? .fileBrowser : nil }
+    }
+
+    public var showArtifacts: Bool {
+        get { activeRightPanel == .artifacts }
+        set { activeRightPanel = newValue ? .artifacts : nil }
+    }
     @Published public var configLoaded = false
 
     // Session state
@@ -199,6 +223,17 @@ public class AppState: ObservableObject {
         }
         return m
     }()
+
+    private var artifactCancellable: AnyCancellable?
+    public lazy var artifactManager: ArtifactManager = {
+        let a = ArtifactManager()
+        artifactCancellable = a.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        return a
+    }()
+
+    private var mcpServer: MCPSocketServer?
 
     public init() {}
 
@@ -424,6 +459,10 @@ public class AppState: ObservableObject {
 
         // Start background monitoring immediately
         monitor.startPolling()
+
+        // Start MCP socket server for agent integration
+        mcpServer = MCPSocketServer(artifactManager: artifactManager)
+        mcpServer?.start()
     }
 
     public func saveHosts() {
@@ -466,12 +505,10 @@ public class AppState: ObservableObject {
             showSettings = false
         } else if showSessionManager {
             showSessionManager = false
-        } else if showFileBrowser {
-            showFileBrowser = false
         } else if showMonitor {
             showMonitor = false
-        } else if showNotes {
-            showNotes = false
+        } else if activeRightPanel != nil {
+            activeRightPanel = nil
         }
     }
 

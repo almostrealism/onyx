@@ -3,8 +3,8 @@ import AppKit
 public class ShortcutManager {
     /// Set by ContentView when monitor overlay is shown/hidden
     public static var monitorVisible = false
-    /// Set by ContentView when notes panel is open — suppresses bare-key shortcuts
-    public static var notesVisible = false
+    /// Set by ContentView when a right panel is open — suppresses bare-key shortcuts
+    public static var rightPanelVisible = false
 
     public static func setupMenuShortcuts() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -65,8 +65,14 @@ public class ShortcutManager {
                 return nil
             }
 
-            // Single-key shortcuts — disabled when notes are open
-            if !notesVisible {
+            // Cmd+D → toggle artifacts panel
+            if flags == .command && chars == "d" {
+                NotificationCenter.default.post(name: .toggleArtifacts, object: nil)
+                return nil
+            }
+
+            // Single-key shortcuts — disabled when a right panel is open
+            if !rightPanelVisible {
                 // Backtick/tilde key (keyCode 50) → toggle monitor overlay
                 if event.keyCode == 50 && flags.isEmpty {
                     NotificationCenter.default.post(name: .toggleMonitor, object: nil)

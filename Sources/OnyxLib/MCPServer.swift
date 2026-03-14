@@ -1,0 +1,450 @@
+import Foundation
+import Network
+
+// MARK: - JSON-RPC Types
+
+public struct JSONRPCRequest: Codable {
+    public let jsonrpc: String
+    public let id: AnyCodableValue?
+    public let method: String
+    public let params: [String: AnyCodableValue]?
+
+    public init(jsonrpc: String = "2.0", id: AnyCodableValue? = nil, method: String, params: [String: AnyCodableValue]? = nil) {
+        self.jsonrpc = jsonrpc
+        self.id = id
+        self.method = method
+        self.params = params
+    }
+}
+
+public struct JSONRPCResponse: Codable {
+    public let jsonrpc: String
+    public let id: AnyCodableValue?
+    public let result: AnyCodableValue?
+    public let error: JSONRPCError?
+
+    public init(id: AnyCodableValue?, result: AnyCodableValue) {
+        self.jsonrpc = "2.0"
+        self.id = id
+        self.result = result
+        self.error = nil
+    }
+
+    public init(id: AnyCodableValue?, error: JSONRPCError) {
+        self.jsonrpc = "2.0"
+        self.id = id
+        self.result = nil
+        self.error = error
+    }
+}
+
+public struct JSONRPCError: Codable {
+    public let code: Int
+    public let message: String
+
+    public static let parseError = JSONRPCError(code: -32700, message: "Parse error")
+    public static let invalidRequest = JSONRPCError(code: -32600, message: "Invalid Request")
+    public static let methodNotFound = JSONRPCError(code: -32601, message: "Method not found")
+    public static let invalidParams = JSONRPCError(code: -32602, message: "Invalid params")
+}
+
+/// Type-erased Codable value for JSON-RPC flexibility
+public enum AnyCodableValue: Codable, Equatable {
+    case string(String)
+    case int(Int)
+    case double(Double)
+    case bool(Bool)
+    case null
+    case array([AnyCodableValue])
+    case object([String: AnyCodableValue])
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let v = try? container.decode(Bool.self) { self = .bool(v) }
+        else if let v = try? container.decode(Int.self) { self = .int(v) }
+        else if let v = try? container.decode(Double.self) { self = .double(v) }
+        else if let v = try? container.decode(String.self) { self = .string(v) }
+        else if let v = try? container.decode([AnyCodableValue].self) { self = .array(v) }
+        else if let v = try? container.decode([String: AnyCodableValue].self) { self = .object(v) }
+        else if container.decodeNil() { self = .null }
+        else { throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported type") }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let v): try container.encode(v)
+        case .int(let v): try container.encode(v)
+        case .double(let v): try container.encode(v)
+        case .bool(let v): try container.encode(v)
+        case .null: try container.encodeNil()
+        case .array(let v): try container.encode(v)
+        case .object(let v): try container.encode(v)
+        }
+    }
+
+    public var stringValue: String? {
+        if case .string(let v) = self { return v }
+        return nil
+    }
+
+    public var intValue: Int? {
+        if case .int(let v) = self { return v }
+        if case .double(let v) = self { return Int(v) }
+        return nil
+    }
+
+    public var boolValue: Bool? {
+        if case .bool(let v) = self { return v }
+        return nil
+    }
+
+    public var objectValue: [String: AnyCodableValue]? {
+        if case .object(let v) = self { return v }
+        return nil
+    }
+
+    public var arrayValue: [AnyCodableValue]? {
+        if case .array(let v) = self { return v }
+        return nil
+    }
+}
+
+// MARK: - MCP Message Handler
+
+public class MCPMessageHandler {
+    private let artifactManager: ArtifactManager
+
+    public init(artifactManager: ArtifactManager) {
+        self.artifactManager = artifactManager
+    }
+
+    public func handleMessage(_ data: Data) -> Data? {
+        guard let request = try? JSONDecoder().decode(JSONRPCRequest.self, from: data) else {
+            let response = JSONRPCResponse(id: nil, error: .parseError)
+            return try? JSONEncoder().encode(response)
+        }
+        let response = dispatch(request)
+        return try? JSONEncoder().encode(response)
+    }
+
+    public func dispatch(_ request: JSONRPCRequest) -> JSONRPCResponse {
+        switch request.method {
+        case "initialize":
+            return handleInitialize(request)
+        case "notifications/initialized":
+            // Client acknowledgment, no response needed for notifications
+            return JSONRPCResponse(id: request.id, result: .null)
+        case "tools/list":
+            return handleToolsList(request)
+        case "tools/call":
+            return handleToolsCall(request)
+        default:
+            return JSONRPCResponse(id: request.id, error: .methodNotFound)
+        }
+    }
+
+    // MARK: - Initialize
+
+    private func handleInitialize(_ request: JSONRPCRequest) -> JSONRPCResponse {
+        let result: AnyCodableValue = .object([
+            "protocolVersion": .string("2024-11-05"),
+            "capabilities": .object([
+                "tools": .object([:])
+            ]),
+            "serverInfo": .object([
+                "name": .string("onyx"),
+                "version": .string("1.0.0")
+            ])
+        ])
+        return JSONRPCResponse(id: request.id, result: result)
+    }
+
+    // MARK: - Tools List
+
+    private func handleToolsList(_ request: JSONRPCRequest) -> JSONRPCResponse {
+        let tools: AnyCodableValue = .object([
+            "tools": .array([
+                showTextTool,
+                showDiagramTool,
+                showModelTool,
+                clearSlotTool,
+                listSlotsTool,
+            ])
+        ])
+        return JSONRPCResponse(id: request.id, result: tools)
+    }
+
+    private var showTextTool: AnyCodableValue {
+        .object([
+            "name": .string("show_text"),
+            "description": .string("Display text or markdown content in an artifact slot visible to the user"),
+            "inputSchema": .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "slot": .object(["type": .string("integer"), "description": .string("Slot number 0-7"), "minimum": .int(0), "maximum": .int(7)]),
+                    "title": .object(["type": .string("string"), "description": .string("Title for the artifact")]),
+                    "content": .object(["type": .string("string"), "description": .string("Text content to display")]),
+                    "format": .object(["type": .string("string"), "enum": .array([.string("plain"), .string("markdown"), .string("html")]), "description": .string("Text format (default: markdown)")])
+                ]),
+                "required": .array([.string("slot"), .string("title"), .string("content")])
+            ])
+        ])
+    }
+
+    private var showDiagramTool: AnyCodableValue {
+        .object([
+            "name": .string("show_diagram"),
+            "description": .string("Render a UML or flowchart diagram in an artifact slot visible to the user"),
+            "inputSchema": .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "slot": .object(["type": .string("integer"), "description": .string("Slot number 0-7"), "minimum": .int(0), "maximum": .int(7)]),
+                    "title": .object(["type": .string("string"), "description": .string("Title for the diagram")]),
+                    "content": .object(["type": .string("string"), "description": .string("Diagram source (Mermaid or PlantUML syntax)")]),
+                    "format": .object(["type": .string("string"), "enum": .array([.string("mermaid"), .string("plantuml")]), "description": .string("Diagram format (default: mermaid)")])
+                ]),
+                "required": .array([.string("slot"), .string("title"), .string("content")])
+            ])
+        ])
+    }
+
+    private var showModelTool: AnyCodableValue {
+        .object([
+            "name": .string("show_model"),
+            "description": .string("Display a 3D model in an artifact slot visible to the user"),
+            "inputSchema": .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "slot": .object(["type": .string("integer"), "description": .string("Slot number 0-7"), "minimum": .int(0), "maximum": .int(7)]),
+                    "title": .object(["type": .string("string"), "description": .string("Title for the model")]),
+                    "data": .object(["type": .string("string"), "description": .string("Base64-encoded model data")]),
+                    "format": .object(["type": .string("string"), "enum": .array([.string("obj"), .string("usdz"), .string("stl")]), "description": .string("3D model format")])
+                ]),
+                "required": .array([.string("slot"), .string("title"), .string("data"), .string("format")])
+            ])
+        ])
+    }
+
+    private var clearSlotTool: AnyCodableValue {
+        .object([
+            "name": .string("clear_slot"),
+            "description": .string("Clear an artifact slot"),
+            "inputSchema": .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "slot": .object(["type": .string("integer"), "description": .string("Slot number 0-7"), "minimum": .int(0), "maximum": .int(7)])
+                ]),
+                "required": .array([.string("slot")])
+            ])
+        ])
+    }
+
+    private var listSlotsTool: AnyCodableValue {
+        .object([
+            "name": .string("list_slots"),
+            "description": .string("List all occupied artifact slots and their contents"),
+            "inputSchema": .object([
+                "type": .string("object"),
+                "properties": .object([:])
+            ])
+        ])
+    }
+
+    // MARK: - Tool Call Dispatch
+
+    private func handleToolsCall(_ request: JSONRPCRequest) -> JSONRPCResponse {
+        guard let params = request.params,
+              let toolName = params["name"]?.stringValue else {
+            return JSONRPCResponse(id: request.id, error: .invalidParams)
+        }
+
+        let arguments = params["arguments"]?.objectValue ?? [:]
+
+        switch toolName {
+        case "show_text": return callShowText(id: request.id, args: arguments)
+        case "show_diagram": return callShowDiagram(id: request.id, args: arguments)
+        case "show_model": return callShowModel(id: request.id, args: arguments)
+        case "clear_slot": return callClearSlot(id: request.id, args: arguments)
+        case "list_slots": return callListSlots(id: request.id)
+        default:
+            return JSONRPCResponse(id: request.id, error: JSONRPCError(code: -32602, message: "Unknown tool: \(toolName)"))
+        }
+    }
+
+    private func callShowText(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {
+        guard let slot = args["slot"]?.intValue,
+              let title = args["title"]?.stringValue,
+              let content = args["content"]?.stringValue else {
+            return JSONRPCResponse(id: id, error: .invalidParams)
+        }
+        let format = TextFormat(rawValue: args["format"]?.stringValue ?? "markdown") ?? .markdown
+        let artifactContent = ArtifactContent.text(content: content, format: format)
+
+        var success = false
+        DispatchQueue.main.sync {
+            success = artifactManager.setSlot(slot, title: title, content: artifactContent)
+        }
+
+        return toolResult(id: id, success: success, message: success ? "Text displayed in slot \(slot)" : "Invalid slot \(slot)")
+    }
+
+    private func callShowDiagram(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {
+        guard let slot = args["slot"]?.intValue,
+              let title = args["title"]?.stringValue,
+              let content = args["content"]?.stringValue else {
+            return JSONRPCResponse(id: id, error: .invalidParams)
+        }
+        let format = DiagramFormat(rawValue: args["format"]?.stringValue ?? "mermaid") ?? .mermaid
+        let artifactContent = ArtifactContent.diagram(content: content, format: format)
+
+        var success = false
+        DispatchQueue.main.sync {
+            success = artifactManager.setSlot(slot, title: title, content: artifactContent)
+        }
+
+        return toolResult(id: id, success: success, message: success ? "Diagram displayed in slot \(slot)" : "Invalid slot \(slot)")
+    }
+
+    private func callShowModel(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {
+        guard let slot = args["slot"]?.intValue,
+              let title = args["title"]?.stringValue,
+              let dataStr = args["data"]?.stringValue,
+              let formatStr = args["format"]?.stringValue,
+              let format = ModelFormat(rawValue: formatStr) else {
+            return JSONRPCResponse(id: id, error: .invalidParams)
+        }
+        guard let data = Data(base64Encoded: dataStr) else {
+            return JSONRPCResponse(id: id, error: JSONRPCError(code: -32602, message: "Invalid base64 data"))
+        }
+        let artifactContent = ArtifactContent.model3D(data: data, format: format)
+
+        var success = false
+        DispatchQueue.main.sync {
+            success = artifactManager.setSlot(slot, title: title, content: artifactContent)
+        }
+
+        return toolResult(id: id, success: success, message: success ? "3D model displayed in slot \(slot)" : "Invalid slot \(slot)")
+    }
+
+    private func callClearSlot(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {
+        guard let slot = args["slot"]?.intValue else {
+            return JSONRPCResponse(id: id, error: .invalidParams)
+        }
+
+        var success = false
+        DispatchQueue.main.sync {
+            success = artifactManager.clearSlot(slot)
+        }
+
+        return toolResult(id: id, success: success, message: success ? "Slot \(slot) cleared" : "Invalid slot \(slot)")
+    }
+
+    private func callListSlots(id: AnyCodableValue?) -> JSONRPCResponse {
+        var slotsInfo: [(slot: Int, title: String, type: String)] = []
+        DispatchQueue.main.sync {
+            slotsInfo = artifactManager.listSlots()
+        }
+
+        let slotValues: [AnyCodableValue] = slotsInfo.map { info in
+            .object([
+                "slot": .int(info.slot),
+                "title": .string(info.title),
+                "type": .string(info.type)
+            ])
+        }
+
+        let result: AnyCodableValue = .object([
+            "content": .array([
+                .object([
+                    "type": .string("text"),
+                    "text": .string(slotsInfo.isEmpty ? "No artifacts displayed" :
+                        slotsInfo.map { "Slot \($0.slot): [\($0.type)] \($0.title)" }.joined(separator: "\n"))
+                ])
+            ]),
+            "slots": .array(slotValues)
+        ])
+        return JSONRPCResponse(id: id, result: result)
+    }
+
+    private func toolResult(id: AnyCodableValue?, success: Bool, message: String) -> JSONRPCResponse {
+        let result: AnyCodableValue = .object([
+            "content": .array([
+                .object([
+                    "type": .string("text"),
+                    "text": .string(message)
+                ])
+            ]),
+            "isError": .bool(!success)
+        ])
+        return JSONRPCResponse(id: id, result: result)
+    }
+}
+
+// MARK: - MCP Socket Server
+
+public class MCPSocketServer {
+    private var listener: NWListener?
+    private let handler: MCPMessageHandler
+    private let socketPath: String
+
+    public init(artifactManager: ArtifactManager) {
+        self.handler = MCPMessageHandler(artifactManager: artifactManager)
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let onyxDir = appSupport.appendingPathComponent("Onyx")
+        try? FileManager.default.createDirectory(at: onyxDir, withIntermediateDirectories: true)
+        self.socketPath = onyxDir.appendingPathComponent("mcp.sock").path
+    }
+
+    public func start() {
+        // Remove stale socket
+        unlink(socketPath)
+
+        do {
+            let params = NWParameters()
+            params.defaultProtocolStack.transportProtocol = NWProtocolTCP.Options()
+            params.requiredLocalEndpoint = NWEndpoint.unix(path: socketPath)
+
+            listener = try NWListener(using: params)
+            listener?.newConnectionHandler = { [weak self] connection in
+                self?.handleConnection(connection)
+            }
+            listener?.start(queue: .global(qos: .utility))
+        } catch {
+            print("MCP server failed to start: \(error)")
+        }
+    }
+
+    public func stop() {
+        listener?.cancel()
+        listener = nil
+        unlink(socketPath)
+    }
+
+    private func handleConnection(_ connection: NWConnection) {
+        connection.start(queue: .global(qos: .utility))
+        receiveMessage(on: connection)
+    }
+
+    private func receiveMessage(on connection: NWConnection) {
+        // Read until newline (JSON-RPC messages are newline-delimited)
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1_000_000) { [weak self] content, _, isComplete, error in
+            guard let self = self else { return }
+            if let data = content, !data.isEmpty {
+                // Handle each line as a separate message
+                if let text = String(data: data, encoding: .utf8) {
+                    for line in text.components(separatedBy: "\n") where !line.isEmpty {
+                        if let msgData = line.data(using: .utf8),
+                           let response = self.handler.handleMessage(msgData) {
+                            let responseWithNewline = response + Data("\n".utf8)
+                            connection.send(content: responseWithNewline, completion: .contentProcessed { _ in })
+                        }
+                    }
+                }
+            }
+            if !isComplete && error == nil {
+                self.receiveMessage(on: connection)
+            }
+        }
+    }
+}

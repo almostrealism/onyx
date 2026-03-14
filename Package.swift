@@ -24,6 +24,11 @@ let package = Package(
             exclude: ["Info.plist"],
             resources: [.copy("AppIcon.icns")]
         ),
+        .executableTarget(
+            name: "OnyxMCP",
+            dependencies: [],
+            path: "Sources/OnyxMCP"
+        ),
         .testTarget(
             name: "OnyxTests",
             dependencies: ["OnyxLib"],

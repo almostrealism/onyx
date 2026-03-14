@@ -5,9 +5,31 @@ public struct ContentView: View {
 
     public init() {}
 
+    /// True overlays that dim/block the terminal (not right panels)
     private var hasOverlay: Bool {
-        appState.showNotes || appState.showSetup || appState.showSettings
-            || appState.showCommandPalette || appState.showFileBrowser || appState.showSessionManager
+        appState.showSetup || appState.showSettings
+            || appState.showCommandPalette || appState.showSessionManager
+    }
+
+    @ViewBuilder
+    private func rightPanelView(for panel: RightPanel) -> some View {
+        switch panel {
+        case .notes:
+            NotesView(appState: appState)
+        case .fileBrowser:
+            FileBrowserView(appState: appState)
+        case .artifacts:
+            ArtifactView(appState: appState)
+        }
+    }
+
+    private var rightPanelWidth: CGFloat {
+        switch appState.activeRightPanel {
+        case .notes: return 500
+        case .fileBrowser: return 600
+        case .artifacts: return 500
+        case .none: return 0
+        }
     }
 
     public var body: some View {
@@ -19,47 +41,48 @@ public struct ContentView: View {
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
 
-                // Terminal always underneath
-                TerminalHostView(appState: appState)
-                    .opacity(hasOverlay ? 0.3 : 1.0)
-                    .allowsHitTesting(!hasOverlay)
+                // Split layout: terminal left, panel right
+                HStack(spacing: 0) {
+                    // LEFT: Terminal area
+                    ZStack {
+                        TerminalHostView(appState: appState)
+                            .opacity(hasOverlay ? 0.3 : 1.0)
+                            .allowsHitTesting(!hasOverlay)
 
-                // Monitor overlay — blur terminal for privacy, then show stats
-                if appState.showMonitor {
-                    VibrancyBackground()
-                        .ignoresSafeArea()
-                        .allowsHitTesting(false)
-                    MonitorView(appState: appState)
-                        .transition(.opacity)
+                        // Monitor overlay — blur terminal for privacy, then show stats
+                        if appState.showMonitor {
+                            VibrancyBackground()
+                                .ignoresSafeArea()
+                                .allowsHitTesting(false)
+                            MonitorView(appState: appState)
+                                .transition(.opacity)
+                        }
+
+                        // Connection error overlay
+                        if appState.connectionError != nil {
+                            ConnectionErrorOverlay(appState: appState)
+                        }
+
+                        // Reconnecting indicator
+                        if appState.isReconnecting && appState.connectionError == nil {
+                            ReconnectingOverlay(accentColor: appState.accentColor)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    // RIGHT: Side panel
+                    if let panel = appState.activeRightPanel {
+                        Rectangle()
+                            .fill(appState.accentColor.opacity(0.15))
+                            .frame(width: 1)
+
+                        rightPanelView(for: panel)
+                            .frame(width: rightPanelWidth)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
                 }
 
-                // Connection error overlay
-                if appState.connectionError != nil {
-                    ConnectionErrorOverlay(appState: appState)
-                }
-
-                // Reconnecting indicator
-                if appState.isReconnecting && appState.connectionError == nil {
-                    ReconnectingOverlay(accentColor: appState.accentColor)
-                }
-
-                // Notes panel slides from right
-                if appState.showNotes {
-                    NotesView(appState: appState)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .trailing).combined(with: .opacity),
-                            removal: .move(edge: .trailing).combined(with: .opacity)
-                        ))
-                }
-
-                // File browser slides from left
-                if appState.showFileBrowser {
-                    FileBrowserView(appState: appState)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .leading).combined(with: .opacity),
-                            removal: .move(edge: .leading).combined(with: .opacity)
-                        ))
-                }
+                // Full-window overlays on top of everything
 
                 // Session manager slides from left
                 if appState.showSessionManager {
@@ -100,12 +123,11 @@ public struct ContentView: View {
                 FavoritesBar(appState: appState)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: appState.showNotes)
+        .animation(.easeInOut(duration: 0.2), value: appState.activeRightPanel)
         .animation(.easeInOut(duration: 0.2), value: appState.showSettings)
         .animation(.easeInOut(duration: 0.2), value: appState.showMonitor)
         .animation(.easeInOut(duration: 0.15), value: appState.showCommandPalette)
         .animation(.easeInOut(duration: 0.2), value: appState.showSetup)
-        .animation(.easeInOut(duration: 0.2), value: appState.showFileBrowser)
         .animation(.easeInOut(duration: 0.2), value: appState.showSessionManager)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
@@ -114,14 +136,14 @@ public struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .toggleNotes)) { _ in
             appState.showCommandPalette = false
             appState.showSettings = false
-            appState.showNotes.toggle()
-            ShortcutManager.notesVisible = appState.showNotes
+            appState.activeRightPanel = appState.activeRightPanel == .notes ? nil : .notes
+            ShortcutManager.rightPanelVisible = appState.activeRightPanel != nil
         }
         .onReceive(NotificationCenter.default.publisher(for: .createNote)) { _ in
             appState.showCommandPalette = false
             appState.showSettings = false
-            appState.showNotes = true
-            ShortcutManager.notesVisible = true
+            appState.activeRightPanel = .notes
+            ShortcutManager.rightPanelVisible = true
             appState.createNoteRequested = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleCommandPalette)) { _ in
@@ -135,12 +157,17 @@ public struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .toggleFileBrowser)) { _ in
             appState.showCommandPalette = false
             appState.showSettings = false
-            appState.showFileBrowser.toggle()
+            appState.activeRightPanel = appState.activeRightPanel == .fileBrowser ? nil : .fileBrowser
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleSessionManager)) { _ in
             appState.showCommandPalette = false
             appState.showSettings = false
             appState.showSessionManager.toggle()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleArtifacts)) { _ in
+            appState.showCommandPalette = false
+            appState.showSettings = false
+            appState.activeRightPanel = appState.activeRightPanel == .artifacts ? nil : .artifacts
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             appState.showCommandPalette = false
@@ -150,7 +177,7 @@ public struct ContentView: View {
             let wasMonitoring = appState.showMonitor
             appState.dismissTopOverlay()
             ShortcutManager.monitorVisible = appState.showMonitor
-            ShortcutManager.notesVisible = appState.showNotes
+            ShortcutManager.rightPanelVisible = appState.activeRightPanel != nil
             if wasMonitoring && !appState.showMonitor {
                 updateWindowTitle()
             }

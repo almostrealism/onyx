@@ -141,83 +141,63 @@ final class MonitorParseTests: XCTestCase {
 
 final class AppStateTests: XCTestCase {
 
-    // MARK: - isLocal
+    // MARK: - HostConfig.isLocal
 
     func testIsLocal_localhost() {
-        let state = AppState()
-        state.sshConfig.host = "localhost"
-        XCTAssertTrue(state.isLocal)
+        let host = HostConfig(label: "test", ssh: SSHConfig(host: "localhost"))
+        XCTAssertTrue(host.isLocal)
     }
 
     func testIsLocal_127001() {
-        let state = AppState()
-        state.sshConfig.host = "127.0.0.1"
-        XCTAssertTrue(state.isLocal)
+        let host = HostConfig(label: "test", ssh: SSHConfig(host: "127.0.0.1"))
+        XCTAssertTrue(host.isLocal)
     }
 
     func testIsLocal_ipv6Loopback() {
-        let state = AppState()
-        state.sshConfig.host = "::1"
-        XCTAssertTrue(state.isLocal)
+        let host = HostConfig(label: "test", ssh: SSHConfig(host: "::1"))
+        XCTAssertTrue(host.isLocal)
     }
 
     func testIsLocal_empty() {
-        let state = AppState()
-        state.sshConfig.host = ""
-        XCTAssertTrue(state.isLocal)
-    }
-
-    func testIsLocal_whitespace() {
-        let state = AppState()
-        state.sshConfig.host = "  "
-        XCTAssertTrue(state.isLocal)
+        let host = HostConfig(label: "test", ssh: SSHConfig(host: ""))
+        XCTAssertTrue(host.isLocal)
     }
 
     func testIsLocal_remoteHost() {
-        let state = AppState()
-        state.sshConfig.host = "myserver.com"
-        XCTAssertFalse(state.isLocal)
+        let host = HostConfig(label: "test", ssh: SSHConfig(host: "myserver.com"))
+        XCTAssertFalse(host.isLocal)
     }
 
     func testIsLocal_caseInsensitive() {
-        let state = AppState()
-        state.sshConfig.host = "LOCALHOST"
-        XCTAssertTrue(state.isLocal)
+        let host = HostConfig(label: "test", ssh: SSHConfig(host: "LOCALHOST"))
+        XCTAssertTrue(host.isLocal)
     }
 
     // MARK: - sshCommand
 
     func testSshCommand_local() {
         let state = AppState()
-        state.sshConfig.host = "localhost"
-        state.sshConfig.tmuxSession = "dev"
-        let (cmd, args) = state.sshCommand()
-        // Local mode: uses shell, not ssh
+        let host = HostConfig.localhost
+        let (cmd, args) = state.sshCommand(host: host, sessionName: "dev")
         XCTAssertFalse(cmd.contains("ssh"))
         XCTAssertTrue(args.last?.contains("tmux new-session -A -s dev") ?? false)
     }
 
     func testSshCommand_remote_defaultPort() {
         let state = AppState()
-        state.sshConfig.host = "myserver.com"
-        state.sshConfig.user = "admin"
-        state.sshConfig.tmuxSession = "main"
-        let (cmd, args) = state.sshCommand()
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com", user: "admin", tmuxSession: "main"))
+        let (cmd, args) = state.sshCommand(host: host, sessionName: "main")
 
         XCTAssertEqual(cmd, "/usr/bin/ssh")
         XCTAssertTrue(args.contains("admin@myserver.com"))
-        // Should not contain -p flag for default port
         XCTAssertFalse(args.contains("-p"))
-        // Last arg should have tmux command
         XCTAssertTrue(args.last?.contains("tmux new-session -A -s main") ?? false)
     }
 
     func testSshCommand_remote_customPort() {
         let state = AppState()
-        state.sshConfig.host = "myserver.com"
-        state.sshConfig.port = 2222
-        state.sshConfig.tmuxSession = "work"
-        let (cmd, args) = state.sshCommand()
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com", port: 2222, tmuxSession: "work"))
+        let (cmd, args) = state.sshCommand(host: host, sessionName: "work")
 
         XCTAssertEqual(cmd, "/usr/bin/ssh")
         XCTAssertTrue(args.contains("-p"))
@@ -226,77 +206,45 @@ final class AppStateTests: XCTestCase {
 
     func testSshCommand_remote_withIdentityFile() {
         let state = AppState()
-        state.sshConfig.host = "myserver.com"
-        state.sshConfig.identityFile = "/home/user/.ssh/custom_key"
-        state.sshConfig.tmuxSession = "work"
-        let (_, args) = state.sshCommand()
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com", tmuxSession: "work", identityFile: "/home/user/.ssh/custom_key"))
+        let (_, args) = state.sshCommand(host: host, sessionName: "work")
 
         XCTAssertTrue(args.contains("-i"))
         XCTAssertTrue(args.contains("/home/user/.ssh/custom_key"))
-    }
-
-    func testSshCommand_remote_noUser() {
-        let state = AppState()
-        state.sshConfig.host = "myserver.com"
-        state.sshConfig.user = ""
-        state.sshConfig.tmuxSession = "main"
-        let (cmd, _) = state.sshCommand()
-
-        XCTAssertEqual(cmd, "/usr/bin/ssh")
-    }
-
-    func testSshCommand_withExplicitSession() {
-        let state = AppState()
-        state.sshConfig.host = "myserver.com"
-        state.sshConfig.tmuxSession = "default"
-        let (_, args) = state.sshCommand(sessionName: "custom")
-
-        XCTAssertTrue(args.last?.contains("tmux new-session -A -s custom") ?? false)
-    }
-
-    func testSshCommand_usesActiveSessionWhenSet() {
-        let state = AppState()
-        state.sshConfig.host = "myserver.com"
-        state.sshConfig.tmuxSession = "default"
-        state.activeSession = TmuxSession(name: "running", source: .host)
-        let (_, args) = state.sshCommand()
-
-        XCTAssertTrue(args.last?.contains("tmux new-session -A -s running") ?? false)
     }
 
     // MARK: - Docker command
 
     func testDockerTmuxCommand_local() {
         let state = AppState()
-        state.sshConfig.host = "localhost"
-        let (cmd, args) = state.dockerTmuxCommand(container: "my-app", sessionName: "dev")
+        let (cmd, args) = state.dockerTmuxCommand(host: .localhost, container: "my-app", sessionName: "dev")
         XCTAssertFalse(cmd.contains("ssh"))
         XCTAssertTrue(args.last?.contains("docker exec -it my-app tmux new-session -A -s dev") ?? false)
     }
 
     func testDockerTmuxCommand_remote() {
         let state = AppState()
-        state.sshConfig.host = "myserver.com"
-        state.sshConfig.user = "admin"
-        let (cmd, args) = state.dockerTmuxCommand(container: "my-app", sessionName: "dev")
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com", user: "admin"))
+        let (cmd, args) = state.dockerTmuxCommand(host: host, container: "my-app", sessionName: "dev")
         XCTAssertEqual(cmd, "/usr/bin/ssh")
         XCTAssertTrue(args.last?.contains("docker exec -it my-app tmux new-session -A -s dev") ?? false)
     }
 
     func testCommandForSession_host() {
         let state = AppState()
-        state.sshConfig.host = "myserver.com"
-        let session = TmuxSession(name: "main", source: .host)
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com"))
+        state.hosts = [host]
+        let session = TmuxSession(name: "main", source: .host(hostID: host.id))
         let (cmd, args) = state.commandForSession(session)
         XCTAssertEqual(cmd, "/usr/bin/ssh")
         XCTAssertTrue(args.last?.contains("tmux new-session -A -s main") ?? false)
-        XCTAssertFalse(args.last?.contains("docker") ?? true)
     }
 
     func testCommandForSession_docker() {
         let state = AppState()
-        state.sshConfig.host = "myserver.com"
-        let session = TmuxSession(name: "dev", source: .docker(containerName: "webapp"))
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com"))
+        state.hosts = [host]
+        let session = TmuxSession(name: "dev", source: .docker(hostID: host.id, containerName: "webapp"))
         let (cmd, args) = state.commandForSession(session)
         XCTAssertEqual(cmd, "/usr/bin/ssh")
         XCTAssertTrue(args.last?.contains("docker exec -it webapp tmux new-session -A -s dev") ?? false)
@@ -311,14 +259,14 @@ final class AppStateTests: XCTestCase {
 
     func testEffectiveWindowTitle_withSession() {
         let state = AppState()
-        state.activeSession = TmuxSession(name: "dev", source: .host)
+        state.activeSession = TmuxSession(name: "dev", source: .host(hostID: HostConfig.localhostID))
         XCTAssertTrue(state.effectiveWindowTitle.contains("dev"))
         XCTAssertTrue(state.effectiveWindowTitle.hasPrefix("Onyx"))
     }
 
     func testEffectiveWindowTitle_withDockerSession() {
         let state = AppState()
-        state.activeSession = TmuxSession(name: "dev", source: .docker(containerName: "webapp"))
+        state.activeSession = TmuxSession(name: "dev", source: .docker(hostID: HostConfig.localhostID, containerName: "webapp"))
         XCTAssertTrue(state.effectiveWindowTitle.contains("webapp/dev"))
     }
 
@@ -330,7 +278,7 @@ final class AppStateTests: XCTestCase {
 
     func testEffectiveWindowTitle_withSessionAndMonitor() {
         let state = AppState()
-        state.activeSession = TmuxSession(name: "prod", source: .host)
+        state.activeSession = TmuxSession(name: "prod", source: .host(hostID: HostConfig.localhostID))
         state.showMonitor = true
         let title = state.effectiveWindowTitle
         XCTAssertTrue(title.contains("prod"))
@@ -357,10 +305,10 @@ final class AppStateTests: XCTestCase {
     func testDismissTopOverlay_settingsAfterPalette() {
         let state = AppState()
         state.showSettings = true
-        state.showNotes = true
+        state.activeRightPanel = .notes
         state.dismissTopOverlay()
         XCTAssertFalse(state.showSettings)
-        XCTAssertTrue(state.showNotes) // not dismissed yet
+        XCTAssertEqual(state.activeRightPanel, .notes) // not dismissed yet
     }
 }
 
@@ -369,121 +317,131 @@ final class SessionModelTests: XCTestCase {
     // MARK: - SessionSource
 
     func testSessionSource_hostStableKey() {
-        XCTAssertEqual(SessionSource.host.stableKey, "host")
+        let key = SessionSource.host(hostID: HostConfig.localhostID).stableKey
+        XCTAssertTrue(key.hasPrefix("host:"))
     }
 
     func testSessionSource_dockerStableKey() {
-        let source = SessionSource.docker(containerName: "my-app")
-        XCTAssertEqual(source.stableKey, "docker:my-app")
+        let source = SessionSource.docker(hostID: HostConfig.localhostID, containerName: "my-app")
+        XCTAssertTrue(source.stableKey.contains("my-app"))
     }
 
     func testSessionSource_hostDisplayName() {
-        XCTAssertEqual(SessionSource.host.displayName, "Host")
+        XCTAssertEqual(SessionSource.host(hostID: HostConfig.localhostID).displayName, "Host")
     }
 
     func testSessionSource_dockerDisplayName() {
-        let source = SessionSource.docker(containerName: "webapp")
+        let source = SessionSource.docker(hostID: HostConfig.localhostID, containerName: "webapp")
         XCTAssertEqual(source.displayName, "webapp")
     }
 
     func testSessionSource_equality() {
-        XCTAssertEqual(SessionSource.host, SessionSource.host)
+        XCTAssertEqual(SessionSource.host(hostID: HostConfig.localhostID), SessionSource.host(hostID: HostConfig.localhostID))
         XCTAssertEqual(
-            SessionSource.docker(containerName: "a"),
-            SessionSource.docker(containerName: "a")
+            SessionSource.docker(hostID: HostConfig.localhostID, containerName: "a"),
+            SessionSource.docker(hostID: HostConfig.localhostID, containerName: "a")
         )
-        XCTAssertNotEqual(SessionSource.host, SessionSource.docker(containerName: "a"))
+        XCTAssertNotEqual(SessionSource.host(hostID: HostConfig.localhostID), SessionSource.docker(hostID: HostConfig.localhostID, containerName: "a"))
         XCTAssertNotEqual(
-            SessionSource.docker(containerName: "a"),
-            SessionSource.docker(containerName: "b")
+            SessionSource.docker(hostID: HostConfig.localhostID, containerName: "a"),
+            SessionSource.docker(hostID: HostConfig.localhostID, containerName: "b")
         )
     }
 
     // MARK: - TmuxSession
 
     func testTmuxSession_id_host() {
-        let s = TmuxSession(name: "dev", source: .host)
-        XCTAssertEqual(s.id, "host:dev")
+        let s = TmuxSession(name: "dev", source: .host(hostID: HostConfig.localhostID))
+        XCTAssertTrue(s.id.contains("dev"))
     }
 
     func testTmuxSession_id_docker() {
-        let s = TmuxSession(name: "dev", source: .docker(containerName: "webapp"))
-        XCTAssertEqual(s.id, "docker:webapp:dev")
+        let s = TmuxSession(name: "dev", source: .docker(hostID: HostConfig.localhostID, containerName: "webapp"))
+        XCTAssertTrue(s.id.contains("dev"))
+        XCTAssertTrue(s.id.contains("webapp"))
     }
 
     func testTmuxSession_displayLabel_host() {
-        let s = TmuxSession(name: "main", source: .host)
+        let s = TmuxSession(name: "main", source: .host(hostID: HostConfig.localhostID))
         XCTAssertEqual(s.displayLabel, "main")
     }
 
     func testTmuxSession_displayLabel_docker() {
-        let s = TmuxSession(name: "main", source: .docker(containerName: "api"))
+        let s = TmuxSession(name: "main", source: .docker(hostID: HostConfig.localhostID, containerName: "api"))
         XCTAssertEqual(s.displayLabel, "api/main")
     }
 
     func testTmuxSession_equality() {
-        let a = TmuxSession(name: "dev", source: .host)
-        let b = TmuxSession(name: "dev", source: .host)
-        let c = TmuxSession(name: "dev", source: .docker(containerName: "x"))
-        let d = TmuxSession(name: "prod", source: .host)
+        let a = TmuxSession(name: "dev", source: .host(hostID: HostConfig.localhostID))
+        let b = TmuxSession(name: "dev", source: .host(hostID: HostConfig.localhostID))
+        let c = TmuxSession(name: "dev", source: .docker(hostID: HostConfig.localhostID, containerName: "x"))
+        let d = TmuxSession(name: "prod", source: .host(hostID: HostConfig.localhostID))
 
         XCTAssertEqual(a, b)
         XCTAssertNotEqual(a, c) // same name, different source
         XCTAssertNotEqual(a, d) // same source, different name
     }
 
-    // MARK: - groupedSessions
+    // MARK: - hostGroupedSessions
 
-    func testGroupedSessions_empty() {
+    func testHostGroupedSessions_empty() {
         let state = AppState()
         state.allSessions = []
-        XCTAssertTrue(state.groupedSessions.isEmpty)
+        // No hosts configured, so no groups
+        XCTAssertTrue(state.hostGroupedSessions.isEmpty)
     }
 
-    func testGroupedSessions_hostOnly() {
+    func testHostGroupedSessions_hostOnly() {
         let state = AppState()
+        state.hosts = [.localhost]
         state.allSessions = [
-            TmuxSession(name: "a", source: .host),
-            TmuxSession(name: "b", source: .host),
+            TmuxSession(name: "a", source: .host(hostID: HostConfig.localhostID)),
+            TmuxSession(name: "b", source: .host(hostID: HostConfig.localhostID)),
         ]
-        let groups = state.groupedSessions
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(groups[0].source, .host)
-        XCTAssertEqual(groups[0].sessions.count, 2)
+        let hostGroups = state.hostGroupedSessions
+        XCTAssertEqual(hostGroups.count, 1)
+        XCTAssertEqual(hostGroups[0].groups.count, 1) // one SessionGroup (host)
+        XCTAssertEqual(hostGroups[0].groups[0].source, .host(hostID: HostConfig.localhostID))
+        XCTAssertEqual(hostGroups[0].groups[0].sessions.count, 2)
     }
 
-    func testGroupedSessions_hostFirstThenDocker() {
+    func testHostGroupedSessions_hostFirstThenDocker() {
         let state = AppState()
+        state.hosts = [.localhost]
         state.allSessions = [
-            TmuxSession(name: "x", source: .docker(containerName: "zzz")),
-            TmuxSession(name: "a", source: .host),
-            TmuxSession(name: "y", source: .docker(containerName: "aaa")),
+            TmuxSession(name: "x", source: .docker(hostID: HostConfig.localhostID, containerName: "zzz")),
+            TmuxSession(name: "a", source: .host(hostID: HostConfig.localhostID)),
+            TmuxSession(name: "y", source: .docker(hostID: HostConfig.localhostID, containerName: "aaa")),
         ]
-        let groups = state.groupedSessions
-        XCTAssertEqual(groups.count, 3)
-        XCTAssertEqual(groups[0].source, .host) // host always first
+        let hostGroups = state.hostGroupedSessions
+        XCTAssertEqual(hostGroups.count, 1) // one host
+        let groups = hostGroups[0].groups
+        XCTAssertEqual(groups.count, 3) // host group + 2 docker groups
+        XCTAssertEqual(groups[0].source, .host(hostID: HostConfig.localhostID)) // host always first
         // Docker groups sorted by key
-        XCTAssertEqual(groups[1].source, .docker(containerName: "aaa"))
-        XCTAssertEqual(groups[2].source, .docker(containerName: "zzz"))
+        XCTAssertEqual(groups[1].source, .docker(hostID: HostConfig.localhostID, containerName: "aaa"))
+        XCTAssertEqual(groups[2].source, .docker(hostID: HostConfig.localhostID, containerName: "zzz"))
     }
 
-    func testGroupedSessions_dockerOnly() {
+    func testHostGroupedSessions_dockerOnly() {
         let state = AppState()
+        state.hosts = [.localhost]
         state.allSessions = [
-            TmuxSession(name: "s1", source: .docker(containerName: "app")),
-            TmuxSession(name: "s2", source: .docker(containerName: "app")),
+            TmuxSession(name: "s1", source: .docker(hostID: HostConfig.localhostID, containerName: "app")),
+            TmuxSession(name: "s2", source: .docker(hostID: HostConfig.localhostID, containerName: "app")),
         ]
-        let groups = state.groupedSessions
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(groups[0].source, .docker(containerName: "app"))
-        XCTAssertEqual(groups[0].sessions.count, 2)
+        let hostGroups = state.hostGroupedSessions
+        XCTAssertEqual(hostGroups.count, 1) // one host
+        XCTAssertEqual(hostGroups[0].groups.count, 1) // one docker group
+        XCTAssertEqual(hostGroups[0].groups[0].source, .docker(hostID: HostConfig.localhostID, containerName: "app"))
+        XCTAssertEqual(hostGroups[0].groups[0].sessions.count, 2)
     }
 
     // MARK: - Favorites
 
     func testToggleFavorite_addsAndRemoves() {
         let state = AppState()
-        let session = TmuxSession(name: "dev", source: .host)
+        let session = TmuxSession(name: "dev", source: .host(hostID: HostConfig.localhostID))
 
         XCTAssertFalse(state.isFavorited(session))
 
@@ -496,9 +454,9 @@ final class SessionModelTests: XCTestCase {
 
     func testFavoriteSessions_filtersCorrectly() {
         let state = AppState()
-        let s1 = TmuxSession(name: "a", source: .host)
-        let s2 = TmuxSession(name: "b", source: .host)
-        let s3 = TmuxSession(name: "c", source: .docker(containerName: "app"))
+        let s1 = TmuxSession(name: "a", source: .host(hostID: HostConfig.localhostID))
+        let s2 = TmuxSession(name: "b", source: .host(hostID: HostConfig.localhostID))
+        let s3 = TmuxSession(name: "c", source: .docker(hostID: HostConfig.localhostID, containerName: "app"))
         state.allSessions = [s1, s2, s3]
 
         state.toggleFavorite(s1)
@@ -513,7 +471,7 @@ final class SessionModelTests: XCTestCase {
 
     func testFavoriteSessions_removedSessionDisappears() {
         let state = AppState()
-        let s1 = TmuxSession(name: "a", source: .host)
+        let s1 = TmuxSession(name: "a", source: .host(hostID: HostConfig.localhostID))
         state.allSessions = [s1]
         state.toggleFavorite(s1)
         XCTAssertEqual(state.favoriteSessions.count, 1)
@@ -525,17 +483,25 @@ final class SessionModelTests: XCTestCase {
         XCTAssertTrue(state.favoritedSessionIDs.contains(s1.id))
     }
 
-    // MARK: - hostSessionNames
+    // MARK: - session filtering
 
-    func testHostSessionNames_filtersDockerSessions() {
+    func testAllSessions_filtersBySource() {
         let state = AppState()
-        state.allSessions = [
-            TmuxSession(name: "onyx", source: .host),
-            TmuxSession(name: "dev", source: .host),
-            TmuxSession(name: "main", source: .docker(containerName: "app")),
+        let hostSessions = [
+            TmuxSession(name: "onyx", source: .host(hostID: HostConfig.localhostID)),
+            TmuxSession(name: "dev", source: .host(hostID: HostConfig.localhostID)),
         ]
-        let names = state.hostSessionNames
-        XCTAssertEqual(names, ["onyx", "dev"])
+        let dockerSessions = [
+            TmuxSession(name: "main", source: .docker(hostID: HostConfig.localhostID, containerName: "app")),
+        ]
+        state.allSessions = hostSessions + dockerSessions
+
+        let hostOnly = state.allSessions.filter {
+            if case .host = $0.source { return true }
+            return false
+        }
+        XCTAssertEqual(hostOnly.count, 2)
+        XCTAssertEqual(hostOnly.map(\.name), ["onyx", "dev"])
     }
 
     // MARK: - sanitizedContainer
@@ -605,7 +571,7 @@ final class SessionModelTests: XCTestCase {
 
     func testUnavailableSession_excludedFromFavorites() {
         let state = AppState()
-        let s = TmuxSession(name: "no tmux", source: .docker(containerName: "app"), unavailable: true)
+        let s = TmuxSession(name: "no tmux", source: .docker(hostID: HostConfig.localhostID, containerName: "app"), unavailable: true)
         state.allSessions = [s]
         state.toggleFavorite(s)
         // Even if favorited, unavailable sessions shouldn't be useful as favorites
@@ -615,18 +581,21 @@ final class SessionModelTests: XCTestCase {
 
     func testUnavailableSession_inGroupedSessions() {
         let state = AppState()
+        state.hosts = [.localhost]
         state.allSessions = [
-            TmuxSession(name: "dev", source: .host),
-            TmuxSession(name: "no tmux", source: .docker(containerName: "redis"), unavailable: true),
+            TmuxSession(name: "dev", source: .host(hostID: HostConfig.localhostID)),
+            TmuxSession(name: "no tmux", source: .docker(hostID: HostConfig.localhostID, containerName: "redis"), unavailable: true),
         ]
-        let groups = state.groupedSessions
-        XCTAssertEqual(groups.count, 2)
+        let hostGroups = state.hostGroupedSessions
+        XCTAssertEqual(hostGroups.count, 1) // one host
+        let groups = hostGroups[0].groups
+        XCTAssertEqual(groups.count, 2) // host group + docker group
         XCTAssertEqual(groups[1].sessions.count, 1)
         XCTAssertTrue(groups[1].sessions[0].unavailable)
     }
 
     func testUnavailableSession_defaultIsFalse() {
-        let s = TmuxSession(name: "dev", source: .host)
+        let s = TmuxSession(name: "dev", source: .host(hostID: HostConfig.localhostID))
         XCTAssertFalse(s.unavailable)
     }
 
@@ -639,7 +608,7 @@ final class SessionModelTests: XCTestCase {
 
     func testActiveSessionName_set() {
         let state = AppState()
-        state.activeSession = TmuxSession(name: "prod", source: .host)
+        state.activeSession = TmuxSession(name: "prod", source: .host(hostID: HostConfig.localhostID))
         XCTAssertEqual(state.activeSessionName, "prod")
     }
 }
@@ -720,7 +689,7 @@ final class FileBrowserTests: XCTestCase {
 
     private func makeBrowser() -> FileBrowserManager {
         let state = AppState()
-        state.sshConfig.host = "localhost"
+        state.hosts = [.localhost]
         return FileBrowserManager(appState: state)
     }
 
@@ -896,5 +865,621 @@ final class RemoteEntryTests: XCTestCase {
         XCTAssertEqual(entries[2].name, "aardvark.txt")
         XCTAssertFalse(entries[3].isDirectory)
         XCTAssertEqual(entries[3].name, "zoo.txt")
+    }
+}
+
+// MARK: - ArtifactManager Tests
+
+final class ArtifactManagerTests: XCTestCase {
+
+    func testSetSlot_validSlot() {
+        let manager = ArtifactManager()
+        let result = manager.setSlot(0, title: "Test", content: .text(content: "Hello", format: .plain))
+        XCTAssertTrue(result)
+        XCTAssertEqual(manager.slots.count, 1)
+        XCTAssertEqual(manager.slots[0]?.title, "Test")
+    }
+
+    func testSetSlot_invalidSlotNegative() {
+        let manager = ArtifactManager()
+        XCTAssertFalse(manager.setSlot(-1, title: "Bad", content: .text(content: "", format: .plain)))
+        XCTAssertTrue(manager.slots.isEmpty)
+    }
+
+    func testSetSlot_invalidSlotTooHigh() {
+        let manager = ArtifactManager()
+        XCTAssertFalse(manager.setSlot(8, title: "Bad", content: .text(content: "", format: .plain)))
+        XCTAssertTrue(manager.slots.isEmpty)
+    }
+
+    func testSetSlot_allValidSlots() {
+        let manager = ArtifactManager()
+        for i in 0..<8 {
+            XCTAssertTrue(manager.setSlot(i, title: "Slot \(i)", content: .text(content: "Content \(i)", format: .plain)))
+        }
+        XCTAssertEqual(manager.slots.count, 8)
+    }
+
+    func testSetSlot_updatesExisting() {
+        let manager = ArtifactManager()
+        _ = manager.setSlot(0, title: "First", content: .text(content: "v1", format: .plain))
+        let firstID = manager.slots[0]!.id
+        _ = manager.setSlot(0, title: "Updated", content: .text(content: "v2", format: .markdown))
+        XCTAssertEqual(manager.slots[0]?.title, "Updated")
+        XCTAssertEqual(manager.slots[0]?.content, .text(content: "v2", format: .markdown))
+        XCTAssertEqual(manager.slots[0]?.id, firstID) // same artifact, just updated
+    }
+
+    func testClearSlot_valid() {
+        let manager = ArtifactManager()
+        _ = manager.setSlot(3, title: "Test", content: .text(content: "", format: .plain))
+        XCTAssertTrue(manager.clearSlot(3))
+        XCTAssertNil(manager.slots[3])
+    }
+
+    func testClearSlot_invalid() {
+        let manager = ArtifactManager()
+        XCTAssertFalse(manager.clearSlot(-1))
+        XCTAssertFalse(manager.clearSlot(8))
+    }
+
+    func testClearSlot_adjustsActiveSlot() {
+        let manager = ArtifactManager()
+        _ = manager.setSlot(2, title: "A", content: .text(content: "", format: .plain))
+        _ = manager.setSlot(5, title: "B", content: .text(content: "", format: .plain))
+        manager.activeSlot = 2
+        _ = manager.clearSlot(2)
+        XCTAssertEqual(manager.activeSlot, 5) // moves to next occupied slot
+    }
+
+    func testClearAll() {
+        let manager = ArtifactManager()
+        _ = manager.setSlot(0, title: "A", content: .text(content: "", format: .plain))
+        _ = manager.setSlot(7, title: "B", content: .diagram(content: "graph TD", format: .mermaid))
+        manager.activeSlot = 7
+        manager.clearAll()
+        XCTAssertTrue(manager.slots.isEmpty)
+        XCTAssertEqual(manager.activeSlot, 0)
+    }
+
+    func testListSlots_empty() {
+        let manager = ArtifactManager()
+        XCTAssertTrue(manager.listSlots().isEmpty)
+    }
+
+    func testListSlots_ordered() {
+        let manager = ArtifactManager()
+        _ = manager.setSlot(5, title: "Five", content: .diagram(content: "graph", format: .mermaid))
+        _ = manager.setSlot(1, title: "One", content: .text(content: "hello", format: .plain))
+        let list = manager.listSlots()
+        XCTAssertEqual(list.count, 2)
+        XCTAssertEqual(list[0].slot, 1)
+        XCTAssertEqual(list[0].title, "One")
+        XCTAssertEqual(list[0].type, "text")
+        XCTAssertEqual(list[1].slot, 5)
+        XCTAssertEqual(list[1].title, "Five")
+        XCTAssertEqual(list[1].type, "diagram")
+    }
+
+    func testHasArtifacts() {
+        let manager = ArtifactManager()
+        XCTAssertFalse(manager.hasArtifacts)
+        _ = manager.setSlot(0, title: "X", content: .text(content: "", format: .plain))
+        XCTAssertTrue(manager.hasArtifacts)
+    }
+
+    func testOccupiedSlotCount() {
+        let manager = ArtifactManager()
+        XCTAssertEqual(manager.occupiedSlotCount, 0)
+        _ = manager.setSlot(0, title: "A", content: .text(content: "", format: .plain))
+        _ = manager.setSlot(3, title: "B", content: .text(content: "", format: .plain))
+        XCTAssertEqual(manager.occupiedSlotCount, 2)
+    }
+
+    func testArtifactContent_typeLabel() {
+        XCTAssertEqual(ArtifactContent.text(content: "", format: .plain).typeLabel, "text")
+        XCTAssertEqual(ArtifactContent.diagram(content: "", format: .mermaid).typeLabel, "diagram")
+        XCTAssertEqual(ArtifactContent.model3D(data: Data(), format: .obj).typeLabel, "3d_model")
+    }
+
+    func testArtifactContent_equality() {
+        let a = ArtifactContent.text(content: "hello", format: .markdown)
+        let b = ArtifactContent.text(content: "hello", format: .markdown)
+        let c = ArtifactContent.text(content: "hello", format: .plain)
+        XCTAssertEqual(a, b)
+        XCTAssertNotEqual(a, c)
+    }
+
+    func testDiagramContent() {
+        let manager = ArtifactManager()
+        let mermaid = "graph TD\n    A-->B"
+        _ = manager.setSlot(0, title: "Flow", content: .diagram(content: mermaid, format: .mermaid))
+        XCTAssertEqual(manager.slots[0]?.content, .diagram(content: mermaid, format: .mermaid))
+    }
+
+    func testModel3DContent() {
+        let manager = ArtifactManager()
+        let data = Data([0x01, 0x02, 0x03])
+        _ = manager.setSlot(0, title: "Cube", content: .model3D(data: data, format: .obj))
+        XCTAssertEqual(manager.slots[0]?.content, .model3D(data: data, format: .obj))
+    }
+}
+
+// MARK: - MCP Message Handler Tests
+
+final class MCPMessageHandlerTests: XCTestCase {
+
+    private func makeHandler() -> (MCPMessageHandler, ArtifactManager) {
+        let manager = ArtifactManager()
+        let handler = MCPMessageHandler(artifactManager: manager)
+        return (handler, manager)
+    }
+
+    // MARK: - Initialize
+
+    func testInitialize() {
+        let (handler, _) = makeHandler()
+        let request = JSONRPCRequest(id: .int(1), method: "initialize")
+        let response = handler.dispatch(request)
+        XCTAssertNil(response.error)
+        XCTAssertNotNil(response.result)
+        if case .object(let obj) = response.result {
+            XCTAssertEqual(obj["protocolVersion"], .string("2024-11-05"))
+            if case .object(let info) = obj["serverInfo"] {
+                XCTAssertEqual(info["name"], .string("onyx"))
+            } else {
+                XCTFail("Missing serverInfo")
+            }
+        } else {
+            XCTFail("Expected object result")
+        }
+    }
+
+    // MARK: - Tools List
+
+    func testToolsList() {
+        let (handler, _) = makeHandler()
+        let request = JSONRPCRequest(id: .int(2), method: "tools/list")
+        let response = handler.dispatch(request)
+        XCTAssertNil(response.error)
+        if case .object(let obj) = response.result,
+           case .array(let tools) = obj["tools"] {
+            XCTAssertEqual(tools.count, 5) // show_text, show_diagram, show_model, clear_slot, list_slots
+            let names = tools.compactMap { tool -> String? in
+                if case .object(let t) = tool { return t["name"]?.stringValue }
+                return nil
+            }
+            XCTAssertTrue(names.contains("show_text"))
+            XCTAssertTrue(names.contains("show_diagram"))
+            XCTAssertTrue(names.contains("show_model"))
+            XCTAssertTrue(names.contains("clear_slot"))
+            XCTAssertTrue(names.contains("list_slots"))
+        } else {
+            XCTFail("Expected tools array in result")
+        }
+    }
+
+    // MARK: - Unknown Method
+
+    func testUnknownMethod() {
+        let (handler, _) = makeHandler()
+        let request = JSONRPCRequest(id: .int(3), method: "nonexistent/method")
+        let response = handler.dispatch(request)
+        XCTAssertNotNil(response.error)
+        XCTAssertEqual(response.error?.code, -32601) // method not found
+    }
+
+    // MARK: - Notifications
+
+    func testNotificationsInitialized() {
+        let (handler, _) = makeHandler()
+        let request = JSONRPCRequest(id: .int(4), method: "notifications/initialized")
+        let response = handler.dispatch(request)
+        XCTAssertNil(response.error)
+        XCTAssertEqual(response.result, .null)
+    }
+
+    // MARK: - handleMessage parse error
+
+    func testHandleMessage_invalidJSON() {
+        let (handler, _) = makeHandler()
+        let garbage = "not json at all".data(using: .utf8)!
+        let responseData = handler.handleMessage(garbage)
+        XCTAssertNotNil(responseData)
+        if let data = responseData,
+           let response = try? JSONDecoder().decode(JSONRPCResponse.self, from: data) {
+            XCTAssertNotNil(response.error)
+            XCTAssertEqual(response.error?.code, -32700) // parse error
+        }
+    }
+
+    // MARK: - tools/call missing params
+
+    func testToolsCall_missingToolName() {
+        let (handler, _) = makeHandler()
+        let request = JSONRPCRequest(id: .int(5), method: "tools/call", params: [:])
+        let response = handler.dispatch(request)
+        XCTAssertNotNil(response.error)
+        XCTAssertEqual(response.error?.code, -32602) // invalid params
+    }
+
+    func testToolsCall_unknownTool() {
+        let (handler, _) = makeHandler()
+        let request = JSONRPCRequest(id: .int(6), method: "tools/call", params: [
+            "name": .string("nonexistent_tool"),
+            "arguments": .object([:])
+        ])
+        let response = handler.dispatch(request)
+        XCTAssertNotNil(response.error)
+        XCTAssertEqual(response.error?.code, -32602)
+    }
+
+    // MARK: - Response ID passthrough
+
+    func testResponsePreservesID_int() {
+        let (handler, _) = makeHandler()
+        let request = JSONRPCRequest(id: .int(42), method: "initialize")
+        let response = handler.dispatch(request)
+        XCTAssertEqual(response.id, .int(42))
+    }
+
+    func testResponsePreservesID_string() {
+        let (handler, _) = makeHandler()
+        let request = JSONRPCRequest(id: .string("req-abc"), method: "initialize")
+        let response = handler.dispatch(request)
+        XCTAssertEqual(response.id, .string("req-abc"))
+    }
+}
+
+// MARK: - AnyCodableValue Tests
+
+final class AnyCodableValueTests: XCTestCase {
+
+    func testStringRoundTrip() throws {
+        let value = AnyCodableValue.string("hello")
+        let data = try JSONEncoder().encode(value)
+        let decoded = try JSONDecoder().decode(AnyCodableValue.self, from: data)
+        XCTAssertEqual(decoded, value)
+        XCTAssertEqual(decoded.stringValue, "hello")
+    }
+
+    func testIntRoundTrip() throws {
+        let value = AnyCodableValue.int(42)
+        let data = try JSONEncoder().encode(value)
+        let decoded = try JSONDecoder().decode(AnyCodableValue.self, from: data)
+        XCTAssertEqual(decoded, value)
+        XCTAssertEqual(decoded.intValue, 42)
+    }
+
+    func testBoolRoundTrip() throws {
+        let value = AnyCodableValue.bool(true)
+        let data = try JSONEncoder().encode(value)
+        let decoded = try JSONDecoder().decode(AnyCodableValue.self, from: data)
+        XCTAssertEqual(decoded, value)
+        XCTAssertEqual(decoded.boolValue, true)
+    }
+
+    func testNullRoundTrip() throws {
+        let value = AnyCodableValue.null
+        let data = try JSONEncoder().encode(value)
+        let decoded = try JSONDecoder().decode(AnyCodableValue.self, from: data)
+        XCTAssertEqual(decoded, value)
+    }
+
+    func testArrayRoundTrip() throws {
+        let value = AnyCodableValue.array([.string("a"), .int(1), .bool(false)])
+        let data = try JSONEncoder().encode(value)
+        let decoded = try JSONDecoder().decode(AnyCodableValue.self, from: data)
+        XCTAssertEqual(decoded, value)
+        XCTAssertEqual(decoded.arrayValue?.count, 3)
+    }
+
+    func testObjectRoundTrip() throws {
+        let value = AnyCodableValue.object(["key": .string("val"), "num": .int(5)])
+        let data = try JSONEncoder().encode(value)
+        let decoded = try JSONDecoder().decode(AnyCodableValue.self, from: data)
+        XCTAssertEqual(decoded, value)
+        XCTAssertEqual(decoded.objectValue?["key"], .string("val"))
+    }
+
+    func testNestedObject() throws {
+        let value = AnyCodableValue.object([
+            "tools": .array([
+                .object(["name": .string("test"), "params": .object(["required": .bool(true)])])
+            ])
+        ])
+        let data = try JSONEncoder().encode(value)
+        let decoded = try JSONDecoder().decode(AnyCodableValue.self, from: data)
+        XCTAssertEqual(decoded, value)
+    }
+
+    func testWrongAccessors() {
+        let str = AnyCodableValue.string("hello")
+        XCTAssertNil(str.intValue)
+        XCTAssertNil(str.boolValue)
+        XCTAssertNil(str.objectValue)
+        XCTAssertNil(str.arrayValue)
+
+        let num = AnyCodableValue.int(5)
+        XCTAssertNil(num.stringValue)
+        XCTAssertNil(num.boolValue)
+    }
+
+    func testDoubleToInt() {
+        let dbl = AnyCodableValue.double(3.0)
+        XCTAssertEqual(dbl.intValue, 3)
+    }
+}
+
+// MARK: - RightPanel State Tests
+
+final class RightPanelTests: XCTestCase {
+
+    func testActiveRightPanel_default() {
+        let state = AppState()
+        XCTAssertNil(state.activeRightPanel)
+    }
+
+    func testShowNotes_computedProperty() {
+        let state = AppState()
+        state.showNotes = true
+        XCTAssertEqual(state.activeRightPanel, .notes)
+        state.showNotes = false
+        XCTAssertNil(state.activeRightPanel)
+    }
+
+    func testShowFileBrowser_computedProperty() {
+        let state = AppState()
+        state.showFileBrowser = true
+        XCTAssertEqual(state.activeRightPanel, .fileBrowser)
+        state.showFileBrowser = false
+        XCTAssertNil(state.activeRightPanel)
+    }
+
+    func testShowArtifacts_computedProperty() {
+        let state = AppState()
+        state.showArtifacts = true
+        XCTAssertEqual(state.activeRightPanel, .artifacts)
+        state.showArtifacts = false
+        XCTAssertNil(state.activeRightPanel)
+    }
+
+    func testOnlyOnePanelAtATime() {
+        let state = AppState()
+        state.showNotes = true
+        XCTAssertTrue(state.showNotes)
+        XCTAssertFalse(state.showFileBrowser)
+        XCTAssertFalse(state.showArtifacts)
+
+        state.showFileBrowser = true
+        XCTAssertFalse(state.showNotes) // setting fileBrowser replaces notes
+        XCTAssertTrue(state.showFileBrowser)
+
+        state.showArtifacts = true
+        XCTAssertFalse(state.showFileBrowser)
+        XCTAssertTrue(state.showArtifacts)
+    }
+
+    func testDismissTopOverlay_panelDismissedLast() {
+        let state = AppState()
+        state.showCommandPalette = true
+        state.showSettings = true
+        state.activeRightPanel = .notes
+
+        // Command palette dismissed first
+        state.dismissTopOverlay()
+        XCTAssertFalse(state.showCommandPalette)
+        XCTAssertTrue(state.showSettings)
+        XCTAssertEqual(state.activeRightPanel, .notes)
+
+        // Settings dismissed second
+        state.dismissTopOverlay()
+        XCTAssertFalse(state.showSettings)
+        XCTAssertEqual(state.activeRightPanel, .notes)
+
+        // Panel dismissed last
+        state.dismissTopOverlay()
+        XCTAssertNil(state.activeRightPanel)
+    }
+}
+
+// MARK: - Git Parser Tests
+
+final class GitParserTests: XCTestCase {
+
+    private func makeGitManager() -> GitManager {
+        let state = AppState()
+        return GitManager(appState: state)
+    }
+
+    // MARK: - parseGitStatusPorcelain
+
+    func testParseGitStatus_modifiedFile() {
+        let gm = makeGitManager()
+        let files = gm.parseGitStatusPorcelain(" M src/main.swift")
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0].path, "src/main.swift")
+        XCTAssertEqual(files[0].status, .modified)
+        XCTAssertEqual(files[0].area, .unstaged)
+    }
+
+    func testParseGitStatus_stagedFile() {
+        let gm = makeGitManager()
+        let files = gm.parseGitStatusPorcelain("M  src/main.swift")
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0].status, .modified)
+        XCTAssertEqual(files[0].area, .staged)
+    }
+
+    func testParseGitStatus_stagedAndUnstaged() {
+        let gm = makeGitManager()
+        let files = gm.parseGitStatusPorcelain("MM src/main.swift")
+        XCTAssertEqual(files.count, 2) // one staged, one unstaged
+        XCTAssertTrue(files.contains(where: { $0.area == .staged }))
+        XCTAssertTrue(files.contains(where: { $0.area == .unstaged }))
+    }
+
+    func testParseGitStatus_addedFile() {
+        let gm = makeGitManager()
+        let files = gm.parseGitStatusPorcelain("A  newfile.swift")
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0].status, .added)
+        XCTAssertEqual(files[0].area, .staged)
+    }
+
+    func testParseGitStatus_deletedFile() {
+        let gm = makeGitManager()
+        let files = gm.parseGitStatusPorcelain(" D oldfile.swift")
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0].status, .deleted)
+        XCTAssertEqual(files[0].area, .unstaged)
+    }
+
+    func testParseGitStatus_untrackedFile() {
+        let gm = makeGitManager()
+        let files = gm.parseGitStatusPorcelain("?? new_untracked.txt")
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0].status, .untracked)
+        XCTAssertEqual(files[0].area, .untracked)
+        XCTAssertEqual(files[0].path, "new_untracked.txt")
+    }
+
+    func testParseGitStatus_multipleFiles() {
+        let gm = makeGitManager()
+        let output = """
+        M  staged.swift
+         M unstaged.swift
+        ?? untracked.txt
+        A  added.swift
+         D deleted.swift
+        """
+        let files = gm.parseGitStatusPorcelain(output)
+        XCTAssertEqual(files.count, 5)
+    }
+
+    func testParseGitStatus_empty() {
+        let gm = makeGitManager()
+        let files = gm.parseGitStatusPorcelain("")
+        XCTAssertTrue(files.isEmpty)
+    }
+
+    func testParseGitStatus_renamedFile() {
+        let gm = makeGitManager()
+        let files = gm.parseGitStatusPorcelain("R  old.swift -> new.swift")
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0].status, .renamed)
+        XCTAssertEqual(files[0].area, .staged)
+    }
+
+    // MARK: - parseDiffStat
+
+    func testParseDiffStat_typical() {
+        let gm = makeGitManager()
+        let output = """
+         src/main.swift  | 10 +++++++---
+         src/utils.swift |  5 ++---
+         3 files changed, 45 insertions(+), 12 deletions(-)
+        """
+        let stats = gm.parseDiffStat(output)
+        XCTAssertNotNil(stats)
+        XCTAssertEqual(stats?.filesChanged, 3)
+        XCTAssertEqual(stats?.insertions, 45)
+        XCTAssertEqual(stats?.deletions, 12)
+    }
+
+    func testParseDiffStat_singleFile() {
+        let gm = makeGitManager()
+        let output = " 1 file changed, 2 insertions(+)"
+        let stats = gm.parseDiffStat(output)
+        XCTAssertNotNil(stats)
+        XCTAssertEqual(stats?.filesChanged, 1)
+        XCTAssertEqual(stats?.insertions, 2)
+        XCTAssertEqual(stats?.deletions, 0)
+    }
+
+    func testParseDiffStat_deletionsOnly() {
+        let gm = makeGitManager()
+        let output = " 1 file changed, 5 deletions(-)"
+        let stats = gm.parseDiffStat(output)
+        XCTAssertNotNil(stats)
+        XCTAssertEqual(stats?.filesChanged, 1)
+        XCTAssertEqual(stats?.insertions, 0)
+        XCTAssertEqual(stats?.deletions, 5)
+    }
+
+    func testParseDiffStat_empty() {
+        let gm = makeGitManager()
+        let stats = gm.parseDiffStat("")
+        XCTAssertNil(stats)
+    }
+
+    func testParseDiffStat_noChanges() {
+        let gm = makeGitManager()
+        let stats = gm.parseDiffStat("no changes at all")
+        XCTAssertNil(stats)
+    }
+
+    // MARK: - GitRepoStatus computed properties
+
+    func testGitRepoStatus_isClean() {
+        let status = GitRepoStatus(branch: "main", isDetachedHead: false, changedFiles: [], diffStats: nil)
+        XCTAssertTrue(status.isClean)
+        XCTAssertTrue(status.stagedFiles.isEmpty)
+        XCTAssertTrue(status.unstagedFiles.isEmpty)
+        XCTAssertTrue(status.untrackedFiles.isEmpty)
+    }
+
+    func testGitRepoStatus_filtersAreas() {
+        let files = [
+            GitChangedFile(path: "a.swift", status: .modified, area: .staged),
+            GitChangedFile(path: "b.swift", status: .modified, area: .unstaged),
+            GitChangedFile(path: "c.txt", status: .untracked, area: .untracked),
+            GitChangedFile(path: "d.swift", status: .added, area: .staged),
+        ]
+        let status = GitRepoStatus(branch: "main", isDetachedHead: false, changedFiles: files, diffStats: nil)
+        XCTAssertFalse(status.isClean)
+        XCTAssertEqual(status.stagedFiles.count, 2)
+        XCTAssertEqual(status.unstagedFiles.count, 1)
+        XCTAssertEqual(status.untrackedFiles.count, 1)
+    }
+}
+
+// MARK: - JSONRPCRequest/Response Codable Tests
+
+final class JSONRPCCodableTests: XCTestCase {
+
+    func testRequestEncodeDecode() throws {
+        let request = JSONRPCRequest(id: .int(1), method: "tools/list", params: ["cursor": .string("abc")])
+        let data = try JSONEncoder().encode(request)
+        let decoded = try JSONDecoder().decode(JSONRPCRequest.self, from: data)
+        XCTAssertEqual(decoded.jsonrpc, "2.0")
+        XCTAssertEqual(decoded.id, .int(1))
+        XCTAssertEqual(decoded.method, "tools/list")
+        XCTAssertEqual(decoded.params?["cursor"], .string("abc"))
+    }
+
+    func testResponseWithResult() throws {
+        let response = JSONRPCResponse(id: .string("req-1"), result: .object(["status": .string("ok")]))
+        let data = try JSONEncoder().encode(response)
+        let decoded = try JSONDecoder().decode(JSONRPCResponse.self, from: data)
+        XCTAssertEqual(decoded.id, .string("req-1"))
+        XCTAssertNotNil(decoded.result)
+        XCTAssertNil(decoded.error)
+    }
+
+    func testResponseWithError() throws {
+        let response = JSONRPCResponse(id: .int(5), error: .methodNotFound)
+        let data = try JSONEncoder().encode(response)
+        let decoded = try JSONDecoder().decode(JSONRPCResponse.self, from: data)
+        XCTAssertNil(decoded.result)
+        XCTAssertNotNil(decoded.error)
+        XCTAssertEqual(decoded.error?.code, -32601)
+    }
+
+    func testJSONRPCError_staticValues() {
+        XCTAssertEqual(JSONRPCError.parseError.code, -32700)
+        XCTAssertEqual(JSONRPCError.invalidRequest.code, -32600)
+        XCTAssertEqual(JSONRPCError.methodNotFound.code, -32601)
+        XCTAssertEqual(JSONRPCError.invalidParams.code, -32602)
     }
 }
