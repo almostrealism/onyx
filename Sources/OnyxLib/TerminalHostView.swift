@@ -144,8 +144,27 @@ class OnyxTerminalView: NSView {
     }
 
     private func startEvictionTimer() {
-        evictionTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        evictionTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            self?.healthCheck()
             self?.evictStaleEntries()
+        }
+    }
+
+    /// Detect dead processes that didn't trigger processTerminated
+    private func healthCheck() {
+        guard let id = activeSessionID, let entry = pool[id] else { return }
+        guard entry.processRunning else { return }
+
+        // Check if the underlying process is actually still alive
+        if !entry.terminalView.process.running {
+            print("Health check: active session \(id) process is dead, triggering reconnect")
+            pool[id]?.processRunning = false
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                guard self.appState.connectionError == nil else { return }
+                self.reconnect()
+            }
         }
     }
 
@@ -684,6 +703,8 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
             pool[id]?.processRunning = false
         }
 
+        print("processTerminated: session=\(terminatedSessionID ?? "unknown") active=\(activeSessionID ?? "none") exit=\(exitCode.map(String.init) ?? "nil")")
+
         if wasKeySetup {
             if exitCode != 0 {
                 DispatchQueue.main.async { [weak self] in
@@ -691,7 +712,6 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
                     self?.appState.isReconnecting = false
                 }
             } else {
-                // Key setup succeeded — clean up and start a fresh connection
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     if let id = self.activeSessionID {
@@ -707,21 +727,41 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
             return
         }
 
-        // Background session died — destroy its pool entry so next switch gets a fresh view
-        guard terminatedSessionID == activeSessionID else {
+        // If we couldn't find which session this was, but the active session's
+        // process is also dead, treat it as the active session dying
+        let isActiveSession: Bool
+        if let id = terminatedSessionID {
+            isActiveSession = (id == activeSessionID)
+        } else if let activeID = activeSessionID,
+                  let entry = pool[activeID],
+                  !entry.terminalView.process.running {
+            // Pool lookup failed but active session process is dead
+            pool[activeID]?.processRunning = false
+            isActiveSession = true
+        } else {
+            isActiveSession = false
+        }
+
+        guard isActiveSession else {
+            // Background session died — destroy its pool entry so next switch gets a fresh view
             if let id = terminatedSessionID {
                 destroyPoolEntry(id)
             }
             return
         }
 
-        // Active session died — auto-reconnect
+        // Active session died — auto-reconnect (except read-only log streams)
         DispatchQueue.main.async { [weak self] in
-            if self?.appState.connectionError != nil {
-                self?.appState.isReconnecting = false
+            guard let self = self else { return }
+            if self.appState.connectionError != nil {
+                self.appState.isReconnecting = false
                 return
             }
-            self?.reconnect()
+            // Don't auto-reconnect docker logs — the container may have stopped
+            if let session = self.appState.activeSession, session.source.isDockerLogs {
+                return
+            }
+            self.reconnect()
         }
     }
 }
