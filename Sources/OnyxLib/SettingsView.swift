@@ -290,7 +290,7 @@ private struct HostRow: View {
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundColor(.white.opacity(0.9))
 
-                    if !host.isLocal {
+                    if host.id != HostConfig.localhostID {
                         let display = host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
                         Text(display.isEmpty ? "not configured" : display)
                             .font(.system(size: 10, design: .monospaced))
@@ -300,7 +300,7 @@ private struct HostRow: View {
 
                 Spacer()
 
-                if !host.isLocal {
+                if host.id != HostConfig.localhostID {
                     Button(action: onToggleEdit) {
                         Image(systemName: isEditing ? "chevron.up" : "chevron.down")
                             .font(.system(size: 10))
@@ -313,11 +313,11 @@ private struct HostRow: View {
             .padding(.vertical, 8)
             .contentShape(Rectangle())
             .onTapGesture {
-                if !host.isLocal { onToggleEdit() }
+                if host.id != HostConfig.localhostID { onToggleEdit() }
             }
 
             // Expanded edit form
-            if isEditing && !host.isLocal {
+            if isEditing && host.id != HostConfig.localhostID {
                 VStack(spacing: 8) {
                     OnyxTextField(label: "Label", text: $label, placeholder: "My Server")
                     OnyxTextField(label: "Host", text: $sshHost, placeholder: "192.168.1.100")

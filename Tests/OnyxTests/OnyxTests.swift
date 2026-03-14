@@ -1658,4 +1658,91 @@ final class MCPForwardingTests: XCTestCase {
         // dockerLogsCommand doesn't use mcpForwardingArgs — just a plain SSH command
         XCTAssertFalse(args.last?.contains("ONYX_MCP_PORT") ?? false)
     }
+
+    // MARK: - Session Identity Tests
+
+    func testSessionIdentity_includesHostID() {
+        let hostID = UUID()
+        let session = TmuxSession(
+            name: "dev",
+            source: .host(hostID: hostID)
+        )
+        XCTAssertTrue(session.id.contains(hostID.uuidString))
+        XCTAssertTrue(session.id.contains("dev"))
+    }
+
+    func testSessionIdentity_differentHostsSameName_differentIDs() {
+        let hostA = UUID()
+        let hostB = UUID()
+        let sessionA = TmuxSession(name: "dev", source: .host(hostID: hostA))
+        let sessionB = TmuxSession(name: "dev", source: .host(hostID: hostB))
+        XCTAssertNotEqual(sessionA.id, sessionB.id)
+    }
+
+    func testSessionIdentity_sameHostSameName_equalIDs() {
+        let hostID = UUID()
+        let sessionA = TmuxSession(name: "dev", source: .host(hostID: hostID))
+        let sessionB = TmuxSession(name: "dev", source: .host(hostID: hostID))
+        XCTAssertEqual(sessionA.id, sessionB.id)
+    }
+
+    func testSessionIdentity_dockerVsHost_differentIDs() {
+        let hostID = UUID()
+        let hostSession = TmuxSession(name: "dev", source: .host(hostID: hostID))
+        let dockerSession = TmuxSession(name: "dev", source: .docker(hostID: hostID, containerName: "app"))
+        XCTAssertNotEqual(hostSession.id, dockerSession.id)
+    }
+
+    func testSessionIdentity_dockerLogsVsDocker_differentIDs() {
+        let hostID = UUID()
+        let dockerSession = TmuxSession(name: "logs", source: .docker(hostID: hostID, containerName: "app"))
+        let logsSession = TmuxSession(name: "logs", source: .dockerLogs(hostID: hostID, containerName: "app"))
+        XCTAssertNotEqual(dockerSession.id, logsSession.id)
+    }
+
+    func testActiveSession_notOverriddenByAllSessions() {
+        // When activeSession is already set, assigning allSessions should not clear it
+        let state = AppState()
+        let hostID = UUID()
+        let target = TmuxSession(name: "mySession", source: .host(hostID: hostID))
+        state.activeSession = target
+        state.allSessions = [
+            TmuxSession(name: "other1", source: .host(hostID: hostID)),
+            TmuxSession(name: "other2", source: .host(hostID: hostID)),
+        ]
+        // activeSession should remain what we set it to
+        XCTAssertEqual(state.activeSession?.name, "mySession")
+        XCTAssertEqual(state.activeSession?.id, target.id)
+    }
+
+    func testIsLocal_emptyHost_returnsTrue() {
+        let host = HostConfig(label: "New Host", ssh: SSHConfig(host: ""))
+        XCTAssertTrue(host.isLocal, "Empty host should be considered local")
+    }
+
+    func testIsLocal_localhost_returnsTrue() {
+        let host = HostConfig(label: "Local", ssh: SSHConfig(host: "localhost"))
+        XCTAssertTrue(host.isLocal)
+    }
+
+    func testIsLocal_remoteHost_returnsFalse() {
+        let host = HostConfig(label: "Server", ssh: SSHConfig(host: "myserver.com"))
+        XCTAssertFalse(host.isLocal)
+    }
+
+    func testLocalhostID_isStable() {
+        XCTAssertEqual(
+            HostConfig.localhostID,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        )
+        XCTAssertEqual(HostConfig.localhost.id, HostConfig.localhostID)
+    }
+
+    func testNewHost_isNotBuiltinLocalhost() {
+        // A new host with empty ssh.host has isLocal==true but a different ID than localhostID
+        let newHost = HostConfig(label: "New Host", ssh: SSHConfig(host: ""))
+        XCTAssertTrue(newHost.isLocal)
+        XCTAssertNotEqual(newHost.id, HostConfig.localhostID,
+            "New hosts should have unique IDs, not the built-in localhost ID")
+    }
 }
