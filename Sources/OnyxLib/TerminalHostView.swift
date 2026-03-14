@@ -308,6 +308,9 @@ class OnyxTerminalView: NSView {
         lastStartTime = Date()
         isKeySetup = false
 
+        // Remember exactly which session we're reconnecting to
+        let targetSession = appState.activeSession
+
         // Destroy only the current session's pool entry for a fresh start
         if let id = activeSessionID {
             destroyPoolEntry(id)
@@ -319,25 +322,34 @@ class OnyxTerminalView: NSView {
             self.appState.needsKeySetup = false
         }
 
+        // Re-enumerate to refresh the session list, but always reconnect
+        // to the same session — never silently switch to a different one
         enumerateAllSessions {
-            self.connectToActiveSession()
+            DispatchQueue.main.async {
+                // Restore the target session regardless of what enumeration found
+                if let target = targetSession {
+                    self.appState.activeSession = target
+                }
+                self.connectToActiveSession()
+            }
         }
     }
 
     private func connectToActiveSession() {
-        DispatchQueue.main.async {
-            let defaultHost = self.appState.hosts.first ?? .localhost
-            let defaultSession = TmuxSession(
-                name: defaultHost.ssh.tmuxSession,
-                source: .host(hostID: defaultHost.id)
-            )
-            let session = self.appState.activeSession ?? defaultSession
-            let tv = self.activateSession(session)
-            self.lastStartTime = Date()
-            let (cmd, args) = self.appState.commandForSession(session)
-            tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
-            self.pool[session.id]?.processRunning = true
-        }
+        let defaultHost = self.appState.hosts.first ?? .localhost
+        let defaultSession = TmuxSession(
+            name: defaultHost.ssh.tmuxSession,
+            source: .host(hostID: defaultHost.id)
+        )
+        let session = self.appState.activeSession ?? defaultSession
+        let hostLabel = self.appState.host(for: session.source.hostID)?.label ?? "unknown"
+        print("connectToActiveSession: \(session.displayLabel) on \(hostLabel) [id: \(session.id)]")
+
+        let tv = self.activateSession(session)
+        self.lastStartTime = Date()
+        let (cmd, args) = self.appState.commandForSession(session)
+        tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
+        self.pool[session.id]?.processRunning = true
     }
 
     /// Probe a remote host with BatchMode=yes. Returns true if key auth works.
@@ -428,16 +440,20 @@ class OnyxTerminalView: NSView {
                         source: .host(hostID: defaultHost.id)
                     )
                     self.appState.allSessions = [fallback]
-                    self.appState.activeSession = fallback
+                    if self.appState.activeSession == nil {
+                        self.appState.activeSession = fallback
+                    }
                 } else {
                     self.appState.allSessions = allResults
-                    if let current = self.appState.activeSession,
-                       allResults.contains(where: { $0.id == current.id }) {
-                        // still valid
-                    } else {
+                    // Only reassign active session if there is none at all.
+                    // Never silently switch to a different session — that causes
+                    // cross-host/cross-container session confusion.
+                    if self.appState.activeSession == nil {
                         let defaultHost = self.appState.hosts.first ?? .localhost
                         let defaultMatch = allResults.first {
-                            $0.source.hostID == defaultHost.id && $0.name == defaultHost.ssh.tmuxSession
+                            $0.source.hostID == defaultHost.id
+                                && $0.name == defaultHost.ssh.tmuxSession
+                                && !$0.source.isDocker
                         }
                         self.appState.activeSession = defaultMatch ?? allResults.first
                     }
@@ -638,6 +654,8 @@ class OnyxTerminalView: NSView {
         lastStartTime = Date()
         isKeySetup = false
 
+        let targetSession = appState.activeSession
+
         if let id = activeSessionID {
             destroyPoolEntry(id)
             activeSessionID = nil
@@ -649,11 +667,17 @@ class OnyxTerminalView: NSView {
         }
 
         enumerateAllSessions {
-            self.connectToActiveSession()
+            DispatchQueue.main.async {
+                if let target = targetSession {
+                    self.appState.activeSession = target
+                }
+                self.connectToActiveSession()
+            }
         }
     }
 
     private func reconnect() {
+        let targetSession = appState.activeSession
         let delay = min(pow(2.0, Double(reconnectAttempt)) * 0.5, maxBackoff)
         reconnectAttempt += 1
 
@@ -672,8 +696,14 @@ class OnyxTerminalView: NSView {
                 self.activeSessionID = nil
             }
 
+            // Restore the target session — don't let enumeration reassign it
             self.enumerateAllSessions {
-                self.connectToActiveSession()
+                DispatchQueue.main.async {
+                    if let target = targetSession {
+                        self.appState.activeSession = target
+                    }
+                    self.connectToActiveSession()
+                }
             }
         }
     }
