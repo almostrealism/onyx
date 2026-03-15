@@ -584,11 +584,7 @@ class OnyxTerminalView: NSView {
                     name: "logs",
                     source: .dockerLogs(hostID: host.id, containerName: containerName)
                 ))
-                if sessions.isEmpty {
-                    allDockerSessions.append(TmuxSession(
-                        name: "no sessions", source: source, unavailable: true
-                    ))
-                } else {
+                if !sessions.isEmpty {
                     allDockerSessions.append(contentsOf: sessions)
                 }
                 lock.unlock()
