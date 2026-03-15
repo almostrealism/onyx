@@ -67,28 +67,30 @@ public class MonitorManager: ObservableObject {
 
     /// Get bucketed values for the grid chart. Returns up to 60 buckets.
     public func bucketedCPU() -> [Double] {
-        return bucket(samples.compactMap { s in s.cpuUsage.map { (s.timestamp, $0) } })
+        return bucket(samples.map { ($0.timestamp, $0.cpuUsage) }, for: "cpu")
     }
 
     public func bucketedMemory() -> [Double] {
-        return bucket(samples.compactMap { s -> (Date, Double)? in
-            guard let u = s.memUsed, let t = s.memTotal, t > 0 else { return nil }
+        return bucket(samples.map { s -> (Date, Double?) in
+            guard let u = s.memUsed, let t = s.memTotal, t > 0 else { return (s.timestamp, nil) }
             return (s.timestamp, (u / t) * 100)
-        })
+        }, for: "mem")
     }
 
     public func bucketedGPU() -> [Double] {
-        return bucket(samples.compactMap { s in s.gpuUsage.map { (s.timestamp, $0) } })
+        return bucket(samples.map { ($0.timestamp, $0.gpuUsage) }, for: "gpu")
     }
 
-    private func bucket(_ data: [(Date, Double)]) -> [Double] {
-        guard !data.isEmpty else { return [] }
+    private func bucket(_ data: [(Date, Double?)], for label: String) -> [Double] {
+        let hasAny = data.contains { $0.1 != nil }
+        guard hasAny else { return [] }
         let bucketCount = 60
 
         if useShortInterval {
             // 5s polling ≈ 1 sample per column — use values directly to avoid
-            // timer-jitter gaps from time-based bucketing
-            let recent = data.suffix(bucketCount).map { $0.1 }
+            // timer-jitter gaps from time-based bucketing.
+            // Use 0 for missing values to keep all charts aligned.
+            let recent = data.suffix(bucketCount).map { $0.1 ?? 0 }
             let padding = Array(repeating: 0.0, count: max(0, bucketCount - recent.count))
             return padding + recent
         }
@@ -101,7 +103,7 @@ public class MonitorManager: ObservableObject {
         for i in 0..<bucketCount {
             let bucketEnd = now.addingTimeInterval(-Double(i) * interval)
             let bucketStart = bucketEnd.addingTimeInterval(-interval)
-            let vals = data.filter { $0.0 > bucketStart && $0.0 <= bucketEnd }.map { $0.1 }
+            let vals = data.filter { $0.0 > bucketStart && $0.0 <= bucketEnd }.compactMap { $0.1 }
             if !vals.isEmpty {
                 buckets[bucketCount - 1 - i] = vals.reduce(0, +) / Double(vals.count)
             }
