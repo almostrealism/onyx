@@ -367,9 +367,15 @@ class OnyxTerminalView: NSView {
         self.pool[session.id]?.processRunning = true
     }
 
-    /// Probe a remote host with BatchMode=yes. Returns true if key auth works.
-    private func probeHost(_ host: HostConfig) -> Bool {
-        guard !host.isLocal else { return true }
+    private enum ProbeResult {
+        case ok
+        case unreachable
+        case keyAuthFailed
+    }
+
+    /// Probe a remote host with BatchMode=yes to check connectivity and key auth.
+    private func probeHost(_ host: HostConfig) -> ProbeResult {
+        guard !host.isLocal else { return .ok }
 
         let nc = Process()
         nc.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
@@ -378,7 +384,7 @@ class OnyxTerminalView: NSView {
         nc.standardError = FileHandle.nullDevice
         try? nc.run()
         nc.waitUntilExit()
-        guard nc.terminationStatus == 0 else { return false }
+        guard nc.terminationStatus == 0 else { return .unreachable }
 
         let probe = Process()
         probe.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
@@ -393,7 +399,7 @@ class OnyxTerminalView: NSView {
         probe.standardError = FileHandle.nullDevice
         try? probe.run()
         probe.waitUntilExit()
-        return probe.terminationStatus == 0
+        return probe.terminationStatus == 0 ? .ok : .keyAuthFailed
     }
 
     func startKeySetup() {
@@ -480,10 +486,19 @@ class OnyxTerminalView: NSView {
 
     private func enumerateHostSessions(_ host: HostConfig, completion: @escaping ([TmuxSession]) -> Void) {
         // For remote hosts, probe first
-        if !host.isLocal && !probeHost(host) {
-            // Host unreachable — return empty (don't block other hosts)
-            completion([])
-            return
+        if !host.isLocal {
+            let result = probeHost(host)
+            if result == .keyAuthFailed {
+                DispatchQueue.main.async {
+                    self.appState.needsKeySetup = true
+                    self.appState.keySetupHostID = host.id
+                }
+                completion([])
+                return
+            } else if result == .unreachable {
+                completion([])
+                return
+            }
         }
 
         let group = DispatchGroup()
