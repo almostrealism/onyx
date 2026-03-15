@@ -17,6 +17,7 @@ public extension Notification.Name {
     static let switchToFavorite = Notification.Name("switchToFavorite")
     static let refreshSession = Notification.Name("refreshSession")
     static let toggleArtifacts = Notification.Name("toggleArtifacts")
+    static let restoreTerminalFocus = Notification.Name("restoreTerminalFocus")
 }
 
 // MARK: - Right Panel

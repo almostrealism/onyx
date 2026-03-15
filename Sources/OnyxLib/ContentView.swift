@@ -123,101 +123,135 @@ public struct ContentView: View {
                 FavoritesBar(appState: appState)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: appState.activeRightPanel)
-        .animation(.easeInOut(duration: 0.2), value: appState.showSettings)
-        .animation(.easeInOut(duration: 0.2), value: appState.showMonitor)
-        .animation(.easeInOut(duration: 0.15), value: appState.showCommandPalette)
-        .animation(.easeInOut(duration: 0.2), value: appState.showSetup)
-        .animation(.easeInOut(duration: 0.2), value: appState.showSessionManager)
+        .modifier(ContentViewAnimations(appState: appState))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear {
-            appState.loadConfig()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleNotes)) { _ in
-            appState.showCommandPalette = false
-            appState.showSettings = false
-            appState.activeRightPanel = appState.activeRightPanel == .notes ? nil : .notes
-            ShortcutManager.rightPanelVisible = appState.activeRightPanel != nil
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .createNote)) { _ in
-            appState.showCommandPalette = false
-            appState.showSettings = false
-            appState.activeRightPanel = .notes
-            ShortcutManager.rightPanelVisible = true
-            appState.createNoteRequested = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleCommandPalette)) { _ in
-            appState.showCommandPalette.toggle()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleMonitor)) { _ in
-            appState.showMonitor.toggle()
-            ShortcutManager.monitorVisible = appState.showMonitor
-            updateWindowTitle()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleFileBrowser)) { _ in
-            appState.showCommandPalette = false
-            appState.showSettings = false
-            appState.activeRightPanel = appState.activeRightPanel == .fileBrowser ? nil : .fileBrowser
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleSessionManager)) { _ in
-            appState.showCommandPalette = false
-            appState.showSettings = false
-            appState.showSessionManager.toggle()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleArtifacts)) { _ in
-            appState.showCommandPalette = false
-            appState.showSettings = false
-            appState.activeRightPanel = appState.activeRightPanel == .artifacts ? nil : .artifacts
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
-            appState.showCommandPalette = false
-            appState.showSettings = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .escapePressed)) { _ in
-            let wasMonitoring = appState.showMonitor
-            appState.dismissTopOverlay()
-            ShortcutManager.monitorVisible = appState.showMonitor
-            ShortcutManager.rightPanelVisible = appState.activeRightPanel != nil
-            if wasMonitoring && !appState.showMonitor {
-                updateWindowTitle()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .cycleTmuxSession)) { _ in
-            let favorites = appState.favoriteSessions
-            guard favorites.count > 1, let current = appState.activeSession else { return }
-            if let idx = favorites.firstIndex(where: { $0.id == current.id }) {
-                let next = favorites[(idx + 1) % favorites.count]
-                appState.switchToSession = next
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .createTmuxSession)) { _ in
-            appState.showSessionManager = true
-            appState.showNewSessionPrompt = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .refreshSession)) { _ in
-            appState.reconnectRequested = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .switchToFavorite)) { notification in
-            guard let index = notification.object as? Int else { return }
-            let favorites = appState.favoriteSessions
-            guard index <= favorites.count else { return }
-            let session = favorites[index - 1]
-            if appState.activeSession?.id != session.id {
-                appState.switchToSession = session
-            }
-        }
-        .onChange(of: appState.appearance.windowTitle) { _, _ in
-            updateWindowTitle()
-        }
-        .onChange(of: appState.activeSession?.id) { _, _ in
-            updateWindowTitle()
-        }
+        .onAppear { appState.loadConfig() }
+        .modifier(ContentViewNotifications(appState: appState, updateWindowTitle: updateWindowTitle))
     }
 
     private func updateWindowTitle() {
         DispatchQueue.main.async {
             NSApplication.shared.windows.first?.title = appState.effectiveWindowTitle
         }
+    }
+}
+
+// MARK: - Extracted Modifiers (keeps body type-checkable)
+
+private struct ContentViewAnimations: ViewModifier {
+    @ObservedObject var appState: AppState
+
+    func body(content: Content) -> some View {
+        content
+            .animation(.easeInOut(duration: 0.2), value: appState.activeRightPanel)
+            .animation(.easeInOut(duration: 0.2), value: appState.showSettings)
+            .animation(.easeInOut(duration: 0.2), value: appState.showMonitor)
+            .animation(.easeInOut(duration: 0.15), value: appState.showCommandPalette)
+            .animation(.easeInOut(duration: 0.2), value: appState.showSetup)
+            .animation(.easeInOut(duration: 0.2), value: appState.showSessionManager)
+    }
+}
+
+private struct ContentViewNotifications: ViewModifier {
+    @ObservedObject var appState: AppState
+    let updateWindowTitle: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .toggleNotes)) { _ in
+                appState.showCommandPalette = false
+                appState.showSettings = false
+                appState.activeRightPanel = appState.activeRightPanel == .notes ? nil : .notes
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .createNote)) { _ in
+                appState.showCommandPalette = false
+                appState.showSettings = false
+                appState.activeRightPanel = .notes
+                appState.createNoteRequested = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleCommandPalette)) { _ in
+                appState.showCommandPalette.toggle()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleMonitor)) { _ in
+                appState.showMonitor.toggle()
+                ShortcutManager.monitorVisible = appState.showMonitor
+                updateWindowTitle()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleFileBrowser)) { _ in
+                appState.showCommandPalette = false
+                appState.showSettings = false
+                appState.activeRightPanel = appState.activeRightPanel == .fileBrowser ? nil : .fileBrowser
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleSessionManager)) { _ in
+                appState.showCommandPalette = false
+                appState.showSettings = false
+                appState.showSessionManager.toggle()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleArtifacts)) { _ in
+                appState.showCommandPalette = false
+                appState.showSettings = false
+                appState.activeRightPanel = appState.activeRightPanel == .artifacts ? nil : .artifacts
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
+                appState.showCommandPalette = false
+                appState.showSettings = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .escapePressed)) { _ in
+                let wasMonitoring = appState.showMonitor
+                appState.dismissTopOverlay()
+                ShortcutManager.monitorVisible = appState.showMonitor
+                if wasMonitoring && !appState.showMonitor { updateWindowTitle() }
+            }
+            .modifier(ContentViewSessionNotifications(appState: appState))
+            .onChange(of: appState.activeRightPanel) { _, newValue in
+                ShortcutManager.rightPanelVisible = newValue != nil
+                if newValue == nil {
+                    NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
+                }
+            }
+            .onChange(of: appState.showSettings) { _, show in
+                if !show { NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil) }
+            }
+            .onChange(of: appState.showCommandPalette) { _, show in
+                if !show { NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil) }
+            }
+            .onChange(of: appState.showSessionManager) { _, show in
+                if !show { NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil) }
+            }
+            .onChange(of: appState.appearance.windowTitle) { _, _ in updateWindowTitle() }
+            .onChange(of: appState.activeSession?.id) { _, _ in updateWindowTitle() }
+    }
+}
+
+private struct ContentViewSessionNotifications: ViewModifier {
+    @ObservedObject var appState: AppState
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .cycleTmuxSession)) { _ in
+                let favorites = appState.favoriteSessions
+                guard favorites.count > 1, let current = appState.activeSession else { return }
+                if let idx = favorites.firstIndex(where: { $0.id == current.id }) {
+                    let next = favorites[(idx + 1) % favorites.count]
+                    appState.switchToSession = next
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .createTmuxSession)) { _ in
+                appState.showSessionManager = true
+                appState.showNewSessionPrompt = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .refreshSession)) { _ in
+                appState.reconnectRequested = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .switchToFavorite)) { notification in
+                guard let index = notification.object as? Int else { return }
+                let favorites = appState.favoriteSessions
+                guard index <= favorites.count else { return }
+                let session = favorites[index - 1]
+                if appState.activeSession?.id != session.id {
+                    appState.switchToSession = session
+                }
+            }
     }
 }
 

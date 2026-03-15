@@ -77,6 +77,8 @@ class OnyxTerminalView: NSView {
         return pool[id]?.terminalView
     }
 
+    private var focusObserver: Any?
+
     init(appState: AppState) {
         self.appState = appState
         super.init(frame: .zero)
@@ -85,6 +87,11 @@ class OnyxTerminalView: NSView {
         layer?.backgroundColor = CGColor.clear
         installScrollMonitor()
         startEvictionTimer()
+        focusObserver = NotificationCenter.default.addObserver(
+            forName: .restoreTerminalFocus, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.restoreFocus()
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -93,6 +100,11 @@ class OnyxTerminalView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         return terminalView?.hitTest(point) ?? super.hitTest(point)
+    }
+
+    private func restoreFocus() {
+        guard let tv = terminalView else { return }
+        tv.window?.makeFirstResponder(tv)
     }
 
     // MARK: - Pool Management
@@ -218,6 +230,9 @@ class OnyxTerminalView: NSView {
     }
 
     deinit {
+        if let observer = focusObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         if let monitor = scrollMonitor {
             NSEvent.removeMonitor(monitor)
         }
