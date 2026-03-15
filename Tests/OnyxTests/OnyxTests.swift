@@ -1659,6 +1659,17 @@ final class MCPForwardingTests: XCTestCase {
         XCTAssertFalse(args.last?.contains("ONYX_MCP_PORT") ?? false)
     }
 
+    func testDockerLogsCommand_remote_usesLoginShell() {
+        let state = AppState()
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com"))
+        let (cmd, args) = state.dockerLogsCommand(host: host, container: "app")
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        // Should wrap in login shell so docker is on PATH
+        XCTAssertTrue(args.last?.contains("$SHELL -lc") ?? false,
+            "Remote docker logs should use login shell wrapper")
+        XCTAssertTrue(args.last?.contains("docker logs -f") ?? false)
+    }
+
     // MARK: - Session Identity Tests
 
     func testSessionIdentity_includesHostID() {

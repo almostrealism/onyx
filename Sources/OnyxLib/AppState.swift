@@ -622,7 +622,7 @@ public class AppState: ObservableObject {
         args.append("-t")
         let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
         args.append(userHost)
-        args.append(dockerCmd)
+        args.append("exec $SHELL -lc '\(extraPath) \(dockerCmd)'")
         return ("/usr/bin/ssh", args)
     }
 
