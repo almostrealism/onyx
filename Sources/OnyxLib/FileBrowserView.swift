@@ -136,14 +136,18 @@ public class FileBrowserManager: ObservableObject {
         let (cmd, args) = appState.remoteCommand(script)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = Self.runProcess(cmd: cmd, args: args)
+            let result = Self.runProcessWithStatus(cmd: cmd, args: args)
             DispatchQueue.main.async {
                 self?.isLoading = false
                 guard let self = self else { return }
-                if let output = output {
+                if let output = result.output {
                     let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                    // Detect error messages from ls or ssh
-                    if trimmed.contains("No such file or directory")
+
+                    // Detect SSH connection/auth failures (exit code 255 is SSH error)
+                    if result.exitCode == 255 || trimmed.contains("Permission denied (publickey") {
+                        let host = self.appState.activeHost?.label ?? "remote host"
+                        self.error = "Cannot connect to \(host).\nOpen a terminal session to this host first."
+                    } else if trimmed.contains("No such file or directory")
                         || trimmed.contains("Permission denied")
                         || trimmed.contains("not a directory")
                         || trimmed.hasPrefix("ls:") {
@@ -151,7 +155,6 @@ public class FileBrowserManager: ObservableObject {
                     } else {
                         self.entries = self.parseLsOutput(output)
                         if self.entries.isEmpty && !trimmed.isEmpty && !trimmed.hasPrefix("total") {
-                            // Output wasn't parseable as ls — treat as error
                             self.error = trimmed
                         }
                     }
@@ -172,20 +175,34 @@ public class FileBrowserManager: ObservableObject {
         let (cmd, args) = appState.remoteCommand(script)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = Self.runProcess(cmd: cmd, args: args)
+            let result = Self.runProcessWithStatus(cmd: cmd, args: args)
             DispatchQueue.main.async {
                 self?.isLoading = false
-                if let output = output {
-                    self?.fileContent = output
-                    self?.viewingFileName = name
+                guard let self = self else { return }
+                if result.exitCode == 255 {
+                    let host = self.appState.activeHost?.label ?? "remote host"
+                    self.error = "Cannot connect to \(host).\nOpen a terminal session to this host first."
+                } else if let output = result.output {
+                    self.fileContent = output
+                    self.viewingFileName = name
                 } else {
-                    self?.error = "Failed to read file"
+                    self.error = "Failed to read file"
                 }
             }
         }
     }
 
+    struct ProcessResult {
+        let output: String?
+        let exitCode: Int32
+    }
+
     static func runProcess(cmd: String, args: [String]) -> String? {
+        let result = runProcessWithStatus(cmd: cmd, args: args)
+        return result.output
+    }
+
+    static func runProcessWithStatus(cmd: String, args: [String]) -> ProcessResult {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: cmd)
@@ -205,9 +222,10 @@ public class FileBrowserManager: ObservableObject {
             killTimer.cancel()
 
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)
+            let output = String(data: data, encoding: .utf8)
+            return ProcessResult(output: output, exitCode: process.terminationStatus)
         } catch {
-            return nil
+            return ProcessResult(output: nil, exitCode: -1)
         }
     }
 
