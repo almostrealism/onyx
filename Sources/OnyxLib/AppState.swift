@@ -20,6 +20,17 @@ public extension Notification.Name {
     static let restoreTerminalFocus = Notification.Name("restoreTerminalFocus")
 }
 
+// MARK: - Focus Tracking
+
+public enum FocusedComponent: Equatable {
+    case terminal
+    case rightPanel
+    case settings
+    case commandPalette
+    case sessionManager
+    case setup
+}
+
 // MARK: - Right Panel
 
 public enum RightPanel: Equatable {
@@ -203,6 +214,11 @@ public class AppState: ObservableObject {
     @Published public var needsKeySetup = false
     @Published public var keySetupInProgress = false
     @Published public var showSessionManager = false
+    public var showFocusOutline = true
+
+    /// Tracks which component should logically have keyboard focus.
+    /// Updated explicitly when overlays open/close and when the user clicks.
+    @Published public var focusedComponent: FocusedComponent = .terminal
 
     // Convenience accessors for right panel types
     public var showNotes: Bool {
@@ -288,6 +304,17 @@ public class AppState: ObservableObject {
         allSessions.removeAll { $0.source.hostID == hostID }
         favoritedSessionIDs.removeAll { id in
             allSessions.first(where: { $0.id == id }) == nil
+        }
+        // Clear key setup state if it was for the removed host
+        if keySetupHostID == hostID {
+            needsKeySetup = false
+            keySetupInProgress = false
+            keySetupHostID = nil
+            connectionError = nil
+        }
+        // If the active session belonged to this host, clear it
+        if activeSession?.source.hostID == hostID {
+            activeSession = nil
         }
         saveHosts()
         saveFavorites()

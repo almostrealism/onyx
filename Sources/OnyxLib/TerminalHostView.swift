@@ -108,9 +108,20 @@ class OnyxTerminalView: NSView {
         return terminalView?.hitTest(point) ?? super.hitTest(point)
     }
 
+    override func mouseDown(with event: NSEvent) {
+        // Ensure clicking the terminal area grabs focus from SwiftUI panels
+        if let tv = terminalView {
+            tv.window?.makeFirstResponder(tv)
+            appState.focusedComponent = .terminal
+        }
+        super.mouseDown(with: event)
+    }
+
     private func restoreFocus() {
         guard let tv = terminalView else { return }
-        tv.window?.makeFirstResponder(tv)
+        DispatchQueue.main.async {
+            tv.window?.makeFirstResponder(tv)
+        }
     }
 
     // MARK: - Pool Management
@@ -434,6 +445,9 @@ class OnyxTerminalView: NSView {
         }
         let (cmd, args) = appState.keySetupCommand(host: host)
         tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            tv.window?.makeFirstResponder(tv)
+        }
     }
 
     // MARK: - Session Enumeration
@@ -495,10 +509,13 @@ class OnyxTerminalView: NSView {
         if !host.isLocal {
             let result = probeHost(host)
             if result == .keyAuthFailed {
+                let hostID = host.id
                 let label = host.label
                 DispatchQueue.main.async {
+                    // Guard against race: host may have been removed while probe was running
+                    guard self.appState.hosts.contains(where: { $0.id == hostID }) else { return }
                     self.appState.needsKeySetup = true
-                    self.appState.keySetupHostID = host.id
+                    self.appState.keySetupHostID = hostID
                     self.appState.connectionError = "Key authentication failed for \(label).\nInstall your SSH key to connect."
                 }
                 completion([])

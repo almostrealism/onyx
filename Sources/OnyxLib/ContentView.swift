@@ -69,6 +69,7 @@ public struct ContentView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .modifier(FocusOutline(active: appState.focusedComponent == .terminal, show: appState.showFocusOutline))
 
                     // RIGHT: Side panel
                     if let panel = appState.activeRightPanel {
@@ -79,6 +80,7 @@ public struct ContentView: View {
                         rightPanelView(for: panel)
                             .frame(width: rightPanelWidth)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .modifier(FocusOutline(active: appState.focusedComponent == .rightPanel, show: appState.showFocusOutline))
                     }
                 }
 
@@ -87,6 +89,7 @@ public struct ContentView: View {
                 // Session manager slides from left
                 if appState.showSessionManager {
                     SessionManagerView(appState: appState)
+                        .modifier(FocusOutline(active: appState.focusedComponent == .sessionManager, show: appState.showFocusOutline))
                         .transition(.asymmetric(
                             insertion: .move(edge: .leading).combined(with: .opacity),
                             removal: .move(edge: .leading).combined(with: .opacity)
@@ -102,6 +105,7 @@ public struct ContentView: View {
                 // Settings
                 if appState.showSettings {
                     SettingsView(appState: appState)
+                        .modifier(FocusOutline(active: appState.focusedComponent == .settings, show: appState.showFocusOutline))
                         .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 }
 
@@ -114,6 +118,7 @@ public struct ContentView: View {
                 // Command palette
                 if appState.showCommandPalette {
                     CommandPaletteView(appState: appState)
+                        .modifier(FocusOutline(active: appState.focusedComponent == .commandPalette, show: appState.showFocusOutline))
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
@@ -133,6 +138,22 @@ public struct ContentView: View {
         DispatchQueue.main.async {
             NSApplication.shared.windows.first?.title = appState.effectiveWindowTitle
         }
+    }
+}
+
+// MARK: - Focus Debug Outline
+
+private struct FocusOutline: ViewModifier {
+    let active: Bool
+    let show: Bool
+
+    func body(content: Content) -> some View {
+        content.overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.orange, lineWidth: 2)
+                .opacity(active && show ? 1 : 0)
+                .allowsHitTesting(false)
+        )
     }
 }
 
@@ -171,6 +192,7 @@ private struct ContentViewNotifications: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleCommandPalette)) { _ in
                 appState.showCommandPalette.toggle()
+                appState.focusedComponent = appState.showCommandPalette ? .commandPalette : .terminal
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleMonitor)) { _ in
                 appState.showMonitor.toggle()
@@ -186,6 +208,7 @@ private struct ContentViewNotifications: ViewModifier {
                 appState.showCommandPalette = false
                 appState.showSettings = false
                 appState.showSessionManager.toggle()
+                appState.focusedComponent = appState.showSessionManager ? .sessionManager : .terminal
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleArtifacts)) { _ in
                 appState.showCommandPalette = false
@@ -195,6 +218,7 @@ private struct ContentViewNotifications: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
                 appState.showCommandPalette = false
                 appState.showSettings = true
+                appState.focusedComponent = .settings
             }
             .onReceive(NotificationCenter.default.publisher(for: .escapePressed)) { _ in
                 let wasMonitoring = appState.showMonitor
@@ -206,17 +230,27 @@ private struct ContentViewNotifications: ViewModifier {
             .onChange(of: appState.activeRightPanel) { _, newValue in
                 ShortcutManager.rightPanelVisible = newValue != nil
                 if newValue == nil {
+                    appState.focusedComponent = .terminal
                     NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
                 }
             }
             .onChange(of: appState.showSettings) { _, show in
-                if !show { NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil) }
+                if !show {
+                    appState.focusedComponent = .terminal
+                    NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
+                }
             }
             .onChange(of: appState.showCommandPalette) { _, show in
-                if !show { NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil) }
+                if !show {
+                    appState.focusedComponent = .terminal
+                    NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
+                }
             }
             .onChange(of: appState.showSessionManager) { _, show in
-                if !show { NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil) }
+                if !show {
+                    appState.focusedComponent = .terminal
+                    NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
+                }
             }
             .onChange(of: appState.appearance.windowTitle) { _, _ in updateWindowTitle() }
             .onChange(of: appState.activeSession?.id) { _, _ in updateWindowTitle() }
