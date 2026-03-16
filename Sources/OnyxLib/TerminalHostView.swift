@@ -84,6 +84,7 @@ class OnyxTerminalView: NSView {
     }
 
     private var focusObserver: Any?
+    private var mouseMonitor: Any?
 
     init(appState: AppState) {
         self.appState = appState
@@ -98,6 +99,7 @@ class OnyxTerminalView: NSView {
         ) { [weak self] _ in
             self?.restoreFocus()
         }
+        installFocusMonitor()
     }
 
     required init?(coder: NSCoder) {
@@ -115,6 +117,37 @@ class OnyxTerminalView: NSView {
             appState.focusedComponent = .terminal
         }
         super.mouseDown(with: event)
+    }
+
+    /// Monitors all mouseDown events in the window to track which component
+    /// the user clicks into, updating the focus outline accordingly.
+    private func installFocusMonitor() {
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let self = self,
+                  let window = self.window,
+                  event.window === window else { return event }
+
+            // Convert click to window coordinates
+            let loc = event.locationInWindow
+
+            // Check if click is inside the terminal area (self's frame)
+            let myFrame = self.convert(self.bounds, to: nil)
+            if myFrame.contains(loc) {
+                self.appState.focusedComponent = .terminal
+            } else {
+                // Click is outside terminal — must be in a right panel or overlay
+                if self.appState.showSettings {
+                    self.appState.focusedComponent = .settings
+                } else if self.appState.showCommandPalette {
+                    self.appState.focusedComponent = .commandPalette
+                } else if self.appState.showSessionManager {
+                    self.appState.focusedComponent = .sessionManager
+                } else if self.appState.activeRightPanel != nil {
+                    self.appState.focusedComponent = .rightPanel
+                }
+            }
+            return event
+        }
     }
 
     private func restoreFocus() {
@@ -249,6 +282,9 @@ class OnyxTerminalView: NSView {
     deinit {
         if let observer = focusObserver {
             NotificationCenter.default.removeObserver(observer)
+        }
+        if let monitor = mouseMonitor {
+            NSEvent.removeMonitor(monitor)
         }
         if let monitor = scrollMonitor {
             NSEvent.removeMonitor(monitor)
