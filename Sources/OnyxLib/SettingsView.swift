@@ -258,6 +258,8 @@ struct SettingsView: View {
         appState.saveHosts()
         appState.saveAppearance()
         appState.showSettings = false
+        // Re-enumerate sessions so new/changed hosts are probed for key setup
+        appState.refreshSessionList = true
     }
 }
 

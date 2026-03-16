@@ -196,6 +196,7 @@ public class AppState: ObservableObject {
     @Published public var showMonitor = false
     @Published public var isReconnecting = false
     @Published public var reconnectRequested = false
+    @Published public var refreshSessionList = false
     @Published public var createNoteRequested = false
     @Published public var showWindowRename = false
     @Published public var connectionError: String?

@@ -22,6 +22,12 @@ struct TerminalHostView: NSViewRepresentable {
             }
             nsView.forceReconnect()
         }
+        if appState.refreshSessionList {
+            DispatchQueue.main.async {
+                appState.refreshSessionList = false
+            }
+            nsView.softRefreshSessions()
+        }
         if appState.keySetupInProgress {
             DispatchQueue.main.async {
                 appState.keySetupInProgress = false
@@ -672,6 +678,12 @@ class OnyxTerminalView: NSView {
             tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
             self.pool[session.id]?.processRunning = true
         }
+    }
+
+    /// Light refresh: re-enumerate sessions without disrupting the current connection.
+    /// Used after settings changes to detect new hosts and trigger key setup if needed.
+    func softRefreshSessions() {
+        enumerateAllSessions {}
     }
 
     /// Manual refresh: tear down and reconnect the active session
