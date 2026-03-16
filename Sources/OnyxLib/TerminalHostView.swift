@@ -413,6 +413,12 @@ class OnyxTerminalView: NSView {
         let hostLabel = self.appState.host(for: session.source.hostID)?.label ?? "unknown"
         print("connectToActiveSession: \(session.displayLabel) on \(hostLabel) [id: \(session.id)]")
 
+        // Ensure the session appears in allSessions (it may not if enumeration
+        // ran before the host was reachable, e.g. right after SSH key setup)
+        if !self.appState.allSessions.contains(where: { $0.id == session.id }) {
+            self.appState.allSessions.append(session)
+        }
+
         let tv = self.activateSession(session)
         self.lastStartTime = Date()
         let (cmd, args) = self.appState.commandForSession(session)
@@ -844,6 +850,11 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
                     self.reconnectAttempt = 0
                     self.enumerateAllSessions {
                         self.connectToActiveSession()
+                        // Re-enumerate after a delay to pick up the tmux session
+                        // that connectToActiveSession just created on the new host
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                            self?.softRefreshSessions()
+                        }
                     }
                 }
             }
