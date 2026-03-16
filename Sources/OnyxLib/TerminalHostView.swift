@@ -495,9 +495,11 @@ class OnyxTerminalView: NSView {
         if !host.isLocal {
             let result = probeHost(host)
             if result == .keyAuthFailed {
+                let label = host.label
                 DispatchQueue.main.async {
                     self.appState.needsKeySetup = true
                     self.appState.keySetupHostID = host.id
+                    self.appState.connectionError = "Key authentication failed for \(label).\nInstall your SSH key to connect."
                 }
                 completion([])
                 return
