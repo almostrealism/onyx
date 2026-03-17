@@ -215,7 +215,22 @@ public class FileBrowserManager: ObservableObject {
 
     // MARK: - Remote Operations
 
+    /// Check if the active host is remote and has no connected sessions
+    private func checkRemoteConnectivity() -> String? {
+        guard let host = appState.activeHost, !host.isLocal else { return nil }
+        let hasSession = appState.allSessions.contains { $0.source.hostID == host.id }
+        if !hasSession {
+            return "No active session to \(host.label).\nOpen a terminal session to this host first."
+        }
+        return nil
+    }
+
     private func listDirectory(_ path: String) {
+        if let connectError = checkRemoteConnectivity() {
+            error = connectError
+            return
+        }
+
         isLoading = true
         error = nil
         entries = []
@@ -256,6 +271,11 @@ public class FileBrowserManager: ObservableObject {
     }
 
     private func readFile(_ path: String, name: String) {
+        if let connectError = checkRemoteConnectivity() {
+            error = connectError
+            return
+        }
+
         isLoading = true
         error = nil
 
@@ -350,6 +370,11 @@ public class FileBrowserManager: ObservableObject {
     public func startSearch(_ query: String) {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty,
               let basePath = currentPath ?? savedFolders.first else { return }
+
+        if let connectError = checkRemoteConnectivity() {
+            error = connectError
+            return
+        }
 
         cancelSearch()
         isSearchActive = true
@@ -676,6 +701,14 @@ struct FileBrowserView: View {
             }
         }
         .background(Color(nsColor: NSColor(white: 0.06, alpha: 0.95)))
+        .onChange(of: appState.allSessions.count) { _ in
+            // Auto-retry if we had a connectivity error and sessions just appeared
+            if let error = browser.error,
+               error.contains("No active session"),
+               let path = browser.currentPath {
+                browser.navigateTo(path)
+            }
+        }
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) {
