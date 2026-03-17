@@ -704,7 +704,7 @@ struct FileBrowserView: View {
             }
         }
         .background(Color(nsColor: NSColor(white: 0.06, alpha: 0.95)))
-        .onChange(of: appState.allSessions.count) { _ in
+        .onChange(of: appState.allSessions.count) {
             // Auto-retry if we had a connectivity error and sessions just appeared
             if let error = browser.error,
                error.contains("No active session"),
