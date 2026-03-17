@@ -383,8 +383,11 @@ public class FileBrowserManager: ObservableObject {
 
         let escaped = escapeForShell(basePath)
         // Use find with -iname for case-insensitive name matching, limit output
-        let safeQuery = query.replacingOccurrences(of: "'", with: "'\\''")
-        let script = "find \(escaped) -maxdepth 10 \\( -name '.*' -prune \\) -o -iname '*\(safeQuery)*' -print 2>/dev/null | head -\(searchResults.maxResults)"
+        // Avoid single quotes since remoteCommand wraps in single quotes for SSH
+        let safeQuery = query
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let script = "find \(escaped) -maxdepth 10 -name \".*\" -prune -o -iname \"*\(safeQuery)*\" -print 2>/dev/null | head -\(searchResults.maxResults)"
         let (cmd, args) = appState.remoteCommand(script)
 
         let process = Process()
