@@ -178,16 +178,19 @@ public class MCPMessageHandler {
     private var showTextTool: AnyCodableValue {
         .object([
             "name": .string("show_text"),
-            "description": .string("Display text or markdown content in an artifact slot visible to the user"),
+            "description": .string("Display text, code, or markdown in an artifact slot. For code files, prefer using the file parameter to load directly — the client renders with syntax highlighting. Line wrapping is auto-detected from file extension (off for code, on for prose) but can be overridden with the wrap parameter."),
             "inputSchema": .object([
                 "type": .string("object"),
                 "properties": .object([
                     "slot": .object(["type": .string("integer"), "description": .string("Slot number 0-7"), "minimum": .int(0), "maximum": .int(7)]),
                     "title": .object(["type": .string("string"), "description": .string("Title for the artifact")]),
-                    "content": .object(["type": .string("string"), "description": .string("Text content to display")]),
-                    "format": .object(["type": .string("string"), "enum": .array([.string("plain"), .string("markdown"), .string("html")]), "description": .string("Text format (default: markdown)")])
+                    "content": .object(["type": .string("string"), "description": .string("Text content to display (optional if file is provided)")]),
+                    "file": .object(["type": .string("string"), "description": .string("Absolute path to a file to load and display. The file extension is used for syntax highlighting and wrap detection.")]),
+                    "format": .object(["type": .string("string"), "enum": .array([.string("plain"), .string("markdown"), .string("html")]), "description": .string("Text format (default: plain for files, markdown for content)")]),
+                    "language": .object(["type": .string("string"), "description": .string("Language hint for syntax highlighting (e.g. java, swift, python). Auto-detected from file extension if not specified.")]),
+                    "wrap": .object(["type": .string("boolean"), "description": .string("Enable line wrapping. Auto-detected if omitted: off for code, on for markdown/plain prose.")])
                 ]),
-                "required": .array([.string("slot"), .string("title"), .string("content")])
+                "required": .array([.string("slot"), .string("title")])
             ])
         ])
     }
@@ -272,21 +275,87 @@ public class MCPMessageHandler {
         }
     }
 
+    private static let proseExtensions: Set<String> = ["md", "markdown", "txt", "text", "rst", "adoc", "csv", "log"]
+
+    private static func languageForExtension(_ ext: String) -> String? {
+        let map: [String: String] = [
+            "swift": "swift", "java": "java", "kt": "kotlin", "kts": "kotlin",
+            "py": "python", "rb": "ruby", "js": "javascript", "ts": "typescript",
+            "tsx": "tsx", "jsx": "jsx", "rs": "rust", "go": "go", "c": "c",
+            "h": "c", "cpp": "cpp", "cc": "cpp", "cxx": "cpp", "hpp": "cpp",
+            "m": "objectivec", "mm": "objectivec", "cs": "csharp",
+            "sh": "bash", "bash": "bash", "zsh": "bash", "fish": "fish",
+            "json": "json", "xml": "xml", "html": "html", "htm": "html",
+            "css": "css", "scss": "scss", "less": "less",
+            "sql": "sql", "yaml": "yaml", "yml": "yaml", "toml": "toml",
+            "lua": "lua", "r": "r", "scala": "scala", "pl": "perl",
+            "php": "php", "ex": "elixir", "exs": "elixir", "erl": "erlang",
+            "hs": "haskell", "ml": "ocaml", "clj": "clojure",
+            "dart": "dart", "zig": "zig", "nim": "nim",
+            "dockerfile": "dockerfile", "makefile": "makefile",
+            "gradle": "gradle", "groovy": "groovy",
+            "tf": "hcl", "proto": "protobuf", "graphql": "graphql",
+            "plist": "xml",
+        ]
+        return map[ext.lowercased()]
+    }
+
     private func callShowText(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {
         guard let slot = args["slot"]?.intValue,
-              let title = args["title"]?.stringValue,
-              let content = args["content"]?.stringValue else {
+              let title = args["title"]?.stringValue else {
             return JSONRPCResponse(id: id, error: .invalidParams)
         }
-        let format = TextFormat(rawValue: args["format"]?.stringValue ?? "markdown") ?? .markdown
-        let artifactContent = ArtifactContent.text(content: content, format: format)
+
+        let content: String
+        var fileExtension: String? = nil
+
+        if let filePath = args["file"]?.stringValue {
+            // Load file content
+            guard let fileData = FileManager.default.contents(atPath: filePath),
+                  let fileContent = String(data: fileData, encoding: .utf8) else {
+                return toolResult(id: id, success: false, message: "Cannot read file: \(filePath)")
+            }
+            content = fileContent
+            fileExtension = (filePath as NSString).pathExtension
+        } else if let textContent = args["content"]?.stringValue {
+            content = textContent
+        } else {
+            return JSONRPCResponse(id: id, error: JSONRPCError(code: -32602, message: "Either content or file must be provided"))
+        }
+
+        // Determine format
+        let defaultFormat = fileExtension != nil ? "plain" : "markdown"
+        let format = TextFormat(rawValue: args["format"]?.stringValue ?? defaultFormat) ?? .markdown
+
+        // Determine language for syntax highlighting
+        let language: String?
+        if let lang = args["language"]?.stringValue {
+            language = lang
+        } else if let ext = fileExtension {
+            language = Self.languageForExtension(ext)
+        } else {
+            language = nil
+        }
+
+        // Determine wrap behavior
+        let wrap: Bool
+        if let wrapVal = args["wrap"]?.boolValue {
+            wrap = wrapVal
+        } else if let ext = fileExtension {
+            wrap = Self.proseExtensions.contains(ext.lowercased())
+        } else {
+            wrap = format == .markdown || format == .html
+        }
+
+        let artifactContent = ArtifactContent.text(content: content, format: format, language: language, wrap: wrap)
 
         var success = false
         DispatchQueue.main.sync {
             success = artifactManager.setSlot(slot, title: title, content: artifactContent)
         }
 
-        return toolResult(id: id, success: success, message: success ? "Text displayed in slot \(slot)" : "Invalid slot \(slot)")
+        let message = success ? "Text displayed in slot \(slot)" : "Invalid slot \(slot)"
+        return toolResult(id: id, success: success, message: message)
     }
 
     private func callShowDiagram(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {

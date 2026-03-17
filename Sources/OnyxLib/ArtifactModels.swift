@@ -15,7 +15,7 @@ public enum ModelFormat: String, Codable {
 }
 
 public enum ArtifactContent: Equatable {
-    case text(content: String, format: TextFormat)
+    case text(content: String, format: TextFormat, language: String?, wrap: Bool)
     case diagram(content: String, format: DiagramFormat)
     case model3D(data: Data, format: ModelFormat)
 

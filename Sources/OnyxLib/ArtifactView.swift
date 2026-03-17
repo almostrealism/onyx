@@ -159,8 +159,8 @@ private struct ArtifactContentView: View {
 
             // Content
             switch artifact.content {
-            case .text(let content, let format):
-                TextArtifactView(content: content, format: format)
+            case .text(let content, let format, let language, let wrap):
+                TextArtifactView(content: content, format: format, language: language, wrap: wrap)
             case .diagram(let content, let format):
                 DiagramArtifactView(content: content, format: format, accentColor: accentColor)
             case .model3D(let data, let format):
@@ -175,37 +175,194 @@ private struct ArtifactContentView: View {
 private struct TextArtifactView: View {
     let content: String
     let format: TextFormat
+    let language: String?
+    let wrap: Bool
 
     var body: some View {
-        ScrollView {
-            switch format {
-            case .plain:
-                Text(content)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.85))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-            case .markdown:
-                Text(markdownAttributed)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.85))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-            case .html:
-                Text(content)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.85))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-            }
-        }
+        CodeWebView(content: content, format: format, language: language, wrap: wrap)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct CodeWebView: NSViewRepresentable {
+    let content: String
+    let format: TextFormat
+    let language: String?
+    let wrap: Bool
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.setValue(false, forKey: "drawsBackground")
+        loadContent(webView)
+        return webView
     }
 
-    private var markdownAttributed: AttributedString {
-        (try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(content)
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        loadContent(webView)
+    }
+
+    private func loadContent(_ webView: WKWebView) {
+        let escaped = content
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+
+        let wrapCSS = wrap
+            ? "white-space: pre-wrap; word-wrap: break-word;"
+            : "white-space: pre; overflow-x: auto;"
+
+        let langClass = language.map { "language-\($0)" } ?? "nohighlight"
+
+        let html: String
+        switch format {
+        case .markdown:
+            html = markdownHTML(escaped, wrapCSS: wrapCSS)
+        default:
+            html = codeHTML(escaped, langClass: langClass, wrapCSS: wrapCSS)
+        }
+
+        webView.loadHTMLString(html, baseURL: nil)
+    }
+
+    private func codeHTML(_ escaped: String, langClass: String, wrapCSS: String) -> String {
+        """
+        <!DOCTYPE html>
+        <html><head>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css">
+        <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                background: #0f0f0f;
+                font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+                font-size: 12px;
+                line-height: 1.5;
+                color: #d4d4d4;
+            }
+            pre {
+                margin: 0;
+                padding: 12px;
+                \(wrapCSS)
+            }
+            code {
+                font-family: inherit;
+                font-size: inherit;
+                \(wrapCSS)
+            }
+            .hljs {
+                background: #0f0f0f !important;
+                padding: 12px !important;
+            }
+            /* Line numbers */
+            .line-numbers {
+                counter-reset: line;
+            }
+            .line-numbers .line::before {
+                counter-increment: line;
+                content: counter(line);
+                display: inline-block;
+                width: 3em;
+                margin-right: 1em;
+                text-align: right;
+                color: #555;
+                -webkit-user-select: none;
+                user-select: none;
+            }
+        </style>
+        </head><body>
+        <pre><code class="\(langClass)">\(escaped)</code></pre>
+        <script>
+            document.querySelectorAll('pre code:not(.nohighlight)').forEach(el => hljs.highlightElement(el));
+        </script>
+        </body></html>
+        """
+    }
+
+    private func markdownHTML(_ escaped: String, wrapCSS: String) -> String {
+        """
+        <!DOCTYPE html>
+        <html><head>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css">
+        <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/marked@14/marked.min.js"></script>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                background: #0f0f0f;
+                font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+                font-size: 13px;
+                line-height: 1.6;
+                color: #d4d4d4;
+                padding: 12px;
+                \(wrapCSS)
+            }
+            h1, h2, h3, h4, h5, h6 { color: #e0e0e0; margin: 0.8em 0 0.4em; }
+            h1 { font-size: 1.4em; }
+            h2 { font-size: 1.2em; }
+            h3 { font-size: 1.1em; }
+            a { color: #58a6ff; }
+            code {
+                font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+                font-size: 0.9em;
+                background: #1a1a1a;
+                padding: 2px 5px;
+                border-radius: 3px;
+            }
+            pre {
+                background: #1a1a1a;
+                border-radius: 6px;
+                padding: 12px;
+                margin: 0.6em 0;
+                overflow-x: auto;
+            }
+            pre code {
+                background: none;
+                padding: 0;
+                font-size: 12px;
+                line-height: 1.5;
+            }
+            .hljs { background: #1a1a1a !important; }
+            blockquote {
+                border-left: 3px solid #444;
+                padding-left: 12px;
+                color: #999;
+                margin: 0.6em 0;
+            }
+            ul, ol { padding-left: 1.5em; margin: 0.4em 0; }
+            li { margin: 0.2em 0; }
+            table { border-collapse: collapse; margin: 0.6em 0; }
+            th, td { border: 1px solid #333; padding: 6px 10px; }
+            th { background: #1a1a1a; }
+            hr { border: none; border-top: 1px solid #333; margin: 1em 0; }
+            img { max-width: 100%; }
+        </style>
+        </head><body>
+        <div id="content"></div>
+        <script>
+            const raw = \(jsStringLiteral(content));
+            marked.setOptions({
+                highlight: function(code, lang) {
+                    if (lang && hljs.getLanguage(lang)) {
+                        return hljs.highlight(code, { language: lang }).value;
+                    }
+                    return hljs.highlightAuto(code).value;
+                },
+                breaks: true,
+                gfm: true
+            });
+            document.getElementById('content').innerHTML = marked.parse(raw);
+        </script>
+        </body></html>
+        """
+    }
+
+    private func jsStringLiteral(_ str: String) -> String {
+        let escaped = str
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "`", with: "\\`")
+            .replacingOccurrences(of: "$", with: "\\$")
+        return "`\(escaped)`"
     }
 }
 
