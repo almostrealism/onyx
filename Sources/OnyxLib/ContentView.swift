@@ -23,14 +23,8 @@ public struct ContentView: View {
         }
     }
 
-    private var rightPanelWidth: CGFloat {
-        switch appState.activeRightPanel {
-        case .notes: return 500
-        case .fileBrowser: return 600
-        case .artifacts: return 500
-        case .none: return 0
-        }
-    }
+    /// Fraction of window width for the right panel (0.0–0.85)
+    @State private var rightPanelFraction: CGFloat = 0.6
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -42,45 +36,72 @@ public struct ContentView: View {
                     .allowsHitTesting(false)
 
                 // Split layout: terminal left, panel right
-                HStack(spacing: 0) {
-                    // LEFT: Terminal area
-                    ZStack {
-                        TerminalHostView(appState: appState)
-                            .opacity(hasOverlay ? 0.3 : 1.0)
-                            .allowsHitTesting(!hasOverlay)
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        // LEFT: Terminal area
+                        ZStack {
+                            TerminalHostView(appState: appState)
+                                .opacity(hasOverlay ? 0.3 : 1.0)
+                                .allowsHitTesting(!hasOverlay)
 
-                        // Monitor overlay — blur terminal for privacy, then show stats
-                        if appState.showMonitor {
-                            VibrancyBackground()
-                                .ignoresSafeArea()
-                                .allowsHitTesting(false)
-                            MonitorView(appState: appState)
-                                .transition(.opacity)
+                            // Monitor overlay — blur terminal for privacy, then show stats
+                            if appState.showMonitor {
+                                VibrancyBackground()
+                                    .ignoresSafeArea()
+                                    .allowsHitTesting(false)
+                                MonitorView(appState: appState)
+                                    .transition(.opacity)
+                            }
+
+                            // Connection error overlay
+                            if appState.connectionError != nil {
+                                ConnectionErrorOverlay(appState: appState)
+                            }
+
+                            // Reconnecting indicator
+                            if appState.isReconnecting && appState.connectionError == nil {
+                                ReconnectingOverlay(accentColor: appState.accentColor)
+                            }
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .modifier(FocusOutline(active: appState.focusedComponent == .terminal, show: appState.showFocusOutline))
 
-                        // Connection error overlay
-                        if appState.connectionError != nil {
-                            ConnectionErrorOverlay(appState: appState)
+                        // RIGHT: Side panel with draggable divider
+                        if let panel = appState.activeRightPanel {
+                            // Drag handle
+                            Rectangle()
+                                .fill(Color.clear)
+                                .frame(width: 6)
+                                .contentShape(Rectangle())
+                                .overlay(
+                                    Rectangle()
+                                        .fill(appState.accentColor.opacity(0.15))
+                                        .frame(width: 1)
+                                )
+                                .onHover { hovering in
+                                    if hovering {
+                                        NSCursor.resizeLeftRight.push()
+                                    } else {
+                                        NSCursor.pop()
+                                    }
+                                }
+                                .gesture(
+                                    DragGesture(minimumDistance: 1)
+                                        .onChanged { value in
+                                            let totalWidth = geo.size.width
+                                            guard totalWidth > 0 else { return }
+                                            // Drag left = panel grows, drag right = panel shrinks
+                                            let panelWidth = totalWidth - value.location.x
+                                            let fraction = panelWidth / totalWidth
+                                            rightPanelFraction = min(max(fraction, 0.2), 0.85)
+                                        }
+                                )
+
+                            rightPanelView(for: panel)
+                                .frame(width: geo.size.width * rightPanelFraction)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                                .modifier(FocusOutline(active: appState.focusedComponent == .rightPanel, show: appState.showFocusOutline))
                         }
-
-                        // Reconnecting indicator
-                        if appState.isReconnecting && appState.connectionError == nil {
-                            ReconnectingOverlay(accentColor: appState.accentColor)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .modifier(FocusOutline(active: appState.focusedComponent == .terminal, show: appState.showFocusOutline))
-
-                    // RIGHT: Side panel
-                    if let panel = appState.activeRightPanel {
-                        Rectangle()
-                            .fill(appState.accentColor.opacity(0.15))
-                            .frame(width: 1)
-
-                        rightPanelView(for: panel)
-                            .frame(width: rightPanelWidth)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                            .modifier(FocusOutline(active: appState.focusedComponent == .rightPanel, show: appState.showFocusOutline))
                     }
                 }
 
