@@ -22,6 +22,75 @@ public struct RemoteEntry: Identifiable, Comparable {
     }
 }
 
+// MARK: - Search Tree Model
+
+public class SearchTreeNode: Identifiable, ObservableObject {
+    public let id = UUID()
+    public let name: String
+    public let fullPath: String
+    public let isDirectory: Bool
+    @Published public var children: [SearchTreeNode] = []
+    @Published public var isExpanded: Bool = true
+
+    public init(name: String, fullPath: String, isDirectory: Bool) {
+        self.name = name
+        self.fullPath = fullPath
+        self.isDirectory = isDirectory
+    }
+}
+
+public class SearchResultTree: ObservableObject {
+    @Published public var roots: [SearchTreeNode] = []
+    @Published public var resultCount: Int = 0
+    public let maxResults = 100
+
+    /// Insert a path into the tree relative to a base directory
+    public func insertPath(_ relativePath: String, basePath: String) {
+        guard resultCount < maxResults else { return }
+
+        let components = relativePath.split(separator: "/").map(String.init)
+        guard !components.isEmpty else { return }
+
+        resultCount += 1
+
+        var currentChildren = roots
+        var currentFullPath = basePath
+        var parentNode: SearchTreeNode? = nil
+
+        for (i, component) in components.enumerated() {
+            currentFullPath = currentFullPath.hasSuffix("/")
+                ? "\(currentFullPath)\(component)"
+                : "\(currentFullPath)/\(component)"
+            let isLast = i == components.count - 1
+
+            if let existing = currentChildren.first(where: { $0.name == component }) {
+                parentNode = existing
+                currentChildren = existing.children
+            } else {
+                let node = SearchTreeNode(
+                    name: component,
+                    fullPath: currentFullPath,
+                    isDirectory: !isLast
+                )
+                if let parent = parentNode {
+                    parent.children.append(node)
+                    parent.children.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                } else {
+                    roots.append(node)
+                    roots.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                }
+                parentNode = node
+                currentChildren = node.children
+            }
+        }
+    }
+
+    public func clear() {
+        roots = []
+        resultCount = 0
+    }
+}
+
 public class FileBrowserManager: ObservableObject {
     @Published public var savedFolders: [String] = []
     @Published public var currentPath: String?
@@ -32,6 +101,14 @@ public class FileBrowserManager: ObservableObject {
     @Published public var error: String?
     @Published public var showAddFolder = false
     @Published public var pathHistory: [String] = []
+
+    // Search state
+    @Published public var searchQuery: String = ""
+    @Published public var isSearching = false
+    @Published public var searchResults = SearchResultTree()
+    @Published public var isSearchActive = false
+    private var searchProcess: Process?
+    private var searchCancellable: AnyCancellable?
 
     private let appState: AppState
     private var gitCancellable: AnyCancellable?
@@ -121,6 +198,19 @@ public class FileBrowserManager: ObservableObject {
     public func closeFile() {
         fileContent = nil
         viewingFileName = nil
+    }
+
+    /// Open a file by full path (used by search results)
+    public func readFileFromSearch(_ path: String, name: String) {
+        // Set the current path to the file's parent directory
+        let parent = (path as NSString).deletingLastPathComponent
+        if currentPath != parent {
+            if let current = currentPath {
+                pathHistory.append(current)
+            }
+            currentPath = parent
+        }
+        readFile(path, name: name)
     }
 
     // MARK: - Remote Operations
@@ -253,6 +343,103 @@ public class FileBrowserManager: ObservableObject {
             results.append(RemoteEntry(name: displayName, isDirectory: isDir, size: size, modified: modified))
         }
         return results.sorted()
+    }
+
+    // MARK: - Search
+
+    public func startSearch(_ query: String) {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty,
+              let basePath = currentPath ?? savedFolders.first else { return }
+
+        cancelSearch()
+        isSearchActive = true
+        isSearching = true
+        searchResults.clear()
+
+        let escaped = escapeForShell(basePath)
+        // Use find with -iname for case-insensitive name matching, limit output
+        let safeQuery = query.replacingOccurrences(of: "'", with: "'\\''")
+        let script = "find \(escaped) -maxdepth 10 \\( -name '.*' -prune \\) -o -iname '*\(safeQuery)*' -print 2>/dev/null | head -\(searchResults.maxResults)"
+        let (cmd, args) = appState.remoteCommand(script)
+
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: cmd)
+        process.arguments = args
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        let baseForStripping = basePath.hasSuffix("/") ? basePath : basePath + "/"
+
+        // Read output progressively line by line
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let self = self else {
+                // EOF
+                return
+            }
+
+            if let text = String(data: data, encoding: .utf8) {
+                let lines = text.components(separatedBy: "\n")
+                for line in lines {
+                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { continue }
+
+                    // Strip base path prefix to get relative path
+                    let relative: String
+                    if trimmed.hasPrefix(baseForStripping) {
+                        relative = String(trimmed.dropFirst(baseForStripping.count))
+                    } else if trimmed == basePath.trimmingCharacters(in: CharacterSet(charactersIn: "/")) || trimmed == basePath {
+                        continue // skip the base directory itself
+                    } else {
+                        relative = trimmed
+                    }
+                    guard !relative.isEmpty else { continue }
+
+                    DispatchQueue.main.async {
+                        self.searchResults.insertPath(relative, basePath: basePath)
+                    }
+                }
+            }
+        }
+
+        // Set up a kill timer (30 seconds max)
+        let killTimer = DispatchSource.makeTimerSource(queue: .global())
+        killTimer.schedule(deadline: .now() + 30)
+        killTimer.setEventHandler { if process.isRunning { process.terminate() } }
+        killTimer.resume()
+
+        searchProcess = process
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                try process.run()
+                process.waitUntilExit()
+            } catch {
+                // ignore
+            }
+            killTimer.cancel()
+            pipe.fileHandleForReading.readabilityHandler = nil
+
+            DispatchQueue.main.async {
+                self?.isSearching = false
+            }
+        }
+    }
+
+    public func cancelSearch() {
+        if let process = searchProcess, process.isRunning {
+            process.terminate()
+        }
+        searchProcess = nil
+        isSearching = false
+    }
+
+    public func clearSearch() {
+        cancelSearch()
+        searchQuery = ""
+        searchResults.clear()
+        isSearchActive = false
     }
 
     // MARK: - Upload
@@ -410,6 +597,8 @@ struct FileBrowserView: View {
                             accentColor: appState.accentColor,
                             onClose: { browser.closeFile() }
                         )
+                    } else if browser.isSearchActive {
+                        SearchResultsView(appState: appState, browser: browser, tree: browser.searchResults)
                     } else if browser.currentPath != nil {
                         VStack(spacing: 0) {
                             if browser.gitManager.isGitRepo, let status = browser.gitManager.repoStatus {
@@ -656,43 +845,107 @@ struct FolderRow: View {
 struct NavigationBar: View {
     @ObservedObject var appState: AppState
     @ObservedObject var browser: FileBrowserManager
+    @State private var searchFieldFocused = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Back button
-            Button(action: { browser.navigateBack() }) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(
-                        (browser.currentPath != nil) ? appState.accentColor : .gray.opacity(0.3)
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(browser.currentPath == nil)
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                // Back button
+                Button(action: {
+                    if browser.isSearchActive {
+                        browser.clearSearch()
+                    } else {
+                        browser.navigateBack()
+                    }
+                }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(
+                            (browser.currentPath != nil || browser.isSearchActive) ? appState.accentColor : .gray.opacity(0.3)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(browser.currentPath == nil && !browser.isSearchActive)
 
-            if let fileName = browser.viewingFileName {
-                Image(systemName: iconForFile(fileName))
-                    .font(.system(size: 11))
-                    .foregroundColor(appState.accentColor)
-                Text(fileName)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.9))
-                    .lineLimit(1)
-            } else if let path = browser.currentPath {
-                Image(systemName: "folder")
-                    .font(.system(size: 11))
-                    .foregroundColor(appState.accentColor.opacity(0.6))
-                Text(path)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.6))
-                    .lineLimit(1)
-                    .truncationMode(.head)
-            }
+                if let fileName = browser.viewingFileName {
+                    Image(systemName: iconForFile(fileName))
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.accentColor)
+                    Text(fileName)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.9))
+                        .lineLimit(1)
+                } else if let path = browser.currentPath {
+                    Image(systemName: "folder")
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.accentColor.opacity(0.6))
+                    Text(path)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
 
-            Spacer()
+                Spacer()
+
+                // Search button
+                if browser.currentPath != nil || !browser.savedFolders.isEmpty {
+                    Button(action: {
+                        if browser.isSearchActive {
+                            browser.clearSearch()
+                        } else {
+                            browser.isSearchActive = true
+                        }
+                    }) {
+                        Image(systemName: browser.isSearchActive ? "xmark.circle.fill" : "magnifyingglass")
+                            .font(.system(size: 12))
+                            .foregroundColor(browser.isSearchActive ? appState.accentColor : .gray.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            // Search bar
+            if browser.isSearchActive {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray.opacity(0.5))
+
+                    TextField("Search files by name...", text: $browser.searchQuery)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.9))
+                        .onSubmit {
+                            browser.startSearch(browser.searchQuery)
+                        }
+
+                    if browser.isSearching {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .colorScheme(.dark)
+                    }
+
+                    if !browser.searchQuery.isEmpty {
+                        Button(action: {
+                            browser.searchQuery = ""
+                            browser.searchResults.clear()
+                            browser.cancelSearch()
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(.gray.opacity(0.4))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.white.opacity(0.04))
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
         .background(Color.white.opacity(0.03))
     }
 }
@@ -709,6 +962,124 @@ struct DirectoryListView: View {
                         .onTapGesture {
                             browser.openEntry(entry)
                         }
+                }
+            }
+        }
+    }
+}
+
+struct SearchResultsView: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var browser: FileBrowserManager
+    @ObservedObject var tree: SearchResultTree
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if tree.roots.isEmpty && !browser.isSearching {
+                Spacer()
+                VStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 24))
+                        .foregroundColor(.gray.opacity(0.3))
+                    if browser.searchQuery.isEmpty {
+                        Text("Type a filename and press Enter")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.4))
+                    } else {
+                        Text("No results found")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.4))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                Spacer()
+            } else {
+                // Result count header
+                HStack {
+                    Text("\(tree.resultCount) result\(tree.resultCount == 1 ? "" : "s")\(tree.resultCount >= tree.maxResults ? " (limit reached)" : "")")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.4))
+                    Spacer()
+                    if browser.isSearching {
+                        Text("searching...")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(appState.accentColor.opacity(0.6))
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(tree.roots) { node in
+                            SearchTreeNodeView(node: node, depth: 0, accentColor: appState.accentColor, browser: browser)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct SearchTreeNodeView: View {
+    @ObservedObject var node: SearchTreeNode
+    let depth: Int
+    let accentColor: Color
+    @ObservedObject var browser: FileBrowserManager
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                // Indent
+                Spacer().frame(width: CGFloat(depth) * 16)
+
+                if node.isDirectory {
+                    // Expand/collapse toggle
+                    Button(action: { node.isExpanded.toggle() }) {
+                        Image(systemName: node.isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9))
+                            .foregroundColor(.gray.opacity(0.4))
+                            .frame(width: 12)
+                    }
+                    .buttonStyle(.plain)
+
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(accentColor.opacity(0.7))
+                } else {
+                    Spacer().frame(width: 12) // align with folder toggle
+
+                    Image(systemName: iconForFile(node.name))
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray.opacity(0.5))
+                }
+
+                Text(node.name)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(node.isDirectory ? .white.opacity(0.9) : .white.opacity(0.7))
+                    .lineLimit(1)
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if node.isDirectory {
+                    // Navigate into this directory
+                    browser.clearSearch()
+                    browser.navigateTo(node.fullPath)
+                } else {
+                    // Open the file
+                    let name = (node.fullPath as NSString).lastPathComponent
+                    browser.clearSearch()
+                    browser.readFileFromSearch(node.fullPath, name: name)
+                }
+            }
+
+            if node.isDirectory && node.isExpanded {
+                ForEach(node.children) { child in
+                    SearchTreeNodeView(node: child, depth: depth + 1, accentColor: accentColor, browser: browser)
                 }
             }
         }
