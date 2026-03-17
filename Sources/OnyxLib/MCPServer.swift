@@ -195,7 +195,7 @@ public class MCPMessageHandler {
     private var showDiagramTool: AnyCodableValue {
         .object([
             "name": .string("show_diagram"),
-            "description": .string("Render a UML or flowchart diagram in an artifact slot visible to the user"),
+            "description": .string("Render a UML or flowchart diagram in an artifact slot visible to the user. Prefer top-down (TD) layouts over left-right (LR) as the display area is a vertical panel. Pinch to zoom is supported."),
             "inputSchema": .object([
                 "type": .string("object"),
                 "properties": .object([

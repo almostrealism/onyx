@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "onyx": {
-      "command": "/Users/Shared/flowtree/OnyxMCP",
+      "command": "/Users/Shared/flowtree/tools/OnyxMCP",
       "env": {
         "ONYX_MCP_PORT": "19432"
       }

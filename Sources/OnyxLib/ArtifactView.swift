@@ -230,6 +230,8 @@ struct MermaidWebView: NSViewRepresentable {
         let config = WKWebViewConfiguration()
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.setValue(false, forKey: "drawsBackground")
+        webView.allowsMagnification = true
+        webView.magnification = 1.0
         loadDiagram(webView)
         return webView
     }
@@ -252,12 +254,13 @@ struct MermaidWebView: NSViewRepresentable {
             <html><head>
             <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
             <style>
-                body { background: #0f0f0f; margin: 0; padding: 16px; display: flex; justify-content: center; }
+                body { background: #0f0f0f; margin: 0; padding: 16px; display: flex; justify-content: center; align-items: start; overflow: auto; }
                 .mermaid { color: #ccc; }
+                .mermaid svg { max-width: none !important; }
             </style>
             </head><body>
             <pre class="mermaid">\(escaped)</pre>
-            <script>mermaid.initialize({ startOnLoad: true, theme: 'dark' });</script>
+            <script>mermaid.initialize({ startOnLoad: true, theme: 'dark', maxTextSize: 100000 });</script>
             </body></html>
             """
         case .plantuml:
