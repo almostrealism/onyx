@@ -31,6 +31,28 @@ public enum FocusedComponent: Equatable {
     case setup
 }
 
+extension AppState {
+    /// Compute which component should have focus based on visibility precedence.
+    /// Precedence (highest first): settings, commandPalette, monitor, sessionManager, rightPanel, terminal
+    public var topVisibleComponent: FocusedComponent {
+        if showSettings { return .settings }
+        if showCommandPalette { return .commandPalette }
+        // Monitor overlay doesn't have text input, so terminal keeps focus
+        if showSessionManager { return .sessionManager }
+        if activeRightPanel != nil { return .rightPanel }
+        return .terminal
+    }
+
+    /// Recalculate and set focusedComponent based on current visibility state.
+    /// Call this when an overlay opens or closes to ensure correct precedence.
+    public func recalculateFocus() {
+        focusedComponent = topVisibleComponent
+        if focusedComponent == .terminal {
+            NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
+        }
+    }
+}
+
 // MARK: - Right Panel
 
 public enum RightPanel: Equatable {

@@ -213,7 +213,7 @@ private struct ContentViewNotifications: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleCommandPalette)) { _ in
                 appState.showCommandPalette.toggle()
-                appState.focusedComponent = appState.showCommandPalette ? .commandPalette : .terminal
+                appState.recalculateFocus()
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleMonitor)) { _ in
                 appState.showMonitor.toggle()
@@ -229,7 +229,7 @@ private struct ContentViewNotifications: ViewModifier {
                 appState.showCommandPalette = false
                 appState.showSettings = false
                 appState.showSessionManager.toggle()
-                appState.focusedComponent = appState.showSessionManager ? .sessionManager : .terminal
+                appState.recalculateFocus()
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleArtifacts)) { _ in
                 appState.showCommandPalette = false
@@ -239,7 +239,7 @@ private struct ContentViewNotifications: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
                 appState.showCommandPalette = false
                 appState.showSettings = true
-                appState.focusedComponent = .settings
+                appState.recalculateFocus()
             }
             .onReceive(NotificationCenter.default.publisher(for: .escapePressed)) { _ in
                 let wasMonitoring = appState.showMonitor
@@ -250,28 +250,16 @@ private struct ContentViewNotifications: ViewModifier {
             .modifier(ContentViewSessionNotifications(appState: appState))
             .onChange(of: appState.activeRightPanel) { _, newValue in
                 ShortcutManager.rightPanelVisible = newValue != nil
-                if newValue == nil {
-                    appState.focusedComponent = .terminal
-                    NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
-                }
+                appState.recalculateFocus()
             }
-            .onChange(of: appState.showSettings) { _, show in
-                if !show {
-                    appState.focusedComponent = .terminal
-                    NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
-                }
+            .onChange(of: appState.showSettings) { _, _ in
+                appState.recalculateFocus()
             }
-            .onChange(of: appState.showCommandPalette) { _, show in
-                if !show {
-                    appState.focusedComponent = .terminal
-                    NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
-                }
+            .onChange(of: appState.showCommandPalette) { _, _ in
+                appState.recalculateFocus()
             }
-            .onChange(of: appState.showSessionManager) { _, show in
-                if !show {
-                    appState.focusedComponent = .terminal
-                    NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
-                }
+            .onChange(of: appState.showSessionManager) { _, _ in
+                appState.recalculateFocus()
             }
             .onChange(of: appState.appearance.windowTitle) { _, _ in updateWindowTitle() }
             .onChange(of: appState.activeSession?.id) { _, _ in updateWindowTitle() }
