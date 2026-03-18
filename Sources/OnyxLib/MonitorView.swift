@@ -733,6 +733,7 @@ public struct DockerContainerStats: Identifiable {
 public class DockerStatsManager: ObservableObject {
     @Published public var containers: [DockerContainerStats] = []
     @Published public var isAvailable = false
+    @Published public var cpuCores: Int = 1
 
     private var timer: Timer?
     private let appState: AppState
@@ -754,7 +755,7 @@ public class DockerStatsManager: ObservableObject {
     }
 
     private func poll() {
-        let script = "docker stats --no-stream --format \"{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}\" 2>/dev/null"
+        let script = "echo CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1); docker stats --no-stream --format \"{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}\" 2>/dev/null"
         let (cmd, args) = appState.remoteCommand(script)
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -779,8 +780,9 @@ public class DockerStatsManager: ObservableObject {
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 let output = String(data: data, encoding: .utf8) ?? ""
 
-                let parsed = Self.parse(output: output)
+                let (cores, parsed) = Self.parse(output: output)
                 DispatchQueue.main.async {
+                    self?.cpuCores = cores
                     self?.containers = parsed
                     self?.isAvailable = !parsed.isEmpty
                 }
@@ -792,11 +794,17 @@ public class DockerStatsManager: ObservableObject {
         }
     }
 
-    public static func parse(output: String) -> [DockerContainerStats] {
-        output.components(separatedBy: "\n")
+    public static func parse(output: String) -> (cores: Int, containers: [DockerContainerStats]) {
+        var cores = 1
+        let containers = output.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .compactMap { line -> DockerContainerStats? in
+                // Parse CORES=N line
+                if line.hasPrefix("CORES=") {
+                    cores = Int(line.dropFirst(6)) ?? 1
+                    return nil
+                }
                 let parts = line.components(separatedBy: "|")
                 guard parts.count >= 6 else { return nil }
                 return DockerContainerStats(
@@ -809,6 +817,7 @@ public class DockerStatsManager: ObservableObject {
                     pids: parts[5]
                 )
             }
+        return (cores, containers)
     }
 }
 
@@ -872,10 +881,11 @@ struct DockerStatsSection: View {
                     .padding(.horizontal, 6)
                     .background(
                         GeometryReader { geo in
-                            // Clamp to 100% for display (CPU can exceed 100% on multi-core)
-                            let barWidth = geo.size.width * min(cpuPct / 100.0, 1.0)
+                            let maxPct = CGFloat(dockerStats.cpuCores) * 100.0
+                            let fraction = min(cpuPct / maxPct, 1.0)
+                            let barWidth = geo.size.width * fraction
                             Rectangle()
-                                .fill(cpuBarColor(cpuPct).opacity(0.15))
+                                .fill(cpuBarColor(cpuPct, maxPct: maxPct).opacity(0.15))
                                 .frame(width: barWidth)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -892,10 +902,11 @@ struct DockerStatsSection: View {
         return CGFloat(Double(cleaned) ?? 0)
     }
 
-    /// Color ramp for CPU bar: low=blue, mid=yellow, high=red
-    private func cpuBarColor(_ pct: CGFloat) -> Color {
-        if pct > 80 { return Color(hex: "FF6B6B") }
-        if pct > 40 { return Color(hex: "FFD06B") }
+    /// Color ramp for CPU bar: low=blue, mid=yellow, high=red (relative to max)
+    private func cpuBarColor(_ pct: CGFloat, maxPct: CGFloat) -> Color {
+        let fraction = pct / maxPct
+        if fraction > 0.8 { return Color(hex: "FF6B6B") }
+        if fraction > 0.4 { return Color(hex: "FFD06B") }
         return Color(hex: "66CCFF")
     }
 

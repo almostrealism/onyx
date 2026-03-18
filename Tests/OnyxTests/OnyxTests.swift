@@ -8,7 +8,7 @@ final class DockerStatsParseTests: XCTestCase {
         nginx|0.05%|12.34MiB / 7.656GiB|1.2kB / 0B|0B / 0B|5
         redis|1.23%|45.6MiB / 7.656GiB|500B / 200B|4.1kB / 0B|4
         """
-        let stats = DockerStatsManager.parse(output: output)
+        let (_, stats) = DockerStatsManager.parse(output: output)
         XCTAssertEqual(stats.count, 2)
         XCTAssertEqual(stats[0].name, "nginx")
         XCTAssertEqual(stats[0].cpu, "0.05%")
@@ -20,26 +20,40 @@ final class DockerStatsParseTests: XCTestCase {
     }
 
     func testParse_emptyOutput() {
-        XCTAssertEqual(DockerStatsManager.parse(output: "").count, 0)
-        XCTAssertEqual(DockerStatsManager.parse(output: "\n\n").count, 0)
+        XCTAssertEqual(DockerStatsManager.parse(output: "").containers.count, 0)
+        XCTAssertEqual(DockerStatsManager.parse(output: "\n\n").containers.count, 0)
     }
 
     func testParse_malformedLine() {
         let output = "incomplete|data\ngood|1%|10MiB / 1GiB|0B / 0B|0B / 0B|2"
-        let stats = DockerStatsManager.parse(output: output)
+        let (_, stats) = DockerStatsManager.parse(output: output)
         XCTAssertEqual(stats.count, 1)
         XCTAssertEqual(stats[0].name, "good")
     }
 
     func testParse_singleContainer() {
         let output = "myapp|50.00%|256MiB / 4GiB|10kB / 5kB|1MB / 500kB|12\n"
-        let stats = DockerStatsManager.parse(output: output)
+        let (_, stats) = DockerStatsManager.parse(output: output)
         XCTAssertEqual(stats.count, 1)
         XCTAssertEqual(stats[0].name, "myapp")
         XCTAssertEqual(stats[0].cpu, "50.00%")
         XCTAssertEqual(stats[0].netIO, "10kB / 5kB")
         XCTAssertEqual(stats[0].blockIO, "1MB / 500kB")
         XCTAssertEqual(stats[0].pids, "12")
+    }
+
+    func testParse_withCoresLine() {
+        let output = "CORES=12\nnginx|150.00%|64MiB / 8GiB|1kB / 0B|0B / 0B|8\n"
+        let (cores, stats) = DockerStatsManager.parse(output: output)
+        XCTAssertEqual(cores, 12)
+        XCTAssertEqual(stats.count, 1)
+        XCTAssertEqual(stats[0].name, "nginx")
+    }
+
+    func testParse_defaultCoresWhenMissing() {
+        let output = "app|1%|10MiB / 1GiB|0B / 0B|0B / 0B|1"
+        let (cores, _) = DockerStatsManager.parse(output: output)
+        XCTAssertEqual(cores, 1)
     }
 }
 
