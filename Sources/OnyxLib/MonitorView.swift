@@ -861,7 +861,7 @@ struct DockerStatsSection: View {
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.4))
 
-                ForEach(dockerStats.containers) { container in
+                ForEach(dockerStats.containers.sorted { parseCPUPercent($0.cpu) > parseCPUPercent($1.cpu) }) { container in
                     let cpuPct = parseCPUPercent(container.cpu)
                     HStack(spacing: 0) {
                         Text(container.name)
