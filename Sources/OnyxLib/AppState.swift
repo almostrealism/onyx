@@ -418,6 +418,39 @@ public class AppState: ObservableObject {
         favoritedSessionIDs.contains(session.id)
     }
 
+    /// Parse a favorited session ID back into a TmuxSession.
+    /// Format: "stableKey:sessionName" where stableKey is "host:UUID", "docker:UUID:container", etc.
+    public func parseFavoriteID(_ id: String) -> TmuxSession? {
+        // Split on ":" — the session name is everything after the source key
+        // host:UUID:name → source = host(UUID), name = name
+        // docker:UUID:container:name → source = docker(UUID, container), name = name
+        // dockerlogs:UUID:container:name → utility, skip
+        // dockertop:UUID:container:name → utility, skip
+        let parts = id.split(separator: ":", maxSplits: 10).map(String.init)
+        guard parts.count >= 3 else { return nil }
+
+        let kind = parts[0]
+        guard let hostID = UUID(uuidString: parts[1]) else { return nil }
+
+        switch kind {
+        case "host":
+            // host:UUID:sessionName
+            let name = parts.dropFirst(2).joined(separator: ":")
+            guard !name.isEmpty else { return nil }
+            return TmuxSession(name: name, source: .host(hostID: hostID))
+        case "docker":
+            // docker:UUID:containerName:sessionName
+            guard parts.count >= 4 else { return nil }
+            let container = parts[2]
+            let name = parts.dropFirst(3).joined(separator: ":")
+            guard !name.isEmpty else { return nil }
+            return TmuxSession(name: name, source: .docker(hostID: hostID, containerName: container))
+        default:
+            // dockerlogs, dockertop — utility sessions don't need recreation
+            return nil
+        }
+    }
+
     public func moveFavorite(from source: IndexSet, to destination: Int) {
         favoritedSessionIDs.move(fromOffsets: source, toOffset: destination)
         saveFavorites()

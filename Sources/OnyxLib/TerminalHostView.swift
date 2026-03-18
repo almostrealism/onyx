@@ -520,8 +520,12 @@ class OnyxTerminalView: NSView {
 
             group.wait()
 
+            // Check for missing favorited sessions that can be recreated
+            let createdSessions = self.recreateMissingFavorites(existing: allResults, hosts: hosts)
+            let finalResults = allResults + createdSessions
+
             DispatchQueue.main.async {
-                if allResults.isEmpty {
+                if finalResults.isEmpty {
                     let defaultHost = self.appState.hosts.first ?? .localhost
                     let fallback = TmuxSession(
                         name: defaultHost.ssh.tmuxSession,
@@ -532,23 +536,94 @@ class OnyxTerminalView: NSView {
                         self.appState.activeSession = fallback
                     }
                 } else {
-                    self.appState.allSessions = allResults
+                    self.appState.allSessions = finalResults
                     // Only reassign active session if there is none at all.
                     // Never silently switch to a different session — that causes
                     // cross-host/cross-container session confusion.
                     if self.appState.activeSession == nil {
                         let defaultHost = self.appState.hosts.first ?? .localhost
-                        let defaultMatch = allResults.first {
+                        let defaultMatch = finalResults.first {
                             $0.source.hostID == defaultHost.id
                                 && $0.name == defaultHost.ssh.tmuxSession
                                 && !$0.source.isDocker
                         }
-                        self.appState.activeSession = defaultMatch ?? allResults.first
+                        self.appState.activeSession = defaultMatch ?? finalResults.first
                     }
                 }
                 completion()
             }
         }
+    }
+
+    /// Recreate favorited tmux sessions that no longer exist on reachable hosts.
+    /// Only creates sessions when we're confident the host is reachable and tmux
+    /// simply doesn't have that session — never on probe failure or SSH errors.
+    private func recreateMissingFavorites(existing: [TmuxSession], hosts: [HostConfig]) -> [TmuxSession] {
+        let existingIDs = Set(existing.map(\.id))
+        let favoriteIDs = appState.favoritedSessionIDs
+        let reachableHostIDs = Set(existing.map(\.source.hostID))
+
+        // Running docker container names per host (from existing enumeration)
+        var runningContainers: [UUID: Set<String>] = [:]
+        for session in existing {
+            if let container = session.source.containerName {
+                runningContainers[session.source.hostID, default: []].insert(container)
+            }
+        }
+
+        var created: [TmuxSession] = []
+
+        for favID in favoriteIDs {
+            guard !existingIDs.contains(favID) else { continue }
+            guard let session = appState.parseFavoriteID(favID) else { continue }
+
+            let hostID = session.source.hostID
+            guard let host = hosts.first(where: { $0.id == hostID }) else { continue }
+
+            // Only recreate if we know the host is reachable (it returned sessions or is local)
+            guard host.isLocal || reachableHostIDs.contains(hostID) else { continue }
+
+            let safeName = appState.sanitizedSession(session.name)
+            let script: String
+
+            switch session.source {
+            case .host:
+                // Create a detached tmux session on the host
+                script = "tmux new-session -d -s \(safeName) 2>/dev/null && echo CREATED || echo EXISTS"
+            case .docker(_, let container):
+                // Only if the container is currently running
+                guard runningContainers[hostID]?.contains(container) == true else { continue }
+                let safeContainer = appState.sanitizedContainer(container)
+                script = "docker exec \(safeContainer) tmux new-session -d -s \(safeName) 2>/dev/null && echo CREATED || echo EXISTS"
+            default:
+                continue
+            }
+
+            let (cmd, args) = appState.remoteCommand(script, host: host)
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: cmd)
+            process.arguments = args
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+            } catch {
+                continue
+            }
+
+            // Only add to results if the command succeeded (exit 0)
+            guard process.terminationStatus == 0 else { continue }
+            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            guard output.contains("CREATED") || output.contains("EXISTS") else { continue }
+
+            print("recreateMissingFavorites: recreated \(session.displayLabel)")
+            created.append(session)
+        }
+
+        return created
     }
 
     private func enumerateHostSessions(_ host: HostConfig, completion: @escaping ([TmuxSession]) -> Void) {

@@ -1751,6 +1751,86 @@ final class DockerLogsTests: XCTestCase {
     }
 }
 
+// MARK: - Favorite Session Parsing Tests
+
+final class FavoriteParsingTests: XCTestCase {
+
+    func testParseFavoriteID_hostSession() {
+        let state = AppState()
+        let hostID = HostConfig.localhostID
+        let id = "host:\(hostID.uuidString):main"
+        let session = state.parseFavoriteID(id)
+        XCTAssertNotNil(session)
+        XCTAssertEqual(session?.name, "main")
+        XCTAssertEqual(session?.source, .host(hostID: hostID))
+    }
+
+    func testParseFavoriteID_dockerSession() {
+        let state = AppState()
+        let hostID = HostConfig.localhostID
+        let id = "docker:\(hostID.uuidString):webapp:dev"
+        let session = state.parseFavoriteID(id)
+        XCTAssertNotNil(session)
+        XCTAssertEqual(session?.name, "dev")
+        XCTAssertEqual(session?.source, .docker(hostID: hostID, containerName: "webapp"))
+    }
+
+    func testParseFavoriteID_roundTrip_host() {
+        let state = AppState()
+        let original = TmuxSession(name: "work", source: .host(hostID: HostConfig.localhostID))
+        let parsed = state.parseFavoriteID(original.id)
+        XCTAssertNotNil(parsed)
+        XCTAssertEqual(parsed?.id, original.id)
+        XCTAssertEqual(parsed?.name, original.name)
+        XCTAssertEqual(parsed?.source, original.source)
+    }
+
+    func testParseFavoriteID_roundTrip_docker() {
+        let state = AppState()
+        let original = TmuxSession(name: "shell", source: .docker(hostID: HostConfig.localhostID, containerName: "redis"))
+        let parsed = state.parseFavoriteID(original.id)
+        XCTAssertNotNil(parsed)
+        XCTAssertEqual(parsed?.id, original.id)
+    }
+
+    func testParseFavoriteID_utilityReturnsNil() {
+        let state = AppState()
+        let logsSession = TmuxSession(name: "logs", source: .dockerLogs(hostID: HostConfig.localhostID, containerName: "app"))
+        XCTAssertNil(state.parseFavoriteID(logsSession.id), "Utility sessions should not be recreated")
+
+        let topSession = TmuxSession(name: "top", source: .dockerTop(hostID: HostConfig.localhostID, containerName: "app"))
+        XCTAssertNil(state.parseFavoriteID(topSession.id))
+    }
+
+    func testParseFavoriteID_invalidID() {
+        let state = AppState()
+        XCTAssertNil(state.parseFavoriteID(""))
+        XCTAssertNil(state.parseFavoriteID("garbage"))
+        XCTAssertNil(state.parseFavoriteID("host:not-a-uuid:name"))
+        XCTAssertNil(state.parseFavoriteID("host:\(UUID().uuidString):")) // empty name
+    }
+
+    func testParseFavoriteID_sessionNameWithColon() {
+        let state = AppState()
+        let hostID = HostConfig.localhostID
+        // Edge case: session name contains a colon
+        let id = "host:\(hostID.uuidString):my:session"
+        let session = state.parseFavoriteID(id)
+        XCTAssertNotNil(session)
+        XCTAssertEqual(session?.name, "my:session")
+    }
+
+    func testParseFavoriteID_unknownHostID() {
+        let state = AppState()
+        let unknownID = UUID()
+        let id = "host:\(unknownID.uuidString):main"
+        let session = state.parseFavoriteID(id)
+        // Should still parse — the caller decides whether the host exists
+        XCTAssertNotNil(session)
+        XCTAssertEqual(session?.source.hostID, unknownID)
+    }
+}
+
 // MARK: - MCP Forwarding Tests
 
 final class MCPForwardingTests: XCTestCase {
