@@ -1,6 +1,48 @@
 import XCTest
 @testable import OnyxLib
 
+final class DockerStatsParseTests: XCTestCase {
+
+    func testParse_typicalOutput() {
+        let output = """
+        nginx|0.05%|12.34MiB / 7.656GiB|1.2kB / 0B|0B / 0B|5
+        redis|1.23%|45.6MiB / 7.656GiB|500B / 200B|4.1kB / 0B|4
+        """
+        let stats = DockerStatsManager.parse(output: output)
+        XCTAssertEqual(stats.count, 2)
+        XCTAssertEqual(stats[0].name, "nginx")
+        XCTAssertEqual(stats[0].cpu, "0.05%")
+        XCTAssertEqual(stats[0].memUsage, "12.34MiB / 7.656GiB")
+        XCTAssertEqual(stats[0].pids, "5")
+        XCTAssertEqual(stats[1].name, "redis")
+        XCTAssertEqual(stats[1].cpu, "1.23%")
+        XCTAssertEqual(stats[1].pids, "4")
+    }
+
+    func testParse_emptyOutput() {
+        XCTAssertEqual(DockerStatsManager.parse(output: "").count, 0)
+        XCTAssertEqual(DockerStatsManager.parse(output: "\n\n").count, 0)
+    }
+
+    func testParse_malformedLine() {
+        let output = "incomplete|data\ngood|1%|10MiB / 1GiB|0B / 0B|0B / 0B|2"
+        let stats = DockerStatsManager.parse(output: output)
+        XCTAssertEqual(stats.count, 1)
+        XCTAssertEqual(stats[0].name, "good")
+    }
+
+    func testParse_singleContainer() {
+        let output = "myapp|50.00%|256MiB / 4GiB|10kB / 5kB|1MB / 500kB|12\n"
+        let stats = DockerStatsManager.parse(output: output)
+        XCTAssertEqual(stats.count, 1)
+        XCTAssertEqual(stats[0].name, "myapp")
+        XCTAssertEqual(stats[0].cpu, "50.00%")
+        XCTAssertEqual(stats[0].netIO, "10kB / 5kB")
+        XCTAssertEqual(stats[0].blockIO, "1MB / 500kB")
+        XCTAssertEqual(stats[0].pids, "12")
+    }
+}
+
 final class MonitorParseTests: XCTestCase {
 
     // MARK: - parseSizeMB

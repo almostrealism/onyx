@@ -470,6 +470,12 @@ private func formatMB(_ mb: Double) -> String {
 
 struct MonitorView: View {
     @ObservedObject var appState: AppState
+    @StateObject private var dockerStats: DockerStatsManager
+
+    init(appState: AppState) {
+        self.appState = appState
+        _dockerStats = StateObject(wrappedValue: DockerStatsManager(appState: appState))
+    }
 
     private var monitor: MonitorManager { appState.monitor }
 
@@ -545,8 +551,17 @@ struct MonitorView: View {
                     }
                     .padding(.horizontal, 40)
 
-                    // Today's reminders
-                    RemindersSection(appState: appState)
+                    // Docker stats + Reminders side by side
+                    HStack(alignment: .top, spacing: 24) {
+                        if dockerStats.isAvailable {
+                            DockerStatsSection(appState: appState, dockerStats: dockerStats)
+                                .frame(maxWidth: .infinity)
+                        }
+                        RemindersSection(appState: appState)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .padding(.horizontal, 40)
+                    .padding(.top, 8)
 
                 } else if let error = monitor.lastError {
                     VStack(spacing: 8) {
@@ -579,6 +594,12 @@ struct MonitorView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleMonitorInterval)) { _ in
             monitor.toggleInterval()
+        }
+        .onAppear {
+            dockerStats.startPolling()
+        }
+        .onDisappear {
+            dockerStats.stopPolling()
         }
     }
 }
@@ -697,6 +718,177 @@ struct GridChart: View {
     }
 }
 
+// MARK: - Docker Stats
+
+public struct DockerContainerStats: Identifiable {
+    public let id: String // container name
+    public let name: String
+    public let cpu: String
+    public let memUsage: String
+    public let netIO: String
+    public let blockIO: String
+    public let pids: String
+}
+
+public class DockerStatsManager: ObservableObject {
+    @Published public var containers: [DockerContainerStats] = []
+    @Published public var isAvailable = false
+
+    private var timer: Timer?
+    private let appState: AppState
+
+    public init(appState: AppState) {
+        self.appState = appState
+    }
+
+    public func startPolling() {
+        poll()
+        timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.poll()
+        }
+    }
+
+    public func stopPolling() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func poll() {
+        let script = "docker stats --no-stream --format \"{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}\" 2>/dev/null"
+        let (cmd, args) = appState.remoteCommand(script)
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: cmd)
+            process.arguments = args
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+
+                let killTimer = DispatchSource.makeTimerSource(queue: .global())
+                killTimer.schedule(deadline: .now() + 10)
+                killTimer.setEventHandler { if process.isRunning { process.terminate() } }
+                killTimer.resume()
+
+                process.waitUntilExit()
+                killTimer.cancel()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+
+                let parsed = Self.parse(output: output)
+                DispatchQueue.main.async {
+                    self?.containers = parsed
+                    self?.isAvailable = !parsed.isEmpty
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.isAvailable = false
+                }
+            }
+        }
+    }
+
+    public static func parse(output: String) -> [DockerContainerStats] {
+        output.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .compactMap { line -> DockerContainerStats? in
+                let parts = line.components(separatedBy: "|")
+                guard parts.count >= 6 else { return nil }
+                return DockerContainerStats(
+                    id: parts[0],
+                    name: parts[0],
+                    cpu: parts[1],
+                    memUsage: parts[2],
+                    netIO: parts[3],
+                    blockIO: parts[4],
+                    pids: parts[5]
+                )
+            }
+    }
+}
+
+struct DockerStatsSection: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var dockerStats: DockerStatsManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("CONTAINERS")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(appState.accentColor)
+                    .tracking(2)
+
+                Spacer()
+
+                if !dockerStats.containers.isEmpty {
+                    Text("\(dockerStats.containers.count)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.4))
+                }
+            }
+
+            if dockerStats.containers.isEmpty {
+                Text("No containers running")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.3))
+            } else {
+                // Header
+                HStack(spacing: 0) {
+                    Text("NAME")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("CPU")
+                        .frame(width: 55, alignment: .trailing)
+                    Text("MEM")
+                        .frame(width: 80, alignment: .trailing)
+                    Text("PIDs")
+                        .frame(width: 35, alignment: .trailing)
+                }
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+
+                ForEach(dockerStats.containers) { container in
+                    HStack(spacing: 0) {
+                        Text(container.name)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text(container.cpu)
+                            .frame(width: 55, alignment: .trailing)
+                        Text(shortMem(container.memUsage))
+                            .frame(width: 80, alignment: .trailing)
+                        Text(container.pids)
+                            .frame(width: 35, alignment: .trailing)
+                    }
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.7))
+                }
+            }
+        }
+    }
+
+    /// Shorten "123.4MiB / 7.656GiB" → "123M / 7.7G"
+    private func shortMem(_ s: String) -> String {
+        let parts = s.components(separatedBy: " / ")
+        return parts.map { part in
+            let t = part.trimmingCharacters(in: .whitespaces)
+            if t.hasSuffix("GiB") {
+                if let v = Double(t.dropLast(3)) { return String(format: "%.1fG", v) }
+            } else if t.hasSuffix("MiB") {
+                if let v = Double(t.dropLast(3)) { return String(format: "%.0fM", v) }
+            } else if t.hasSuffix("KiB") {
+                if let v = Double(t.dropLast(3)) { return String(format: "%.0fK", v) }
+            }
+            return t
+        }.joined(separator: "/")
+    }
+}
+
 struct RemindersSection: View {
     @ObservedObject var appState: AppState
     @StateObject private var reminders = RemindersManager()
@@ -738,8 +930,6 @@ struct RemindersSection: View {
                 }
             }
         }
-        .padding(.horizontal, 40)
-        .padding(.top, 8)
         .onAppear {
             reminders.selectedList = appState.appearance.remindersList
             reminders.fetchReminders()
