@@ -451,6 +451,10 @@ public class AppState: ObservableObject {
         return dir
     }
 
+    public lazy var notesManager: NotesManager = {
+        NotesManager(directory: notesDirectory)
+    }()
+
     public var savedFoldersURL: URL {
         appSupportDir.appendingPathComponent("folders.json")
     }

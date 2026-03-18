@@ -78,12 +78,12 @@ public class NotesManager: ObservableObject {
 
 struct NotesView: View {
     @ObservedObject var appState: AppState
-    @StateObject private var manager: NotesManager
+    @ObservedObject var manager: NotesManager
     @State private var searchQuery = ""
 
     init(appState: AppState) {
         self.appState = appState
-        _manager = StateObject(wrappedValue: NotesManager(directory: appState.notesDirectory))
+        self.manager = appState.notesManager
     }
 
     var filteredNotes: [Note] {
