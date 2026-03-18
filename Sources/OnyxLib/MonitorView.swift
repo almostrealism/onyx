@@ -853,6 +853,7 @@ struct DockerStatsSection: View {
                 .foregroundColor(.gray.opacity(0.4))
 
                 ForEach(dockerStats.containers) { container in
+                    let cpuPct = parseCPUPercent(container.cpu)
                     HStack(spacing: 0) {
                         Text(container.name)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -867,9 +868,35 @@ struct DockerStatsSection: View {
                     }
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(0.7))
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 6)
+                    .background(
+                        GeometryReader { geo in
+                            // Clamp to 100% for display (CPU can exceed 100% on multi-core)
+                            let barWidth = geo.size.width * min(cpuPct / 100.0, 1.0)
+                            Rectangle()
+                                .fill(cpuBarColor(cpuPct).opacity(0.15))
+                                .frame(width: barWidth)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    )
+                    .cornerRadius(3)
                 }
             }
         }
+    }
+
+    /// Parse "12.34%" → 12.34
+    private func parseCPUPercent(_ s: String) -> CGFloat {
+        let cleaned = s.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "%", with: "")
+        return CGFloat(Double(cleaned) ?? 0)
+    }
+
+    /// Color ramp for CPU bar: low=blue, mid=yellow, high=red
+    private func cpuBarColor(_ pct: CGFloat) -> Color {
+        if pct > 80 { return Color(hex: "FF6B6B") }
+        if pct > 40 { return Color(hex: "FFD06B") }
+        return Color(hex: "66CCFF")
     }
 
     /// Shorten "123.4MiB / 7.656GiB" → "123M / 7.7G"
