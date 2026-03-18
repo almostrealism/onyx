@@ -117,12 +117,14 @@ public enum SessionSource: Codable, Hashable {
     case host(hostID: UUID)
     case docker(hostID: UUID, containerName: String)
     case dockerLogs(hostID: UUID, containerName: String)
+    case dockerTop(hostID: UUID, containerName: String)
 
     public var hostID: UUID {
         switch self {
         case .host(let id): return id
         case .docker(let id, _): return id
         case .dockerLogs(let id, _): return id
+        case .dockerTop(let id, _): return id
         }
     }
 
@@ -131,6 +133,7 @@ public enum SessionSource: Codable, Hashable {
         case .host(let id): return "host:\(id.uuidString)"
         case .docker(let id, let name): return "docker:\(id.uuidString):\(name)"
         case .dockerLogs(let id, let name): return "dockerlogs:\(id.uuidString):\(name)"
+        case .dockerTop(let id, let name): return "dockertop:\(id.uuidString):\(name)"
         }
     }
 
@@ -139,12 +142,13 @@ public enum SessionSource: Codable, Hashable {
         case .host: return "Host"
         case .docker(_, let name): return name
         case .dockerLogs(_, let name): return "\(name) logs"
+        case .dockerTop(_, let name): return "\(name) processes"
         }
     }
 
     public var isDocker: Bool {
         switch self {
-        case .docker, .dockerLogs: return true
+        case .docker, .dockerLogs, .dockerTop: return true
         default: return false
         }
     }
@@ -154,10 +158,21 @@ public enum SessionSource: Codable, Hashable {
         return false
     }
 
+    public var isDockerTop: Bool {
+        if case .dockerTop = self { return true }
+        return false
+    }
+
+    /// True for pseudo-sessions that are not interactive tmux sessions
+    public var isUtility: Bool {
+        isDockerLogs || isDockerTop
+    }
+
     public var containerName: String? {
         switch self {
         case .docker(_, let name): return name
         case .dockerLogs(_, let name): return name
+        case .dockerTop(_, let name): return name
         default: return nil
         }
     }
@@ -181,6 +196,7 @@ public struct TmuxSession: Identifiable, Hashable {
         case .host: return name
         case .docker(_, let container): return "\(container)/\(name)"
         case .dockerLogs(_, let container): return "\(container)/logs"
+        case .dockerTop(_, let container): return "\(container)/top"
         }
     }
 }
@@ -349,7 +365,7 @@ public class AppState: ObservableObject {
                 let key: String
                 switch s.source {
                 case .host: key = SessionSource.host(hostID: host.id).stableKey
-                case .docker(_, let name), .dockerLogs(_, let name):
+                case .docker(_, let name), .dockerLogs(_, let name), .dockerTop(_, let name):
                     key = SessionSource.docker(hostID: host.id, containerName: name).stableKey
                 }
                 groups[key, default: []].append(s)
@@ -362,7 +378,7 @@ public class AppState: ObservableObject {
             for (key, sessions) in groups.sorted(by: { $0.key < $1.key }) {
                 if key != hostKey {
                     // Use the first docker (non-logs) source as the group source
-                    let groupSource = sessions.first(where: { !$0.source.isDockerLogs })?.source ?? sessions[0].source
+                    let groupSource = sessions.first(where: { !$0.source.isUtility })?.source ?? sessions[0].source
                     sessionGroups.append(SessionGroup(source: groupSource, sessions: sessions))
                 }
             }
@@ -644,6 +660,8 @@ public class AppState: ObservableObject {
             return dockerTmuxCommand(host: h, container: containerName, sessionName: session.name)
         case .dockerLogs(_, let containerName):
             return dockerLogsCommand(host: h, container: containerName)
+        case .dockerTop(_, let containerName):
+            return dockerTopCommand(host: h, container: containerName)
         }
     }
 
@@ -651,6 +669,34 @@ public class AppState: ObservableObject {
     public func dockerLogsCommand(host h: HostConfig, container: String) -> (String, [String]) {
         let safeContainer = sanitizedContainer(container)
         let dockerCmd = "docker logs -f --tail 1000 \(safeContainer)"
+
+        if h.isLocal {
+            let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+            return (shell, ["-lc", dockerCmd])
+        }
+
+        var args = [String]()
+        args.append("-o"); args.append("ServerAliveInterval=10")
+        args.append("-o"); args.append("ServerAliveCountMax=3")
+        args.append("-o"); args.append("ConnectTimeout=10")
+        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
+        if h.ssh.port != 22 {
+            args.append("-p"); args.append("\(h.ssh.port)")
+        }
+        if !h.ssh.identityFile.isEmpty {
+            args.append("-i"); args.append(h.ssh.identityFile)
+        }
+        args.append("-t")
+        let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
+        args.append(userHost)
+        args.append("exec $SHELL -lc '\(extraPath) \(dockerCmd)'")
+        return ("/usr/bin/ssh", args)
+    }
+
+    /// Build the command to show docker container processes (refreshes every 2s)
+    public func dockerTopCommand(host h: HostConfig, container: String) -> (String, [String]) {
+        let safeContainer = sanitizedContainer(container)
+        let dockerCmd = "watch -n 2 docker top \(safeContainer) -eo pid,user,%cpu,%mem,etime,comm"
 
         if h.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"

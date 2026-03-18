@@ -472,8 +472,18 @@ private struct SessionRow: View {
         appState.isFavorited(session)
     }
 
-    private var isLogs: Bool {
-        session.source.isDockerLogs
+    private var isUtility: Bool {
+        session.source.isUtility
+    }
+
+    private var utilityIcon: String {
+        if session.source.isDockerTop { return "list.number" }
+        return "doc.text"
+    }
+
+    private var utilityLabel: String {
+        if session.source.isDockerTop { return "processes" }
+        return "logs"
     }
 
     var body: some View {
@@ -490,12 +500,12 @@ private struct SessionRow: View {
                     .lineLimit(1)
 
                 Spacer()
-            } else if isLogs {
-                Image(systemName: "doc.text")
+            } else if isUtility {
+                Image(systemName: utilityIcon)
                     .font(.system(size: sz(9)))
                     .foregroundColor(isActive ? appState.accentColor.opacity(0.7) : .gray.opacity(0.4))
 
-                Text("logs")
+                Text(utilityLabel)
                     .font(.system(size: sz(11), weight: isActive ? .medium : .regular, design: .monospaced))
                     .foregroundColor(isActive ? appState.accentColor : .gray.opacity(0.5))
                     .italic()

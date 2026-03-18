@@ -1604,6 +1604,109 @@ final class DockerLogsTests: XCTestCase {
     func testIsDockerLogs_false_for_docker() {
         XCTAssertFalse(SessionSource.docker(hostID: HostConfig.localhostID, containerName: "x").isDockerLogs)
     }
+
+    // MARK: - Docker Top
+
+    func testDockerTop_stableKey() {
+        let source = SessionSource.dockerTop(hostID: HostConfig.localhostID, containerName: "webapp")
+        XCTAssertTrue(source.stableKey.contains("dockertop:"))
+        XCTAssertTrue(source.stableKey.contains("webapp"))
+    }
+
+    func testDockerTop_displayName() {
+        let source = SessionSource.dockerTop(hostID: HostConfig.localhostID, containerName: "api")
+        XCTAssertEqual(source.displayName, "api processes")
+    }
+
+    func testDockerTop_isDocker() {
+        let source = SessionSource.dockerTop(hostID: HostConfig.localhostID, containerName: "x")
+        XCTAssertTrue(source.isDocker)
+        XCTAssertTrue(source.isDockerTop)
+        XCTAssertTrue(source.isUtility)
+        XCTAssertFalse(source.isDockerLogs)
+    }
+
+    func testDockerTop_containerName() {
+        let source = SessionSource.dockerTop(hostID: HostConfig.localhostID, containerName: "myapp")
+        XCTAssertEqual(source.containerName, "myapp")
+    }
+
+    func testDockerTop_hostID() {
+        let id = UUID()
+        let source = SessionSource.dockerTop(hostID: id, containerName: "x")
+        XCTAssertEqual(source.hostID, id)
+    }
+
+    func testDockerTop_notEqualToDockerOrLogs() {
+        let docker = SessionSource.docker(hostID: HostConfig.localhostID, containerName: "app")
+        let logs = SessionSource.dockerLogs(hostID: HostConfig.localhostID, containerName: "app")
+        let top = SessionSource.dockerTop(hostID: HostConfig.localhostID, containerName: "app")
+        XCTAssertNotEqual(docker, top)
+        XCTAssertNotEqual(logs, top)
+    }
+
+    func testTmuxSession_displayLabel_dockerTop() {
+        let s = TmuxSession(name: "top", source: .dockerTop(hostID: HostConfig.localhostID, containerName: "webapp"))
+        XCTAssertEqual(s.displayLabel, "webapp/top")
+    }
+
+    func testDockerTopCommand_local() {
+        let state = AppState()
+        let (cmd, args) = state.dockerTopCommand(host: .localhost, container: "myapp")
+        XCTAssertFalse(cmd.contains("ssh"))
+        XCTAssertTrue(args.last?.contains("docker top myapp") ?? false)
+    }
+
+    func testDockerTopCommand_remote() {
+        let state = AppState()
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com", user: "admin"))
+        let (cmd, args) = state.dockerTopCommand(host: host, container: "webapp")
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        XCTAssertTrue(args.contains("admin@myserver.com"))
+        XCTAssertTrue(args.last?.contains("docker top webapp") ?? false)
+    }
+
+    func testCommandForSession_dockerTop() {
+        let state = AppState()
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com"))
+        state.hosts = [host]
+        let session = TmuxSession(name: "top", source: .dockerTop(hostID: host.id, containerName: "webapp"))
+        let (cmd, args) = state.commandForSession(session)
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        XCTAssertTrue(args.last?.contains("docker top") ?? false)
+        XCTAssertTrue(args.last?.contains("webapp") ?? false)
+    }
+
+    func testHostGroupedSessions_topMergedWithDocker() {
+        let state = AppState()
+        state.hosts = [.localhost]
+        state.allSessions = [
+            TmuxSession(name: "dev", source: .docker(hostID: HostConfig.localhostID, containerName: "app")),
+            TmuxSession(name: "logs", source: .dockerLogs(hostID: HostConfig.localhostID, containerName: "app")),
+            TmuxSession(name: "top", source: .dockerTop(hostID: HostConfig.localhostID, containerName: "app")),
+        ]
+        let hostGroups = state.hostGroupedSessions
+        XCTAssertEqual(hostGroups.count, 1)
+        let groups = hostGroups[0].groups
+        XCTAssertEqual(groups.count, 1, "All three should be in one group")
+        XCTAssertEqual(groups[0].sessions.count, 3)
+    }
+
+    func testIsUtility_dockerLogs() {
+        XCTAssertTrue(SessionSource.dockerLogs(hostID: HostConfig.localhostID, containerName: "x").isUtility)
+    }
+
+    func testIsUtility_dockerTop() {
+        XCTAssertTrue(SessionSource.dockerTop(hostID: HostConfig.localhostID, containerName: "x").isUtility)
+    }
+
+    func testIsUtility_false_for_host() {
+        XCTAssertFalse(SessionSource.host(hostID: HostConfig.localhostID).isUtility)
+    }
+
+    func testIsUtility_false_for_docker() {
+        XCTAssertFalse(SessionSource.docker(hostID: HostConfig.localhostID, containerName: "x").isUtility)
+    }
 }
 
 // MARK: - MCP Forwarding Tests
