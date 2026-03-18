@@ -419,6 +419,11 @@ class OnyxTerminalView: NSView {
             self.appState.allSessions.append(session)
         }
 
+        // Clean up stale MCP port listeners before connecting, so -R forwarding succeeds
+        if let host = self.appState.host(for: session.source.hostID) {
+            self.appState.cleanupRemoteMCPPort(host: host)
+        }
+
         let tv = self.activateSession(session)
         self.lastStartTime = Date()
         let (cmd, args) = self.appState.commandForSession(session)

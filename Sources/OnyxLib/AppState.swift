@@ -608,14 +608,30 @@ public class AppState: ObservableObject {
         return String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : Character("_") })
     }
 
-    /// SSH flags and env export for MCP remote port forwarding
+    /// SSH flags and env export for MCP remote port forwarding.
+    /// Uses `-o ExitOnForwardFailure=no` so the session always connects even if the port is busy.
     private func mcpForwardingArgs() -> (sshFlags: [String], envExport: String) {
         guard let localPort = mcpServer?.tcpPort else { return ([], "") }
         let remotePort = MCPSocketServer.defaultRemotePort
         return (
-            ["-R", "\(remotePort):127.0.0.1:\(localPort)"],
+            ["-o", "ExitOnForwardFailure=no", "-R", "\(remotePort):127.0.0.1:\(localPort)"],
             "export ONYX_MCP_PORT=\(remotePort); tmux set-environment ONYX_MCP_PORT \(remotePort) 2>/dev/null; "
         )
+    }
+
+    /// Kill stale MCP port listeners on a remote host before connecting.
+    /// Call this before establishing an SSH session with `-R` forwarding.
+    public func cleanupRemoteMCPPort(host h: HostConfig) {
+        guard !h.isLocal, mcpServer?.tcpPort != nil else { return }
+        let remotePort = MCPSocketServer.defaultRemotePort
+        let (cmd, args) = remoteCommand("lsof -ti tcp:\(remotePort) 2>/dev/null | xargs kill 2>/dev/null", host: h)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: cmd)
+        process.arguments = args
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
     }
 
     /// Build the command for a session based on its source
