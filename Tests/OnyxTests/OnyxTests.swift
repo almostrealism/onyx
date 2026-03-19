@@ -334,10 +334,13 @@ final class AppStateTests: XCTestCase {
 
     func testEffectiveWindowTitle_withSessionAndMonitor() {
         let state = AppState()
-        state.activeSession = TmuxSession(name: "prod", source: .host(hostID: HostConfig.localhostID))
+        let host = HostConfig(label: "myserver", ssh: SSHConfig(host: "myserver.com"))
+        state.hosts = [host]
+        state.activeSession = TmuxSession(name: "prod", source: .host(hostID: host.id))
         state.showMonitor = true
         let title = state.effectiveWindowTitle
-        XCTAssertTrue(title.contains("prod"))
+        XCTAssertFalse(title.contains("prod"), "Session name should not appear during monitoring")
+        XCTAssertTrue(title.contains("myserver"))
         XCTAssertTrue(title.contains("Monitoring"))
     }
 

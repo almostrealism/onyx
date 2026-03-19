@@ -482,11 +482,14 @@ public class AppState: ObservableObject {
 
     public var effectiveWindowTitle: String {
         var title = appearance.windowTitle
-        if let session = activeSession {
-            title += " — \(session.displayLabel)"
-        }
         if showMonitor {
-            title += " — Monitoring"
+            if let host = activeHost {
+                title += " — \(host.label) — Monitoring"
+            } else {
+                title += " — Monitoring"
+            }
+        } else if let session = activeSession {
+            title += " — \(session.displayLabel)"
         }
         return title
     }
