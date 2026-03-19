@@ -319,6 +319,7 @@ public class AppState: ObservableObject {
     @Published public var configLoaded = false
 
     // Session state
+    @Published public var isEnumeratingSessions = false
     @Published public var allSessions: [TmuxSession] = []
     @Published public var activeSession: TmuxSession?
     @Published public var switchToSession: TmuxSession?
@@ -842,7 +843,7 @@ public class AppState: ObservableObject {
     /// Build the command to show docker container processes (refreshes every 2s)
     public func dockerTopCommand(host h: HostConfig, container: String) -> (String, [String]) {
         let safeContainer = sanitizedContainer(container)
-        let dockerCmd = "watch -n 2 docker top \(safeContainer) -eo pid,user,%cpu,%mem,etime,comm"
+        let dockerCmd = "while true; do clear; date; echo; docker top \(safeContainer) -eo pid,user,%cpu,%mem,etime,comm 2>&1; sleep 2; done"
 
         if h.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"

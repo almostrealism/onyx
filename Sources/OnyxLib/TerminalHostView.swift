@@ -528,6 +528,7 @@ class OnyxTerminalView: NSView {
     // MARK: - Session Enumeration
 
     private func enumerateAllSessions(then completion: @escaping () -> Void) {
+        DispatchQueue.main.async { self.appState.isEnumeratingSessions = true }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             let hosts = self.appState.hosts
@@ -578,6 +579,7 @@ class OnyxTerminalView: NSView {
                         self.appState.activeSession = defaultMatch ?? finalResults.first
                     }
                 }
+                self.appState.isEnumeratingSessions = false
                 completion()
             }
         }

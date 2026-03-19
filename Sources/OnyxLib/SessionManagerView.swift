@@ -73,15 +73,28 @@ struct SessionManagerView: View {
                             }
 
                             if hostGroup.groups.isEmpty {
-                                Text("No sessions")
-                                    .font(.system(size: sz(11), design: .monospaced))
-                                    .foregroundColor(.gray.opacity(0.3))
+                                if appState.isEnumeratingSessions {
+                                    HStack(spacing: 6) {
+                                        ProgressView()
+                                            .scaleEffect(0.5)
+                                            .colorScheme(.dark)
+                                        Text("Loading sessions...")
+                                            .font(.system(size: sz(11), design: .monospaced))
+                                            .foregroundColor(.gray.opacity(0.3))
+                                    }
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 4)
+                                } else {
+                                    Text("No sessions")
+                                        .font(.system(size: sz(11), design: .monospaced))
+                                        .foregroundColor(.gray.opacity(0.3))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 4)
+                                }
                             }
                         }
 
-                        if appState.allSessions.isEmpty {
+                        if appState.allSessions.isEmpty && !appState.isEnumeratingSessions {
                             Text("No sessions found")
                                 .font(.system(size: sz(12), design: .monospaced))
                                 .foregroundColor(.gray.opacity(0.4))
