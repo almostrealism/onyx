@@ -107,20 +107,29 @@ class OnyxTerminalView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        // Don't claim hits when an overlay is covering the terminal
+        if appState.showMonitor || appState.showSettings || appState.showCommandPalette
+            || appState.showSessionManager || appState.showSetup {
+            return nil
+        }
         return terminalView?.hitTest(point) ?? super.hitTest(point)
     }
 
     override func mouseDown(with event: NSEvent) {
-        // Ensure clicking the terminal area grabs focus from SwiftUI panels
-        if let tv = terminalView {
-            tv.window?.makeFirstResponder(tv)
-            appState.focusedComponent = .terminal
+        // Only grab focus if no overlay is covering us
+        if !appState.showMonitor && !appState.showSettings && !appState.showCommandPalette
+            && !appState.showSessionManager && !appState.showSetup {
+            if let tv = terminalView {
+                tv.window?.makeFirstResponder(tv)
+                appState.focusedComponent = .terminal
+            }
         }
         super.mouseDown(with: event)
     }
 
-    /// Monitors all mouseDown events in the window to track which component
-    /// the user clicks into, updating the focus outline and first responder.
+    /// Monitors all mouseDown events in the window to manage first responder.
+    /// Runs SYNCHRONOUSLY during event dispatch so the responder change takes
+    /// effect before SwiftUI processes the click on a text field.
     private func installFocusMonitor() {
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             guard let self = self,
@@ -129,39 +138,35 @@ class OnyxTerminalView: NSView {
 
             let loc = event.locationInWindow
             let myFrame = self.convert(self.bounds, to: nil)
-            let clickedTerminal = myFrame.contains(loc) && !self.appState.showMonitor
+
+            // Determine if the click landed in the terminal area (and no overlay is blocking it)
+            let hasOverlay = self.appState.showMonitor || self.appState.showSettings
+                || self.appState.showCommandPalette || self.appState.showSessionManager
+                || self.appState.showSetup
+            let clickedTerminal = myFrame.contains(loc) && !hasOverlay
 
             if clickedTerminal {
-                // Click inside terminal — grab first responder
                 self.appState.focusedComponent = .terminal
-                if let tv = self.terminalView {
-                    DispatchQueue.main.async {
-                        tv.window?.makeFirstResponder(tv)
-                    }
-                }
+                // Terminal grabs focus via its own mouseDown, no need to do it here
             } else {
-                // Click outside terminal — determine which component and
-                // RESIGN terminal's first responder so SwiftUI fields can receive input.
-                // Use precedence: settings > command palette > monitor > session manager > right panel
+                // Determine which component based on visibility precedence
                 if self.appState.showSettings {
                     self.appState.focusedComponent = .settings
                 } else if self.appState.showCommandPalette {
                     self.appState.focusedComponent = .commandPalette
-                } else if self.appState.showMonitor {
-                    self.appState.focusedComponent = .terminal // monitor has no text input
                 } else if self.appState.showSessionManager {
                     self.appState.focusedComponent = .sessionManager
                 } else if self.appState.activeRightPanel != nil {
                     self.appState.focusedComponent = .rightPanel
+                } else if self.appState.showMonitor {
+                    // Monitor has no text input — terminal keeps focus conceptually
+                    self.appState.focusedComponent = .terminal
                 }
 
-                // Resign terminal first responder so SwiftUI text fields can accept input
+                // SYNCHRONOUSLY resign terminal first responder BEFORE the click
+                // reaches SwiftUI, so the text field under the click can accept focus.
                 if let tv = self.terminalView, window.firstResponder === tv {
-                    DispatchQueue.main.async {
-                        // Setting firstResponder to the window's content view lets
-                        // SwiftUI's focus system take over for the clicked text field
-                        window.makeFirstResponder(window.contentView)
-                    }
+                    window.makeFirstResponder(nil)
                 }
             }
             return event
@@ -170,8 +175,11 @@ class OnyxTerminalView: NSView {
 
     private func restoreFocus() {
         guard let tv = terminalView else { return }
+        // Only restore if nothing else should have focus
+        guard appState.focusedComponent == .terminal else { return }
+        // Use async here because this is called from a notification, and we need
+        // the overlay dismissal to finish before we grab focus
         DispatchQueue.main.async {
-            // Only restore if no panel/overlay is actively expecting keyboard input
             guard self.appState.focusedComponent == .terminal else { return }
             tv.window?.makeFirstResponder(tv)
         }
