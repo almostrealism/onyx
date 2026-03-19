@@ -413,6 +413,17 @@ struct FavoritesBar: View {
             .buttonStyle(.plain)
             .padding(.trailing, 6)
 
+            // Window number badge
+            if appState.windowIndex <= 3 {
+                Text("\(appState.windowIndex + 1)")
+                    .font(.system(size: sz(8), weight: .bold, design: .monospaced))
+                    .foregroundColor(appState.accentColor.opacity(0.5))
+                    .frame(width: sz(14), height: sz(14))
+                    .background(appState.accentColor.opacity(0.1))
+                    .cornerRadius(3)
+                    .padding(.trailing, 4)
+            }
+
             // Connection indicator + host
             HStack(spacing: 5) {
                 Circle()

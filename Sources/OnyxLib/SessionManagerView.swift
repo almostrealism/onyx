@@ -537,6 +537,16 @@ private struct SessionRow: View {
                         .foregroundColor(isFavorited ? Color(hex: "FFD06B") : .gray.opacity(0.3))
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    if isFavorited {
+                        ForEach(0..<4, id: \.self) { idx in
+                            Button(action: { appState.toggleFavoriteWindow(session, windowIndex: idx) }) {
+                                let isOn = appState.isFavoriteInWindow(session, windowIndex: idx)
+                                Label("Window \(idx + 1)", systemImage: isOn ? "checkmark.circle.fill" : "circle")
+                            }
+                        }
+                    }
+                }
             }
         }
         .padding(.horizontal, 14)

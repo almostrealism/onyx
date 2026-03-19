@@ -20,6 +20,49 @@ public extension Notification.Name {
     static let restoreTerminalFocus = Notification.Name("restoreTerminalFocus")
 }
 
+// MARK: - Favorite Entry
+
+public struct FavoriteEntry: Codable, Equatable {
+    public var sessionID: String
+    /// Window indices (0-3) where this favorite is visible. Empty = visible nowhere.
+    public var windows: Set<Int>
+
+    public init(sessionID: String, windows: Set<Int> = [0]) {
+        self.sessionID = sessionID
+        self.windows = windows
+    }
+}
+
+// MARK: - Window Index
+
+/// Tracks which window indices are in use across all AppState instances.
+private class WindowIndexPool {
+    static let shared = WindowIndexPool()
+    private var inUse: Set<Int> = []
+    private let lock = NSLock()
+
+    func claim() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        for i in 0...3 {
+            if !inUse.contains(i) {
+                inUse.insert(i)
+                return i
+            }
+        }
+        // All 0-3 in use — overflow windows get index 4+ (show all favorites)
+        let next = (inUse.max() ?? 0) + 1
+        inUse.insert(next)
+        return next
+    }
+
+    func release(_ index: Int) {
+        lock.lock()
+        inUse.remove(index)
+        lock.unlock()
+    }
+}
+
 // MARK: - Focus Tracking
 
 public enum FocusedComponent: Equatable {
@@ -281,7 +324,9 @@ public class AppState: ObservableObject {
     @Published public var switchToSession: TmuxSession?
     @Published public var createNewSession: TmuxSession?  // session to create, nil = none
     @Published public var showNewSessionPrompt = false
-    @Published public var favoritedSessionIDs: [String] = []  // ordered list
+    @Published public var favoriteEntries: [FavoriteEntry] = []  // ordered list with per-window visibility
+    /// This window's index (0-3). Windows > 3 show all favorites.
+    public let windowIndex: Int
 
     // Host being edited for key setup
     @Published public var keySetupHostID: UUID?
@@ -306,7 +351,13 @@ public class AppState: ObservableObject {
 
     private var mcpServer: MCPSocketServer?
 
-    public init() {}
+    public init() {
+        self.windowIndex = WindowIndexPool.shared.claim()
+    }
+
+    deinit {
+        WindowIndexPool.shared.release(windowIndex)
+    }
 
     // MARK: - Host Helpers
 
@@ -340,8 +391,8 @@ public class AppState: ObservableObject {
         hosts.removeAll { $0.id == hostID }
         // Remove sessions belonging to this host
         allSessions.removeAll { $0.source.hostID == hostID }
-        favoritedSessionIDs.removeAll { id in
-            allSessions.first(where: { $0.id == id }) == nil
+        favoriteEntries.removeAll { entry in
+            allSessions.first(where: { $0.id == entry.sessionID }) == nil
         }
         // Clear key setup state if it was for the removed host
         if keySetupHostID == hostID {
@@ -409,10 +460,23 @@ public class AppState: ObservableObject {
         return result
     }
 
-    /// Only favorited sessions, ordered by their position in favoritedSessionIDs
+    /// All favorited session IDs (convenience for code that just needs the ID list)
+    public var favoritedSessionIDs: [String] {
+        favoriteEntries.map(\.sessionID)
+    }
+
+    /// Only favorited sessions visible in this window, ordered by position
     public var favoriteSessions: [TmuxSession] {
         let sessionMap = Dictionary(allSessions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        return favoritedSessionIDs.compactMap { sessionMap[$0] }
+        return favoriteEntries
+            .filter { windowIndex > 3 || $0.windows.contains(windowIndex) }
+            .compactMap { sessionMap[$0.sessionID] }
+    }
+
+    /// All favorited sessions regardless of window assignment
+    public var allFavoriteSessions: [TmuxSession] {
+        let sessionMap = Dictionary(allSessions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return favoriteEntries.compactMap { sessionMap[$0.sessionID] }
     }
 
     /// Docker container names for a specific host
@@ -428,16 +492,34 @@ public class AppState: ObservableObject {
     }
 
     public func toggleFavorite(_ session: TmuxSession) {
-        if let idx = favoritedSessionIDs.firstIndex(of: session.id) {
-            favoritedSessionIDs.remove(at: idx)
+        if let idx = favoriteEntries.firstIndex(where: { $0.sessionID == session.id }) {
+            favoriteEntries.remove(at: idx)
         } else {
-            favoritedSessionIDs.append(session.id)
+            // New favorites default to visible in this window only
+            favoriteEntries.append(FavoriteEntry(sessionID: session.id, windows: [windowIndex]))
         }
         saveFavorites()
     }
 
     public func isFavorited(_ session: TmuxSession) -> Bool {
-        favoritedSessionIDs.contains(session.id)
+        favoriteEntries.contains { $0.sessionID == session.id }
+    }
+
+    /// Toggle whether a favorite is visible in a specific window
+    public func toggleFavoriteWindow(_ session: TmuxSession, windowIndex: Int) {
+        guard let idx = favoriteEntries.firstIndex(where: { $0.sessionID == session.id }) else { return }
+        if favoriteEntries[idx].windows.contains(windowIndex) {
+            favoriteEntries[idx].windows.remove(windowIndex)
+        } else {
+            favoriteEntries[idx].windows.insert(windowIndex)
+        }
+        saveFavorites()
+    }
+
+    /// Check if a favorite is visible in a specific window
+    public func isFavoriteInWindow(_ session: TmuxSession, windowIndex: Int) -> Bool {
+        guard let entry = favoriteEntries.first(where: { $0.sessionID == session.id }) else { return false }
+        return entry.windows.contains(windowIndex)
     }
 
     /// Parse a favorited session ID back into a TmuxSession.
@@ -474,7 +556,7 @@ public class AppState: ObservableObject {
     }
 
     public func moveFavorite(from source: IndexSet, to destination: Int) {
-        favoritedSessionIDs.move(fromOffsets: source, toOffset: destination)
+        favoriteEntries.move(fromOffsets: source, toOffset: destination)
         saveFavorites()
     }
 
@@ -613,14 +695,20 @@ public class AppState: ObservableObject {
     }
 
     private func loadFavorites() {
-        if let data = try? Data(contentsOf: favoritesURL),
-           let ids = try? JSONDecoder().decode([String].self, from: data) {
-            favoritedSessionIDs = ids
+        guard let data = try? Data(contentsOf: favoritesURL) else { return }
+        // Try new format first (FavoriteEntry array)
+        if let entries = try? JSONDecoder().decode([FavoriteEntry].self, from: data) {
+            favoriteEntries = entries
+        } else if let ids = try? JSONDecoder().decode([String].self, from: data) {
+            // Backward compatibility: old format was just [String] of session IDs
+            // Assign all to window 0
+            favoriteEntries = ids.map { FavoriteEntry(sessionID: $0, windows: [0]) }
+            saveFavorites() // Migrate to new format
         }
     }
 
     private func saveFavorites() {
-        if let data = try? JSONEncoder().encode(favoritedSessionIDs) {
+        if let data = try? JSONEncoder().encode(favoriteEntries) {
             try? data.write(to: favoritesURL)
         }
     }
