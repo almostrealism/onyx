@@ -1,7 +1,9 @@
 import SwiftUI
+import SceneKit
 
 public struct ContentView: View {
     @StateObject private var appState = AppState()
+    @State private var showStartupAnimation = true
 
     public init() {}
 
@@ -145,13 +147,28 @@ public struct ContentView: View {
             }
 
             // Favorites bar — outside terminal area at the bottom
-            if !appState.showSetup {
+            if !appState.showSetup && !showStartupAnimation {
                 FavoritesBar(appState: appState)
+            }
+        }
+        .overlay {
+            if showStartupAnimation {
+                StartupOverlay(accentHex: appState.appearance.accentHex)
+                    .transition(.opacity)
+                    .zIndex(999)
             }
         }
         .modifier(ContentViewAnimations(appState: appState))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { appState.loadConfig() }
+        .onAppear {
+            appState.loadConfig()
+            // Dismiss startup animation after a delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                withAnimation(.easeOut(duration: 0.6)) {
+                    showStartupAnimation = false
+                }
+            }
+        }
         .modifier(ContentViewNotifications(appState: appState, updateWindowTitle: updateWindowTitle))
     }
 
@@ -159,6 +176,98 @@ public struct ContentView: View {
         DispatchQueue.main.async {
             NSApplication.shared.windows.first?.title = appState.effectiveWindowTitle
         }
+    }
+}
+
+// MARK: - Startup Animation
+
+private struct StartupOverlay: View {
+    let accentHex: String
+
+    var body: some View {
+        ZStack {
+            Color(nsColor: NSColor(white: 0.03, alpha: 1.0))
+                .ignoresSafeArea()
+
+            VStack(spacing: 24) {
+                SpinningCubeView(accentHex: accentHex)
+                    .frame(width: 120, height: 120)
+
+                Text("ONYX")
+                    .font(.system(size: 18, weight: .ultraLight, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.6))
+                    .tracking(12)
+            }
+        }
+    }
+}
+
+private struct SpinningCubeView: NSViewRepresentable {
+    let accentHex: String
+
+    func makeNSView(context: Context) -> SCNView {
+        let scnView = SCNView()
+        scnView.backgroundColor = .clear
+        scnView.antialiasingMode = .multisampling4X
+
+        let scene = SCNScene()
+        scene.background.contents = NSColor.clear
+        scnView.scene = scene
+
+        // Wireframe cube
+        let box = SCNBox(width: 1.2, height: 1.2, length: 1.2, chamferRadius: 0.05)
+        let material = SCNMaterial()
+        material.fillMode = .lines
+        material.diffuse.contents = NSColor(hex: accentHex)?.withAlphaComponent(0.7) ?? NSColor.cyan
+        material.isDoubleSided = true
+        box.materials = [material]
+
+        let cubeNode = SCNNode(geometry: box)
+        scene.rootNode.addChildNode(cubeNode)
+
+        // Spin animation — continuous rotation on two axes
+        let rotateX = SCNAction.rotateBy(x: .pi * 2, y: 0, z: 0, duration: 6)
+        let rotateY = SCNAction.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 4)
+        cubeNode.runAction(.repeatForever(rotateX))
+        cubeNode.runAction(.repeatForever(rotateY))
+
+        // Subtle ambient + directional light
+        let ambientLight = SCNNode()
+        ambientLight.light = SCNLight()
+        ambientLight.light?.type = .ambient
+        ambientLight.light?.color = NSColor(white: 0.3, alpha: 1.0)
+        scene.rootNode.addChildNode(ambientLight)
+
+        let dirLight = SCNNode()
+        dirLight.light = SCNLight()
+        dirLight.light?.type = .directional
+        dirLight.light?.color = NSColor(white: 0.8, alpha: 1.0)
+        dirLight.eulerAngles = SCNVector3(x: -.pi / 4, y: .pi / 4, z: 0)
+        scene.rootNode.addChildNode(dirLight)
+
+        // Camera
+        let camera = SCNNode()
+        camera.camera = SCNCamera()
+        camera.position = SCNVector3(x: 0, y: 0, z: 3)
+        scene.rootNode.addChildNode(camera)
+        scnView.pointOfView = camera
+
+        return scnView
+    }
+
+    func updateNSView(_ scnView: SCNView, context: Context) {}
+}
+
+private extension NSColor {
+    convenience init?(hex: String) {
+        let h = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        guard h.count == 6, let int = UInt64(h, radix: 16) else { return nil }
+        self.init(
+            red: CGFloat((int >> 16) & 0xFF) / 255.0,
+            green: CGFloat((int >> 8) & 0xFF) / 255.0,
+            blue: CGFloat(int & 0xFF) / 255.0,
+            alpha: 1.0
+        )
     }
 }
 
