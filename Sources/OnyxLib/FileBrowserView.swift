@@ -562,6 +562,101 @@ public class FileBrowserManager: ObservableObject {
         }
     }
 
+    // MARK: - Download
+
+    @Published public var downloadStatus: String?
+    @Published public var isDownloading = false
+
+    public func downloadEntry(_ entry: RemoteEntry) {
+        guard let current = currentPath else { return }
+        let fullPath = current.hasSuffix("/") ? "\(current)\(entry.name)" : "\(current)/\(entry.name)"
+        downloadPath(fullPath, isDirectory: entry.isDirectory)
+    }
+
+    public func downloadPath(_ remotePath: String, isDirectory: Bool) {
+        // Show save panel to pick local destination
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = (remotePath as NSString).lastPathComponent
+        panel.canCreateDirectories = true
+        if isDirectory {
+            // For directories, treat the name as a folder
+            panel.nameFieldStringValue = (remotePath as NSString).lastPathComponent
+        }
+        guard panel.runModal() == .OK, let destURL = panel.url else { return }
+
+        isDownloading = true
+        downloadStatus = "Downloading \((remotePath as NSString).lastPathComponent)..."
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let success: Bool
+            if self.appState.activeHost?.isLocal ?? true {
+                success = self.copyLocalDown(remotePath, to: destURL, isDirectory: isDirectory)
+            } else {
+                success = self.scpDownload(remotePath, to: destURL, isDirectory: isDirectory)
+            }
+
+            DispatchQueue.main.async {
+                self.isDownloading = false
+                self.downloadStatus = success ? "Download complete" : "Download failed"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    if self.downloadStatus?.hasPrefix("Download") == true {
+                        self.downloadStatus = nil
+                    }
+                }
+            }
+        }
+    }
+
+    private func copyLocalDown(_ remotePath: String, to destURL: URL, isDirectory: Bool) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/cp")
+        process.arguments = isDirectory ? ["-R", remotePath, destURL.path] : [remotePath, destURL.path]
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
+    private func scpDownload(_ remotePath: String, to destURL: URL, isDirectory: Bool) -> Bool {
+        let ssh = appState.activeSSHConfig
+        var args = [String]()
+        if isDirectory { args.append("-r") }
+        args.append("-o"); args.append("BatchMode=yes")
+        args.append("-o"); args.append("ConnectTimeout=10")
+        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
+        if ssh.port != 22 {
+            args.append("-P"); args.append("\(ssh.port)")
+        }
+        if !ssh.identityFile.isEmpty {
+            args.append("-i"); args.append(ssh.identityFile)
+        }
+        let userHost = ssh.user.isEmpty ? ssh.host : "\(ssh.user)@\(ssh.host)"
+        args.append("\(userHost):\(remotePath)")
+        args.append(destURL.path)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
+        process.arguments = args
+        do {
+            try process.run()
+
+            let killTimer = DispatchSource.makeTimerSource(queue: .global())
+            killTimer.schedule(deadline: .now() + 60)
+            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
+            killTimer.resume()
+
+            process.waitUntilExit()
+            killTimer.cancel()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
     /// Escape a path for safe use inside a double-quoted shell string
     public func escapeForShell(_ s: String) -> String {
         // Wrap in double quotes, escaping the chars that are special inside double quotes
@@ -623,7 +718,13 @@ struct FileBrowserView: View {
                             fileName: browser.viewingFileName ?? "file",
                             content: content,
                             accentColor: appState.accentColor,
-                            onClose: { browser.closeFile() }
+                            onClose: { browser.closeFile() },
+                            onDownload: {
+                                if let path = browser.currentPath, let name = browser.viewingFileName {
+                                    let fullPath = path.hasSuffix("/") ? "\(path)\(name)" : "\(path)/\(name)"
+                                    browser.downloadPath(fullPath, isDirectory: false)
+                                }
+                            }
                         )
                     } else if browser.isSearchActive {
                         SearchResultsView(appState: appState, browser: browser, tree: browser.searchResults)
@@ -652,11 +753,12 @@ struct FileBrowserView: View {
                     }
 
                     // Upload status bar
-                    if let status = browser.uploadStatus {
+                    // Transfer status bars (upload / download)
+                    ForEach(transferStatuses, id: \.text) { status in
                         HStack(spacing: 8) {
-                            if browser.isUploading {
+                            if status.inProgress {
                                 ProgressView().scaleEffect(0.6).colorScheme(.dark)
-                            } else if status.hasPrefix("Failed") {
+                            } else if status.text.contains("failed") || status.text.hasPrefix("Failed") {
                                 Image(systemName: "exclamationmark.triangle")
                                     .font(.system(size: 10))
                                     .foregroundColor(Color(hex: "FF6B6B"))
@@ -665,7 +767,7 @@ struct FileBrowserView: View {
                                     .font(.system(size: 10))
                                     .foregroundColor(Color(hex: "6BFF8E"))
                             }
-                            Text(status)
+                            Text(status.text)
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.7))
                             Spacer()
@@ -712,6 +814,22 @@ struct FileBrowserView: View {
                 browser.navigateTo(path)
             }
         }
+    }
+
+    private struct TransferStatus: Hashable {
+        let text: String
+        let inProgress: Bool
+    }
+
+    private var transferStatuses: [TransferStatus] {
+        var statuses: [TransferStatus] = []
+        if let s = browser.uploadStatus {
+            statuses.append(TransferStatus(text: s, inProgress: browser.isUploading))
+        }
+        if let s = browser.downloadStatus {
+            statuses.append(TransferStatus(text: s, inProgress: browser.isDownloading))
+        }
+        return statuses
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) {
@@ -998,6 +1116,11 @@ struct DirectoryListView: View {
                         .onTapGesture {
                             browser.openEntry(entry)
                         }
+                        .contextMenu {
+                            Button(action: { browser.downloadEntry(entry) }) {
+                                Label("Download", systemImage: "arrow.down.circle")
+                            }
+                        }
                 }
             }
         }
@@ -1167,9 +1290,30 @@ struct FileContentView: View {
     let content: String
     let accentColor: Color
     let onClose: () -> Void
+    var onDownload: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
+            // Download bar
+            if let download = onDownload {
+                HStack {
+                    Spacer()
+                    Button(action: download) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.down.circle")
+                                .font(.system(size: 10))
+                            Text("Download")
+                                .font(.system(size: 10, design: .monospaced))
+                        }
+                        .foregroundColor(accentColor.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(Color.white.opacity(0.03))
+            }
+
             ScrollView(.vertical) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     Text(content)
