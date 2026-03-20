@@ -478,20 +478,28 @@ class OnyxTerminalView: NSView {
         nc.waitUntilExit()
         guard nc.terminationStatus == 0 else { return .unreachable }
 
-        let probe = Process()
-        probe.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        var probeArgs = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-                         "-o", "StrictHostKeyChecking=accept-new"]
-        if host.ssh.port != 22 { probeArgs += ["-p", "\(host.ssh.port)"] }
-        if !host.ssh.identityFile.isEmpty { probeArgs += ["-i", host.ssh.identityFile] }
-        let userHost = host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
-        probeArgs += [userHost, "true"]
-        probe.arguments = probeArgs
-        probe.standardOutput = FileHandle.nullDevice
-        probe.standardError = FileHandle.nullDevice
-        try? probe.run()
-        probe.waitUntilExit()
-        return probe.terminationStatus == 0 ? .ok : .keyAuthFailed
+        // Try SSH auth up to 2 times — the first attempt on startup may fail
+        // transiently (SSH agent not ready, network still initializing, etc.)
+        for attempt in 1...2 {
+            let probe = Process()
+            probe.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+            var probeArgs = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+                             "-o", "StrictHostKeyChecking=accept-new"]
+            if host.ssh.port != 22 { probeArgs += ["-p", "\(host.ssh.port)"] }
+            if !host.ssh.identityFile.isEmpty { probeArgs += ["-i", host.ssh.identityFile] }
+            let userHost = host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
+            probeArgs += [userHost, "true"]
+            probe.arguments = probeArgs
+            probe.standardOutput = FileHandle.nullDevice
+            probe.standardError = FileHandle.nullDevice
+            try? probe.run()
+            probe.waitUntilExit()
+            if probe.terminationStatus == 0 { return .ok }
+            if attempt < 2 {
+                Thread.sleep(forTimeInterval: 1.0) // brief pause before retry
+            }
+        }
+        return .keyAuthFailed
     }
 
     func startKeySetup() {
