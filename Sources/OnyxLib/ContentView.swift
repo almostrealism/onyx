@@ -1,9 +1,36 @@
 import SwiftUI
 import SceneKit
 
+// MARK: - Window Finder
+
+/// Invisible NSView that captures a reference to the hosting NSWindow.
+private class WindowFinder: NSView {
+    var onWindow: ((NSWindow) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let window = window {
+            onWindow?(window)
+        }
+    }
+}
+
+private struct WindowFinderView: NSViewRepresentable {
+    let onWindow: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> WindowFinder {
+        let view = WindowFinder()
+        view.onWindow = onWindow
+        return view
+    }
+
+    func updateNSView(_ nsView: WindowFinder, context: Context) {}
+}
+
 public struct ContentView: View {
     @StateObject private var appState = AppState()
     @State private var showStartupAnimation = true
+    @State private var hostWindow: NSWindow?
 
     public init() {}
 
@@ -159,6 +186,9 @@ public struct ContentView: View {
             }
         }
         .modifier(ContentViewAnimations(appState: appState))
+        .background(WindowFinderView { window in
+            hostWindow = window
+        })
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             appState.loadConfig()
@@ -174,7 +204,7 @@ public struct ContentView: View {
 
     private func updateWindowTitle() {
         DispatchQueue.main.async {
-            NSApplication.shared.windows.first?.title = appState.effectiveWindowTitle
+            hostWindow?.title = appState.effectiveWindowTitle
         }
     }
 }

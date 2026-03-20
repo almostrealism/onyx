@@ -82,9 +82,6 @@ struct WindowRenameView: View {
         appState.appearance.windowTitle = newTitle.isEmpty ? "Onyx" : newTitle
         appState.saveAppearance()
         appState.showWindowRename = false
-        // Update actual window title
-        DispatchQueue.main.async {
-            NSApplication.shared.windows.first?.title = appState.effectiveWindowTitle
-        }
+        // Title update handled by ContentView's onChange(of: appearance.windowTitle)
     }
 }
