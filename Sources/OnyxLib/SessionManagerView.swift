@@ -482,6 +482,10 @@ private struct SessionRow: View {
     }
 
     private var isFavorited: Bool {
+        appState.isFavoriteInWindow(session, windowIndex: appState.windowIndex)
+    }
+
+    private var isFavoritedAnyWindow: Bool {
         appState.isFavorited(session)
     }
 
@@ -527,9 +531,9 @@ private struct SessionRow: View {
                 Spacer()
 
                 Button(action: { appState.toggleFavorite(session) }) {
-                    Image(systemName: isFavorited ? "star.fill" : "star")
+                    Image(systemName: isFavorited ? "star.fill" : (isFavoritedAnyWindow ? "star.leadinghalf.filled" : "star"))
                         .font(.system(size: sz(10)))
-                        .foregroundColor(isFavorited ? Color(hex: "FFD06B") : .gray.opacity(0.3))
+                        .foregroundColor(isFavorited ? Color(hex: "FFD06B") : (isFavoritedAnyWindow ? Color(hex: "FFD06B").opacity(0.4) : .gray.opacity(0.3)))
                 }
                 .buttonStyle(.plain)
             } else {
@@ -545,9 +549,9 @@ private struct SessionRow: View {
                 Spacer()
 
                 Button(action: { appState.toggleFavorite(session) }) {
-                    Image(systemName: isFavorited ? "star.fill" : "star")
+                    Image(systemName: isFavorited ? "star.fill" : (isFavoritedAnyWindow ? "star.leadinghalf.filled" : "star"))
                         .font(.system(size: sz(10)))
-                        .foregroundColor(isFavorited ? Color(hex: "FFD06B") : .gray.opacity(0.3))
+                        .foregroundColor(isFavorited ? Color(hex: "FFD06B") : (isFavoritedAnyWindow ? Color(hex: "FFD06B").opacity(0.4) : .gray.opacity(0.3)))
                 }
                 .buttonStyle(.plain)
                 .contextMenu {

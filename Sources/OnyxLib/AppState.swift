@@ -492,11 +492,21 @@ public class AppState: ObservableObject {
         return result.sorted()
     }
 
+    /// Toggle a session's favorite status for the current window.
+    /// If the session is favorited in this window, remove this window.
+    /// If that leaves no windows, remove the entry entirely.
+    /// If not favorited at all, add it for this window.
     public func toggleFavorite(_ session: TmuxSession) {
         if let idx = favoriteEntries.firstIndex(where: { $0.sessionID == session.id }) {
-            favoriteEntries.remove(at: idx)
+            if favoriteEntries[idx].windows.contains(windowIndex) {
+                favoriteEntries[idx].windows.remove(windowIndex)
+                if favoriteEntries[idx].windows.isEmpty {
+                    favoriteEntries.remove(at: idx)
+                }
+            } else {
+                favoriteEntries[idx].windows.insert(windowIndex)
+            }
         } else {
-            // New favorites default to visible in this window only
             favoriteEntries.append(FavoriteEntry(sessionID: session.id, windows: [windowIndex]))
         }
         saveFavorites()
