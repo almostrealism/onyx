@@ -519,49 +519,59 @@ struct MonitorView: View {
                     }
                     .padding(.top, 4)
 
-                    // Grid charts
-                    VStack(spacing: 16) {
-                        let cpuData = monitor.bucketedCPU()
-                        if !cpuData.isEmpty {
-                            GridChart(
-                                title: "CPU",
-                                values: cpuData,
-                                accentColor: Color(hex: "66CCFF")
-                            )
-                        }
-
-                        let memData = monitor.bucketedMemory()
-                        if !memData.isEmpty {
-                            GridChart(
-                                title: "MEMORY",
-                                values: memData,
-                                accentColor: Color(hex: "FFD06B"),
-                                height: 50
-                            )
-                        }
-
-                        let gpuData = monitor.bucketedGPU()
-                        if !gpuData.isEmpty {
-                            GridChart(
-                                title: "GPU",
-                                values: gpuData,
-                                accentColor: Color(hex: "C06BFF")
-                            )
-                        }
-                    }
-                    .padding(.horizontal, 40)
-
-                    // Docker stats + Reminders side by side
+                    // TOP HALF: Charts + Docker stats side by side
                     HStack(alignment: .top, spacing: 24) {
+                        // Charts (left or full width)
+                        VStack(spacing: 16) {
+                            let cpuData = monitor.bucketedCPU()
+                            if !cpuData.isEmpty {
+                                GridChart(
+                                    title: "CPU",
+                                    values: cpuData,
+                                    accentColor: Color(hex: "66CCFF")
+                                )
+                            }
+
+                            let memData = monitor.bucketedMemory()
+                            if !memData.isEmpty {
+                                GridChart(
+                                    title: "MEMORY",
+                                    values: memData,
+                                    accentColor: Color(hex: "FFD06B"),
+                                    height: 50
+                                )
+                            }
+
+                            let gpuData = monitor.bucketedGPU()
+                            if !gpuData.isEmpty {
+                                GridChart(
+                                    title: "GPU",
+                                    values: gpuData,
+                                    accentColor: Color(hex: "C06BFF")
+                                )
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        // Docker container stats (right half, only if available)
                         if dockerStats.isAvailable {
                             DockerStatsSection(appState: appState, dockerStats: dockerStats)
                                 .frame(maxWidth: .infinity)
                         }
+                    }
+                    .padding(.horizontal, 40)
+
+                    Divider().background(Color.white.opacity(0.1)).padding(.horizontal, 40)
+
+                    // BOTTOM HALF: Connections + Reminders side by side
+                    HStack(alignment: .top, spacing: 24) {
+                        ConnectionPoolSection(appState: appState)
+                            .frame(maxWidth: .infinity)
                         RemindersSection(appState: appState)
                             .frame(maxWidth: .infinity)
                     }
                     .padding(.horizontal, 40)
-                    .padding(.top, 8)
+                    .padding(.top, 4)
 
                 } else if let error = monitor.lastError {
                     VStack(spacing: 8) {
@@ -597,6 +607,8 @@ struct MonitorView: View {
         }
         .onAppear {
             dockerStats.startPolling()
+            // Trigger an immediate pool status publish via notification
+            NotificationCenter.default.post(name: .refreshPoolStatus, object: nil)
         }
         .onDisappear {
             dockerStats.stopPolling()
@@ -924,6 +936,70 @@ struct DockerStatsSection: View {
             }
             return t
         }.joined(separator: "/")
+    }
+}
+
+struct ConnectionPoolSection: View {
+    @ObservedObject var appState: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("CONNECTIONS")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(appState.accentColor)
+                    .tracking(2)
+                Spacer()
+                let running = appState.connectionPool.filter(\.isRunning).count
+                let total = appState.connectionPool.count
+                if total > 0 {
+                    Text("\(running)/\(total)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.4))
+                }
+            }
+
+            if appState.connectionPool.isEmpty {
+                Text("No connections")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.3))
+            } else {
+                // Header
+                HStack(spacing: 0) {
+                    Text("")
+                        .frame(width: 8)
+                    Text("SESSION")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("HOST")
+                        .frame(width: 80, alignment: .trailing)
+                    Text("STATUS")
+                        .frame(width: 75, alignment: .trailing)
+                }
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+
+                ForEach(appState.connectionPool) { conn in
+                    HStack(spacing: 0) {
+                        Circle()
+                            .fill(Color(hex: conn.statusColor))
+                            .frame(width: 5, height: 5)
+                            .padding(.trailing, 3)
+                        Text(conn.label)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text(conn.hostLabel)
+                            .frame(width: 80, alignment: .trailing)
+                            .lineLimit(1)
+                        Text(conn.status)
+                            .frame(width: 75, alignment: .trailing)
+                            .foregroundColor(Color(hex: conn.statusColor).opacity(0.8))
+                    }
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.7))
+                }
+            }
+        }
     }
 }
 

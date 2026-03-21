@@ -100,6 +100,9 @@ class OnyxTerminalView: NSView {
             self?.restoreFocus()
         }
         installFocusMonitor()
+        NotificationCenter.default.addObserver(forName: .refreshPoolStatus, object: nil, queue: .main) { [weak self] _ in
+            self?.publishPoolStatus()
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -241,6 +244,33 @@ class OnyxTerminalView: NSView {
         evictionTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.healthCheck()
             self?.evictStaleEntries()
+            self?.publishPoolStatus()
+        }
+    }
+
+    /// Publish the current pool state to AppState for the monitor overlay
+    private func publishPoolStatus() {
+        let infos: [ConnectionInfo] = pool.map { (sessionID, entry) in
+            let session = appState.allSessions.first { $0.id == sessionID }
+            let hostID = session?.source.hostID
+            let hostLabel = hostID.flatMap { id in appState.hosts.first { $0.id == id }?.label } ?? "local"
+            return ConnectionInfo(
+                id: sessionID,
+                label: session?.displayLabel ?? sessionID,
+                hostLabel: hostLabel,
+                isRunning: entry.processRunning,
+                isActive: sessionID == activeSessionID,
+                lastActiveTime: entry.lastActiveTime,
+                source: session?.source
+            )
+        }.sorted { a, b in
+            // Active first, then running, then by label
+            if a.isActive != b.isActive { return a.isActive }
+            if a.isRunning != b.isRunning { return a.isRunning }
+            return a.label < b.label
+        }
+        DispatchQueue.main.async {
+            self.appState.connectionPool = infos
         }
     }
 

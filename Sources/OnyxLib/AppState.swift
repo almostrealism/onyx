@@ -18,6 +18,7 @@ public extension Notification.Name {
     static let refreshSession = Notification.Name("refreshSession")
     static let toggleArtifacts = Notification.Name("toggleArtifacts")
     static let restoreTerminalFocus = Notification.Name("restoreTerminalFocus")
+    static let refreshPoolStatus = Notification.Name("refreshPoolStatus")
 }
 
 // MARK: - Favorite Entry
@@ -225,6 +226,30 @@ public struct AppearanceConfig: Codable {
     }
 }
 
+// MARK: - Connection Pool Info
+
+public struct ConnectionInfo: Identifiable {
+    public let id: String           // session ID from pool
+    public let label: String        // display name
+    public let hostLabel: String    // host name
+    public let isRunning: Bool      // process is alive
+    public let isActive: Bool       // currently displayed terminal
+    public let lastActiveTime: Date
+    public let source: SessionSource?
+
+    public var status: String {
+        if isActive && isRunning { return "active" }
+        if isRunning { return "connected" }
+        return "disconnected"
+    }
+
+    public var statusColor: String {
+        if isActive && isRunning { return "6BFF8E" }  // green
+        if isRunning { return "FFD06B" }               // yellow
+        return "FF6B6B"                                 // red
+    }
+}
+
 // MARK: - Session Model
 
 public enum SessionSource: Codable, Hashable {
@@ -369,6 +394,7 @@ public class AppState: ObservableObject {
 
     // Session state
     @Published public var isEnumeratingSessions = false
+    @Published public var connectionPool: [ConnectionInfo] = []
     @Published public var allSessions: [TmuxSession] = []
     @Published public var activeSession: TmuxSession?
     @Published public var switchToSession: TmuxSession?
