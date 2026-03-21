@@ -189,7 +189,7 @@ class OnyxTerminalView: NSView {
 
     /// Activate a session: hide current view, show (or create) the target view
     @discardableResult
-    private func activateSession(_ session: TmuxSession) -> LocalProcessTerminalView {
+    private func activateSession(_ session: TmuxSession, grabFocus: Bool = true) -> LocalProcessTerminalView {
         // Hide the currently active view and stamp its last-active time
         if let currentID = activeSessionID, let entry = pool[currentID] {
             entry.terminalView.isHidden = true
@@ -202,8 +202,10 @@ class OnyxTerminalView: NSView {
             entry.terminalView.frame = bounds
             activeSessionID = session.id
             hideScroller(on: entry.terminalView)
-            DispatchQueue.main.async {
-                entry.terminalView.window?.makeFirstResponder(entry.terminalView)
+            if grabFocus {
+                DispatchQueue.main.async {
+                    entry.terminalView.window?.makeFirstResponder(entry.terminalView)
+                }
             }
             return entry.terminalView
         }
@@ -222,8 +224,10 @@ class OnyxTerminalView: NSView {
             processRunning: false
         )
         activeSessionID = session.id
-        DispatchQueue.main.async {
-            tv.window?.makeFirstResponder(tv)
+        if grabFocus {
+            DispatchQueue.main.async {
+                tv.window?.makeFirstResponder(tv)
+            }
         }
         return tv
     }
@@ -431,7 +435,7 @@ class OnyxTerminalView: NSView {
         }
     }
 
-    private func connectToActiveSession() {
+    private func connectToActiveSession(grabFocus: Bool = false) {
         let defaultHost = self.appState.hosts.first ?? .localhost
         let defaultSession = TmuxSession(
             name: defaultHost.ssh.tmuxSession,
@@ -452,7 +456,7 @@ class OnyxTerminalView: NSView {
             self.appState.cleanupRemoteMCPPort(host: host)
         }
 
-        let tv = self.activateSession(session)
+        let tv = self.activateSession(session, grabFocus: grabFocus)
         self.lastStartTime = Date()
         let (cmd, args) = self.appState.commandForSession(session)
         tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
@@ -892,7 +896,7 @@ class OnyxTerminalView: NSView {
                 if let target = targetSession {
                     self.appState.activeSession = target
                 }
-                self.connectToActiveSession()
+                self.connectToActiveSession(grabFocus: true)
             }
         }
     }
