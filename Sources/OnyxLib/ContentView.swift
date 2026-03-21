@@ -199,7 +199,7 @@ public struct ContentView: View {
                 }
             }
         }
-        .modifier(ContentViewNotifications(appState: appState, updateWindowTitle: updateWindowTitle))
+        .modifier(ContentViewNotifications(appState: appState, updateWindowTitle: updateWindowTitle, hostWindow: hostWindow))
     }
 
     private func updateWindowTitle() {
@@ -336,57 +336,69 @@ private struct ContentViewAnimations: ViewModifier {
 private struct ContentViewNotifications: ViewModifier {
     @ObservedObject var appState: AppState
     let updateWindowTitle: () -> Void
+    var hostWindow: NSWindow?
+
+    private var isKeyWindow: Bool { hostWindow?.isKeyWindow == true }
 
     func body(content: Content) -> some View {
         content
             .onReceive(NotificationCenter.default.publisher(for: .toggleNotes)) { _ in
+                guard isKeyWindow else { return }
                 appState.showCommandPalette = false
                 appState.showSettings = false
                 appState.activeRightPanel = appState.activeRightPanel == .notes ? nil : .notes
             }
             .onReceive(NotificationCenter.default.publisher(for: .createNote)) { _ in
+                guard isKeyWindow else { return }
                 appState.showCommandPalette = false
                 appState.showSettings = false
                 appState.activeRightPanel = .notes
                 appState.createNoteRequested = true
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleCommandPalette)) { _ in
+                guard isKeyWindow else { return }
                 appState.showCommandPalette.toggle()
                 appState.recalculateFocus()
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleMonitor)) { _ in
+                guard isKeyWindow else { return }
                 appState.showMonitor.toggle()
                 ShortcutManager.monitorVisible = appState.showMonitor
                 updateWindowTitle()
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleFileBrowser)) { _ in
+                guard isKeyWindow else { return }
                 appState.showCommandPalette = false
                 appState.showSettings = false
                 appState.activeRightPanel = appState.activeRightPanel == .fileBrowser ? nil : .fileBrowser
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleSessionManager)) { _ in
+                guard isKeyWindow else { return }
                 appState.showCommandPalette = false
                 appState.showSettings = false
                 appState.showSessionManager.toggle()
                 appState.recalculateFocus()
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleArtifacts)) { _ in
+                guard isKeyWindow else { return }
                 appState.showCommandPalette = false
                 appState.showSettings = false
                 appState.activeRightPanel = appState.activeRightPanel == .artifacts ? nil : .artifacts
             }
             .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
+                guard isKeyWindow else { return }
                 appState.showCommandPalette = false
                 appState.showSettings = true
                 appState.recalculateFocus()
             }
             .onReceive(NotificationCenter.default.publisher(for: .escapePressed)) { _ in
+                guard isKeyWindow else { return }
                 let wasMonitoring = appState.showMonitor
                 appState.dismissTopOverlay()
                 ShortcutManager.monitorVisible = appState.showMonitor
                 if wasMonitoring && !appState.showMonitor { updateWindowTitle() }
             }
-            .modifier(ContentViewSessionNotifications(appState: appState))
+            .modifier(ContentViewSessionNotifications(appState: appState, hostWindow: hostWindow))
             .onChange(of: appState.activeRightPanel) { _, newValue in
                 ShortcutManager.rightPanelVisible = newValue != nil
                 appState.recalculateFocus()
@@ -407,10 +419,17 @@ private struct ContentViewNotifications: ViewModifier {
 
 private struct ContentViewSessionNotifications: ViewModifier {
     @ObservedObject var appState: AppState
+    var hostWindow: NSWindow?
+
+    /// Only respond to keyboard-triggered notifications in the key window
+    private var isKeyWindow: Bool {
+        hostWindow?.isKeyWindow == true
+    }
 
     func body(content: Content) -> some View {
         content
             .onReceive(NotificationCenter.default.publisher(for: .cycleTmuxSession)) { _ in
+                guard isKeyWindow else { return }
                 let favorites = appState.favoriteSessions
                 guard favorites.count > 1, let current = appState.activeSession else { return }
                 if let idx = favorites.firstIndex(where: { $0.id == current.id }) {
@@ -419,13 +438,16 @@ private struct ContentViewSessionNotifications: ViewModifier {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .createTmuxSession)) { _ in
+                guard isKeyWindow else { return }
                 appState.showSessionManager = true
                 appState.showNewSessionPrompt = true
             }
             .onReceive(NotificationCenter.default.publisher(for: .refreshSession)) { _ in
+                guard isKeyWindow else { return }
                 appState.reconnectRequested = true
             }
             .onReceive(NotificationCenter.default.publisher(for: .switchToFavorite)) { notification in
+                guard isKeyWindow else { return }
                 guard let index = notification.object as? Int else { return }
                 let favorites = appState.favoriteSessions
                 guard index <= favorites.count else { return }

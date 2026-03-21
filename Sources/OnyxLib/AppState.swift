@@ -63,6 +63,55 @@ private class WindowIndexPool {
     }
 }
 
+// MARK: - Shared Favorites Store
+
+/// Singleton that owns the favorites data. All windows read/write through this
+/// to avoid race conditions on the shared JSON file.
+public class FavoritesStore: ObservableObject {
+    public static let shared = FavoritesStore()
+
+    @Published public var entries: [FavoriteEntry] = []
+    private var url: URL?
+    private let lock = NSLock()
+
+    private init() {}
+
+    public func configure(url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard self.url == nil else { return } // only configure once
+        self.url = url
+        load()
+    }
+
+    private func load() {
+        guard let url = url, let data = try? Data(contentsOf: url) else { return }
+        if let entries = try? JSONDecoder().decode([FavoriteEntry].self, from: data) {
+            self.entries = entries
+        } else if let ids = try? JSONDecoder().decode([String].self, from: data) {
+            // Backward compatibility: old format was just [String]
+            self.entries = ids.map { FavoriteEntry(sessionID: $0, windows: [0]) }
+            save()
+        }
+    }
+
+    public func save() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let url = url else { return }
+        if let data = try? JSONEncoder().encode(entries) {
+            try? data.write(to: url)
+        }
+    }
+
+    /// Reset for testing — clears all entries without saving
+    public func reset() {
+        lock.lock()
+        entries = []
+        lock.unlock()
+    }
+}
+
 // MARK: - Focus Tracking
 
 public enum FocusedComponent: Equatable {
@@ -325,7 +374,11 @@ public class AppState: ObservableObject {
     @Published public var switchToSession: TmuxSession?
     @Published public var createNewSession: TmuxSession?  // session to create, nil = none
     @Published public var showNewSessionPrompt = false
-    @Published public var favoriteEntries: [FavoriteEntry] = []  // ordered list with per-window visibility
+    /// Shared favorites store — all windows read/write through this singleton
+    public var favoriteEntries: [FavoriteEntry] {
+        get { FavoritesStore.shared.entries }
+        set { FavoritesStore.shared.entries = newValue }
+    }
     /// This window's index (0-3). Windows > 3 show all favorites.
     public let windowIndex: Int
 
@@ -333,6 +386,7 @@ public class AppState: ObservableObject {
     @Published public var keySetupHostID: UUID?
 
     private var monitorCancellable: AnyCancellable?
+    private var favoritesCancellable: AnyCancellable?
     public lazy var monitor: MonitorManager = {
         let m = MonitorManager(appState: self)
         monitorCancellable = m.objectWillChange.sink { [weak self] _ in
@@ -354,6 +408,13 @@ public class AppState: ObservableObject {
 
     public init() {
         self.windowIndex = WindowIndexPool.shared.claim()
+        // Forward shared favorites store changes to this AppState's publisher
+        // so SwiftUI views update when favorites change from any window
+        favoritesCancellable = FavoritesStore.shared.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.objectWillChange.send()
+            }
+        }
     }
 
     deinit {
@@ -706,22 +767,11 @@ public class AppState: ObservableObject {
     }
 
     private func loadFavorites() {
-        guard let data = try? Data(contentsOf: favoritesURL) else { return }
-        // Try new format first (FavoriteEntry array)
-        if let entries = try? JSONDecoder().decode([FavoriteEntry].self, from: data) {
-            favoriteEntries = entries
-        } else if let ids = try? JSONDecoder().decode([String].self, from: data) {
-            // Backward compatibility: old format was just [String] of session IDs
-            // Assign all to window 0
-            favoriteEntries = ids.map { FavoriteEntry(sessionID: $0, windows: [0]) }
-            saveFavorites() // Migrate to new format
-        }
+        FavoritesStore.shared.configure(url: favoritesURL)
     }
 
     private func saveFavorites() {
-        if let data = try? JSONEncoder().encode(favoriteEntries) {
-            try? data.write(to: favoritesURL)
-        }
+        FavoritesStore.shared.save()
     }
 
     public func dismissTopOverlay() {

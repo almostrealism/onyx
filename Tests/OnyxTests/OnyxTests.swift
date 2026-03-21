@@ -373,6 +373,11 @@ final class AppStateTests: XCTestCase {
 
 final class SessionModelTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        FavoritesStore.shared.reset()
+    }
+
     // MARK: - SessionSource
 
     func testSessionSource_hostStableKey() {
@@ -1771,6 +1776,11 @@ final class DockerLogsTests: XCTestCase {
 // MARK: - Favorite Session Parsing Tests
 
 final class FavoriteParsingTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        FavoritesStore.shared.reset()
+    }
 
     func testParseFavoriteID_hostSession() {
         let state = AppState()
