@@ -896,7 +896,10 @@ class OnyxTerminalView: NSView {
                 if let target = targetSession {
                     self.appState.activeSession = target
                 }
-                self.connectToActiveSession(grabFocus: true)
+                // Only grab focus if the terminal still has it — the user may
+                // have switched to another panel while waiting for the reconnect
+                let shouldFocus = self.appState.focusedComponent == .terminal
+                self.connectToActiveSession(grabFocus: shouldFocus)
             }
         }
     }
