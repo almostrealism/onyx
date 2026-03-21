@@ -673,12 +673,12 @@ public class FileBrowserManager: ObservableObject {
 
 struct FileBrowserView: View {
     @ObservedObject var appState: AppState
-    @StateObject private var browser: FileBrowserManager
+    @ObservedObject var browser: FileBrowserManager
     @State private var isDragOver = false
 
     init(appState: AppState) {
         self.appState = appState
-        _browser = StateObject(wrappedValue: FileBrowserManager(appState: appState))
+        self.browser = appState.fileBrowserManager
     }
 
     var body: some View {

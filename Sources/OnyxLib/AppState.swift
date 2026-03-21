@@ -683,6 +683,10 @@ public class AppState: ObservableObject {
         NotesManager(directory: notesDirectory)
     }()
 
+    public lazy var fileBrowserManager: FileBrowserManager = {
+        FileBrowserManager(appState: self)
+    }()
+
     public var savedFoldersURL: URL {
         appSupportDir.appendingPathComponent("folders.json")
     }
