@@ -659,6 +659,15 @@ public class AppState: ObservableObject {
         saveFavorites()
     }
 
+    /// Move a favorite up or down within the full entries list by session ID
+    public func moveFavoriteByID(_ sessionID: String, direction: Int) {
+        guard let fromIdx = favoriteEntries.firstIndex(where: { $0.sessionID == sessionID }) else { return }
+        let toIdx = fromIdx + direction
+        guard toIdx >= 0 && toIdx < favoriteEntries.count else { return }
+        favoriteEntries.swapAt(fromIdx, toIdx)
+        saveFavorites()
+    }
+
     // MARK: - Window Title
 
     public var effectiveWindowTitle: String {

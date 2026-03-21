@@ -345,7 +345,7 @@ private struct FavoriteRow: View {
             // Move up/down
             VStack(spacing: 0) {
                 Button(action: {
-                    appState.moveFavorite(from: IndexSet(integer: index), to: index - 1)
+                    appState.moveFavoriteByID(session.id, direction: -1)
                 }) {
                     Image(systemName: "chevron.up")
                         .font(.system(size: sz(7), weight: .bold))
@@ -357,7 +357,7 @@ private struct FavoriteRow: View {
                 .disabled(index == 0)
 
                 Button(action: {
-                    appState.moveFavorite(from: IndexSet(integer: index), to: index + 2)
+                    appState.moveFavoriteByID(session.id, direction: 1)
                 }) {
                     Image(systemName: "chevron.down")
                         .font(.system(size: sz(7), weight: .bold))
