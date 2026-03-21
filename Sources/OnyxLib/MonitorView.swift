@@ -35,6 +35,7 @@ public class MonitorManager: ObservableObject {
     @Published public var latestSample: MonitorSample?
     @Published public var isPolling = false
     @Published public var lastError: String?
+    @Published public var showMemoryChart = true
     @Published public var pollCount = 0
     @Published public var useShortInterval = true // true = 5s buckets (default), false = 1m buckets
 
@@ -513,7 +514,7 @@ struct MonitorView: View {
                         Text(monitor.useShortInterval ? "5s intervals" : "1m intervals")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.4))
-                        Text("(T to toggle)")
+                        Text("(T interval · M memory)")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.25))
                     }
@@ -532,14 +533,16 @@ struct MonitorView: View {
                                 )
                             }
 
-                            let memData = monitor.bucketedMemory()
-                            if !memData.isEmpty {
-                                GridChart(
-                                    title: "MEMORY",
-                                    values: memData,
-                                    accentColor: Color(hex: "FFD06B"),
-                                    height: 50
-                                )
+                            if monitor.showMemoryChart {
+                                let memData = monitor.bucketedMemory()
+                                if !memData.isEmpty {
+                                    GridChart(
+                                        title: "MEMORY",
+                                        values: memData,
+                                        accentColor: Color(hex: "FFD06B"),
+                                        height: 50
+                                    )
+                                }
                             }
 
                             let gpuData = monitor.bucketedGPU()
@@ -604,6 +607,9 @@ struct MonitorView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleMonitorInterval)) { _ in
             monitor.toggleInterval()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleMemoryChart)) { _ in
+            monitor.showMemoryChart.toggle()
         }
         .onAppear {
             dockerStats.startPolling()

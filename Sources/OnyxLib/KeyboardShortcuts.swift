@@ -84,6 +84,12 @@ public class ShortcutManager {
                     NotificationCenter.default.post(name: .toggleMonitorInterval, object: nil)
                     return nil
                 }
+
+                // M key (keyCode 46) → toggle memory chart (only when overlay is visible)
+                if event.keyCode == 46 && flags.isEmpty && monitorVisible {
+                    NotificationCenter.default.post(name: .toggleMemoryChart, object: nil)
+                    return nil
+                }
             }
 
             // Escape → dismiss top overlay
