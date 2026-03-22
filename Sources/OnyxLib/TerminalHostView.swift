@@ -260,27 +260,49 @@ class OnyxTerminalView: NSView {
 
     /// Publish the current pool state to AppState for the monitor overlay
     private func publishPoolStatus() {
+        let poolIDs = Set(pool.keys)
         let infos: [ConnectionInfo] = pool.map { (sessionID, entry) in
             let session = appState.allSessions.first { $0.id == sessionID }
             let hostID = session?.source.hostID
             let hostLabel = hostID.flatMap { id in appState.hosts.first { $0.id == id }?.label } ?? "local"
+            let isActive = sessionID == activeSessionID
+            let status: ConnectionStatus
+            if isActive && entry.processRunning {
+                status = .active
+            } else if entry.processRunning {
+                status = .connected
+            } else {
+                status = .disconnected
+            }
             return ConnectionInfo(
                 id: sessionID,
                 label: session?.displayLabel ?? sessionID,
                 hostLabel: hostLabel,
                 isRunning: entry.processRunning,
-                isActive: sessionID == activeSessionID,
+                isActive: isActive,
                 lastActiveTime: entry.lastActiveTime,
-                source: session?.source
+                source: session?.source,
+                connectionStatus: status
             )
         }.sorted { a, b in
-            // Active first, then running, then by label
             if a.isActive != b.isActive { return a.isActive }
             if a.isRunning != b.isRunning { return a.isRunning }
             return a.label < b.label
         }
+
+        // Build pending entries for sessions not in pool but in a transient state
+        var pending: [ConnectionInfo] = []
+        for info in appState.pendingConnections {
+            // Keep pending entries that aren't yet in the pool
+            if !poolIDs.contains(info.id) {
+                pending.append(info)
+            }
+        }
+
         DispatchQueue.main.async {
             self.appState.connectionPool = infos
+            // Only clear pending entries that now exist in pool
+            self.appState.pendingConnections = pending
         }
     }
 
@@ -442,6 +464,40 @@ class OnyxTerminalView: NSView {
             ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
+    // MARK: - Pending Connection Tracking
+
+    /// Record a session entering a transient state so it appears in the connections list
+    private func setPendingStatus(_ status: ConnectionStatus, for session: TmuxSession? = nil) {
+        let target = session ?? appState.activeSession
+        guard let target = target else { return }
+        let hostLabel = appState.host(for: target.source.hostID)?.label ?? "local"
+        let info = ConnectionInfo(
+            id: target.id,
+            label: target.displayLabel,
+            hostLabel: hostLabel,
+            isRunning: false,
+            isActive: true,
+            lastActiveTime: Date(),
+            source: target.source,
+            connectionStatus: status
+        )
+        DispatchQueue.main.async {
+            // Replace existing pending entry for this session, or append
+            if let idx = self.appState.pendingConnections.firstIndex(where: { $0.id == info.id }) {
+                self.appState.pendingConnections[idx] = info
+            } else {
+                self.appState.pendingConnections.append(info)
+            }
+        }
+    }
+
+    /// Remove a session from pending (it's now in pool or abandoned)
+    private func clearPendingStatus(for sessionID: String) {
+        DispatchQueue.main.async {
+            self.appState.pendingConnections.removeAll { $0.id == sessionID }
+        }
+    }
+
     // MARK: - Connection Lifecycle
 
     func startSSH() {
@@ -451,6 +507,7 @@ class OnyxTerminalView: NSView {
         lastStartTime = Date()
 
         DispatchQueue.main.async { self.appState.connectionError = nil }
+        setPendingStatus(.enumerating)
 
         enumerateAllSessions {
             self.connectToActiveSession()
@@ -464,6 +521,7 @@ class OnyxTerminalView: NSView {
 
         // Remember exactly which session we're reconnecting to
         let targetSession = appState.activeSession
+        setPendingStatus(.enumerating, for: targetSession)
 
         // Destroy only the current session's pool entry for a fresh start
         if let id = activeSessionID {
@@ -499,6 +557,9 @@ class OnyxTerminalView: NSView {
         let hostLabel = self.appState.host(for: session.source.hostID)?.label ?? "unknown"
         print("connectToActiveSession: \(session.displayLabel) on \(hostLabel) [id: \(session.id)]")
 
+        // Mark as connecting (SSH handshake in progress)
+        setPendingStatus(.connecting, for: session)
+
         // Ensure the session appears in allSessions (it may not if enumeration
         // ran before the host was reachable, e.g. right after SSH key setup)
         if !self.appState.allSessions.contains(where: { $0.id == session.id }) {
@@ -515,6 +576,9 @@ class OnyxTerminalView: NSView {
         let (cmd, args) = self.appState.commandForSession(session)
         tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
         self.pool[session.id]?.processRunning = true
+        // Now in pool — clear pending status and refresh pool display
+        clearPendingStatus(for: session.id)
+        publishPoolStatus()
     }
 
     private enum ProbeResult {
@@ -915,6 +979,7 @@ class OnyxTerminalView: NSView {
         }
 
         // Dead or missing session — destroy stale entry so we get a fresh terminal
+        setPendingStatus(.connecting, for: session)
         destroyPoolEntry(session.id)
         let tv = activateSession(session)
 
@@ -922,6 +987,8 @@ class OnyxTerminalView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
             self.pool[session.id]?.processRunning = true
+            self.clearPendingStatus(for: session.id)
+            self.publishPoolStatus()
         }
     }
 
@@ -957,6 +1024,7 @@ class OnyxTerminalView: NSView {
         isKeySetup = false
 
         let targetSession = appState.activeSession
+        setPendingStatus(.enumerating, for: targetSession)
 
         if let id = activeSessionID {
             destroyPoolEntry(id)
@@ -986,6 +1054,8 @@ class OnyxTerminalView: NSView {
         let delay = min(pow(2.0, Double(reconnectAttempt)) * 0.5, maxBackoff)
         reconnectAttempt += 1
 
+        setPendingStatus(.reconnecting, for: targetSession)
+
         DispatchQueue.main.async {
             self.appState.isReconnecting = true
         }
@@ -994,6 +1064,8 @@ class OnyxTerminalView: NSView {
             guard let self = self else { return }
             self.appState.isReconnecting = false
             self.lastStartTime = Date()
+
+            self.setPendingStatus(.enumerating, for: targetSession)
 
             // Destroy the dead entry so we get a fresh terminal view
             if let id = self.activeSessionID {

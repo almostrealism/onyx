@@ -96,7 +96,10 @@ public class FileBrowserManager: ObservableObject {
     @Published public var currentPath: String?
     @Published public var entries: [RemoteEntry] = []
     @Published public var fileContent: String?
+    @Published public var imageData: Data?
     @Published public var viewingFileName: String?
+    /// True when the file can't be previewed (binary, unknown format)
+    @Published public var isUnsupportedFile = false
     @Published public var isLoading = false
     @Published public var error: String?
     @Published public var showAddFolder = false
@@ -154,6 +157,8 @@ public class FileBrowserManager: ObservableObject {
             currentPath = nil
             entries = []
             fileContent = nil
+            imageData = nil
+            isUnsupportedFile = false
             gitManager.clear()
         }
     }
@@ -162,7 +167,9 @@ public class FileBrowserManager: ObservableObject {
 
     public func navigateTo(_ path: String) {
         fileContent = nil
+        imageData = nil
         viewingFileName = nil
+        isUnsupportedFile = false
         if let current = currentPath {
             pathHistory.append(current)
         }
@@ -173,7 +180,9 @@ public class FileBrowserManager: ObservableObject {
 
     public func navigateBack() {
         fileContent = nil
+        imageData = nil
         viewingFileName = nil
+        isUnsupportedFile = false
         if let prev = pathHistory.popLast() {
             currentPath = prev
             listDirectory(prev)
@@ -197,7 +206,9 @@ public class FileBrowserManager: ObservableObject {
 
     public func closeFile() {
         fileContent = nil
+        imageData = nil
         viewingFileName = nil
+        isUnsupportedFile = false
     }
 
     /// Open a file by full path (used by search results)
@@ -270,6 +281,33 @@ public class FileBrowserManager: ObservableObject {
         }
     }
 
+    private static let imageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "webp", "ico", "heic", "heif"
+    ]
+
+    private static let binaryExtensions: Set<String> = [
+        "zip", "tar", "gz", "bz2", "xz", "7z", "rar",
+        "exe", "dll", "dylib", "so", "o", "a",
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+        "mp3", "mp4", "mov", "avi", "mkv", "wav", "flac", "ogg",
+        "ttf", "otf", "woff", "woff2",
+        "sqlite", "db", "bin", "dat",
+        "class", "pyc", "wasm",
+    ]
+
+    private enum FileKind {
+        case text
+        case image
+        case binary
+    }
+
+    private static func classifyFile(_ name: String) -> FileKind {
+        let ext = (name as NSString).pathExtension.lowercased()
+        if imageExtensions.contains(ext) { return .image }
+        if binaryExtensions.contains(ext) { return .binary }
+        return .text
+    }
+
     private func readFile(_ path: String, name: String) {
         if let connectError = checkRemoteConnectivity() {
             error = connectError
@@ -278,10 +316,35 @@ public class FileBrowserManager: ObservableObject {
 
         isLoading = true
         error = nil
+        imageData = nil
+        isUnsupportedFile = false
 
-        // Read first 2000 lines to avoid huge files
+        let kind = Self.classifyFile(name)
         let escaped = escapeForShell(path)
-        let script = "head -2000 \(escaped) 2>&1"
+
+        switch kind {
+        case .image:
+            readImageFile(path: escaped, name: name)
+        case .binary:
+            // Don't try to read — just show the unsupported file view
+            DispatchQueue.main.async {
+                self.isLoading = false
+                self.viewingFileName = name
+                self.isUnsupportedFile = true
+            }
+        case .text:
+            readTextFile(path: escaped, name: name)
+        }
+    }
+
+    private func readTextFile(path escaped: String, name: String) {
+        // Check if file is actually binary (even if extension looks like text)
+        // Read first 2000 lines, but first check if it's binary with file(1)
+        let script = """
+        FILE_TYPE=$(file -b --mime-encoding \(escaped) 2>/dev/null); \
+        if echo "$FILE_TYPE" | grep -qi binary; then echo "__BINARY__"; \
+        else head -2000 \(escaped) 2>&1; fi
+        """
         let (cmd, args) = appState.remoteCommand(script)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -293,10 +356,43 @@ public class FileBrowserManager: ObservableObject {
                     let host = self.appState.activeHost?.label ?? "remote host"
                     self.error = "Cannot connect to \(host).\nOpen a terminal session to this host first."
                 } else if let output = result.output {
-                    self.fileContent = output
-                    self.viewingFileName = name
+                    if output.trimmingCharacters(in: .whitespacesAndNewlines) == "__BINARY__" {
+                        self.viewingFileName = name
+                        self.isUnsupportedFile = true
+                    } else {
+                        self.fileContent = output
+                        self.viewingFileName = name
+                    }
                 } else {
                     self.error = "Failed to read file"
+                }
+            }
+        }
+    }
+
+    private func readImageFile(path escaped: String, name: String) {
+        // Base64-encode the image and transfer as text
+        let script = "base64 < \(escaped) 2>&1"
+        let (cmd, args) = appState.remoteCommand(script)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Self.runProcessWithStatus(cmd: cmd, args: args)
+            DispatchQueue.main.async {
+                self?.isLoading = false
+                guard let self = self else { return }
+                if result.exitCode == 255 {
+                    let host = self.appState.activeHost?.label ?? "remote host"
+                    self.error = "Cannot connect to \(host).\nOpen a terminal session to this host first."
+                } else if let output = result.output,
+                          let data = Data(base64Encoded: output.trimmingCharacters(in: .whitespacesAndNewlines),
+                                          options: .ignoreUnknownCharacters),
+                          !data.isEmpty {
+                    self.imageData = data
+                    self.viewingFileName = name
+                } else {
+                    // Failed to decode — show as unsupported with download option
+                    self.viewingFileName = name
+                    self.isUnsupportedFile = true
                 }
             }
         }
@@ -713,6 +809,31 @@ struct FileBrowserView: View {
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
                         Spacer()
+                    } else if let data = browser.imageData {
+                        ImageContentView(
+                            fileName: browser.viewingFileName ?? "image",
+                            imageData: data,
+                            accentColor: appState.accentColor,
+                            onClose: { browser.closeFile() },
+                            onDownload: {
+                                if let path = browser.currentPath, let name = browser.viewingFileName {
+                                    let fullPath = path.hasSuffix("/") ? "\(path)\(name)" : "\(path)/\(name)"
+                                    browser.downloadPath(fullPath, isDirectory: false)
+                                }
+                            }
+                        )
+                    } else if browser.isUnsupportedFile {
+                        UnsupportedFileView(
+                            fileName: browser.viewingFileName ?? "file",
+                            accentColor: appState.accentColor,
+                            onClose: { browser.closeFile() },
+                            onDownload: {
+                                if let path = browser.currentPath, let name = browser.viewingFileName {
+                                    let fullPath = path.hasSuffix("/") ? "\(path)\(name)" : "\(path)/\(name)"
+                                    browser.downloadPath(fullPath, isDirectory: false)
+                                }
+                            }
+                        )
                     } else if let content = browser.fileContent {
                         FileContentView(
                             fileName: browser.viewingFileName ?? "file",
@@ -936,7 +1057,9 @@ struct FolderSidebar: View {
                         .onTapGesture {
                             browser.pathHistory = []
                             browser.fileContent = nil
+                            browser.imageData = nil
                             browser.viewingFileName = nil
+                            browser.isUnsupportedFile = false
                             browser.currentPath = folder
                             browser.navigateTo(folder)
                         }
@@ -1324,6 +1447,106 @@ struct FileContentView: View {
                 }
             }
         }
+    }
+}
+
+struct ImageContentView: View {
+    let fileName: String
+    let imageData: Data
+    let accentColor: Color
+    let onClose: () -> Void
+    var onDownload: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Action bar
+            HStack {
+                Spacer()
+                if let download = onDownload {
+                    Button(action: download) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.down.circle")
+                                .font(.system(size: 10))
+                            Text("Download")
+                                .font(.system(size: 10, design: .monospaced))
+                        }
+                        .foregroundColor(accentColor.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .background(Color.white.opacity(0.03))
+
+            // Image
+            ScrollView([.horizontal, .vertical]) {
+                if let nsImage = NSImage(data: imageData) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(12)
+                } else {
+                    // Data exists but couldn't create image — corrupt or unsupported codec
+                    VStack(spacing: 12) {
+                        Image(systemName: "photo.badge.exclamationmark")
+                            .font(.system(size: 32))
+                            .foregroundColor(.gray.opacity(0.4))
+                        Text("Cannot render image")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.5))
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(40)
+                }
+            }
+        }
+    }
+}
+
+struct UnsupportedFileView: View {
+    let fileName: String
+    let accentColor: Color
+    let onClose: () -> Void
+    var onDownload: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Spacer()
+
+            Image(systemName: "doc.questionmark")
+                .font(.system(size: 36))
+                .foregroundColor(.gray.opacity(0.35))
+
+            Text("Cannot preview this file")
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.6))
+
+            Text(fileName)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+
+            if let download = onDownload {
+                Button(action: download) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 14))
+                        Text("Download")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    }
+                    .foregroundColor(accentColor)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                    .background(accentColor.opacity(0.15))
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

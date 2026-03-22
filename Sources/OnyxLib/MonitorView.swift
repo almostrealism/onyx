@@ -1011,6 +1011,23 @@ struct DockerStatsSection: View {
 struct ConnectionPoolSection: View {
     @ObservedObject var appState: AppState
 
+    /// Merge pool entries with pending entries, deduplicating by ID
+    private var allConnections: [ConnectionInfo] {
+        var seen = Set<String>()
+        var result: [ConnectionInfo] = []
+        // Pool entries first (they're authoritative)
+        for conn in appState.connectionPool {
+            seen.insert(conn.id)
+            result.append(conn)
+        }
+        // Pending entries that aren't already in pool
+        for conn in appState.pendingConnections where !seen.contains(conn.id) {
+            seen.insert(conn.id)
+            result.append(conn)
+        }
+        return result
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -1019,8 +1036,9 @@ struct ConnectionPoolSection: View {
                     .foregroundColor(appState.accentColor)
                     .tracking(2)
                 Spacer()
-                let running = appState.connectionPool.filter(\.isRunning).count
-                let total = appState.connectionPool.count
+                let conns = allConnections
+                let running = conns.filter { $0.isRunning || $0.connectionStatus.isTransient }.count
+                let total = conns.count
                 if total > 0 {
                     Text("\(running)/\(total)")
                         .font(.system(size: 10, design: .monospaced))
@@ -1028,7 +1046,8 @@ struct ConnectionPoolSection: View {
                 }
             }
 
-            if appState.connectionPool.isEmpty {
+            let conns = allConnections
+            if conns.isEmpty {
                 Text("No connections")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.3))
@@ -1042,17 +1061,27 @@ struct ConnectionPoolSection: View {
                     Text("HOST")
                         .frame(width: 80, alignment: .trailing)
                     Text("STATUS")
-                        .frame(width: 75, alignment: .trailing)
+                        .frame(width: 85, alignment: .trailing)
                 }
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.4))
 
-                ForEach(appState.connectionPool) { conn in
+                ForEach(conns) { conn in
                     HStack(spacing: 0) {
-                        Circle()
-                            .fill(Color(hex: conn.statusColor))
-                            .frame(width: 5, height: 5)
-                            .padding(.trailing, 3)
+                        if conn.connectionStatus.isTransient {
+                            // Pulsing dot for transient states
+                            Circle()
+                                .fill(Color(hex: conn.statusColor))
+                                .frame(width: 5, height: 5)
+                                .padding(.trailing, 3)
+                                .opacity(0.6)
+                                .modifier(PulseModifier())
+                        } else {
+                            Circle()
+                                .fill(Color(hex: conn.statusColor))
+                                .frame(width: 5, height: 5)
+                                .padding(.trailing, 3)
+                        }
                         Text(conn.label)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .lineLimit(1)
@@ -1061,14 +1090,26 @@ struct ConnectionPoolSection: View {
                             .frame(width: 80, alignment: .trailing)
                             .lineLimit(1)
                         Text(conn.status)
-                            .frame(width: 75, alignment: .trailing)
+                            .frame(width: 85, alignment: .trailing)
                             .foregroundColor(Color(hex: conn.statusColor).opacity(0.8))
                     }
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundColor(.white.opacity(conn.connectionStatus.isTransient ? 0.5 : 0.7))
                 }
             }
         }
+    }
+}
+
+/// Simple pulse animation for transient connection states
+private struct PulseModifier: ViewModifier {
+    @State private var isPulsing = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isPulsing ? 1.0 : 0.3)
+            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPulsing)
+            .onAppear { isPulsing = true }
     }
 }
 
