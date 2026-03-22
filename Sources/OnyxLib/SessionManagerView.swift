@@ -273,6 +273,10 @@ private struct HostHeader: View {
 
     private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
 
+    private var probeInfo: (result: ProbeStatus?, time: Date?) {
+        NetworkTopologyStore.shared.probeStatus(hostID: hostGroup.host.id)
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: hostGroup.host.isLocal ? "desktopcomputer" : "network")
@@ -284,7 +288,25 @@ private struct HostHeader: View {
                 .foregroundColor(appState.accentColor.opacity(0.7))
                 .tracking(1)
 
+            // Probe status icon
+            if let result = probeInfo.result, result == .unreachable {
+                Image(systemName: "wifi.slash")
+                    .font(.system(size: sz(8)))
+                    .foregroundColor(Color(hex: "FF6B6B").opacity(0.7))
+            } else if let result = probeInfo.result, result == .keyAuthFailed {
+                Image(systemName: "key.slash")
+                    .font(.system(size: sz(8)))
+                    .foregroundColor(Color(hex: "FFD06B").opacity(0.7))
+            }
+
             Spacer()
+
+            // Last checked time
+            if let time = probeInfo.time {
+                Text(relativeTime(time))
+                    .font(.system(size: sz(8), design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.25))
+            }
 
             let available = hostGroup.groups.flatMap(\.sessions).filter { !$0.unavailable }.count
             if available > 0 {
@@ -296,6 +318,13 @@ private struct HostHeader: View {
         .padding(.horizontal, 14)
         .padding(.top, 12)
         .padding(.bottom, 4)
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let elapsed = Int(Date().timeIntervalSince(date))
+        if elapsed < 60 { return "\(elapsed)s ago" }
+        if elapsed < 3600 { return "\(elapsed / 60)m ago" }
+        return "\(elapsed / 3600)h ago"
     }
 }
 
@@ -503,6 +532,15 @@ private struct SessionRow: View {
         return "logs"
     }
 
+    private var sessionConfidence: Double {
+        let store = NetworkTopologyStore.shared
+        _ = store.probeStatus(hostID: session.source.hostID) // trigger access for observation
+        if let entry = store.hosts[session.source.hostID]?.sessions[session.id] {
+            return entry.confidence
+        }
+        return 1.0 // unknown entries assumed fresh
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             if session.unavailable {
@@ -545,6 +583,12 @@ private struct SessionRow: View {
                     .font(.system(size: sz(12), weight: isActive ? .medium : .regular, design: .monospaced))
                     .foregroundColor(isActive ? appState.accentColor : .white.opacity(0.7))
                     .lineLimit(1)
+
+                if sessionConfidence < 0.5 && !isActive {
+                    Image(systemName: "clock")
+                        .font(.system(size: sz(8)))
+                        .foregroundColor(Color(hex: "FFD06B").opacity(0.5))
+                }
 
                 Spacer()
 

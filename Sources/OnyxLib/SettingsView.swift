@@ -147,15 +147,15 @@ struct SettingsView: View {
                                 // Reminders list picker
                                 if remindersManager.accessGranted {
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text("REMINDERS LIST")
+                                        Text("REMINDERS LISTS")
                                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                                             .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
                                             .tracking(2)
 
                                         ScrollView(.horizontal, showsIndicators: false) {
                                             HStack(spacing: 6) {
-                                                let isToday = appState.appearance.remindersList.isEmpty
-                                                Button(action: { appState.appearance.remindersList = "" }) {
+                                                let isToday = appState.appearance.remindersLists.isEmpty
+                                                Button(action: { appState.appearance.remindersLists = [] }) {
                                                     Text("Today")
                                                         .font(.system(size: 11, design: .monospaced))
                                                         .foregroundColor(isToday ? .white : .gray.opacity(0.5))
@@ -167,8 +167,14 @@ struct SettingsView: View {
                                                 .buttonStyle(.plain)
 
                                                 ForEach(remindersManager.availableLists, id: \.self) { list in
-                                                    let selected = appState.appearance.remindersList == list
-                                                    Button(action: { appState.appearance.remindersList = list }) {
+                                                    let selected = appState.appearance.remindersLists.contains(list)
+                                                    Button(action: {
+                                                        if selected {
+                                                            appState.appearance.remindersLists.removeAll { $0 == list }
+                                                        } else {
+                                                            appState.appearance.remindersLists.append(list)
+                                                        }
+                                                    }) {
                                                         Text(list)
                                                             .font(.system(size: 11, design: .monospaced))
                                                             .foregroundColor(selected ? .white : .gray.opacity(0.5))

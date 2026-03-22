@@ -85,6 +85,9 @@ class OnyxTerminalView: NSView {
 
     private var focusObserver: Any?
     private var mouseMonitor: Any?
+    private var periodicEnumerationTimer: Timer?
+    private var lastEnumerationTime: Date = .distantPast
+    private var isEnumerating = false
 
     init(appState: AppState) {
         self.appState = appState
@@ -103,6 +106,7 @@ class OnyxTerminalView: NSView {
         NotificationCenter.default.addObserver(forName: .refreshPoolStatus, object: nil, queue: .main) { [weak self] _ in
             self?.publishPoolStatus()
         }
+        startPeriodicEnumeration()
     }
 
     required init?(coder: NSCoder) {
@@ -347,6 +351,19 @@ class OnyxTerminalView: NSView {
         }
     }
 
+    /// Check every 15s; if 60s have passed since last enumeration, run one
+    private func startPeriodicEnumeration() {
+        periodicEnumerationTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            guard !self.isEnumerating else { return }
+            guard self.hasStarted else { return }
+            let elapsed = Date().timeIntervalSince(self.lastEnumerationTime)
+            if elapsed >= 60 {
+                self.softRefreshSessions()
+            }
+        }
+    }
+
     deinit {
         if let observer = focusObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -358,6 +375,7 @@ class OnyxTerminalView: NSView {
             NSEvent.removeMonitor(monitor)
         }
         evictionTimer?.invalidate()
+        periodicEnumerationTimer?.invalidate()
         for id in Array(pool.keys) {
             destroyPoolEntry(id)
         }
@@ -576,32 +594,48 @@ class OnyxTerminalView: NSView {
     // MARK: - Session Enumeration
 
     private func enumerateAllSessions(then completion: @escaping () -> Void) {
+        isEnumerating = true
         DispatchQueue.main.async { self.appState.isEnumeratingSessions = true }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             let hosts = self.appState.hosts
+            let store = NetworkTopologyStore.shared
 
             let group = DispatchGroup()
-            var allResults: [TmuxSession] = []
             let lock = NSLock()
+            var allEnumerated: [(hostID: UUID, sessions: [TmuxSession], probe: ProbeStatus)] = []
 
             for host in hosts {
                 group.enter()
-                self.enumerateHostSessions(host) { sessions in
+                self.enumerateHostSessions(host) { sessions, probeResult in
                     lock.lock()
-                    allResults.append(contentsOf: sessions)
+                    allEnumerated.append((hostID: host.id, sessions: sessions, probe: probeResult))
                     lock.unlock()
                     group.leave()
                 }
             }
 
             group.wait()
+            self.lastEnumerationTime = Date()
+
+            // Merge each host's results into the topology store
+            for result in allEnumerated {
+                store.mergeEnumeration(hostID: result.hostID, sessions: result.sessions, probeResult: result.probe)
+            }
+            store.save()
+
+            // Build session list from topology (includes stale entries as unavailable)
+            let topologySessions = store.deriveSessions()
 
             // Check for missing favorited sessions that can be recreated
+            let allResults = allEnumerated.flatMap(\.sessions)
             let createdSessions = self.recreateMissingFavorites(existing: allResults, hosts: hosts)
-            let finalResults = allResults + createdSessions
+            let finalResults = topologySessions + createdSessions.filter { created in
+                !topologySessions.contains(where: { $0.id == created.id })
+            }
 
             DispatchQueue.main.async {
+                self.isEnumerating = false
                 if finalResults.isEmpty {
                     let defaultHost = self.appState.hosts.first ?? .localhost
                     let fallback = TmuxSession(
@@ -704,10 +738,17 @@ class OnyxTerminalView: NSView {
         return created
     }
 
-    private func enumerateHostSessions(_ host: HostConfig, completion: @escaping ([TmuxSession]) -> Void) {
+    private func enumerateHostSessions(_ host: HostConfig, completion: @escaping ([TmuxSession], ProbeStatus) -> Void) {
         // For remote hosts, probe first
         if !host.isLocal {
             let result = probeHost(host)
+            let probeStatus: ProbeStatus
+            switch result {
+            case .ok: probeStatus = .ok
+            case .unreachable: probeStatus = .unreachable
+            case .keyAuthFailed: probeStatus = .keyAuthFailed
+            }
+
             if result == .keyAuthFailed {
                 let hostID = host.id
                 let label = host.label
@@ -718,10 +759,10 @@ class OnyxTerminalView: NSView {
                     self.appState.keySetupHostID = hostID
                     self.appState.connectionError = "Key authentication failed for \(label).\nInstall your SSH key to connect."
                 }
-                completion([])
+                completion([], probeStatus)
                 return
             } else if result == .unreachable {
-                completion([])
+                completion([], probeStatus)
                 return
             }
         }
@@ -748,7 +789,7 @@ class OnyxTerminalView: NSView {
         }
 
         group.wait()
-        completion(hostSessions + dockerSessions)
+        completion(hostSessions + dockerSessions, .ok)
     }
 
     private func fetchTmuxSessions(host: HostConfig, source: SessionSource, completion: @escaping ([TmuxSession]) -> Void) {

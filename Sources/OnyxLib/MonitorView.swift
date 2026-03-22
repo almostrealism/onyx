@@ -35,13 +35,18 @@ public class MonitorManager: ObservableObject {
     @Published public var latestSample: MonitorSample?
     @Published public var isPolling = false
     @Published public var lastError: String?
-    @Published public var showMemoryChart = true
+    @Published public var showMemoryChart = false
     @Published public var pollCount = 0
     @Published public var useShortInterval = true // true = 5s buckets (default), false = 1m buckets
+    /// True once any sample has ever contained GPU data — prevents chart from vanishing on transient failures
+    @Published public var gpuEverSeen = false
 
     private var timer: Timer?
     private let appState: AppState
     private let maxSamples = 720 // 1 hour at 5s intervals
+    /// Count of consecutive GPU-less polls (to detect persistent loss)
+    private var consecutiveGpuMisses = 0
+    private let gpuMissThreshold = 60  // after 60 misses (5 min at 5s) consider GPU truly gone
 
     public init(appState: AppState) {
         self.appState = appState
@@ -79,7 +84,13 @@ public class MonitorManager: ObservableObject {
     }
 
     public func bucketedGPU() -> [Double] {
-        return bucket(samples.map { ($0.timestamp, $0.gpuUsage) }, for: "gpu")
+        let data = bucket(samples.map { ($0.timestamp, $0.gpuUsage) }, for: "gpu")
+        // If GPU was ever seen but current data is empty (transient failure),
+        // return zeros to keep the chart visible
+        if data.isEmpty && gpuEverSeen {
+            return Array(repeating: 0.0, count: 60)
+        }
+        return data
     }
 
     private func bucket(_ data: [(Date, Double?)], for label: String) -> [Double] {
@@ -159,6 +170,18 @@ public class MonitorManager: ObservableObject {
                         self?.samples.append(sample)
                         if let count = self?.samples.count, count > (self?.maxSamples ?? 720) {
                             self?.samples.removeFirst(count - (self?.maxSamples ?? 720))
+                        }
+                        // Track GPU presence: once seen, keep showing until
+                        // many consecutive polls come back without GPU data
+                        if sample.gpuUsage != nil {
+                            self?.gpuEverSeen = true
+                            self?.consecutiveGpuMisses = 0
+                        } else if self?.gpuEverSeen == true {
+                            self?.consecutiveGpuMisses += 1
+                            if let misses = self?.consecutiveGpuMisses,
+                               misses >= (self?.gpuMissThreshold ?? 60) {
+                                self?.gpuEverSeen = false
+                            }
                         }
                     }
                 }
@@ -328,16 +351,18 @@ public class RemindersManager: ObservableObject {
     private let store = EKEventStore()
     private var refreshTimer: Timer?
     private var changeObserver: Any?
-    public var selectedList: String = ""  // empty = "Today" (due today across all lists)
+    public var selectedLists: [String] = []  // empty = "Today" (due today across all lists)
 
     /// Display name for the header
     public var displayName: String {
-        selectedList.isEmpty ? "TODAY" : selectedList.uppercased()
+        if selectedLists.isEmpty { return "TODAY" }
+        if selectedLists.count == 1 { return selectedLists[0].uppercased() }
+        return "\(selectedLists.count) LISTS"
     }
 
     /// Empty-state message
     public var emptyMessage: String {
-        selectedList.isEmpty ? "No reminders due today" : "No reminders"
+        selectedLists.isEmpty ? "No reminders due today" : "No reminders"
     }
 
     public init() {
@@ -386,12 +411,12 @@ public class RemindersManager: ObservableObject {
     public func fetchReminders() {
         guard accessGranted else { return }
 
-        if selectedList.isEmpty {
+        if selectedLists.isEmpty {
             // "Today" mode: incomplete reminders due by end of today, across all lists
             fetchTodayReminders(calendars: nil)
         } else {
-            // Specific list: all incomplete reminders from that calendar
-            let match = store.calendars(for: .reminder).filter { $0.title == selectedList }
+            // Specific lists: all incomplete reminders from the selected calendars
+            let match = store.calendars(for: .reminder).filter { selectedLists.contains($0.title) }
             if match.isEmpty {
                 DispatchQueue.main.async { self.reminders = [] }
             } else {
@@ -533,24 +558,41 @@ struct MonitorView: View {
                                 )
                             }
 
-                            if monitor.showMemoryChart {
-                                let memData = monitor.bucketedMemory()
-                                if !memData.isEmpty {
-                                    GridChart(
-                                        title: "MEMORY",
-                                        values: memData,
-                                        accentColor: Color(hex: "FFD06B"),
-                                        height: 50
-                                    )
-                                }
-                            }
-
+                            // Memory + GPU area: fixed total height, charts share space
+                            let memData = monitor.showMemoryChart ? monitor.bucketedMemory() : []
                             let gpuData = monitor.bucketedGPU()
-                            if !gpuData.isEmpty {
+                            let hasMem = !memData.isEmpty && monitor.showMemoryChart
+                            let hasGpu = !gpuData.isEmpty
+                            let subChartHeight: CGFloat = 100 // total area for mem+gpu
+
+                            if hasMem && hasGpu {
+                                // Both: split the space evenly
+                                let halfHeight = (subChartHeight - 16) / 2 // 16 = spacing
+                                GridChart(
+                                    title: "MEMORY",
+                                    values: memData,
+                                    accentColor: Color(hex: "FFD06B"),
+                                    height: halfHeight
+                                )
                                 GridChart(
                                     title: "GPU",
                                     values: gpuData,
-                                    accentColor: Color(hex: "C06BFF")
+                                    accentColor: Color(hex: "C06BFF"),
+                                    height: halfHeight
+                                )
+                            } else if hasMem {
+                                GridChart(
+                                    title: "MEMORY",
+                                    values: memData,
+                                    accentColor: Color(hex: "FFD06B"),
+                                    height: subChartHeight
+                                )
+                            } else if hasGpu {
+                                GridChart(
+                                    title: "GPU",
+                                    values: gpuData,
+                                    accentColor: Color(hex: "C06BFF"),
+                                    height: subChartHeight
                                 )
                             }
                         }
@@ -799,6 +841,13 @@ public class DockerStatsManager: ObservableObject {
                 let output = String(data: data, encoding: .utf8) ?? ""
 
                 let (cores, parsed) = Self.parse(output: output)
+
+                // Feed alive containers into topology store
+                if !parsed.isEmpty, let hostID = self?.appState.activeHost?.id {
+                    let names = parsed.map(\.name)
+                    NetworkTopologyStore.shared.confirmContainersAlive(hostID: hostID, containerNames: names)
+                }
+
                 DispatchQueue.main.async {
                     self?.cpuCores = cores
                     self?.containers = parsed
@@ -881,7 +930,14 @@ struct DockerStatsSection: View {
 
                 ForEach(dockerStats.containers.sorted { parseCPUPercent($0.cpu) > parseCPUPercent($1.cpu) }) { container in
                     let cpuPct = parseCPUPercent(container.cpu)
+                    let confidence = appState.activeHost.map {
+                        NetworkTopologyStore.shared.containerConfidence(hostID: $0.id, containerName: container.name)
+                    } ?? 0
                     HStack(spacing: 0) {
+                        Circle()
+                            .fill(confidenceColor(confidence))
+                            .frame(width: 5, height: 5)
+                            .padding(.trailing, 4)
                         Text(container.name)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .lineLimit(1)
@@ -926,6 +982,13 @@ struct DockerStatsSection: View {
         if fraction > 0.8 { return Color(hex: "FF6B6B") }
         if fraction > 0.4 { return Color(hex: "FFD06B") }
         return Color(hex: "66CCFF")
+    }
+
+    /// Confidence dot color: green >= 0.7, yellow >= 0.3, red < 0.3
+    private func confidenceColor(_ confidence: Double) -> Color {
+        if confidence >= 0.7 { return Color(hex: "6BFF8E") }
+        if confidence >= 0.3 { return Color(hex: "FFD06B") }
+        return Color(hex: "FF6B6B")
     }
 
     /// Shorten "123.4MiB / 7.656GiB" → "123M / 7.7G"
@@ -1051,11 +1114,11 @@ struct RemindersSection: View {
             }
         }
         .onAppear {
-            reminders.selectedList = appState.appearance.remindersList
+            reminders.selectedLists = appState.appearance.remindersLists
             reminders.fetchReminders()
         }
-        .onChange(of: appState.appearance.remindersList) { _, newValue in
-            reminders.selectedList = newValue
+        .onChange(of: appState.appearance.remindersLists) { _, newValue in
+            reminders.selectedLists = newValue
             reminders.fetchReminders()
         }
     }
