@@ -66,6 +66,7 @@ class OnyxTerminalView: NSView {
     var hasStarted = false
     private var reconnectAttempt = 0
     private let maxBackoff: TimeInterval = 15.0
+    private let maxReconnectAttempts = 10  // stop auto-reconnecting after this many failures
     private var currentFontSize: Double = 13
     private var currentFontName: String = "SF Mono"
     private var lastStartTime: Date?
@@ -588,8 +589,12 @@ class OnyxTerminalView: NSView {
     }
 
     /// Probe a remote host with BatchMode=yes to check connectivity and key auth.
+    /// Uses the mux socket — if a master already exists, this is nearly instant.
     private func probeHost(_ host: HostConfig) -> ProbeResult {
         guard !host.isLocal else { return .ok }
+
+        // First check if mux master is alive — if so, skip the expensive nc+ssh probe
+        if appState.sshMuxAlive(for: host) { return .ok }
 
         let nc = Process()
         nc.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
@@ -602,15 +607,12 @@ class OnyxTerminalView: NSView {
 
         // Try SSH auth up to 2 times — the first attempt on startup may fail
         // transiently (SSH agent not ready, network still initializing, etc.)
+        // This also establishes the mux master connection for subsequent commands.
         for attempt in 1...2 {
             let probe = Process()
             probe.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-            var probeArgs = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-                             "-o", "StrictHostKeyChecking=accept-new"]
-            if host.ssh.port != 22 { probeArgs += ["-p", "\(host.ssh.port)"] }
-            if !host.ssh.identityFile.isEmpty { probeArgs += ["-i", host.ssh.identityFile] }
-            let userHost = host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
-            probeArgs += [userHost, "true"]
+            var probeArgs = appState.sshBaseArgs(for: host)
+            probeArgs += [appState.sshUserHost(for: host), "true"]
             probe.arguments = probeArgs
             probe.standardOutput = FileHandle.nullDevice
             probe.standardError = FileHandle.nullDevice
@@ -1051,6 +1053,20 @@ class OnyxTerminalView: NSView {
 
     private func reconnect() {
         let targetSession = appState.activeSession
+
+        // Stop auto-reconnecting after too many consecutive failures
+        if reconnectAttempt >= maxReconnectAttempts {
+            let hostLabel = targetSession.flatMap { appState.host(for: $0.source.hostID)?.label } ?? "remote host"
+            DispatchQueue.main.async { [weak self] in
+                self?.appState.isReconnecting = false
+                self?.appState.connectionError = "Connection to \(hostLabel) failed after \(self?.maxReconnectAttempts ?? 10) attempts.\nUse ⌘K → Reconnect to try again."
+            }
+            if let session = targetSession {
+                clearPendingStatus(for: session.id)
+            }
+            return
+        }
+
         let delay = min(pow(2.0, Double(reconnectAttempt)) * 0.5, maxBackoff)
         reconnectAttempt += 1
 

@@ -630,21 +630,11 @@ public class FileBrowserManager: ObservableObject {
     }
 
     private func scpUpload(_ url: URL, toDir dest: String) -> Bool {
-        let ssh = appState.activeSSHConfig
-        var args = [String]()
+        guard let host = appState.activeHost else { return false }
+        var args = appState.scpBaseArgs(for: host)
         args.append("-r")  // recursive for directories
-        args.append("-o"); args.append("BatchMode=yes")
-        args.append("-o"); args.append("ConnectTimeout=10")
-        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if ssh.port != 22 {
-            args.append("-P"); args.append("\(ssh.port)")
-        }
-        if !ssh.identityFile.isEmpty {
-            args.append("-i"); args.append(ssh.identityFile)
-        }
         args.append(url.path)
-        let userHost = ssh.user.isEmpty ? ssh.host : "\(ssh.user)@\(ssh.host)"
-        args.append("\(userHost):\(dest)/")
+        args.append("\(appState.sshUserHost(for: host)):\(dest)/")
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
@@ -718,20 +708,10 @@ public class FileBrowserManager: ObservableObject {
     }
 
     private func scpDownload(_ remotePath: String, to destURL: URL, isDirectory: Bool) -> Bool {
-        let ssh = appState.activeSSHConfig
-        var args = [String]()
+        guard let host = appState.activeHost else { return false }
+        var args = appState.scpBaseArgs(for: host)
         if isDirectory { args.append("-r") }
-        args.append("-o"); args.append("BatchMode=yes")
-        args.append("-o"); args.append("ConnectTimeout=10")
-        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if ssh.port != 22 {
-            args.append("-P"); args.append("\(ssh.port)")
-        }
-        if !ssh.identityFile.isEmpty {
-            args.append("-i"); args.append(ssh.identityFile)
-        }
-        let userHost = ssh.user.isEmpty ? ssh.host : "\(ssh.user)@\(ssh.host)"
-        args.append("\(userHost):\(remotePath)")
+        args.append("\(appState.sshUserHost(for: host)):\(remotePath)")
         args.append(destURL.path)
 
         let process = Process()

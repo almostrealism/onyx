@@ -753,6 +753,10 @@ public class AppState: ObservableObject {
 
     public func removeHost(_ hostID: UUID) {
         guard hostID != HostConfig.localhostID else { return }
+        // Tear down SSH mux before removing
+        if let host = hosts.first(where: { $0.id == hostID }) {
+            sshMuxStop(for: host)
+        }
         hosts.removeAll { $0.id == hostID }
         // Remove sessions belonging to this host
         allSessions.removeAll { $0.source.hostID == hostID }
@@ -1117,6 +1121,114 @@ public class AppState: ObservableObject {
         }
     }
 
+    // MARK: - SSH Multiplexing
+
+    /// Directory for SSH mux control sockets
+    private var sshMuxDir: URL {
+        let dir = appSupportDir.appendingPathComponent("ssh-mux")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// ControlPath pattern for SSH multiplexing — one socket per host:port combo
+    private func sshControlPath(for host: HostConfig) -> String {
+        sshMuxDir.appendingPathComponent("mux-\(host.id.uuidString)").path
+    }
+
+    /// SSH multiplexing args to share a single TCP connection per host.
+    /// The first SSH process to a host becomes the ControlMaster; subsequent
+    /// ones reuse it. ControlPersist keeps the master alive for 120s after
+    /// the last session disconnects so polling commands don't re-handshake.
+    private func sshMuxArgs(for host: HostConfig) -> [String] {
+        let controlPath = sshControlPath(for: host)
+        return [
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPath=\(controlPath)",
+            "-o", "ControlPersist=120",
+        ]
+    }
+
+    /// Common SSH options applied to all remote connections
+    func sshBaseArgs(for host: HostConfig, batchMode: Bool = true, connectTimeout: Int = 5) -> [String] {
+        var args = sshMuxArgs(for: host)
+        if batchMode {
+            args.append("-o"); args.append("BatchMode=yes")
+        }
+        args.append("-o"); args.append("ConnectTimeout=\(connectTimeout)")
+        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
+        if host.ssh.port != 22 {
+            args.append("-p"); args.append("\(host.ssh.port)")
+        }
+        if !host.ssh.identityFile.isEmpty {
+            args.append("-i"); args.append(host.ssh.identityFile)
+        }
+        return args
+    }
+
+    /// SSH base args for SCP (uses -P instead of -p for port)
+    func scpBaseArgs(for host: HostConfig) -> [String] {
+        // SCP uses the same mux socket when available
+        let controlPath = sshControlPath(for: host)
+        var args: [String] = [
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPath=\(controlPath)",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=10",
+            "-o", "StrictHostKeyChecking=accept-new",
+        ]
+        if host.ssh.port != 22 {
+            args.append("-P"); args.append("\(host.ssh.port)")
+        }
+        if !host.ssh.identityFile.isEmpty {
+            args.append("-i"); args.append(host.ssh.identityFile)
+        }
+        return args
+    }
+
+    /// User@host string for SSH commands
+    func sshUserHost(for host: HostConfig) -> String {
+        host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
+    }
+
+    /// Check if the SSH mux master is alive for a host
+    public func sshMuxAlive(for host: HostConfig) -> Bool {
+        guard !host.isLocal else { return true }
+        let controlPath = sshControlPath(for: host)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.arguments = [
+            "-o", "ControlPath=\(controlPath)",
+            "-O", "check",
+            sshUserHost(for: host)
+        ]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
+    /// Tear down the SSH mux master for a host (e.g. when host config changes)
+    public func sshMuxStop(for host: HostConfig) {
+        guard !host.isLocal else { return }
+        let controlPath = sshControlPath(for: host)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.arguments = [
+            "-o", "ControlPath=\(controlPath)",
+            "-O", "exit",
+            sshUserHost(for: host)
+        ]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
+    }
+
     // MARK: - Command Builders
 
     /// Extra PATH entries so tmux/docker are found even when login profile doesn't set it
@@ -1130,18 +1242,8 @@ public class AppState: ObservableObject {
             return (shell, ["-lc", "\(extraPath) \(script)"])
         }
 
-        var args = [String]()
-        args.append("-o"); args.append("BatchMode=yes")
-        args.append("-o"); args.append("ConnectTimeout=5")
-        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if h.ssh.port != 22 {
-            args.append("-p"); args.append("\(h.ssh.port)")
-        }
-        if !h.ssh.identityFile.isEmpty {
-            args.append("-i"); args.append(h.ssh.identityFile)
-        }
-        let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
-        args.append(userHost)
+        var args = sshBaseArgs(for: h)
+        args.append(sshUserHost(for: h))
         args.append("exec $SHELL -lc '\(extraPath) \(script)'")
         return ("/usr/bin/ssh", args)
     }
@@ -1221,20 +1323,11 @@ public class AppState: ObservableObject {
             return (shell, ["-lc", dockerCmd])
         }
 
-        var args = [String]()
+        var args = sshBaseArgs(for: h, batchMode: false, connectTimeout: 10)
         args.append("-o"); args.append("ServerAliveInterval=10")
         args.append("-o"); args.append("ServerAliveCountMax=3")
-        args.append("-o"); args.append("ConnectTimeout=10")
-        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if h.ssh.port != 22 {
-            args.append("-p"); args.append("\(h.ssh.port)")
-        }
-        if !h.ssh.identityFile.isEmpty {
-            args.append("-i"); args.append(h.ssh.identityFile)
-        }
         args.append("-t")
-        let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
-        args.append(userHost)
+        args.append(sshUserHost(for: h))
         args.append("exec $SHELL -lc '\(extraPath) \(dockerCmd)'")
         return ("/usr/bin/ssh", args)
     }
@@ -1249,20 +1342,11 @@ public class AppState: ObservableObject {
             return (shell, ["-lc", dockerCmd])
         }
 
-        var args = [String]()
+        var args = sshBaseArgs(for: h, batchMode: false, connectTimeout: 10)
         args.append("-o"); args.append("ServerAliveInterval=10")
         args.append("-o"); args.append("ServerAliveCountMax=3")
-        args.append("-o"); args.append("ConnectTimeout=10")
-        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if h.ssh.port != 22 {
-            args.append("-p"); args.append("\(h.ssh.port)")
-        }
-        if !h.ssh.identityFile.isEmpty {
-            args.append("-i"); args.append(h.ssh.identityFile)
-        }
         args.append("-t")
-        let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
-        args.append(userHost)
+        args.append(sshUserHost(for: h))
         args.append("exec $SHELL -lc '\(extraPath) \(dockerCmd)'")
         return ("/usr/bin/ssh", args)
     }
@@ -1276,23 +1360,14 @@ public class AppState: ObservableObject {
             return (shell, ["-lc", "\(extraPath) tmux new-session -A -s \(sess)"])
         }
 
-        var args = [String]()
+        var args = sshBaseArgs(for: h, batchMode: false, connectTimeout: 10)
         args.append("-o"); args.append("ServerAliveInterval=10")
         args.append("-o"); args.append("ServerAliveCountMax=3")
-        args.append("-o"); args.append("ConnectTimeout=10")
-        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if h.ssh.port != 22 {
-            args.append("-p"); args.append("\(h.ssh.port)")
-        }
-        if !h.ssh.identityFile.isEmpty {
-            args.append("-i"); args.append(h.ssh.identityFile)
-        }
         // MCP remote port forwarding — allows remote agents to talk back to Onyx
         let mcpArgs = mcpForwardingArgs()
         args.append(contentsOf: mcpArgs.sshFlags)
         args.append("-t")
-        let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
-        args.append(userHost)
+        args.append(sshUserHost(for: h))
         args.append("exec $SHELL -lc '\(mcpArgs.envExport)\(extraPath) tmux new-session -A -s \(sess)'")
         return ("/usr/bin/ssh", args)
     }
@@ -1308,23 +1383,14 @@ public class AppState: ObservableObject {
             return (shell, ["-lc", "\(extraPath) \(dockerCmd)"])
         }
 
-        var args = [String]()
+        var args = sshBaseArgs(for: h, batchMode: false, connectTimeout: 10)
         args.append("-o"); args.append("ServerAliveInterval=10")
         args.append("-o"); args.append("ServerAliveCountMax=3")
-        args.append("-o"); args.append("ConnectTimeout=10")
-        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if h.ssh.port != 22 {
-            args.append("-p"); args.append("\(h.ssh.port)")
-        }
-        if !h.ssh.identityFile.isEmpty {
-            args.append("-i"); args.append(h.ssh.identityFile)
-        }
         // MCP remote port forwarding
         let mcpArgs = mcpForwardingArgs()
         args.append(contentsOf: mcpArgs.sshFlags)
         args.append("-t")
-        let userHost = h.ssh.user.isEmpty ? h.ssh.host : "\(h.ssh.user)@\(h.ssh.host)"
-        args.append(userHost)
+        args.append(sshUserHost(for: h))
         args.append("exec $SHELL -lc '\(mcpArgs.envExport)\(extraPath) \(dockerCmd)'")
         return ("/usr/bin/ssh", args)
     }

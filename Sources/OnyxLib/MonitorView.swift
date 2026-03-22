@@ -1010,6 +1010,7 @@ struct DockerStatsSection: View {
 
 struct ConnectionPoolSection: View {
     @ObservedObject var appState: AppState
+    @State private var muxStatus: [UUID: Bool] = [:]  // hostID -> mux alive
 
     /// Merge pool entries with pending entries, deduplicating by ID
     private var allConnections: [ConnectionInfo] {
@@ -1096,6 +1097,58 @@ struct ConnectionPoolSection: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(conn.connectionStatus.isTransient ? 0.5 : 0.7))
                 }
+
+                // SSH mux status per remote host
+                let remoteHosts = appState.hosts.filter { !$0.isLocal }
+                if !remoteHosts.isEmpty {
+                    Divider().background(Color.white.opacity(0.06)).padding(.vertical, 4)
+
+                    HStack(spacing: 0) {
+                        Text("")
+                            .frame(width: 8)
+                        Text("SSH MUX")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text("STATUS")
+                            .frame(width: 85, alignment: .trailing)
+                    }
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+
+                    ForEach(remoteHosts) { host in
+                        let alive = muxStatus[host.id] ?? false
+                        HStack(spacing: 0) {
+                            Circle()
+                                .fill(Color(hex: alive ? "6BFF8E" : "FF6B6B"))
+                                .frame(width: 5, height: 5)
+                                .padding(.trailing, 3)
+                            Text(host.label)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .lineLimit(1)
+                            Text(alive ? "multiplexed" : "no mux")
+                                .frame(width: 85, alignment: .trailing)
+                                .foregroundColor(Color(hex: alive ? "6BFF8E" : "FF6B6B").opacity(0.8))
+                        }
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.7))
+                    }
+                }
+            }
+        }
+        .onAppear { refreshMuxStatus() }
+        .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in
+            refreshMuxStatus()
+        }
+    }
+
+    private func refreshMuxStatus() {
+        let hosts = appState.hosts.filter { !$0.isLocal }
+        DispatchQueue.global(qos: .utility).async {
+            var status: [UUID: Bool] = [:]
+            for host in hosts {
+                status[host.id] = appState.sshMuxAlive(for: host)
+            }
+            DispatchQueue.main.async {
+                muxStatus = status
             }
         }
     }
