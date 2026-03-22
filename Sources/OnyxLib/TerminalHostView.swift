@@ -237,6 +237,12 @@ class OnyxTerminalView: NSView {
 
     private func destroyPoolEntry(_ sessionID: String) {
         guard let entry = pool.removeValue(forKey: sessionID) else { return }
+        // Terminate the process BEFORE removing the view to avoid
+        // "Resurrection of an object" crash — SwiftTerm's dispatch IO
+        // channel must be closed before the view is deallocated.
+        if entry.processRunning {
+            entry.terminalView.process.terminate()
+        }
         entry.terminalView.removeFromSuperview()
     }
 
