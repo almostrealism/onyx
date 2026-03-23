@@ -569,29 +569,35 @@ struct MonitorView: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
-            VStack(spacing: 20) {
-                // Current time
-                TimeDisplay(accentColor: appState.accentColor)
+            VStack(spacing: 16) {
+                // Time + stats row
+                HStack(alignment: .center) {
+                    // Time/date on left
+                    TimeDisplay(accentColor: appState.accentColor)
 
-                Divider().background(Color.white.opacity(0.1)).padding(.horizontal, 40)
+                    Spacer()
 
-                if let sample = monitor.latestSample {
-                    // Current values row
-                    HStack(spacing: 30) {
-                        if let cpu = sample.cpuUsage {
-                            StatChip(label: "CPU", value: "\(Int(cpu))%", accentColor: Color(hex: "66CCFF"))
-                        }
-                        if let used = sample.memUsed, let total = sample.memTotal, total > 0 {
-                            StatChip(label: "MEM", value: "\(formatMB(used)) / \(formatMB(total))", accentColor: Color(hex: "FFD06B"))
-                        }
-                        if let gpu = sample.gpuUsage {
-                            StatChip(label: "GPU", value: "\(Int(gpu))%", accentColor: Color(hex: "C06BFF"))
-                        }
-                        if let temp = sample.gpuTemp {
-                            StatChip(label: "TEMP", value: "\(temp)°C", accentColor: Color(hex: "FF6B6B"))
+                    // Stat chips on right
+                    if let sample = monitor.latestSample {
+                        HStack(spacing: 12) {
+                            if let cpu = sample.cpuUsage {
+                                StatChip(label: "CPU", value: "\(Int(cpu))%", accentColor: Color(hex: "66CCFF"))
+                            }
+                            if let used = sample.memUsed, let total = sample.memTotal, total > 0 {
+                                StatChip(label: "MEM", value: "\(formatMB(used)) / \(formatMB(total))", accentColor: Color(hex: "FFD06B"))
+                            }
+                            if let gpu = sample.gpuUsage {
+                                StatChip(label: "GPU", value: "\(Int(gpu))%", accentColor: Color(hex: "C06BFF"))
+                            }
+                            if let temp = sample.gpuTemp {
+                                StatChip(label: "TEMP", value: "\(temp)°C", accentColor: Color(hex: "FF6B6B"))
+                            }
                         }
                     }
+                }
+                .padding(.horizontal, 40)
 
+                if let _ = monitor.latestSample {
                     // Interval label
                     HStack(spacing: 4) {
                         Text(monitor.useShortInterval ? "5s intervals" : "1m intervals")
@@ -601,7 +607,6 @@ struct MonitorView: View {
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.25))
                     }
-                    .padding(.top, 4)
 
                     // TOP HALF: Charts + Docker stats side by side
                     HStack(alignment: .top, spacing: 24) {
@@ -728,13 +733,13 @@ struct TimeDisplay: View {
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(timeString)
-                .font(.system(size: 48, weight: .ultraLight, design: .monospaced))
+                .font(.system(size: 36, weight: .ultraLight, design: .monospaced))
                 .foregroundColor(.white.opacity(0.9))
 
             Text(dateString)
-                .font(.system(size: 14, weight: .light, design: .monospaced))
+                .font(.system(size: 12, weight: .light, design: .monospaced))
                 .foregroundColor(accentColor.opacity(0.6))
         }
         .onReceive(timer) { _ in
