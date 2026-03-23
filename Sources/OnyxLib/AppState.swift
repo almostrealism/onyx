@@ -1123,14 +1123,17 @@ public class AppState: ObservableObject {
 
     // MARK: - SSH Multiplexing
 
-    /// Directory for SSH mux control sockets
+    /// Directory for SSH mux control sockets.
+    /// Must NOT contain spaces — SSH's ControlPath parser splits on whitespace.
+    /// Uses ~/.ssh/onyx-mux/ which is guaranteed space-free.
     private var sshMuxDir: URL {
-        let dir = appSupportDir.appendingPathComponent("ssh-mux")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let dir = home.appendingPathComponent(".ssh/onyx-mux")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         return dir
     }
 
-    /// ControlPath pattern for SSH multiplexing — one socket per host:port combo
+    /// ControlPath pattern for SSH multiplexing — one socket per host
     private func sshControlPath(for host: HostConfig) -> String {
         sshMuxDir.appendingPathComponent("mux-\(host.id.uuidString)").path
     }
