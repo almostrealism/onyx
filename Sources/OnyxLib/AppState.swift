@@ -815,13 +815,18 @@ public class AppState: ObservableObject {
             var sessionGroups: [SessionGroup] = []
             let hostKey = SessionSource.host(hostID: host.id).stableKey
             if let sessions = groups[hostKey], !sessions.isEmpty {
-                sessionGroups.append(SessionGroup(source: .host(hostID: host.id), sessions: sessions))
+                let sorted = sessions.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                sessionGroups.append(SessionGroup(source: .host(hostID: host.id), sessions: sorted))
             }
             for (key, sessions) in groups.sorted(by: { $0.key < $1.key }) {
                 if key != hostKey {
-                    // Use the first docker (non-logs) source as the group source
-                    let groupSource = sessions.first(where: { !$0.source.isUtility })?.source ?? sessions[0].source
-                    sessionGroups.append(SessionGroup(source: groupSource, sessions: sessions))
+                    // Sort: regular tmux sessions alphabetically first, then utility sessions (logs, processes) at the end
+                    let sorted = sessions.sorted { a, b in
+                        if a.source.isUtility != b.source.isUtility { return !a.source.isUtility }
+                        return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+                    }
+                    let groupSource = sorted.first(where: { !$0.source.isUtility })?.source ?? sorted[0].source
+                    sessionGroups.append(SessionGroup(source: groupSource, sessions: sorted))
                 }
             }
             result.append(HostGroup(host: host, groups: sessionGroups))
