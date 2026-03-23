@@ -696,9 +696,17 @@ class OnyxTerminalView: NSView {
             // Check for missing favorited sessions that can be recreated
             let allResults = allEnumerated.flatMap(\.sessions)
             let createdSessions = self.recreateMissingFavorites(existing: allResults, hosts: hosts)
-            let finalResults = topologySessions + createdSessions.filter { created in
+            var finalResults = topologySessions + createdSessions.filter { created in
                 !topologySessions.contains(where: { $0.id == created.id })
             }
+
+            // Preserve sessions that have active pool entries — they're provably
+            // connected and must not vanish just because enumeration missed them
+            let finalIDs = Set(finalResults.map(\.id))
+            let pooledSessions = self.appState.allSessions.filter { session in
+                !finalIDs.contains(session.id) && self.pool[session.id]?.processRunning == true
+            }
+            finalResults.append(contentsOf: pooledSessions)
 
             DispatchQueue.main.async {
                 self.isEnumerating = false
@@ -998,6 +1006,13 @@ class OnyxTerminalView: NSView {
         reconnectAttempt = 0
         lastStartTime = Date()
         isKeySetup = false
+
+        // Register in topology store immediately so it survives re-enumeration
+        NetworkTopologyStore.shared.mergeEnumeration(
+            hostID: session.source.hostID,
+            sessions: [session],
+            probeResult: .ok
+        )
 
         DispatchQueue.main.async {
             self.appState.allSessions.append(session)
