@@ -343,8 +343,17 @@ public class MonitorManager: ObservableObject {
     }
 }
 
+/// A group of reminders under one list name
+public struct ReminderListGroup: Identifiable {
+    public let id: String   // list name
+    public let name: String
+    public let reminders: [EKReminder]
+}
+
 public class RemindersManager: ObservableObject {
     @Published public var reminders: [EKReminder] = []
+    /// Reminders grouped by list, in the order of selectedLists
+    @Published public var groupedReminders: [ReminderListGroup] = []
     @Published public var accessGranted = false
     @Published public var availableLists: [String] = []
 
@@ -353,11 +362,20 @@ public class RemindersManager: ObservableObject {
     private var changeObserver: Any?
     public var selectedLists: [String] = []  // empty = "Today" (due today across all lists)
 
+    /// True when showing multiple lists (grouped display)
+    public var isMultiList: Bool { selectedLists.count > 1 }
+
     /// Display name for the header
     public var displayName: String {
         if selectedLists.isEmpty { return "TODAY" }
         if selectedLists.count == 1 { return selectedLists[0].uppercased() }
-        return "\(selectedLists.count) LISTS"
+        return "REMINDERS"
+    }
+
+    /// Total count across all groups
+    public var totalCount: Int {
+        if isMultiList { return groupedReminders.reduce(0) { $0 + $1.reminders.count } }
+        return reminders.count
     }
 
     /// Empty-state message
@@ -414,14 +432,17 @@ public class RemindersManager: ObservableObject {
         if selectedLists.isEmpty {
             // "Today" mode: incomplete reminders due by end of today, across all lists
             fetchTodayReminders(calendars: nil)
-        } else {
-            // Specific lists: all incomplete reminders from the selected calendars
+        } else if selectedLists.count == 1 {
+            // Single list: flat display
             let match = store.calendars(for: .reminder).filter { selectedLists.contains($0.title) }
             if match.isEmpty {
-                DispatchQueue.main.async { self.reminders = [] }
+                DispatchQueue.main.async { self.reminders = []; self.groupedReminders = [] }
             } else {
                 fetchListReminders(calendars: match)
             }
+        } else {
+            // Multiple lists: fetch per-list and group
+            fetchGroupedReminders()
         }
     }
 
@@ -476,6 +497,43 @@ public class RemindersManager: ObservableObject {
                 DispatchQueue.main.async {
                     self.reminders = sorted
                 }
+            }
+        }
+    }
+
+    private func fetchGroupedReminders() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let allCalendars = self.store.calendars(for: .reminder)
+            let listOrder = self.selectedLists
+            var groups: [ReminderListGroup] = []
+
+            for listName in listOrder {
+                guard let calendar = allCalendars.first(where: { $0.title == listName }) else { continue }
+                let predicate = self.store.predicateForIncompleteReminders(
+                    withDueDateStarting: nil, ending: nil, calendars: [calendar]
+                )
+                // fetchReminders is async with callback — use a semaphore for sequential fetch
+                let sem = DispatchSemaphore(value: 0)
+                var fetched: [EKReminder] = []
+                self.store.fetchReminders(matching: predicate) { reminders in
+                    fetched = (reminders ?? []).sorted { a, b in
+                        let normA = a.priority == 0 ? 100 : a.priority
+                        let normB = b.priority == 0 ? 100 : b.priority
+                        if normA != normB { return normA < normB }
+                        let da = a.dueDateComponents?.date ?? .distantFuture
+                        let db = b.dueDateComponents?.date ?? .distantFuture
+                        return da < db
+                    }
+                    sem.signal()
+                }
+                sem.wait()
+                groups.append(ReminderListGroup(id: listName, name: listName, reminders: fetched))
+            }
+
+            DispatchQueue.main.async {
+                self.groupedReminders = groups
+                self.reminders = groups.flatMap(\.reminders)
             }
         }
     }
@@ -1180,8 +1238,9 @@ struct RemindersSection: View {
 
                 Spacer()
 
-                if !reminders.reminders.isEmpty {
-                    Text("\(reminders.reminders.count)")
+                let count = reminders.totalCount
+                if count > 0 {
+                    Text("\(count)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.4))
                 }
@@ -1191,11 +1250,40 @@ struct RemindersSection: View {
                 Text("Reminders access not granted")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.4))
+            } else if reminders.isMultiList {
+                // Grouped display: each list shown with its own header
+                if reminders.groupedReminders.isEmpty || reminders.groupedReminders.allSatisfy({ $0.reminders.isEmpty }) {
+                    Text(reminders.emptyMessage)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.3))
+                } else {
+                    ForEach(reminders.groupedReminders) { group in
+                        if !group.reminders.isEmpty {
+                            // List header
+                            Text(group.name.uppercased())
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundColor(appState.accentColor.opacity(0.6))
+                                .tracking(1)
+                                .padding(.top, group.id == reminders.groupedReminders.first?.id ? 0 : 4)
+
+                            let visible = Array(group.reminders.prefix(5))
+                            ForEach(visible, id: \.calendarItemIdentifier) { reminder in
+                                ReminderRow(reminder: reminder, appState: appState, manager: reminders)
+                            }
+                            if group.reminders.count > 5 {
+                                Text("+\(group.reminders.count - 5) more")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.gray.opacity(0.3))
+                            }
+                        }
+                    }
+                }
             } else if reminders.reminders.isEmpty {
                 Text(reminders.emptyMessage)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.3))
             } else {
+                // Single list or Today: flat display
                 let visible = Array(reminders.reminders.prefix(7))
                 ForEach(visible, id: \.calendarItemIdentifier) { reminder in
                     ReminderRow(reminder: reminder, appState: appState, manager: reminders)
