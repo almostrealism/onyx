@@ -1,10 +1,34 @@
 import AppKit
 
 public class ShortcutManager {
-    /// Set by ContentView when monitor overlay is shown/hidden
-    public static var monitorVisible = false
-    /// Set by ContentView when a right panel is open — suppresses bare-key shortcuts
-    public static var rightPanelVisible = false
+    /// Per-window AppState registry — keyboard handler queries this to check
+    /// overlay state for the specific window that received the event.
+    private static var windowAppStates: [Int: () -> AppState?] = [:]  // windowNumber -> weak getter
+    private static let lock = NSLock()
+
+    /// Register an AppState for a window. Call from ContentView.onAppear.
+    public static func register(window: NSWindow, appState: AppState) {
+        let number = window.windowNumber
+        lock.lock()
+        windowAppStates[number] = { [weak appState] in appState }
+        lock.unlock()
+    }
+
+    /// Unregister when window closes.
+    public static func unregister(window: NSWindow) {
+        lock.lock()
+        windowAppStates.removeValue(forKey: window.windowNumber)
+        lock.unlock()
+    }
+
+    /// Get the AppState for the window that owns this event
+    private static func appState(for event: NSEvent) -> AppState? {
+        guard let window = event.window else { return nil }
+        lock.lock()
+        let getter = windowAppStates[window.windowNumber]
+        lock.unlock()
+        return getter?()
+    }
 
     public static func setupMenuShortcuts() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -71,22 +95,26 @@ public class ShortcutManager {
                 return nil
             }
 
-            // Single-key shortcuts — disabled when a right panel is open
-            if !rightPanelVisible {
+            // Single-key shortcuts — check the state of the EVENT'S window, not a global flag
+            let state = appState(for: event)
+            let monitorVisibleInWindow = state?.showMonitor ?? false
+            let rightPanelInWindow = state?.activeRightPanel != nil
+
+            if !rightPanelInWindow {
                 // Backtick/tilde key (keyCode 50) → toggle monitor overlay
                 if event.keyCode == 50 && flags.isEmpty {
                     NotificationCenter.default.post(name: .toggleMonitor, object: nil)
                     return nil
                 }
 
-                // T key (keyCode 17) → toggle monitor time interval (only when overlay is visible)
-                if event.keyCode == 17 && flags.isEmpty && monitorVisible {
+                // T key (keyCode 17) → toggle monitor time interval (only when overlay is visible in THIS window)
+                if event.keyCode == 17 && flags.isEmpty && monitorVisibleInWindow {
                     NotificationCenter.default.post(name: .toggleMonitorInterval, object: nil)
                     return nil
                 }
 
-                // M key (keyCode 46) → toggle memory chart (only when overlay is visible)
-                if event.keyCode == 46 && flags.isEmpty && monitorVisible {
+                // M key (keyCode 46) → toggle memory chart (only when overlay is visible in THIS window)
+                if event.keyCode == 46 && flags.isEmpty && monitorVisibleInWindow {
                     NotificationCenter.default.post(name: .toggleMemoryChart, object: nil)
                     return nil
                 }

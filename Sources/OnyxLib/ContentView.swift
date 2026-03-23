@@ -200,6 +200,16 @@ public struct ContentView: View {
             }
         }
         .modifier(ContentViewNotifications(appState: appState, updateWindowTitle: updateWindowTitle, hostWindow: hostWindow))
+        .onChange(of: hostWindow) { _, window in
+            if let window = window {
+                ShortcutManager.register(window: window, appState: appState)
+            }
+        }
+        .onDisappear {
+            if let window = hostWindow {
+                ShortcutManager.unregister(window: window)
+            }
+        }
     }
 
     private func updateWindowTitle() {
@@ -363,7 +373,6 @@ private struct ContentViewNotifications: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .toggleMonitor)) { _ in
                 guard isKeyWindow else { return }
                 appState.showMonitor.toggle()
-                ShortcutManager.monitorVisible = appState.showMonitor
                 updateWindowTitle()
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleFileBrowser)) { _ in
@@ -395,12 +404,10 @@ private struct ContentViewNotifications: ViewModifier {
                 guard isKeyWindow else { return }
                 let wasMonitoring = appState.showMonitor
                 appState.dismissTopOverlay()
-                ShortcutManager.monitorVisible = appState.showMonitor
                 if wasMonitoring && !appState.showMonitor { updateWindowTitle() }
             }
             .modifier(ContentViewSessionNotifications(appState: appState, hostWindow: hostWindow))
-            .onChange(of: appState.activeRightPanel) { _, newValue in
-                ShortcutManager.rightPanelVisible = newValue != nil
+            .onChange(of: appState.activeRightPanel) { _, _ in
                 appState.recalculateFocus()
             }
             .onChange(of: appState.showSettings) { _, _ in
