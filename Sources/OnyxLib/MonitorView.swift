@@ -671,11 +671,11 @@ struct MonitorView: View {
 
                     Divider().background(Color.white.opacity(0.1)).padding(.horizontal, 40)
 
-                    // BOTTOM HALF: Connections + Reminders side by side
+                    // BOTTOM HALF: Reminders + Connections side by side
                     HStack(alignment: .top, spacing: 24) {
-                        ConnectionPoolSection(appState: appState)
-                            .frame(maxWidth: .infinity)
                         RemindersSection(appState: appState)
+                            .frame(maxWidth: .infinity)
+                        ConnectionPoolSection(appState: appState)
                             .frame(maxWidth: .infinity)
                     }
                     .padding(.horizontal, 40)
