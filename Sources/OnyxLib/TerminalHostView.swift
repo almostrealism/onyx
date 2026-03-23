@@ -65,8 +65,8 @@ class OnyxTerminalView: NSView {
     let appState: AppState
     var hasStarted = false
     private var reconnectAttempt = 0
-    private let maxBackoff: TimeInterval = 15.0
-    private let maxReconnectAttempts = 10  // stop auto-reconnecting after this many failures
+    private let maxBackoff: TimeInterval = 30.0
+    private let maxReconnectAttempts = 8  // stop auto-reconnecting after this many failures
     private var currentFontSize: Double = 13
     private var currentFontName: String = "SF Mono"
     private var lastStartTime: Date?
@@ -110,16 +110,15 @@ class OnyxTerminalView: NSView {
         }
         startPeriodicEnumeration()
 
-        // On wake from sleep: clean up stale mux sockets and let connections
-        // recover naturally via ServerAliveInterval timeout + processTerminated
+        // On wake from sleep: clean up stale mux sockets so polling commands
+        // can establish a fresh mux master. Don't reset reconnect counter —
+        // that would create an infinite loop if display sleep cycles frequently.
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             guard let self = self else { return }
             print("System woke from sleep — cleaning up stale mux sockets")
             self.appState.cleanupStaleMuxSockets()
-            // Reset reconnect counter so the user gets a fresh set of attempts
-            self.reconnectAttempt = 0
         }
     }
 
@@ -259,7 +258,16 @@ class OnyxTerminalView: NSView {
         // "Resurrection of an object" crash — SwiftTerm's dispatch IO
         // channel must be closed before the view is deallocated.
         if entry.processRunning {
+            let pid = entry.terminalView.process.shellPid
             entry.terminalView.process.terminate()
+            // If SIGTERM doesn't kill it within 2s, force-kill to free
+            // the remote sshd connection slot
+            if pid > 0 {
+                DispatchQueue.global(qos: .utility).async {
+                    Thread.sleep(forTimeInterval: 2.0)
+                    kill(pid, SIGKILL)
+                }
+            }
         }
         entry.terminalView.removeFromSuperview()
     }
@@ -564,7 +572,7 @@ class OnyxTerminalView: NSView {
         }
     }
 
-    private func connectToActiveSession(grabFocus: Bool = false) {
+    private func connectToActiveSession(grabFocus: Bool = false, isReconnect: Bool = false) {
         let defaultHost = self.appState.hosts.first ?? .localhost
         let defaultSession = TmuxSession(
             name: defaultHost.ssh.tmuxSession,
@@ -572,7 +580,7 @@ class OnyxTerminalView: NSView {
         )
         let session = self.appState.activeSession ?? defaultSession
         let hostLabel = self.appState.host(for: session.source.hostID)?.label ?? "unknown"
-        print("connectToActiveSession: \(session.displayLabel) on \(hostLabel) [id: \(session.id)]")
+        print("connectToActiveSession: \(session.displayLabel) on \(hostLabel) [id: \(session.id)] reconnect=\(isReconnect)")
 
         // Mark as connecting (SSH handshake in progress)
         setPendingStatus(.connecting, for: session)
@@ -583,8 +591,10 @@ class OnyxTerminalView: NSView {
             self.appState.allSessions.append(session)
         }
 
-        // Clean up stale MCP port listeners before connecting, so -R forwarding succeeds
-        if let host = self.appState.host(for: session.source.hostID) {
+        // Clean up stale MCP port listeners before connecting, so -R forwarding succeeds.
+        // Skip during reconnect — it wastes a connection slot on the remote sshd and
+        // the port cleanup is not critical for session recovery.
+        if !isReconnect, let host = self.appState.host(for: session.source.hostID) {
             self.appState.cleanupRemoteMCPPort(host: host)
         }
 
@@ -1147,12 +1157,16 @@ class OnyxTerminalView: NSView {
             self.activeSessionID = nil
         }
 
-        // Reconnect directly to the target session without re-enumerating.
-        // The session is known — we just need a fresh SSH connection.
-        if let target = targetSession {
-            self.appState.activeSession = target
+        // Brief delay to let the remote sshd release the connection slot.
+        // Without this, the new connection can arrive before the old one
+        // finishes tearing down, hitting MaxSessions limits.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self = self else { return }
+            if let target = targetSession {
+                self.appState.activeSession = target
+            }
+            self.connectToActiveSession(isReconnect: true)
         }
-        self.connectToActiveSession()
     }
 }
 
@@ -1242,6 +1256,12 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
             // Don't auto-reconnect docker logs — the container may have stopped
             if let session = self.appState.activeSession, session.source.isDockerLogs {
                 return
+            }
+            // If the process died very quickly after starting (<5s), the remote host
+            // is actively rejecting us. Jump ahead in the backoff to avoid hammering
+            // the server with rapid-fire connection attempts.
+            if let start = self.lastStartTime, Date().timeIntervalSince(start) < 5.0 {
+                self.reconnectAttempt = max(self.reconnectAttempt, 4) // at least 8s backoff
             }
             self.reconnect()
         }
