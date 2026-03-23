@@ -66,14 +66,36 @@ public struct GitRepoStatus {
     public var isClean: Bool { changedFiles.isEmpty }
 }
 
+public struct GitLogEntry: Identifiable {
+    public let id: String     // commit hash (short)
+    public let hash: String
+    public let message: String
+    public let author: String
+    public let date: String   // relative or short date
+}
+
+public struct GitCommitDetail {
+    public let hash: String
+    public let message: String
+    public let author: String
+    public let date: String
+    public let diff: String   // full diff output
+}
+
 // MARK: - GitManager
 
 public class GitManager: ObservableObject {
     @Published public var repoStatus: GitRepoStatus?
     @Published public var isGitRepo = false
     @Published public var isLoading = false
+    @Published public var logEntries: [GitLogEntry] = []
+    @Published public var isLoadingLog = false
+    @Published public var showLog = false
+    @Published public var commitDetail: GitCommitDetail?
+    @Published public var isLoadingCommit = false
 
     private let appState: AppState
+    private var currentRepoPath: String?
 
     public init(appState: AppState) {
         self.appState = appState
@@ -81,6 +103,7 @@ public class GitManager: ObservableObject {
 
     public func checkAndLoad(path: String) {
         isLoading = true
+        currentRepoPath = path
 
         let escaped = escapeForShell(path)
         // Single compound command with markers — one SSH round-trip
@@ -120,6 +143,110 @@ public class GitManager: ObservableObject {
     public func clear() {
         isGitRepo = false
         repoStatus = nil
+        logEntries = []
+        showLog = false
+        commitDetail = nil
+        currentRepoPath = nil
+    }
+
+    // MARK: - Git Log
+
+    public func fetchLog(forFile filePath: String? = nil) {
+        guard let repoPath = currentRepoPath else { return }
+        isLoadingLog = true
+        showLog = true
+        commitDetail = nil
+
+        let escaped = escapeForShell(repoPath)
+        // Use %x00 as field separator, %x01 as record separator
+        var script = "git -C \(escaped) log --pretty=format:'%h%x00%s%x00%an%x00%ar%x01' -50"
+        if let file = filePath {
+            let escapedFile = escapeForShell(file)
+            script += " -- \(escapedFile)"
+        }
+
+        let (cmd, args) = appState.remoteCommand(script)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let output = FileBrowserManager.runProcess(cmd: cmd, args: args)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isLoadingLog = false
+                guard let output = output else {
+                    self.logEntries = []
+                    return
+                }
+                self.logEntries = self.parseLogOutput(output)
+            }
+        }
+    }
+
+    public func fetchCommitDetail(hash: String) {
+        guard let repoPath = currentRepoPath else { return }
+        isLoadingCommit = true
+
+        let escaped = escapeForShell(repoPath)
+        let script = """
+        echo "---COMMIT_INFO---" && \
+        git -C \(escaped) log -1 --pretty=format:'%H%n%s%n%an%n%ar' \(hash) 2>/dev/null && \
+        echo "" && echo "---COMMIT_DIFF---" && \
+        git -C \(escaped) diff-tree -p --stat \(hash) 2>/dev/null
+        """
+
+        let (cmd, args) = appState.remoteCommand(script)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let output = FileBrowserManager.runProcess(cmd: cmd, args: args)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isLoadingCommit = false
+                guard let output = output else { return }
+                self.commitDetail = self.parseCommitDetail(output, hash: hash)
+            }
+        }
+    }
+
+    public func closeLog() {
+        showLog = false
+        commitDetail = nil
+        logEntries = []
+    }
+
+    private func parseLogOutput(_ output: String) -> [GitLogEntry] {
+        // Records separated by \x01, fields by \x00
+        return output.components(separatedBy: "\u{01}")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .compactMap { record in
+                let fields = record.components(separatedBy: "\u{00}")
+                guard fields.count >= 4 else { return nil }
+                let hash = fields[0].trimmingCharacters(in: .init(charactersIn: "'"))
+                return GitLogEntry(
+                    id: hash,
+                    hash: hash,
+                    message: fields[1],
+                    author: fields[2],
+                    date: fields[3]
+                )
+            }
+    }
+
+    private func parseCommitDetail(_ output: String, hash: String) -> GitCommitDetail? {
+        let info = extractSection(output, start: "---COMMIT_INFO---", end: "---COMMIT_DIFF---")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let diff = extractSection(output, start: "---COMMIT_DIFF---", end: nil)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let lines = info.components(separatedBy: "\n")
+        guard lines.count >= 4 else { return nil }
+
+        return GitCommitDetail(
+            hash: lines[0],
+            message: lines[1],
+            author: lines[2],
+            date: lines[3],
+            diff: diff
+        )
     }
 
     // MARK: - Parsing
@@ -385,5 +512,173 @@ private struct GitFileRow: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 2)
+    }
+}
+
+// MARK: - Git Log View
+
+struct GitLogView: View {
+    @ObservedObject var gitManager: GitManager
+    let accentColor: Color
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack(spacing: 8) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 11))
+                    .foregroundColor(accentColor)
+
+                Text("HISTORY")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(accentColor)
+                    .tracking(2)
+
+                Spacer()
+
+                if !gitManager.logEntries.isEmpty {
+                    Text("\(gitManager.logEntries.count)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.4))
+                }
+
+                Button(action: { gitManager.closeLog() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10))
+                        .foregroundColor(.gray.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(0.03))
+
+            Divider().background(Color.white.opacity(0.06))
+
+            if gitManager.isLoadingLog {
+                Spacer()
+                HStack(spacing: 8) {
+                    ProgressView().scaleEffect(0.7).colorScheme(.dark)
+                    Text("Loading history...")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.5))
+                }
+                Spacer()
+            } else if let detail = gitManager.commitDetail {
+                GitCommitDetailView(detail: detail, accentColor: accentColor, onBack: {
+                    gitManager.commitDetail = nil
+                })
+            } else if gitManager.logEntries.isEmpty {
+                Spacer()
+                Text("No commits")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(gitManager.logEntries) { entry in
+                            GitLogRow(entry: entry, accentColor: accentColor)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    gitManager.fetchCommitDetail(hash: entry.hash)
+                                }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct GitLogRow: View {
+    let entry: GitLogEntry
+    let accentColor: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(entry.hash)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(accentColor.opacity(0.7))
+                .frame(width: 56, alignment: .leading)
+
+            Text(entry.message)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+                .lineLimit(1)
+
+            Spacer()
+
+            Text(entry.date)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+    }
+}
+
+private struct GitCommitDetailView: View {
+    let detail: GitCommitDetail
+    let accentColor: Color
+    let onBack: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Commit info header
+            HStack(spacing: 8) {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(accentColor)
+                }
+                .buttonStyle(.plain)
+
+                Text(String(detail.hash.prefix(8)))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(accentColor)
+
+                Text(detail.message)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(1)
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    Image(systemName: "person")
+                        .font(.system(size: 9))
+                        .foregroundColor(.gray.opacity(0.4))
+                    Text(detail.author)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.5))
+                }
+                Text(detail.date)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
+
+            Divider().background(Color.white.opacity(0.06))
+
+            // Diff content
+            ScrollView(.vertical) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(detail.diff)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.75))
+                        .textSelection(.enabled)
+                        .padding(12)
+                        .environment(\.layoutDirection, .leftToRight)
+                }
+            }
+        }
     }
 }

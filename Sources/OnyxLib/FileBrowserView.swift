@@ -827,6 +827,8 @@ struct FileBrowserView: View {
                                 }
                             }
                         )
+                    } else if browser.gitManager.showLog {
+                        GitLogView(gitManager: browser.gitManager, accentColor: appState.accentColor)
                     } else if browser.isSearchActive {
                         SearchResultsView(appState: appState, browser: browser, tree: browser.searchResults)
                     } else if browser.currentPath != nil {
@@ -1144,6 +1146,22 @@ struct NavigationBar: View {
                 }
 
                 Spacer()
+
+                // Git history button
+                if browser.gitManager.isGitRepo {
+                    Button(action: {
+                        if browser.gitManager.showLog {
+                            browser.gitManager.closeLog()
+                        } else {
+                            browser.gitManager.fetchLog()
+                        }
+                    }) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 12))
+                            .foregroundColor(browser.gitManager.showLog ? appState.accentColor : .gray.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 // Search button
                 if browser.currentPath != nil || !browser.savedFolders.isEmpty {
