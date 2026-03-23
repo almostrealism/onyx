@@ -1059,7 +1059,7 @@ class OnyxTerminalView: NSView {
             let hostLabel = targetSession.flatMap { appState.host(for: $0.source.hostID)?.label } ?? "remote host"
             DispatchQueue.main.async { [weak self] in
                 self?.appState.isReconnecting = false
-                self?.appState.connectionError = "Connection to \(hostLabel) failed after \(self?.maxReconnectAttempts ?? 10) attempts.\nUse ⌘K → Reconnect to try again."
+                self?.appState.connectionError = "Connection to \(hostLabel) failed after \(self?.maxReconnectAttempts ?? 10) attempts.\nUse ⌘K → Reconnect SSH to try again."
             }
             if let session = targetSession {
                 clearPendingStatus(for: session.id)
@@ -1131,7 +1131,7 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
         if wasKeySetup {
             if exitCode != 0 {
                 DispatchQueue.main.async { [weak self] in
-                    self?.appState.connectionError = "SSH key setup failed. Use ⌘K → Reconnect to try again."
+                    self?.appState.connectionError = "SSH key setup failed. Use ⌘K → Reconnect SSH to try again."
                     self?.appState.isReconnecting = false
                 }
             } else {
