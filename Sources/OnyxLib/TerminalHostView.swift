@@ -86,6 +86,7 @@ class OnyxTerminalView: NSView {
 
     private var focusObserver: Any?
     private var mouseMonitor: Any?
+    private var wakeObserver: Any?
     private var periodicEnumerationTimer: Timer?
     private var lastEnumerationTime: Date = .distantPast
     private var isEnumerating = false
@@ -108,6 +109,18 @@ class OnyxTerminalView: NSView {
             self?.publishPoolStatus()
         }
         startPeriodicEnumeration()
+
+        // On wake from sleep: clean up stale mux sockets and let connections
+        // recover naturally via ServerAliveInterval timeout + processTerminated
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            print("System woke from sleep — cleaning up stale mux sockets")
+            self.appState.cleanupStaleMuxSockets()
+            // Reset reconnect counter so the user gets a fresh set of attempts
+            self.reconnectAttempt = 0
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -390,6 +403,9 @@ class OnyxTerminalView: NSView {
     deinit {
         if let observer = focusObserver {
             NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
         if let monitor = mouseMonitor {
             NSEvent.removeMonitor(monitor)
@@ -1093,27 +1109,50 @@ class OnyxTerminalView: NSView {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self else { return }
-            self.appState.isReconnecting = false
-            self.lastStartTime = Date()
 
-            self.setPendingStatus(.enumerating, for: targetSession)
-
-            // Destroy the dead entry so we get a fresh terminal view
-            if let id = self.activeSessionID {
-                self.destroyPoolEntry(id)
-                self.activeSessionID = nil
-            }
-
-            // Restore the target session — don't let enumeration reassign it
-            self.enumerateAllSessions {
-                DispatchQueue.main.async {
-                    if let target = targetSession {
-                        self.appState.activeSession = target
+            // Check if the host is actually reachable before attempting reconnect.
+            // This avoids burning through retry attempts on a sleeping/unreachable host.
+            if let session = targetSession,
+               let host = self.appState.host(for: session.source.hostID),
+               !host.isLocal {
+                self.setPendingStatus(.connecting, for: targetSession)
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let reachable = self.probeHost(host)
+                    DispatchQueue.main.async {
+                        if reachable != .ok {
+                            // Host not reachable — retry with backoff, don't waste an attempt
+                            self.appState.isReconnecting = false
+                            self.reconnect()
+                            return
+                        }
+                        self.performReconnect(targetSession: targetSession)
                     }
-                    self.connectToActiveSession()
                 }
+            } else {
+                self.performReconnect(targetSession: targetSession)
             }
         }
+    }
+
+    /// Actually reconnect once we know the host is reachable.
+    /// Directly reconnects the target session without full re-enumeration —
+    /// enumeration is slow and itself can fail, making reconnect worse.
+    private func performReconnect(targetSession: TmuxSession?) {
+        self.appState.isReconnecting = false
+        self.lastStartTime = Date()
+
+        // Destroy the dead entry so we get a fresh terminal view
+        if let id = self.activeSessionID {
+            self.destroyPoolEntry(id)
+            self.activeSessionID = nil
+        }
+
+        // Reconnect directly to the target session without re-enumerating.
+        // The session is known — we just need a fresh SSH connection.
+        if let target = targetSession {
+            self.appState.activeSession = target
+        }
+        self.connectToActiveSession()
     }
 }
 

@@ -1138,10 +1138,10 @@ public class AppState: ObservableObject {
         sshMuxDir.appendingPathComponent("mux-\(host.id.uuidString)").path
     }
 
-    /// SSH multiplexing args to share a single TCP connection per host.
-    /// The first SSH process to a host becomes the ControlMaster; subsequent
-    /// ones reuse it. ControlPersist keeps the master alive for 120s after
-    /// the last session disconnects so polling commands don't re-handshake.
+    /// SSH multiplexing args for SHORT-LIVED utility commands only.
+    /// Interactive terminal sessions must NOT use mux — when the mux master
+    /// dies (sleep, network change), ALL sessions through it die simultaneously
+    /// and create a thundering-herd reconnect loop.
     private func sshMuxArgs(for host: HostConfig) -> [String] {
         let controlPath = sshControlPath(for: host)
         return [
@@ -1151,7 +1151,8 @@ public class AppState: ObservableObject {
         ]
     }
 
-    /// Common SSH options applied to all remote connections
+    /// SSH args for short-lived utility commands (stats, enumeration, file browser).
+    /// Uses mux for efficiency — these are ephemeral and can retry if mux dies.
     func sshBaseArgs(for host: HostConfig, batchMode: Bool = true, connectTimeout: Int = 5) -> [String] {
         var args = sshMuxArgs(for: host)
         if batchMode {
@@ -1168,9 +1169,26 @@ public class AppState: ObservableObject {
         return args
     }
 
-    /// SSH base args for SCP (uses -P instead of -p for port)
+    /// SSH args for long-lived interactive sessions (terminal, docker tmux, logs).
+    /// NO mux — each session gets its own independent SSH connection so they
+    /// survive independently across sleep/wake and network changes.
+    func sshSessionArgs(for host: HostConfig, connectTimeout: Int = 10) -> [String] {
+        var args: [String] = []
+        args.append("-o"); args.append("ConnectTimeout=\(connectTimeout)")
+        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
+        args.append("-o"); args.append("ServerAliveInterval=15")
+        args.append("-o"); args.append("ServerAliveCountMax=3")
+        if host.ssh.port != 22 {
+            args.append("-p"); args.append("\(host.ssh.port)")
+        }
+        if !host.ssh.identityFile.isEmpty {
+            args.append("-i"); args.append(host.ssh.identityFile)
+        }
+        return args
+    }
+
+    /// SSH base args for SCP (uses -P instead of -p for port, uses mux)
     func scpBaseArgs(for host: HostConfig) -> [String] {
-        // SCP uses the same mux socket when available
         let controlPath = sshControlPath(for: host)
         var args: [String] = [
             "-o", "ControlMaster=auto",
@@ -1186,6 +1204,13 @@ public class AppState: ObservableObject {
             args.append("-i"); args.append(host.ssh.identityFile)
         }
         return args
+    }
+
+    /// Clean up stale mux sockets for all hosts (call on wake from sleep)
+    public func cleanupStaleMuxSockets() {
+        for host in hosts where !host.isLocal {
+            sshMuxStop(for: host)
+        }
     }
 
     /// User@host string for SSH commands
@@ -1327,9 +1352,7 @@ public class AppState: ObservableObject {
             return (shell, ["-lc", "export \(extraPath); \(dockerCmd)"])
         }
 
-        var args = sshBaseArgs(for: h, batchMode: false, connectTimeout: 10)
-        args.append("-o"); args.append("ServerAliveInterval=10")
-        args.append("-o"); args.append("ServerAliveCountMax=3")
+        var args = sshSessionArgs(for: h)
         args.append("-t")
         args.append(sshUserHost(for: h))
         args.append("exec $SHELL -lc 'export \(extraPath); \(dockerCmd)'")
@@ -1348,9 +1371,7 @@ public class AppState: ObservableObject {
             return (shell, ["-lc", dockerCmd])
         }
 
-        var args = sshBaseArgs(for: h, batchMode: false, connectTimeout: 10)
-        args.append("-o"); args.append("ServerAliveInterval=10")
-        args.append("-o"); args.append("ServerAliveCountMax=3")
+        var args = sshSessionArgs(for: h)
         args.append("-t")
         args.append(sshUserHost(for: h))
         args.append("exec $SHELL -lc '\(dockerCmd)'")
@@ -1366,9 +1387,7 @@ public class AppState: ObservableObject {
             return (shell, ["-lc", "export \(extraPath); tmux new-session -A -s \(sess)"])
         }
 
-        var args = sshBaseArgs(for: h, batchMode: false, connectTimeout: 10)
-        args.append("-o"); args.append("ServerAliveInterval=10")
-        args.append("-o"); args.append("ServerAliveCountMax=3")
+        var args = sshSessionArgs(for: h)
         // MCP remote port forwarding — allows remote agents to talk back to Onyx
         let mcpArgs = mcpForwardingArgs()
         args.append(contentsOf: mcpArgs.sshFlags)
@@ -1389,9 +1408,7 @@ public class AppState: ObservableObject {
             return (shell, ["-lc", "export \(extraPath); \(dockerCmd)"])
         }
 
-        var args = sshBaseArgs(for: h, batchMode: false, connectTimeout: 10)
-        args.append("-o"); args.append("ServerAliveInterval=10")
-        args.append("-o"); args.append("ServerAliveCountMax=3")
+        var args = sshSessionArgs(for: h)
         // MCP remote port forwarding
         let mcpArgs = mcpForwardingArgs()
         args.append(contentsOf: mcpArgs.sshFlags)
