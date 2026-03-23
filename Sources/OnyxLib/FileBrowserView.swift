@@ -105,6 +105,12 @@ public class FileBrowserManager: ObservableObject {
     @Published public var showAddFolder = false
     @Published public var pathHistory: [String] = []
 
+    /// When true, single-child directory chains are collapsed into combined paths
+    @Published public var collapsePaths = true
+    /// Collapsed directory entries: maps display name → resolved full path
+    @Published public var collapsedEntries: [RemoteEntry] = []
+    @Published public var isCollapsingPaths = false
+
     // Search state
     @Published public var searchQuery: String = ""
     @Published public var isSearching = false
@@ -170,6 +176,7 @@ public class FileBrowserManager: ObservableObject {
         imageData = nil
         viewingFileName = nil
         isUnsupportedFile = false
+        collapsedEntries = []
         if let current = currentPath {
             pathHistory.append(current)
         }
@@ -272,10 +279,78 @@ public class FileBrowserManager: ObservableObject {
                         self.entries = self.parseLsOutput(output)
                         if self.entries.isEmpty && !trimmed.isEmpty && !trimmed.hasPrefix("total") {
                             self.error = trimmed
+                        } else if self.collapsePaths {
+                            self.resolveCollapsedPaths(path)
+                        } else {
+                            self.collapsedEntries = []
                         }
                     }
                 } else {
                     self.error = "Failed to list directory"
+                }
+            }
+        }
+    }
+
+    /// For each directory in entries, walk single-child directory chains and
+    /// produce collapsed entries like "org/almostrealism/collect".
+    /// Uses a single remote command that checks all directories at once.
+    func resolveCollapsedPaths(_ basePath: String) {
+        let dirs = entries.filter(\.isDirectory).map(\.name)
+        guard !dirs.isEmpty else {
+            collapsedEntries = []
+            return
+        }
+
+        isCollapsingPaths = true
+        let escaped = escapeForShell(basePath)
+
+        // Shell script: for each directory, follow single-child chains.
+        // Output: "original_dir\tresolved_relative_path" per line.
+        // A directory is "single-child" if it contains exactly one entry and that entry is a directory.
+        var scriptParts: [String] = []
+        for dir in dirs {
+            let safeDir = dir.replacingOccurrences(of: "'", with: "'\\''")
+            scriptParts.append("""
+            d='\(safeDir)'; p="$d"; \
+            while true; do \
+            c=$(ls -1A \(escaped)/"$p" 2>/dev/null); \
+            n=$(echo "$c" | grep -c .); \
+            if [ "$n" -eq 1 ] && [ -d \(escaped)/"$p/$c" ]; then \
+            p="$p/$c"; else break; fi; done; \
+            echo "$d\t$p"
+            """)
+        }
+        let script = scriptParts.joined(separator: "; ")
+        let (cmd, args) = appState.remoteCommand(script)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let output = FileBrowserManager.runProcess(cmd: cmd, args: args) ?? ""
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isCollapsingPaths = false
+
+                // Parse output: "original\tresolved" per line
+                var collapsed: [String: String] = [:]  // original name → resolved relative path
+                for line in output.components(separatedBy: "\n") {
+                    let parts = line.split(separator: "\t", maxSplits: 1).map(String.init)
+                    guard parts.count == 2 else { continue }
+                    let original = parts[0].trimmingCharacters(in: .whitespaces)
+                    let resolved = parts[1].trimmingCharacters(in: .whitespaces)
+                    if resolved != original && !resolved.isEmpty {
+                        collapsed[original] = resolved
+                    }
+                }
+
+                // Build collapsed entries list: replace directory entries with collapsed versions
+                self.collapsedEntries = self.entries.map { entry in
+                    guard entry.isDirectory, let resolved = collapsed[entry.name] else { return entry }
+                    return RemoteEntry(
+                        name: resolved,
+                        isDirectory: true,
+                        size: entry.size,
+                        modified: entry.modified
+                    )
                 }
             }
         }
@@ -1147,6 +1222,24 @@ struct NavigationBar: View {
 
                 Spacer()
 
+                // Collapse paths toggle
+                if browser.currentPath != nil && browser.viewingFileName == nil {
+                    Button(action: {
+                        browser.collapsePaths.toggle()
+                        if browser.collapsePaths, let path = browser.currentPath {
+                            browser.resolveCollapsedPaths(path)
+                        } else {
+                            browser.collapsedEntries = []
+                        }
+                    }) {
+                        Image(systemName: "arrow.right.to.line.compact")
+                            .font(.system(size: 12))
+                            .foregroundColor(browser.collapsePaths ? appState.accentColor : .gray.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Collapse single-child directories")
+                }
+
                 // Git history button
                 if browser.gitManager.isGitRepo {
                     Button(action: {
@@ -1229,13 +1322,28 @@ struct DirectoryListView: View {
     @ObservedObject var appState: AppState
     @ObservedObject var browser: FileBrowserManager
 
+    /// Use collapsed entries if available and collapse mode is on, otherwise raw entries
+    private var displayEntries: [RemoteEntry] {
+        if browser.collapsePaths && !browser.collapsedEntries.isEmpty {
+            return browser.collapsedEntries
+        }
+        return browser.entries
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(browser.entries) { entry in
+                ForEach(displayEntries) { entry in
                     EntryRow(entry: entry, accentColor: appState.accentColor)
                         .onTapGesture {
-                            browser.openEntry(entry)
+                            if entry.isDirectory {
+                                // Navigate to the full resolved path
+                                guard let current = browser.currentPath else { return }
+                                let fullPath = current.hasSuffix("/") ? "\(current)\(entry.name)" : "\(current)/\(entry.name)"
+                                browser.navigateTo(fullPath)
+                            } else {
+                                browser.openEntry(entry)
+                            }
                         }
                         .contextMenu {
                             Button(action: { browser.downloadEntry(entry) }) {
