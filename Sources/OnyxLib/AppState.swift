@@ -1234,20 +1234,21 @@ public class AppState: ObservableObject {
 
     // MARK: - Command Builders
 
-    /// Extra PATH entries so tmux/docker are found even when login profile doesn't set it
-    let extraPath = "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:/snap/bin\""
+    /// Extra PATH entries so tmux/docker are found even when login profile doesn't set it.
+    /// Uses export so it works before compound commands (while/if/for) in all shells.
+    let extraPath = "PATH=$PATH:/opt/homebrew/bin:/usr/local/bin:/snap/bin"
 
     /// Run a shell command on a host and return (executable, args)
     public func remoteCommand(_ script: String, host: HostConfig? = nil) -> (String, [String]) {
         let h = host ?? activeHost ?? .localhost
         if h.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-            return (shell, ["-lc", "\(extraPath) \(script)"])
+            return (shell, ["-lc", "export \(extraPath); \(script)"])
         }
 
         var args = sshBaseArgs(for: h)
         args.append(sshUserHost(for: h))
-        args.append("exec $SHELL -lc '\(extraPath) \(script)'")
+        args.append("exec $SHELL -lc 'export \(extraPath); \(script)'")
         return ("/usr/bin/ssh", args)
     }
 
@@ -1323,7 +1324,7 @@ public class AppState: ObservableObject {
 
         if h.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-            return (shell, ["-lc", dockerCmd])
+            return (shell, ["-lc", "export \(extraPath); \(dockerCmd)"])
         }
 
         var args = sshBaseArgs(for: h, batchMode: false, connectTimeout: 10)
@@ -1331,14 +1332,16 @@ public class AppState: ObservableObject {
         args.append("-o"); args.append("ServerAliveCountMax=3")
         args.append("-t")
         args.append(sshUserHost(for: h))
-        args.append("exec $SHELL -lc '\(extraPath) \(dockerCmd)'")
+        args.append("exec $SHELL -lc 'export \(extraPath); \(dockerCmd)'")
         return ("/usr/bin/ssh", args)
     }
 
     /// Build the command to show docker container processes (refreshes every 2s)
     public func dockerTopCommand(host h: HostConfig, container: String) -> (String, [String]) {
         let safeContainer = sanitizedContainer(container)
-        let dockerCmd = "while true; do clear; date; echo; docker top \(safeContainer) -eo pid,user,%cpu,%mem,etime,comm 2>&1; sleep 2; done"
+        // Wrap in a function so PATH assignment + while loop works in all shells (zsh
+        // doesn't allow inline VAR=value before compound commands like while/if/for)
+        let dockerCmd = "export \(extraPath); while true; do clear; date; echo; docker top \(safeContainer) -eo pid,user,%cpu,%mem,etime,comm 2>&1; sleep 2; done"
 
         if h.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
@@ -1350,7 +1353,7 @@ public class AppState: ObservableObject {
         args.append("-o"); args.append("ServerAliveCountMax=3")
         args.append("-t")
         args.append(sshUserHost(for: h))
-        args.append("exec $SHELL -lc '\(extraPath) \(dockerCmd)'")
+        args.append("exec $SHELL -lc '\(dockerCmd)'")
         return ("/usr/bin/ssh", args)
     }
 
@@ -1360,7 +1363,7 @@ public class AppState: ObservableObject {
 
         if h.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-            return (shell, ["-lc", "\(extraPath) tmux new-session -A -s \(sess)"])
+            return (shell, ["-lc", "export \(extraPath); tmux new-session -A -s \(sess)"])
         }
 
         var args = sshBaseArgs(for: h, batchMode: false, connectTimeout: 10)
@@ -1371,7 +1374,7 @@ public class AppState: ObservableObject {
         args.append(contentsOf: mcpArgs.sshFlags)
         args.append("-t")
         args.append(sshUserHost(for: h))
-        args.append("exec $SHELL -lc '\(mcpArgs.envExport)\(extraPath) tmux new-session -A -s \(sess)'")
+        args.append("exec $SHELL -lc '\(mcpArgs.envExport)export \(extraPath); tmux new-session -A -s \(sess)'")
         return ("/usr/bin/ssh", args)
     }
 
@@ -1383,7 +1386,7 @@ public class AppState: ObservableObject {
 
         if h.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-            return (shell, ["-lc", "\(extraPath) \(dockerCmd)"])
+            return (shell, ["-lc", "export \(extraPath); \(dockerCmd)"])
         }
 
         var args = sshBaseArgs(for: h, batchMode: false, connectTimeout: 10)
@@ -1394,7 +1397,7 @@ public class AppState: ObservableObject {
         args.append(contentsOf: mcpArgs.sshFlags)
         args.append("-t")
         args.append(sshUserHost(for: h))
-        args.append("exec $SHELL -lc '\(mcpArgs.envExport)\(extraPath) \(dockerCmd)'")
+        args.append("exec $SHELL -lc '\(mcpArgs.envExport)export \(extraPath); \(dockerCmd)'")
         return ("/usr/bin/ssh", args)
     }
 
@@ -1417,18 +1420,8 @@ public class AppState: ObservableObject {
             return (shell, ["-lc", statsScript])
         }
 
-        var args = [String]()
-        args.append("-o"); args.append("BatchMode=yes")
-        args.append("-o"); args.append("ConnectTimeout=5")
-        args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        if host.ssh.port != 22 {
-            args.append("-p"); args.append("\(host.ssh.port)")
-        }
-        if !host.ssh.identityFile.isEmpty {
-            args.append("-i"); args.append(host.ssh.identityFile)
-        }
-        let userHost = host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
-        args.append(userHost)
+        var args = sshBaseArgs(for: host)
+        args.append(sshUserHost(for: host))
         args.append("exec $SHELL -lc '\(statsScript)'")
         return ("/usr/bin/ssh", args)
     }
