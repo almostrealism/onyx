@@ -123,7 +123,7 @@ struct SettingsView: View {
 
                                 // Accent color picker
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("ACCENT COLOR")
+                                    Text("DEFAULT ACCENT")
                                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                                         .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
                                         .tracking(2)
@@ -139,6 +139,46 @@ struct SettingsView: View {
                                                 )
                                                 .onTapGesture {
                                                     appState.appearance.accentHex = hex
+                                                }
+                                        }
+                                    }
+                                }
+
+                                // Per-window accent color
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("WINDOW \(appState.windowIndex + 1) ACCENT")
+                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .tracking(2)
+
+                                    HStack(spacing: 8) {
+                                        // "Default" option — removes per-window override
+                                        Circle()
+                                            .fill(Color(hex: appState.appearance.accentHex))
+                                            .frame(width: 24, height: 24)
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(Color.white, lineWidth: appState.appearance.windowAccents[appState.windowIndex] == nil ? 2 : 0)
+                                            )
+                                            .overlay(
+                                                Text("D")
+                                                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                                    .foregroundColor(.white.opacity(0.7))
+                                            )
+                                            .onTapGesture {
+                                                appState.appearance.windowAccents.removeValue(forKey: appState.windowIndex)
+                                            }
+
+                                        ForEach(AppearanceConfig.accentOptions, id: \.self) { hex in
+                                            Circle()
+                                                .fill(Color(hex: hex))
+                                                .frame(width: 24, height: 24)
+                                                .overlay(
+                                                    Circle()
+                                                        .stroke(Color.white, lineWidth: appState.appearance.windowAccents[appState.windowIndex] == hex ? 2 : 0)
+                                                )
+                                                .onTapGesture {
+                                                    appState.appearance.windowAccents[appState.windowIndex] = hex
                                                 }
                                         }
                                     }

@@ -429,6 +429,9 @@ public struct AppearanceConfig: Codable {
     public var uiFontSize: Double = 12
     public var windowOpacity: Double = 0.82
     public var accentHex: String = "66CCFF"
+    /// Per-window accent color overrides. Key = window index (0-3), value = hex color.
+    /// Windows without an entry use the global accentHex.
+    public var windowAccents: [Int: String] = [:]
     public var windowTitle: String = "Onyx"
     public var remindersList: String?       // deprecated: migrated to remindersLists
     public var remindersLists: [String] = [] // empty = "Today" mode
@@ -1017,7 +1020,13 @@ public class AppState: ObservableObject {
     }
 
     public var accentColor: Color {
-        Color(hex: appearance.accentHex)
+        let hex = appearance.windowAccents[windowIndex] ?? appearance.accentHex
+        return Color(hex: hex)
+    }
+
+    /// The effective accent hex for this window
+    public var effectiveAccentHex: String {
+        appearance.windowAccents[windowIndex] ?? appearance.accentHex
     }
 
     /// Scale factor for UI text relative to default size of 12
