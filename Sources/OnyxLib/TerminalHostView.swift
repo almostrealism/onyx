@@ -86,6 +86,7 @@ class OnyxTerminalView: NSView {
 
     private var focusObserver: Any?
     private var mouseMonitor: Any?
+    private var cmdClickMonitor: Any?
     private var wakeObserver: Any?
     private var periodicEnumerationTimer: Timer?
     private var lastEnumerationTime: Date = .distantPast
@@ -105,6 +106,7 @@ class OnyxTerminalView: NSView {
             self?.restoreFocus()
         }
         installFocusMonitor()
+        installCmdClickMonitor()
         NotificationCenter.default.addObserver(forName: .refreshPoolStatus, object: nil, queue: .main) { [weak self] _ in
             self?.publishPoolStatus()
         }
@@ -145,6 +147,82 @@ class OnyxTerminalView: NSView {
             }
         }
         super.mouseDown(with: event)
+    }
+
+    // MARK: - URL Detection (Cmd+click)
+
+    /// Monitor for Cmd+click on terminal text to detect and open URLs
+    private func installCmdClickMonitor() {
+        cmdClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+            guard let self = self else { return event }
+            // Only handle Cmd+click (no other modifiers)
+            guard event.modifierFlags.contains(.command) else { return event }
+            guard let tv = self.terminalView,
+                  let window = tv.window,
+                  event.window === window else { return event }
+
+            // Check the click is in the terminal area
+            let loc = tv.convert(event.locationInWindow, from: nil)
+            guard tv.bounds.contains(loc) else { return event }
+
+            // Try to detect a URL at the click position
+            if self.openURLAtPosition(event: event) {
+                return nil  // consumed — don't pass to SwiftTerm
+            }
+            return event
+        }
+    }
+
+    /// Extract the full line of text at a terminal grid row from the active terminal view
+    private func terminalLineText(at row: Int) -> String? {
+        guard let tv = terminalView else { return nil }
+        let terminal = tv.terminal!
+        guard row >= 0 && row < terminal.rows else { return nil }
+        guard let line = terminal.getLine(row: row) else { return nil }
+        // Build string from CharData
+        var text = ""
+        for col in 0..<terminal.cols {
+            if let cd = terminal.getCharData(col: col, row: row) {
+                let ch = cd.getCharacter()
+                text.append(ch == "\u{0}" ? " " : ch)
+            }
+        }
+        return text
+    }
+
+    /// Detect and open a URL at a grid position in the terminal. Returns true if a URL was found.
+    @discardableResult
+    func openURLAtPosition(event: NSEvent) -> Bool {
+        guard let tv = terminalView else { return false }
+        let point = tv.convert(event.locationInWindow, from: nil)
+        guard point.x >= 0 && point.y >= 0 else { return false }
+
+        let cols = CGFloat(tv.terminal.cols)
+        let rows = CGFloat(tv.terminal.rows)
+        guard cols > 0 && rows > 0 && tv.frame.width > 0 && tv.frame.height > 0 else { return false }
+        let cellW = tv.frame.width / cols
+        let cellH = tv.frame.height / rows
+        let col = Int(point.x / cellW)
+        let row = Int((tv.frame.height - point.y) / cellH)
+
+        guard let lineText = terminalLineText(at: row) else { return false }
+        guard !lineText.isEmpty else { return false }
+
+        // Use NSDataDetector to find URLs in the line
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return false }
+        let nsLine = lineText as NSString
+        let range = NSRange(location: 0, length: nsLine.length)
+
+        for match in detector.matches(in: lineText, range: range) {
+            guard let url = match.url else { continue }
+            let matchRange = match.range
+            // Check if the clicked column falls within this URL
+            if col >= matchRange.location && col < matchRange.location + matchRange.length {
+                NSWorkspace.shared.open(url)
+                return true
+            }
+        }
+        return false
     }
 
     /// Monitors all mouseDown events in the window to manage first responder.
@@ -416,6 +494,9 @@ class OnyxTerminalView: NSView {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
         if let monitor = mouseMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = cmdClickMonitor {
             NSEvent.removeMonitor(monitor)
         }
         if let monitor = scrollMonitor {
@@ -1182,6 +1263,13 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
     }
 
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+
+    /// Handle OSC 8 explicit hyperlinks (Cmd+click on links emitted by terminal apps)
+    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+        if let url = URL(string: link), url.scheme != nil {
+            NSWorkspace.shared.open(url)
+        }
+    }
 
     func processTerminated(source: TerminalView, exitCode: Int32?) {
         let wasKeySetup = isKeySetup
