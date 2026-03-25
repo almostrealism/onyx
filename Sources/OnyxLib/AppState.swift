@@ -705,6 +705,7 @@ public class AppState: ObservableObject {
     }()
 
     private var mcpServer: MCPSocketServer?
+    private var dashboardServer: DashboardServer?
 
     public init() {
         self.windowIndex = WindowIndexPool.shared.claim()
@@ -1086,6 +1087,10 @@ public class AppState: ObservableObject {
         // Start MCP socket server for agent integration
         mcpServer = MCPSocketServer(artifactManager: artifactManager)
         mcpServer?.start()
+
+        // Start dashboard HTTP server for browser new-tab monitoring
+        dashboardServer = DashboardServer(appState: self)
+        dashboardServer?.start()
     }
 
     public func saveHosts() {
