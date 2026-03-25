@@ -118,6 +118,12 @@ public class ShortcutManager {
                     NotificationCenter.default.post(name: .toggleMemoryChart, object: nil)
                     return nil
                 }
+
+                // C key (keyCode 8) → toggle showing all containers (only when overlay is visible in THIS window)
+                if event.keyCode == 8 && flags.isEmpty && monitorVisibleInWindow {
+                    NotificationCenter.default.post(name: .toggleAllContainers, object: nil)
+                    return nil
+                }
             }
 
             // Escape → dismiss top overlay

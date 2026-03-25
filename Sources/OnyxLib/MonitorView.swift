@@ -603,7 +603,7 @@ struct MonitorView: View {
                         Text(monitor.useShortInterval ? "5s intervals" : "1m intervals")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.4))
-                        Text("(T interval · M memory)")
+                        Text("(T interval · M memory · C containers)")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.25))
                     }
@@ -715,6 +715,9 @@ struct MonitorView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleMemoryChart)) { _ in
             monitor.showMemoryChart.toggle()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleAllContainers)) { _ in
+            dockerStats.showAllContainers.toggle()
         }
         .onAppear {
             dockerStats.startPolling()
@@ -857,12 +860,46 @@ public class DockerStatsManager: ObservableObject {
     @Published public var containers: [DockerContainerStats] = []
     @Published public var isAvailable = false
     @Published public var cpuCores: Int = 1
+    @Published public var showAllContainers = false
+
+    /// Per-container CPU history: name → array of (timestamp, cpuPct) pairs
+    private var cpuHistory: [String: [(Date, Double)]] = [:]
+    private let historyWindow: TimeInterval = 60 // 60s window for idle detection
 
     private var timer: Timer?
     private let appState: AppState
 
     public init(appState: AppState) {
         self.appState = appState
+    }
+
+    /// Containers that have had <1% CPU for the entire 60s window
+    public var idleContainerNames: Set<String> {
+        let cutoff = Date().addingTimeInterval(-historyWindow)
+        var idle = Set<String>()
+        for (name, history) in cpuHistory {
+            // Need at least some data spanning the window
+            let recent = history.filter { $0.0 >= cutoff }
+            guard recent.count >= 6 else { continue } // at least 30s of data at 5s intervals
+            if recent.allSatisfy({ $0.1 < 1.0 }) {
+                idle.insert(name)
+            }
+        }
+        return idle
+    }
+
+    /// Visible containers (filtered or all)
+    public var visibleContainers: [DockerContainerStats] {
+        guard !showAllContainers else { return containers }
+        let idle = idleContainerNames
+        return containers.filter { !idle.contains($0.name) }
+    }
+
+    /// Count of hidden idle containers
+    public var hiddenIdleCount: Int {
+        guard !showAllContainers else { return 0 }
+        let idle = idleContainerNames
+        return containers.filter { idle.contains($0.name) }.count
     }
 
     public func startPolling() {
@@ -915,6 +952,18 @@ public class DockerStatsManager: ObservableObject {
                     self?.cpuCores = cores
                     self?.containers = parsed
                     self?.isAvailable = !parsed.isEmpty
+
+                    // Record CPU history per container
+                    let now = Date()
+                    let cutoff = now.addingTimeInterval(-120) // keep 2 min of history
+                    for container in parsed {
+                        let pct = Self.parseCPUPct(container.cpu)
+                        self?.cpuHistory[container.name, default: []].append((now, pct))
+                    }
+                    // Prune old entries
+                    for (name, history) in self?.cpuHistory ?? [:] {
+                        self?.cpuHistory[name] = history.filter { $0.0 >= cutoff }
+                    }
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -922,6 +971,11 @@ public class DockerStatsManager: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Parse "12.34%" → 12.34
+    static func parseCPUPct(_ s: String) -> Double {
+        Double(s.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "%", with: "")) ?? 0
     }
 
     public static func parse(output: String) -> (cores: Int, containers: [DockerContainerStats]) {
@@ -991,7 +1045,7 @@ struct DockerStatsSection: View {
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.4))
 
-                ForEach(dockerStats.containers.sorted { parseCPUPercent($0.cpu) > parseCPUPercent($1.cpu) }) { container in
+                ForEach(dockerStats.visibleContainers.sorted { parseCPUPercent($0.cpu) > parseCPUPercent($1.cpu) }) { container in
                     let cpuPct = parseCPUPercent(container.cpu)
                     let confidence = appState.activeHost.map {
                         NetworkTopologyStore.shared.containerConfidence(hostID: $0.id, containerName: container.name)
@@ -1028,6 +1082,15 @@ struct DockerStatsSection: View {
                         }
                     )
                     .cornerRadius(3)
+                }
+
+                // Hidden idle containers indicator
+                let hiddenCount = dockerStats.hiddenIdleCount
+                if hiddenCount > 0 {
+                    Text("\(hiddenCount) container\(hiddenCount == 1 ? "" : "s") with <1% CPU (C to show)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.3))
+                        .padding(.top, 4)
                 }
             }
         }

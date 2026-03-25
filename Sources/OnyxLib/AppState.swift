@@ -20,6 +20,7 @@ public extension Notification.Name {
     static let restoreTerminalFocus = Notification.Name("restoreTerminalFocus")
     static let refreshPoolStatus = Notification.Name("refreshPoolStatus")
     static let toggleMemoryChart = Notification.Name("toggleMemoryChart")
+    static let toggleAllContainers = Notification.Name("toggleAllContainers")
 }
 
 // MARK: - Favorite Entry
