@@ -554,14 +554,9 @@ private func formatMB(_ mb: Double) -> String {
 
 struct MonitorView: View {
     @ObservedObject var appState: AppState
-    @StateObject private var dockerStats: DockerStatsManager
-
-    init(appState: AppState) {
-        self.appState = appState
-        _dockerStats = StateObject(wrappedValue: DockerStatsManager(appState: appState))
-    }
 
     private var monitor: MonitorManager { appState.monitor }
+    private var dockerStats: DockerStatsManager { appState.dockerStats }
 
     var body: some View {
         ZStack {
@@ -862,9 +857,14 @@ public class DockerStatsManager: ObservableObject {
     @Published public var cpuCores: Int = 1
     @Published public var showAllContainers = false
 
-    /// Per-container CPU history: name → array of (timestamp, cpuPct) pairs
+    /// Per-container CPU history: name → array of (timestamp, cpuPct) pairs.
+    /// Persists across overlay open/close since DockerStatsManager lives on AppState.
     private var cpuHistory: [String: [(Date, Double)]] = [:]
-    private let historyWindow: TimeInterval = 60 // 60s window for idle detection
+
+    /// Containers that have EVER exceeded 1% CPU in collected data.
+    /// Once a container crosses the threshold it stays visible permanently
+    /// (until the app restarts or the container disappears).
+    private var hasExceededThreshold: Set<String> = []
 
     private var timer: Timer?
     private let appState: AppState
@@ -873,16 +873,13 @@ public class DockerStatsManager: ObservableObject {
         self.appState = appState
     }
 
-    /// Containers that have had <1% CPU for the entire 60s window
+    /// Containers that should be hidden: never seen >=1% CPU in any collected sample.
+    /// Missing data = hidden (container must prove it's active to be shown).
     public var idleContainerNames: Set<String> {
-        let cutoff = Date().addingTimeInterval(-historyWindow)
         var idle = Set<String>()
-        for (name, history) in cpuHistory {
-            // Need at least some data spanning the window
-            let recent = history.filter { $0.0 >= cutoff }
-            guard recent.count >= 6 else { continue } // at least 30s of data at 5s intervals
-            if recent.allSatisfy({ $0.1 < 1.0 }) {
-                idle.insert(name)
+        for container in containers {
+            if !hasExceededThreshold.contains(container.name) {
+                idle.insert(container.name)
             }
         }
         return idle
@@ -891,15 +888,13 @@ public class DockerStatsManager: ObservableObject {
     /// Visible containers (filtered or all)
     public var visibleContainers: [DockerContainerStats] {
         guard !showAllContainers else { return containers }
-        let idle = idleContainerNames
-        return containers.filter { !idle.contains($0.name) }
+        return containers.filter { hasExceededThreshold.contains($0.name) }
     }
 
     /// Count of hidden idle containers
     public var hiddenIdleCount: Int {
         guard !showAllContainers else { return 0 }
-        let idle = idleContainerNames
-        return containers.filter { idle.contains($0.name) }.count
+        return containers.filter { !hasExceededThreshold.contains($0.name) }.count
     }
 
     public func startPolling() {
@@ -953,16 +948,12 @@ public class DockerStatsManager: ObservableObject {
                     self?.containers = parsed
                     self?.isAvailable = !parsed.isEmpty
 
-                    // Record CPU history per container
-                    let now = Date()
-                    let cutoff = now.addingTimeInterval(-120) // keep 2 min of history
+                    // Track per-container CPU and threshold crossing
                     for container in parsed {
                         let pct = Self.parseCPUPct(container.cpu)
-                        self?.cpuHistory[container.name, default: []].append((now, pct))
-                    }
-                    // Prune old entries
-                    for (name, history) in self?.cpuHistory ?? [:] {
-                        self?.cpuHistory[name] = history.filter { $0.0 >= cutoff }
+                        if pct >= 1.0 {
+                            self?.hasExceededThreshold.insert(container.name)
+                        }
                     }
                 }
             } catch {
@@ -1019,8 +1010,10 @@ struct DockerStatsSection: View {
 
                 Spacer()
 
-                if !dockerStats.containers.isEmpty {
-                    Text("\(dockerStats.containers.count)")
+                let visCount = dockerStats.visibleContainers.count
+                let totalCount = dockerStats.containers.count
+                if totalCount > 0 {
+                    Text(visCount == totalCount ? "\(totalCount)" : "\(visCount)/\(totalCount)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.4))
                 }

@@ -696,6 +696,15 @@ public class AppState: ObservableObject {
         return m
     }()
 
+    private var dockerStatsCancellable: AnyCancellable?
+    public lazy var dockerStats: DockerStatsManager = {
+        let d = DockerStatsManager(appState: self)
+        dockerStatsCancellable = d.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        return d
+    }()
+
     private var artifactCancellable: AnyCancellable?
     public lazy var artifactManager: ArtifactManager = {
         let a = ArtifactManager()
