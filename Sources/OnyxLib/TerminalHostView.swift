@@ -445,6 +445,14 @@ class OnyxTerminalView: NSView {
             guard let self = self, let tv = self.terminalView else { return event }
             guard event.deltaY != 0 else { return event }
 
+            // Never intercept scroll events when an overlay is visible —
+            // the overlay's ScrollView needs to receive them.
+            if self.appState.showMonitor || self.appState.showSettings
+                || self.appState.showCommandPalette || self.appState.showSessionManager
+                || self.appState.showSetup || self.appState.activeRightPanel != nil {
+                return event
+            }
+
             guard let window = tv.window,
                   let targetView = window.contentView?.hitTest(event.locationInWindow),
                   targetView === tv || targetView.isDescendant(of: tv) else {
