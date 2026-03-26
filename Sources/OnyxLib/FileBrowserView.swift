@@ -91,8 +91,19 @@ public class SearchResultTree: ObservableObject {
     }
 }
 
+public struct SavedFolder: Codable, Identifiable, Equatable {
+    public var id: String { "\(hostID.uuidString):\(path)" }
+    public let path: String
+    public let hostID: UUID
+
+    public init(path: String, hostID: UUID) {
+        self.path = path
+        self.hostID = hostID
+    }
+}
+
 public class FileBrowserManager: ObservableObject {
-    @Published public var savedFolders: [String] = []
+    @Published public var savedFolders: [SavedFolder] = []
     @Published public var currentPath: String?
     @Published public var entries: [RemoteEntry] = []
     @Published public var fileContent: String?
@@ -104,6 +115,12 @@ public class FileBrowserManager: ObservableObject {
     @Published public var error: String?
     @Published public var showAddFolder = false
     @Published public var pathHistory: [String] = []
+
+    /// Folders for the currently active host
+    public var activeFolders: [SavedFolder] {
+        let hostID = appState.activeHost?.id ?? HostConfig.localhostID
+        return savedFolders.filter { $0.hostID == hostID }
+    }
 
     /// When true, single-child directory chains are collapsed into combined paths
     @Published public var collapsePaths = true
@@ -138,9 +155,16 @@ public class FileBrowserManager: ObservableObject {
     // MARK: - Persistence
 
     private func loadSavedFolders() {
-        guard let data = try? Data(contentsOf: appState.savedFoldersURL),
-              let folders = try? JSONDecoder().decode([String].self, from: data) else { return }
-        savedFolders = folders
+        guard let data = try? Data(contentsOf: appState.savedFoldersURL) else { return }
+        // Try new format first
+        if let folders = try? JSONDecoder().decode([SavedFolder].self, from: data) {
+            savedFolders = folders
+        } else if let legacyPaths = try? JSONDecoder().decode([String].self, from: data) {
+            // Migrate from old [String] format — assign to first host (or localhost)
+            let hostID = appState.hosts.first?.id ?? HostConfig.localhostID
+            savedFolders = legacyPaths.map { SavedFolder(path: $0, hostID: hostID) }
+            saveFolders()
+        }
     }
 
     private func saveFolders() {
@@ -151,15 +175,17 @@ public class FileBrowserManager: ObservableObject {
 
     public func addFolder(_ path: String) {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !savedFolders.contains(trimmed) else { return }
-        savedFolders.append(trimmed)
+        let hostID = appState.activeHost?.id ?? HostConfig.localhostID
+        let folder = SavedFolder(path: trimmed, hostID: hostID)
+        guard !trimmed.isEmpty, !savedFolders.contains(folder) else { return }
+        savedFolders.append(folder)
         saveFolders()
     }
 
-    public func removeFolder(_ path: String) {
-        savedFolders.removeAll { $0 == path }
+    public func removeFolder(_ folder: SavedFolder) {
+        savedFolders.removeAll { $0 == folder }
         saveFolders()
-        if currentPath?.hasPrefix(path) == true {
+        if currentPath?.hasPrefix(folder.path) == true {
             currentPath = nil
             entries = []
             fileContent = nil
@@ -540,7 +566,7 @@ public class FileBrowserManager: ObservableObject {
 
     public func startSearch(_ query: String) {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty,
-              let basePath = currentPath ?? savedFolders.first else { return }
+              let basePath = currentPath ?? activeFolders.first?.path else { return }
 
         if let connectError = checkRemoteConnectivity() {
             error = connectError
@@ -1105,10 +1131,11 @@ struct FolderSidebar: View {
             // Folder list
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(browser.savedFolders, id: \.self) { folder in
+                    ForEach(browser.activeFolders) { folder in
                         FolderRow(
-                            path: folder,
-                            isSelected: browser.currentPath?.hasPrefix(folder) == true,
+                            path: folder.path,
+                            hostLabel: appState.hosts.count > 1 ? appState.host(for: folder.hostID)?.label : nil,
+                            isSelected: browser.currentPath?.hasPrefix(folder.path) == true,
                             accentColor: appState.accentColor
                         )
                         .onTapGesture {
@@ -1117,8 +1144,8 @@ struct FolderSidebar: View {
                             browser.imageData = nil
                             browser.viewingFileName = nil
                             browser.isUnsupportedFile = false
-                            browser.currentPath = folder
-                            browser.navigateTo(folder)
+                            browser.currentPath = folder.path
+                            browser.navigateTo(folder.path)
                         }
                         .contextMenu {
                             Button("Remove", role: .destructive) {
@@ -1129,7 +1156,7 @@ struct FolderSidebar: View {
                 }
             }
 
-            if !browser.savedFolders.isEmpty {
+            if !browser.activeFolders.isEmpty {
                 Divider().background(Color.white.opacity(0.1))
                 Text("right-click to remove")
                     .font(.system(size: 9, design: .monospaced))
@@ -1143,6 +1170,7 @@ struct FolderSidebar: View {
 
 struct FolderRow: View {
     let path: String
+    var hostLabel: String? = nil
     let isSelected: Bool
     let accentColor: Color
 
@@ -1157,10 +1185,22 @@ struct FolderRow: View {
                 .foregroundColor(isSelected ? accentColor : .gray.opacity(0.5))
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(displayName)
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundColor(isSelected ? accentColor : .white.opacity(0.8))
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(displayName)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundColor(isSelected ? accentColor : .white.opacity(0.8))
+                        .lineLimit(1)
+
+                    if let host = hostLabel {
+                        Text(host)
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .foregroundColor(accentColor.opacity(0.5))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(accentColor.opacity(0.1))
+                            .cornerRadius(2)
+                    }
+                }
 
                 Text(path)
                     .font(.system(size: 9, design: .monospaced))
@@ -1257,7 +1297,7 @@ struct NavigationBar: View {
                 }
 
                 // Search button
-                if browser.currentPath != nil || !browser.savedFolders.isEmpty {
+                if browser.currentPath != nil || !browser.activeFolders.isEmpty {
                     Button(action: {
                         if browser.isSearchActive {
                             browser.clearSearch()
