@@ -92,6 +92,8 @@ class OnyxTerminalView: NSView {
     }
 
     private var focusObserver: Any?
+    private var windowKeyObserver: Any?
+    private var appActiveObserver: Any?
     private var mouseMonitor: Any?
     private var cmdClickMonitor: Any?
     private var wakeObserver: Any?
@@ -112,6 +114,27 @@ class OnyxTerminalView: NSView {
         ) { [weak self] _ in
             self?.restoreFocus()
         }
+
+        // Restore terminal focus when the window becomes key (app switch, click on window)
+        windowKeyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let window = notification.object as? NSWindow,
+                  window === self.window else { return }
+            self.restoreFocusIfNeeded()
+        }
+
+        // Restore terminal focus when the app becomes active
+        appActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Small delay to let the window activation settle
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self?.restoreFocusIfNeeded()
+            }
+        }
+
         installFocusMonitor()
         installCmdClickMonitor()
         NotificationCenter.default.addObserver(forName: .refreshPoolStatus, object: nil, queue: .main) { [weak self] _ in
@@ -140,7 +163,7 @@ class OnyxTerminalView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         // Don't claim hits when an overlay is covering the terminal
         if appState.showMonitor || appState.showSettings || appState.showCommandPalette
-            || appState.showSessionManager || appState.showSetup {
+            || appState.showSessionManager || appState.showSetup || appState.showTerminalText {
             return nil
         }
         return terminalView?.hitTest(point) ?? super.hitTest(point)
@@ -149,7 +172,7 @@ class OnyxTerminalView: NSView {
     override func mouseDown(with event: NSEvent) {
         // Only grab focus if no overlay is covering us
         if !appState.showMonitor && !appState.showSettings && !appState.showCommandPalette
-            && !appState.showSessionManager && !appState.showSetup {
+            && !appState.showSessionManager && !appState.showSetup && !appState.showTerminalText {
             if let tv = terminalView {
                 tv.window?.makeFirstResponder(tv)
                 appState.focusedComponent = .terminal
@@ -308,8 +331,40 @@ class OnyxTerminalView: NSView {
         // Use async here because this is called from a notification, and we need
         // the overlay dismissal to finish before we grab focus
         DispatchQueue.main.async {
-            guard self.appState.focusedComponent == .terminal else { return }
-            tv.window?.makeFirstResponder(tv)
+            self.doRestoreFocus()
+        }
+    }
+
+    /// Restore focus if the terminal should have it but doesn't.
+    /// Called on window-became-key, app-became-active, and explicit restore.
+    private func restoreFocusIfNeeded() {
+        // Don't steal focus from overlays
+        let hasOverlay = appState.showMonitor || appState.showSettings
+            || appState.showCommandPalette || appState.showSessionManager
+            || appState.showSetup || appState.showTerminalText
+        guard !hasOverlay else { return }
+        // Don't steal focus from right panels with text fields
+        guard appState.focusedComponent == .terminal else { return }
+        doRestoreFocus()
+    }
+
+    /// Actually make the terminal view first responder, with a retry
+    private func doRestoreFocus() {
+        guard let tv = terminalView else { return }
+        guard appState.focusedComponent == .terminal else { return }
+        guard let window = tv.window, window.isKeyWindow else { return }
+
+        if window.firstResponder !== tv {
+            let success = window.makeFirstResponder(tv)
+            if !success {
+                // Retry after a brief delay — view might not be ready yet
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    guard let self = self, let tv = self.terminalView else { return }
+                    guard self.appState.focusedComponent == .terminal else { return }
+                    guard let window = tv.window, window.isKeyWindow else { return }
+                    window.makeFirstResponder(tv)
+                }
+            }
         }
     }
 
@@ -526,6 +581,12 @@ class OnyxTerminalView: NSView {
 
     deinit {
         if let observer = focusObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = windowKeyObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = appActiveObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = wakeObserver {
