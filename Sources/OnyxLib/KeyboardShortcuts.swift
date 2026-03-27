@@ -35,6 +35,12 @@ public class ShortcutManager {
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let chars = event.charactersIgnoringModifiers ?? ""
 
+            // Cmd+Shift+C → toggle terminal text mode (selectable text view)
+            if flags.contains([.command, .shift]) && chars.lowercased() == "c" {
+                NotificationCenter.default.post(name: .toggleTerminalTextMode, object: nil)
+                return nil
+            }
+
             // Cmd+Shift+E → new note (check shift combo first, before plain Cmd+E)
             if flags.contains([.command, .shift]) && chars.lowercased() == "e" {
                 NotificationCenter.default.post(name: .createNote, object: nil)

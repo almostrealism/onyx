@@ -73,6 +73,12 @@ public struct ContentView: View {
                                 .opacity(hasOverlay ? 0.3 : 1.0)
                                 .allowsHitTesting(!hasOverlay)
 
+                            // Terminal text mode — selectable text overlay
+                            if appState.showTerminalText {
+                                TerminalTextOverlay(appState: appState)
+                                    .transition(.opacity)
+                            }
+
                             // Monitor overlay — blur terminal for privacy, then show stats
                             if appState.showMonitor {
                                 VibrancyBackground()
@@ -370,6 +376,17 @@ private struct ContentViewNotifications: ViewModifier {
                 appState.showCommandPalette.toggle()
                 appState.recalculateFocus()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleTerminalTextMode)) { _ in
+                guard isKeyWindow else { return }
+                if appState.showTerminalText {
+                    appState.showTerminalText = false
+                    appState.terminalTextContent = ""
+                } else {
+                    // Content will be captured by TerminalHostView.updateNSView
+                    appState.terminalTextContent = ""
+                    appState.showTerminalText = true
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .toggleMonitor)) { _ in
                 guard isKeyWindow else { return }
                 appState.showMonitor.toggle()
@@ -463,6 +480,59 @@ private struct ContentViewSessionNotifications: ViewModifier {
                     appState.switchToSession = session
                 }
             }
+    }
+}
+
+struct TerminalTextOverlay: View {
+    @ObservedObject var appState: AppState
+
+    var body: some View {
+        ZStack {
+            Color(nsColor: NSColor(white: 0.04, alpha: 0.98))
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Header bar
+                HStack {
+                    Text("TERMINAL TEXT")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(appState.accentColor)
+                        .tracking(2)
+
+                    Spacer()
+
+                    Text("⌘⇧C or Esc to close")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.4))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.03))
+
+                Divider().background(Color.white.opacity(0.1))
+
+                // Selectable text content
+                if appState.terminalTextContent.isEmpty {
+                    Spacer()
+                    HStack(spacing: 8) {
+                        ProgressView().scaleEffect(0.7).colorScheme(.dark)
+                        Text("Capturing terminal text...")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.5))
+                    }
+                    Spacer()
+                } else {
+                    ScrollView([.vertical, .horizontal]) {
+                        Text(appState.terminalTextContent)
+                            .font(.system(size: CGFloat(appState.appearance.effectiveTerminalFontSize), design: .monospaced))
+                            .foregroundColor(.white.opacity(0.9))
+                            .textSelection(.enabled)
+                            .padding(16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
     }
 }
 

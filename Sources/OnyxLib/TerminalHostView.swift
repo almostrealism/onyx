@@ -46,6 +46,13 @@ struct TerminalHostView: NSViewRepresentable {
             }
             nsView.createNewTmuxSession(newSession)
         }
+        // Capture terminal text when entering text mode
+        if appState.showTerminalText && appState.terminalTextContent.isEmpty {
+            let text = nsView.getVisibleText()
+            DispatchQueue.main.async {
+                appState.terminalTextContent = text
+            }
+        }
         nsView.updateTerminalFont(
             name: appState.appearance.terminalFontName,
             size: appState.appearance.effectiveTerminalFontSize
@@ -171,6 +178,27 @@ class OnyxTerminalView: NSView {
             }
             return event
         }
+    }
+
+    /// Extract all visible text from the terminal buffer (all rows)
+    func getVisibleText() -> String {
+        guard let tv = terminalView else { return "" }
+        let terminal = tv.terminal!
+        var lines: [String] = []
+        for row in 0..<terminal.rows {
+            var line = ""
+            for col in 0..<terminal.cols {
+                if let cd = terminal.getCharData(col: col, row: row) {
+                    let ch = cd.getCharacter()
+                    line.append(ch == "\u{0}" ? " " : ch)
+                }
+            }
+            // Trim trailing spaces but keep the line
+            lines.append(line.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression))
+        }
+        // Remove trailing empty lines
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return lines.joined(separator: "\n")
     }
 
     /// Extract the full line of text at a terminal grid row from the active terminal view

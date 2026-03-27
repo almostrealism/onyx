@@ -21,6 +21,7 @@ public extension Notification.Name {
     static let refreshPoolStatus = Notification.Name("refreshPoolStatus")
     static let toggleMemoryChart = Notification.Name("toggleMemoryChart")
     static let toggleAllContainers = Notification.Name("toggleAllContainers")
+    static let toggleTerminalTextMode = Notification.Name("toggleTerminalTextMode")
 }
 
 // MARK: - Favorite Entry
@@ -641,6 +642,8 @@ public class AppState: ObservableObject {
     @Published public var needsKeySetup = false
     @Published public var keySetupInProgress = false
     @Published public var showSessionManager = false
+    @Published public var showTerminalText = false
+    @Published public var terminalTextContent: String = ""
     public var showFocusOutline = true
 
     /// Tracks which component should logically have keyboard focus.
@@ -1141,6 +1144,9 @@ public class AppState: ObservableObject {
             showWindowRename = false
         } else if showSettings {
             showSettings = false
+        } else if showTerminalText {
+            showTerminalText = false
+            terminalTextContent = ""
         } else if showSessionManager {
             showSessionManager = false
         } else if showMonitor {
