@@ -935,7 +935,7 @@ struct FileBrowserView: View {
                     } else if browser.currentPath != nil {
                         VStack(spacing: 0) {
                             if browser.gitManager.isGitRepo, let status = browser.gitManager.repoStatus {
-                                GitLandingView(status: status, accentColor: appState.accentColor)
+                                GitLandingView(status: status, accentColor: appState.accentColor, gitManager: browser.gitManager)
                                 Divider().background(Color.white.opacity(0.1))
                             }
                             DirectoryListView(appState: appState, browser: browser)

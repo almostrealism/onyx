@@ -93,6 +93,9 @@ public class GitManager: ObservableObject {
     @Published public var showLog = false
     @Published public var commitDetail: GitCommitDetail?
     @Published public var isLoadingCommit = false
+    @Published public var fileDiff: String?
+    @Published public var fileDiffTitle: String?
+    @Published public var isLoadingDiff = false
 
     private let appState: AppState
     private var currentRepoPath: String?
@@ -146,6 +149,8 @@ public class GitManager: ObservableObject {
         logEntries = []
         showLog = false
         commitDetail = nil
+        fileDiff = nil
+        fileDiffTitle = nil
         currentRepoPath = nil
     }
 
@@ -210,6 +215,68 @@ public class GitManager: ObservableObject {
         showLog = false
         commitDetail = nil
         logEntries = []
+    }
+
+    // MARK: - File Diff
+
+    /// Fetch diff for a specific changed file
+    public func fetchFileDiff(_ file: GitChangedFile) {
+        guard let repoPath = currentRepoPath else { return }
+        isLoadingDiff = true
+        fileDiffTitle = file.path
+
+        let escaped = escapeForShell(repoPath)
+        let filePath = file.path.replacingOccurrences(of: "'", with: "'\\''")
+        let script: String
+        switch file.area {
+        case .staged:
+            script = "git -C \(escaped) diff --cached -- '\(filePath)' 2>/dev/null"
+        case .unstaged, .untracked:
+            script = "git -C \(escaped) diff -- '\(filePath)' 2>/dev/null"
+        }
+
+        let (cmd, args) = appState.remoteCommand(script)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let output = FileBrowserManager.runProcess(cmd: cmd, args: args)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isLoadingDiff = false
+                self.fileDiff = output ?? "No diff available"
+            }
+        }
+    }
+
+    /// Fetch full working diff (staged + unstaged combined)
+    public func fetchFullDiff() {
+        guard let repoPath = currentRepoPath else { return }
+        isLoadingDiff = true
+        fileDiffTitle = "All Changes"
+
+        let escaped = escapeForShell(repoPath)
+        // Show both staged and unstaged in one output
+        let script = """
+        echo "--- STAGED ---" && \
+        git -C \(escaped) diff --cached 2>/dev/null && \
+        echo "" && echo "--- UNSTAGED ---" && \
+        git -C \(escaped) diff 2>/dev/null
+        """
+
+        let (cmd, args) = appState.remoteCommand(script)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let output = FileBrowserManager.runProcess(cmd: cmd, args: args)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isLoadingDiff = false
+                self.fileDiff = output ?? "No diff available"
+            }
+        }
+    }
+
+    public func closeDiff() {
+        fileDiff = nil
+        fileDiffTitle = nil
     }
 
     private func parseLogOutput(_ output: String) -> [GitLogEntry] {
@@ -381,88 +448,121 @@ public class GitManager: ObservableObject {
 struct GitLandingView: View {
     let status: GitRepoStatus
     let accentColor: Color
+    @ObservedObject var gitManager: GitManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Branch + summary header
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 11))
-                    .foregroundColor(accentColor)
+            // Check if we're showing a diff
+            if let diff = gitManager.fileDiff {
+                GitDiffView(
+                    title: gitManager.fileDiffTitle ?? "Diff",
+                    diff: diff,
+                    accentColor: accentColor,
+                    onClose: { gitManager.closeDiff() }
+                )
+            } else {
+                // Branch + summary header
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 11))
+                        .foregroundColor(accentColor)
 
-                Text(status.branch)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(accentColor)
+                    Text(status.branch)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(accentColor)
 
-                if status.isDetachedHead {
-                    Text("DETACHED")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(hex: "FFD06B"))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color(hex: "FFD06B").opacity(0.15))
-                        .cornerRadius(2)
-                }
+                    if status.isDetachedHead {
+                        Text("DETACHED")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(hex: "FFD06B"))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color(hex: "FFD06B").opacity(0.15))
+                            .cornerRadius(2)
+                    }
 
-                Spacer()
+                    Spacer()
 
-                if let stats = status.diffStats {
-                    HStack(spacing: 6) {
-                        if stats.insertions > 0 {
-                            Text("+\(stats.insertions)")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(Color(hex: "6BFF8E"))
+                    if let stats = status.diffStats {
+                        // Tap to view full diff
+                        Button(action: { gitManager.fetchFullDiff() }) {
+                            HStack(spacing: 6) {
+                                if stats.insertions > 0 {
+                                    Text("+\(stats.insertions)")
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(Color(hex: "6BFF8E"))
+                                }
+                                if stats.deletions > 0 {
+                                    Text("-\(stats.deletions)")
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(Color(hex: "FF6B6B"))
+                                }
+                                Text("~\(stats.filesChanged)")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.gray.opacity(0.5))
+
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(accentColor.opacity(0.5))
+                            }
                         }
-                        if stats.deletions > 0 {
-                            Text("-\(stats.deletions)")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(Color(hex: "FF6B6B"))
-                        }
-                        Text("~\(stats.filesChanged)")
+                        .buttonStyle(.plain)
+                    }
+
+                    if status.isClean {
+                        Text("clean")
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.gray.opacity(0.5))
+                            .foregroundColor(Color(hex: "6BFF8E").opacity(0.6))
                     }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.03))
 
-                if status.isClean {
-                    Text("clean")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(Color(hex: "6BFF8E").opacity(0.6))
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color.white.opacity(0.03))
+                // Changed files sections
+                if !status.isClean {
+                    Divider().background(Color.white.opacity(0.06))
 
-            // Changed files sections
-            if !status.isClean {
-                Divider().background(Color.white.opacity(0.06))
+                    if gitManager.isLoadingDiff {
+                        HStack(spacing: 8) {
+                            ProgressView().scaleEffect(0.6).colorScheme(.dark)
+                            Text("Loading diff...")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.gray.opacity(0.4))
+                        }
+                        .padding(12)
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                if !status.stagedFiles.isEmpty {
+                                    GitSectionHeader(title: "STAGED", count: status.stagedFiles.count, color: Color(hex: "6BFF8E"))
+                                    ForEach(status.stagedFiles) { file in
+                                        GitFileRow(file: file)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture { gitManager.fetchFileDiff(file) }
+                                    }
+                                }
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if !status.stagedFiles.isEmpty {
-                            GitSectionHeader(title: "STAGED", count: status.stagedFiles.count, color: Color(hex: "6BFF8E"))
-                            ForEach(status.stagedFiles) { file in
-                                GitFileRow(file: file)
+                                if !status.unstagedFiles.isEmpty {
+                                    GitSectionHeader(title: "UNSTAGED", count: status.unstagedFiles.count, color: Color(hex: "FFD06B"))
+                                    ForEach(status.unstagedFiles) { file in
+                                        GitFileRow(file: file)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture { gitManager.fetchFileDiff(file) }
+                                    }
+                                }
+
+                                if !status.untrackedFiles.isEmpty {
+                                    GitSectionHeader(title: "UNTRACKED", count: status.untrackedFiles.count, color: .gray.opacity(0.5))
+                                    ForEach(status.untrackedFiles) { file in
+                                        GitFileRow(file: file)
+                                    }
+                                }
                             }
                         }
-
-                        if !status.unstagedFiles.isEmpty {
-                            GitSectionHeader(title: "UNSTAGED", count: status.unstagedFiles.count, color: Color(hex: "FFD06B"))
-                            ForEach(status.unstagedFiles) { file in
-                                GitFileRow(file: file)
-                            }
-                        }
-
-                        if !status.untrackedFiles.isEmpty {
-                            GitSectionHeader(title: "UNTRACKED", count: status.untrackedFiles.count, color: .gray.opacity(0.5))
-                            ForEach(status.untrackedFiles) { file in
-                                GitFileRow(file: file)
-                            }
-                        }
+                        .frame(maxHeight: 200)
                     }
                 }
-                .frame(maxHeight: 200)
             }
         }
     }
@@ -512,6 +612,80 @@ private struct GitFileRow: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 2)
+    }
+}
+
+// MARK: - Git Diff View
+
+struct GitDiffView: View {
+    let title: String
+    let diff: String
+    let accentColor: Color
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 8) {
+                Button(action: onClose) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(accentColor)
+                }
+                .buttonStyle(.plain)
+
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 10))
+                    .foregroundColor(accentColor.opacity(0.6))
+
+                Text(title)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(1)
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.white.opacity(0.03))
+
+            Divider().background(Color.white.opacity(0.06))
+
+            // Diff content with line coloring
+            ScrollView([.vertical, .horizontal]) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(diff.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(diffLineColor(line))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 0.5)
+                            .background(diffLineBackground(line))
+                    }
+                }
+                .textSelection(.enabled)
+                .padding(.vertical, 8)
+            }
+        }
+    }
+
+    private func diffLineColor(_ line: String) -> Color {
+        if line.hasPrefix("+++") || line.hasPrefix("---") {
+            return .white.opacity(0.6)
+        }
+        if line.hasPrefix("+") { return Color(hex: "6BFF8E") }
+        if line.hasPrefix("-") { return Color(hex: "FF6B6B") }
+        if line.hasPrefix("@@") { return Color(hex: "66CCFF") }
+        if line.hasPrefix("diff ") || line.hasPrefix("index ") { return .white.opacity(0.4) }
+        return .white.opacity(0.7)
+    }
+
+    private func diffLineBackground(_ line: String) -> Color {
+        if line.hasPrefix("+") && !line.hasPrefix("+++") { return Color(hex: "6BFF8E").opacity(0.06) }
+        if line.hasPrefix("-") && !line.hasPrefix("---") { return Color(hex: "FF6B6B").opacity(0.06) }
+        if line.hasPrefix("@@") { return Color(hex: "66CCFF").opacity(0.04) }
+        return .clear
     }
 }
 
