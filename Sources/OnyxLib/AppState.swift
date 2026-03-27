@@ -770,9 +770,11 @@ public class AppState: ObservableObject {
 
     public func removeHost(_ hostID: UUID) {
         guard hostID != HostConfig.localhostID else { return }
-        // Tear down SSH mux before removing
+        // Tear down SSH mux on background thread to avoid blocking UI
         if let host = hosts.first(where: { $0.id == hostID }) {
-            sshMuxStop(for: host)
+            DispatchQueue.global(qos: .utility).async { [self] in
+                self.sshMuxStop(for: host)
+            }
         }
         hosts.removeAll { $0.id == hostID }
         // Remove sessions belonging to this host
@@ -1253,7 +1255,8 @@ public class AppState: ObservableObject {
         host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
     }
 
-    /// Check if the SSH mux master is alive for a host
+    /// Check if the SSH mux master is alive for a host.
+    /// Has a 3s timeout to avoid blocking if the mux socket is stale.
     public func sshMuxAlive(for host: HostConfig) -> Bool {
         guard !host.isLocal else { return true }
         let controlPath = sshControlPath(for: host)
@@ -1268,7 +1271,12 @@ public class AppState: ObservableObject {
         process.standardError = FileHandle.nullDevice
         do {
             try process.run()
+            let killTimer = DispatchSource.makeTimerSource(queue: .global())
+            killTimer.schedule(deadline: .now() + 3)
+            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
+            killTimer.resume()
             process.waitUntilExit()
+            killTimer.cancel()
             return process.terminationStatus == 0
         } catch {
             return false
@@ -1288,8 +1296,18 @@ public class AppState: ObservableObject {
         ]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try? process.run()
-        process.waitUntilExit()
+        do {
+            try process.run()
+            // Don't wait indefinitely — kill after 3s if it hangs
+            let killTimer = DispatchSource.makeTimerSource(queue: .global())
+            killTimer.schedule(deadline: .now() + 3)
+            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
+            killTimer.resume()
+            process.waitUntilExit()
+            killTimer.cancel()
+        } catch {
+            // SSH not available or socket already gone — fine
+        }
     }
 
     // MARK: - Command Builders

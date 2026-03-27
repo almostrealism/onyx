@@ -120,14 +120,16 @@ class OnyxTerminalView: NSView {
         startPeriodicEnumeration()
 
         // On wake from sleep: clean up stale mux sockets so polling commands
-        // can establish a fresh mux master. Don't reset reconnect counter —
-        // that would create an infinite loop if display sleep cycles frequently.
+        // can establish a fresh mux master. Runs on background queue to avoid
+        // blocking the UI — sshMuxStop waits for SSH processes to exit.
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             guard let self = self else { return }
             print("System woke from sleep — cleaning up stale mux sockets")
-            self.appState.cleanupStaleMuxSockets()
+            DispatchQueue.global(qos: .utility).async {
+                self.appState.cleanupStaleMuxSockets()
+            }
         }
     }
 

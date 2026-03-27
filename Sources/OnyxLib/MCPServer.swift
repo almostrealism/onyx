@@ -349,13 +349,10 @@ public class MCPMessageHandler {
 
         let artifactContent = ArtifactContent.text(content: content, format: format, language: language, wrap: wrap)
 
-        var success = false
-        DispatchQueue.main.sync {
-            success = artifactManager.setSlot(slot, title: title, content: artifactContent)
+        DispatchQueue.main.async { [self] in
+            _ = self.artifactManager.setSlot(slot, title: title, content: artifactContent)
         }
-
-        let message = success ? "Text displayed in slot \(slot)" : "Invalid slot \(slot)"
-        return toolResult(id: id, success: success, message: message)
+        return toolResult(id: id, success: true, message: "Text displayed in slot \(slot)")
     }
 
     private func callShowDiagram(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {
@@ -367,12 +364,10 @@ public class MCPMessageHandler {
         let format = DiagramFormat(rawValue: args["format"]?.stringValue ?? "mermaid") ?? .mermaid
         let artifactContent = ArtifactContent.diagram(content: content, format: format)
 
-        var success = false
-        DispatchQueue.main.sync {
-            success = artifactManager.setSlot(slot, title: title, content: artifactContent)
+        DispatchQueue.main.async { [self] in
+            _ = self.artifactManager.setSlot(slot, title: title, content: artifactContent)
         }
-
-        return toolResult(id: id, success: success, message: success ? "Diagram displayed in slot \(slot)" : "Invalid slot \(slot)")
+        return toolResult(id: id, success: true, message: "Diagram displayed in slot \(slot)")
     }
 
     private func callShowModel(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {
@@ -388,12 +383,10 @@ public class MCPMessageHandler {
         }
         let artifactContent = ArtifactContent.model3D(data: data, format: format)
 
-        var success = false
-        DispatchQueue.main.sync {
-            success = artifactManager.setSlot(slot, title: title, content: artifactContent)
+        DispatchQueue.main.async { [self] in
+            _ = self.artifactManager.setSlot(slot, title: title, content: artifactContent)
         }
-
-        return toolResult(id: id, success: success, message: success ? "3D model displayed in slot \(slot)" : "Invalid slot \(slot)")
+        return toolResult(id: id, success: true, message: "3D model displayed in slot \(slot)")
     }
 
     private func callClearSlot(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {
@@ -401,19 +394,21 @@ public class MCPMessageHandler {
             return JSONRPCResponse(id: id, error: .invalidParams)
         }
 
-        var success = false
-        DispatchQueue.main.sync {
-            success = artifactManager.clearSlot(slot)
+        DispatchQueue.main.async { [self] in
+            _ = self.artifactManager.clearSlot(slot)
         }
-
-        return toolResult(id: id, success: success, message: success ? "Slot \(slot) cleared" : "Invalid slot \(slot)")
+        return toolResult(id: id, success: true, message: "Slot \(slot) cleared")
     }
 
     private func callListSlots(id: AnyCodableValue?) -> JSONRPCResponse {
+        // Use semaphore with timeout to avoid deadlock if main thread is busy
         var slotsInfo: [(slot: Int, title: String, type: String)] = []
-        DispatchQueue.main.sync {
-            slotsInfo = artifactManager.listSlots()
+        let sem = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async { [self] in
+            slotsInfo = self.artifactManager.listSlots()
+            sem.signal()
         }
+        _ = sem.wait(timeout: .now() + 2)
 
         let slotValues: [AnyCodableValue] = slotsInfo.map { info in
             .object([
