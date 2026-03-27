@@ -89,6 +89,12 @@ public class ShortcutManager {
                 return nil
             }
 
+            // Cmd+\ → cycle panel split ratio
+            if flags == .command && event.keyCode == 42 {
+                NotificationCenter.default.post(name: .cyclePanelSize, object: nil)
+                return nil
+            }
+
             // Cmd+, → settings
             if flags == .command && chars == "," {
                 NotificationCenter.default.post(name: .openSettings, object: nil)

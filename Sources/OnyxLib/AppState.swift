@@ -22,6 +22,7 @@ public extension Notification.Name {
     static let toggleMemoryChart = Notification.Name("toggleMemoryChart")
     static let toggleAllContainers = Notification.Name("toggleAllContainers")
     static let toggleTerminalTextMode = Notification.Name("toggleTerminalTextMode")
+    static let cyclePanelSize = Notification.Name("cyclePanelSize")
 }
 
 // MARK: - Favorite Entry

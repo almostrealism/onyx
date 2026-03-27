@@ -53,7 +53,9 @@ public struct ContentView: View {
     }
 
     /// Fraction of window width for the right panel (0.0–0.85)
-    @State private var rightPanelFraction: CGFloat = 0.6
+    @State private var rightPanelFraction: CGFloat = 0.4
+    /// Preset split ratios for the right panel (fraction of total width)
+    private static let panelPresets: [CGFloat] = [0.3, 0.4, 0.5, 0.6, 0.7]
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -67,7 +69,6 @@ public struct ContentView: View {
                 // Split layout: terminal left, panel right
                 GeometryReader { geo in
                     HStack(spacing: 0) {
-                        // LEFT: Terminal area
                         ZStack {
                             TerminalHostView(appState: appState)
                                 .opacity(hasOverlay ? 0.3 : 1.0)
@@ -103,10 +104,10 @@ public struct ContentView: View {
 
                         // RIGHT: Side panel with draggable divider
                         if let panel = appState.activeRightPanel {
-                            // Drag handle
+                            // Drag handle — 10pt wide grab area, 1pt visible line
                             Rectangle()
-                                .fill(Color.clear)
-                                .frame(width: 6)
+                                .fill(Color.white.opacity(0.001)) // nearly invisible but hittable
+                                .frame(width: 10)
                                 .contentShape(Rectangle())
                                 .overlay(
                                     Rectangle()
@@ -121,16 +122,19 @@ public struct ContentView: View {
                                     }
                                 }
                                 .gesture(
-                                    DragGesture(minimumDistance: 1)
+                                    DragGesture(minimumDistance: 1, coordinateSpace: .global)
                                         .onChanged { value in
                                             let totalWidth = geo.size.width
                                             guard totalWidth > 0 else { return }
-                                            // Drag left = panel grows, drag right = panel shrinks
-                                            let panelWidth = totalWidth - value.location.x
+                                            // Convert global X to local frame X
+                                            let windowOriginX = geo.frame(in: .global).minX
+                                            let localX = value.location.x - windowOriginX
+                                            let panelWidth = totalWidth - localX
                                             let fraction = panelWidth / totalWidth
                                             rightPanelFraction = min(max(fraction, 0.2), 0.85)
                                         }
                                 )
+                                .zIndex(10)
 
                             rightPanelView(for: panel)
                                 .frame(width: geo.size.width * rightPanelFraction)
@@ -203,6 +207,16 @@ public struct ContentView: View {
                 withAnimation(.easeOut(duration: 0.6)) {
                     showStartupAnimation = false
                 }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cyclePanelSize)) { _ in
+            guard hostWindow?.isKeyWindow == true else { return }
+            guard appState.activeRightPanel != nil else { return }
+            let current = rightPanelFraction
+            let next = Self.panelPresets.first(where: { $0 > current + 0.01 })
+                ?? Self.panelPresets.first ?? 0.4
+            withAnimation(.easeInOut(duration: 0.2)) {
+                rightPanelFraction = next
             }
         }
         .modifier(ContentViewNotifications(appState: appState, updateWindowTitle: updateWindowTitle, hostWindow: hostWindow))
