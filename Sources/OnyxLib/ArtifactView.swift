@@ -372,29 +372,114 @@ private struct DiagramArtifactView: View {
     let content: String
     let format: DiagramFormat
     let accentColor: Color
+    @State private var zoomLevel: Double = 1.0
+    @State private var webViewRef: WKWebView?
+
+    private let zoomPresets: [(String, Double)] = [
+        ("Fit", 1.0),
+        ("100%", 1.0),
+        ("200%", 2.0),
+        ("300%", 3.0),
+        ("500%", 5.0),
+        ("750%", 7.5),
+        ("1000%", 10.0),
+    ]
 
     var body: some View {
-        MermaidWebView(source: content, format: format)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ZStack(alignment: .bottomTrailing) {
+            MermaidWebView(source: content, format: format, zoom: $zoomLevel, webViewRef: $webViewRef)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Zoom controls
+            VStack(spacing: 4) {
+                // Zoom preset menu
+                Menu {
+                    ForEach(zoomPresets, id: \.1) { name, level in
+                        Button(name) {
+                            zoomLevel = level
+                            webViewRef?.magnification = level
+                        }
+                    }
+                } label: {
+                    Text("\(Int(zoomLevel * 100))%")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.7))
+                        .frame(width: 50)
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 50)
+
+                HStack(spacing: 2) {
+                    Button(action: {
+                        zoomLevel = max(0.25, zoomLevel / 1.5)
+                        webViewRef?.magnification = zoomLevel
+                    }) {
+                        Image(systemName: "minus")
+                            .font(.system(size: 11, weight: .medium))
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: {
+                        zoomLevel = min(10.0, zoomLevel * 1.5)
+                        webViewRef?.magnification = zoomLevel
+                    }) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .medium))
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: {
+                        zoomLevel = 1.0
+                        webViewRef?.magnification = 1.0
+                    }) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 10, weight: .medium))
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .foregroundColor(.white.opacity(0.7))
+            .padding(8)
+            .background(Color.black.opacity(0.7))
+            .cornerRadius(6)
+            .padding(12)
+        }
     }
 }
 
 struct MermaidWebView: NSViewRepresentable {
     let source: String
     let format: DiagramFormat
+    @Binding var zoom: Double
+    @Binding var webViewRef: WKWebView?
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.setValue(false, forKey: "drawsBackground")
         webView.allowsMagnification = true
-        webView.magnification = 1.0
+        webView.magnification = zoom
         loadDiagram(webView)
+        DispatchQueue.main.async { webViewRef = webView }
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        loadDiagram(webView)
+        // Only reload if source changed, not on zoom changes
+        if context.coordinator.lastSource != source {
+            context.coordinator.lastSource = source
+            loadDiagram(webView)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(source: source) }
+
+    class Coordinator {
+        var lastSource: String
+        init(source: String) { self.lastSource = source }
     }
 
     private func loadDiagram(_ webView: WKWebView) {
