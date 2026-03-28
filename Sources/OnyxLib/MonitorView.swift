@@ -666,6 +666,12 @@ struct MonitorView: View {
 
                     Divider().background(Color.white.opacity(0.1)).padding(.horizontal, 40)
 
+                    // Claude Code sessions (if any active)
+                    if !appState.claudeSessions.activeSessions.isEmpty || !appState.claudeSessions.pendingPermissions.isEmpty {
+                        ClaudeSessionsSection(appState: appState)
+                            .padding(.horizontal, 40)
+                    }
+
                     // BOTTOM HALF: Reminders + Connections side by side
                     HStack(alignment: .top, spacing: 24) {
                         RemindersSection(appState: appState)
@@ -1282,6 +1288,147 @@ private struct PulseModifier: ViewModifier {
             .opacity(isPulsing ? 1.0 : 0.3)
             .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPulsing)
             .onAppear { isPulsing = true }
+    }
+}
+
+// MARK: - Claude Code Sessions
+
+struct ClaudeSessionsSection: View {
+    @ObservedObject var appState: AppState
+
+    private var manager: ClaudeSessionManager { appState.claudeSessions }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "brain")
+                    .font(.system(size: 10))
+                    .foregroundColor(Color(hex: "C06BFF"))
+                Text("CLAUDE SESSIONS")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(Color(hex: "C06BFF"))
+                    .tracking(2)
+
+                Spacer()
+
+                Text("\(manager.activeSessions.count)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+            }
+
+            // Permission requests (urgent, shown first)
+            ForEach(manager.pendingPermissions) { request in
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.shield")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(hex: "FFD06B"))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(request.toolName)")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.9))
+                        Text(request.summary)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.5))
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    Button(action: { manager.approvePermission(request.id) }) {
+                        Text("Allow")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(Color(hex: "6BFF8E"))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color(hex: "6BFF8E").opacity(0.15))
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { manager.denyPermission(request.id) }) {
+                        Text("Deny")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(Color(hex: "FF6B6B"))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color(hex: "FF6B6B").opacity(0.15))
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(8)
+                .background(Color(hex: "FFD06B").opacity(0.06))
+                .cornerRadius(6)
+            }
+
+            // Active sessions
+            ForEach(manager.activeSessions) { session in
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(sessionStatusColor(session.status))
+                        .frame(width: 6, height: 6)
+
+                    Text(shortSessionId(session.id))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Color(hex: "C06BFF").opacity(0.7))
+                        .frame(width: 50, alignment: .leading)
+
+                    switch session.status {
+                    case .running(let tool):
+                        Text(tool)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.8))
+                        if let input = session.toolInput, !input.isEmpty {
+                            Text(input)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.gray.opacity(0.5))
+                                .lineLimit(1)
+                        }
+                    case .waitingPermission:
+                        Text("waiting for permission")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(hex: "FFD06B"))
+                            .modifier(PulseModifier())
+                    case .idle:
+                        Text("idle")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.4))
+                    case .stopped:
+                        Text("stopped")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.3))
+                    }
+
+                    Spacer()
+
+                    Text(relativeTime(session.lastSeen))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.3))
+                }
+            }
+        }
+    }
+
+    private func sessionStatusColor(_ status: ClaudeActivity.ClaudeStatus) -> Color {
+        switch status {
+        case .running: return Color(hex: "6BFF8E")
+        case .waitingPermission: return Color(hex: "FFD06B")
+        case .idle: return Color(hex: "66CCFF").opacity(0.5)
+        case .stopped: return .gray.opacity(0.3)
+        }
+    }
+
+    private func shortSessionId(_ id: String) -> String {
+        String(id.prefix(8))
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let elapsed = Int(Date().timeIntervalSince(date))
+        if elapsed < 5 { return "now" }
+        if elapsed < 60 { return "\(elapsed)s" }
+        if elapsed < 3600 { return "\(elapsed / 60)m" }
+        return "\(elapsed / 3600)h"
     }
 }
 

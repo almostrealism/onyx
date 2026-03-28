@@ -114,9 +114,11 @@ public enum AnyCodableValue: Codable, Equatable {
 
 public class MCPMessageHandler {
     private let artifactManager: ArtifactManager
+    private let claudeSessions: ClaudeSessionManager
 
-    public init(artifactManager: ArtifactManager) {
+    public init(artifactManager: ArtifactManager, claudeSessions: ClaudeSessionManager) {
         self.artifactManager = artifactManager
+        self.claudeSessions = claudeSessions
     }
 
     public func handleMessage(_ data: Data) -> Data? {
@@ -139,6 +141,8 @@ public class MCPMessageHandler {
             return handleToolsList(request)
         case "tools/call":
             return handleToolsCall(request)
+        case "claude/hook":
+            return handleClaudeHook(request)
         default:
             return JSONRPCResponse(id: request.id, error: .methodNotFound)
         }
@@ -431,6 +435,69 @@ public class MCPMessageHandler {
         return JSONRPCResponse(id: id, result: result)
     }
 
+    // MARK: - Claude Hook Handler
+
+    /// Handle a claude/hook event from OnyxMCP --hook mode.
+    /// The params contain the raw hook event JSON from Claude Code.
+    /// For PermissionRequest events, this BLOCKS until the user responds in the UI.
+    private func handleClaudeHook(_ request: JSONRPCRequest) -> JSONRPCResponse {
+        // Convert AnyCodableValue params to [String: Any] for the session manager
+        guard let params = request.params else {
+            return JSONRPCResponse(id: request.id, error: .invalidParams)
+        }
+
+        let event = codableToDict(params)
+        // Process on a background thread since PermissionRequest may block
+        let result = claudeSessions.processHookEvent(event)
+
+        // Convert result back to AnyCodableValue
+        let resultValue = dictToCodable(result)
+        return JSONRPCResponse(id: request.id, result: resultValue)
+    }
+
+    private func codableToDict(_ params: [String: AnyCodableValue]) -> [String: Any] {
+        var dict: [String: Any] = [:]
+        for (key, value) in params {
+            dict[key] = codableValueToAny(value)
+        }
+        return dict
+    }
+
+    private func codableValueToAny(_ value: AnyCodableValue) -> Any {
+        switch value {
+        case .string(let s): return s
+        case .int(let i): return i
+        case .double(let d): return d
+        case .bool(let b): return b
+        case .null: return NSNull()
+        case .array(let arr): return arr.map { codableValueToAny($0) }
+        case .object(let obj):
+            var dict: [String: Any] = [:]
+            for (k, v) in obj { dict[k] = codableValueToAny(v) }
+            return dict
+        }
+    }
+
+    private func dictToCodable(_ dict: [String: Any]) -> AnyCodableValue {
+        var obj: [String: AnyCodableValue] = [:]
+        for (key, value) in dict {
+            obj[key] = anyToCodableValue(value)
+        }
+        return .object(obj)
+    }
+
+    private func anyToCodableValue(_ value: Any) -> AnyCodableValue {
+        switch value {
+        case let s as String: return .string(s)
+        case let i as Int: return .int(i)
+        case let d as Double: return .double(d)
+        case let b as Bool: return .bool(b)
+        case let arr as [Any]: return .array(arr.map { anyToCodableValue($0) })
+        case let dict as [String: Any]: return dictToCodable(dict)
+        default: return .null
+        }
+    }
+
     private func toolResult(id: AnyCodableValue?, success: Bool, message: String) -> JSONRPCResponse {
         let result: AnyCodableValue = .object([
             "content": .array([
@@ -459,8 +526,8 @@ public class MCPSocketServer {
     /// Default remote-side port for SSH -R forwarding
     public static let defaultRemotePort: UInt16 = 19432
 
-    public init(artifactManager: ArtifactManager) {
-        self.handler = MCPMessageHandler(artifactManager: artifactManager)
+    public init(artifactManager: ArtifactManager, claudeSessions: ClaudeSessionManager) {
+        self.handler = MCPMessageHandler(artifactManager: artifactManager, claudeSessions: claudeSessions)
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let onyxDir = appSupport.appendingPathComponent("Onyx")
         try? FileManager.default.createDirectory(at: onyxDir, withIntermediateDirectories: true)

@@ -700,6 +700,15 @@ public class AppState: ObservableObject {
         return m
     }()
 
+    private var claudeSessionCancellable: AnyCancellable?
+    public lazy var claudeSessions: ClaudeSessionManager = {
+        let c = ClaudeSessionManager()
+        claudeSessionCancellable = c.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        return c
+    }()
+
     private var dockerStatsCancellable: AnyCancellable?
     public lazy var dockerStats: DockerStatsManager = {
         let d = DockerStatsManager(appState: self)
@@ -1101,7 +1110,7 @@ public class AppState: ObservableObject {
         monitor.startPolling()
 
         // Start MCP socket server for agent integration
-        mcpServer = MCPSocketServer(artifactManager: artifactManager)
+        mcpServer = MCPSocketServer(artifactManager: artifactManager, claudeSessions: claudeSessions)
         mcpServer?.start()
 
         // Start dashboard HTTP server for browser new-tab monitoring

@@ -1075,7 +1075,7 @@ final class MCPMessageHandlerTests: XCTestCase {
 
     private func makeHandler() -> (MCPMessageHandler, ArtifactManager) {
         let manager = ArtifactManager()
-        let handler = MCPMessageHandler(artifactManager: manager)
+        let handler = MCPMessageHandler(artifactManager: manager, claudeSessions: ClaudeSessionManager())
         return (handler, manager)
     }
 

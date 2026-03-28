@@ -119,37 +119,91 @@ func extractRequestId(_ json: String) -> String {
     return "null"
 }
 
-// 30-second timeout for socket reads
-let responseTimeout = 30
+// Detect mode from command-line args
+let isHookMode = CommandLine.arguments.contains("--hook")
 
-// Main loop: connect, then read stdin → forward → write stdout
-let fd = connectToOnyx()
-guard fd >= 0 else {
-    FileHandle.standardError.write(Data("OnyxMCP: Cannot connect to Onyx. Is it running?\n".utf8))
-    let errorResponse = """
-    {"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"Cannot connect to Onyx app. Is it running?"}}
-    """
-    print(errorResponse)
-    fflush(stdout)
-    exit(1)
-}
+if isHookMode {
+    // HOOK MODE: Read Claude Code hook event from stdin, send to Onyx, output response.
+    // Used as a Claude Code hook command: OnyxMCP --hook
+    // Permission requests use a 120s timeout to wait for user response in Onyx UI.
 
-setReceiveTimeout(fd: fd, seconds: responseTimeout)
+    let hookTimeout = 120
 
-while let line = readLine(strippingNewline: true) {
-    guard !line.isEmpty else { continue }
-
-    if let response = sendAndReceive(fd: fd, message: line) {
-        print(response)
-        fflush(stdout)
-    } else {
-        // Timed out or connection lost — return an error to the caller
-        let reqId = extractRequestId(line)
-        let errMsg = "Onyx did not respond within \(responseTimeout) seconds. The app may need to be rebuilt with the latest MCP server code."
-        FileHandle.standardError.write(Data("OnyxMCP: timeout/error for request\n".utf8))
-        print("{\"jsonrpc\":\"2.0\",\"id\":\(reqId),\"error\":{\"code\":-32000,\"message\":\"\(errMsg)\"}}")
-        fflush(stdout)
+    let fd = connectToOnyx()
+    guard fd >= 0 else {
+        // Can't connect — exit 0 with no output so Claude Code falls through to normal behavior
+        exit(0)
     }
-}
+    setReceiveTimeout(fd: fd, seconds: hookTimeout)
 
-close(fd)
+    // Read all of stdin (the hook event JSON)
+    var inputData = Data()
+    while let chunk = try? FileHandle.standardInput.availableData, !chunk.isEmpty {
+        inputData.append(chunk)
+        // Check if we have a complete JSON object
+        if (try? JSONSerialization.jsonObject(with: inputData)) != nil { break }
+    }
+
+    guard !inputData.isEmpty, let inputString = String(data: inputData, encoding: .utf8) else {
+        close(fd)
+        exit(0)
+    }
+
+    // Wrap in JSON-RPC call to claude/hook
+    let requestId = "hook_\(ProcessInfo.processInfo.processIdentifier)"
+    let jsonRPC = """
+    {"jsonrpc":"2.0","id":"\(requestId)","method":"claude/hook","params":\(inputString)}
+    """
+
+    if let response = sendAndReceive(fd: fd, message: jsonRPC) {
+        // Parse the JSON-RPC response and extract the result
+        if let data = response.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let result = json["result"] {
+            // Output just the result (not the JSON-RPC wrapper) for Claude Code
+            if let resultData = try? JSONSerialization.data(withJSONObject: result),
+               let resultString = String(data: resultData, encoding: .utf8) {
+                print(resultString)
+                fflush(stdout)
+            }
+        }
+    }
+    // No response or error — exit 0 silently (Claude Code continues normally)
+
+    close(fd)
+
+} else {
+    // MCP BRIDGE MODE (original behavior): stdio JSON-RPC bridge
+
+    let responseTimeout = 30
+
+    let fd = connectToOnyx()
+    guard fd >= 0 else {
+        FileHandle.standardError.write(Data("OnyxMCP: Cannot connect to Onyx. Is it running?\n".utf8))
+        let errorResponse = """
+        {"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"Cannot connect to Onyx app. Is it running?"}}
+        """
+        print(errorResponse)
+        fflush(stdout)
+        exit(1)
+    }
+
+    setReceiveTimeout(fd: fd, seconds: responseTimeout)
+
+    while let line = readLine(strippingNewline: true) {
+        guard !line.isEmpty else { continue }
+
+        if let response = sendAndReceive(fd: fd, message: line) {
+            print(response)
+            fflush(stdout)
+        } else {
+            let reqId = extractRequestId(line)
+            let errMsg = "Onyx did not respond within \(responseTimeout) seconds. The app may need to be rebuilt with the latest MCP server code."
+            FileHandle.standardError.write(Data("OnyxMCP: timeout/error for request\n".utf8))
+            print("{\"jsonrpc\":\"2.0\",\"id\":\(reqId),\"error\":{\"code\":-32000,\"message\":\"\(errMsg)\"}}")
+            fflush(stdout)
+        }
+    }
+
+    close(fd)
+}
