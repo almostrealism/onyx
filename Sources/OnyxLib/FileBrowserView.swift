@@ -102,6 +102,19 @@ public struct SavedFolder: Codable, Identifiable, Equatable {
     }
 }
 
+public struct RecentFile: Identifiable, Equatable, Codable {
+    public var id: String { "\(hostID.uuidString):\(path)" }
+    public let path: String
+    public let name: String
+    public let hostID: UUID
+
+    public init(path: String, name: String, hostID: UUID) {
+        self.path = path
+        self.name = name
+        self.hostID = hostID
+    }
+}
+
 public class FileBrowserManager: ObservableObject {
     @Published public var savedFolders: [SavedFolder] = []
     @Published public var currentPath: String?
@@ -115,6 +128,12 @@ public class FileBrowserManager: ObservableObject {
     @Published public var error: String?
     @Published public var showAddFolder = false
     @Published public var pathHistory: [String] = []
+
+    /// Recently opened files (path, name, hostID) — most recent first
+    @Published public var recentFiles: [RecentFile] = []
+    private let maxRecentFiles = 20
+    /// Whether we were in search mode before opening a file
+    private var wasSearchActiveBeforeFile = false
 
     /// Folders for the currently active host
     public var activeFolders: [SavedFolder] {
@@ -147,9 +166,21 @@ public class FileBrowserManager: ObservableObject {
         return g
     }()
 
+    private var recentFilesURL: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("Onyx/recent-files.json")
+    }
+
     public init(appState: AppState) {
         self.appState = appState
         loadSavedFolders()
+        loadRecentFiles()
+    }
+
+    /// Recent files for the active host
+    public var activeRecentFiles: [RecentFile] {
+        let hostID = appState.activeHost?.id ?? HostConfig.localhostID
+        return recentFiles.filter { $0.hostID == hostID }
     }
 
     // MARK: - Persistence
@@ -171,6 +202,42 @@ public class FileBrowserManager: ObservableObject {
         if let data = try? JSONEncoder().encode(savedFolders) {
             try? data.write(to: appState.savedFoldersURL)
         }
+    }
+
+    private func loadRecentFiles() {
+        guard let data = try? Data(contentsOf: recentFilesURL),
+              let files = try? JSONDecoder().decode([RecentFile].self, from: data) else { return }
+        recentFiles = files
+    }
+
+    private func saveRecentFiles() {
+        if let data = try? JSONEncoder().encode(recentFiles) {
+            try? data.write(to: recentFilesURL)
+        }
+    }
+
+    private func trackRecentFile(path: String, name: String) {
+        let hostID = appState.activeHost?.id ?? HostConfig.localhostID
+        let file = RecentFile(path: path, name: name, hostID: hostID)
+        // Remove existing entry for same path, then prepend
+        recentFiles.removeAll { $0.id == file.id }
+        recentFiles.insert(file, at: 0)
+        if recentFiles.count > maxRecentFiles {
+            recentFiles = Array(recentFiles.prefix(maxRecentFiles))
+        }
+        saveRecentFiles()
+    }
+
+    /// Open a recent file by path
+    public func openRecentFile(_ file: RecentFile) {
+        let parent = (file.path as NSString).deletingLastPathComponent
+        if currentPath != parent {
+            if let current = currentPath {
+                pathHistory.append(current)
+            }
+            currentPath = parent
+        }
+        readFile(file.path, name: file.name)
     }
 
     public func addFolder(_ path: String) {
@@ -212,10 +279,22 @@ public class FileBrowserManager: ObservableObject {
     }
 
     public func navigateBack() {
+        // If viewing a file and we came from search, return to search results
+        if viewingFileName != nil && wasSearchActiveBeforeFile {
+            fileContent = nil
+            imageData = nil
+            viewingFileName = nil
+            isUnsupportedFile = false
+            wasSearchActiveBeforeFile = false
+            isSearchActive = true
+            return
+        }
+
         fileContent = nil
         imageData = nil
         viewingFileName = nil
         isUnsupportedFile = false
+        wasSearchActiveBeforeFile = false
         if let prev = pathHistory.popLast() {
             currentPath = prev
             listDirectory(prev)
@@ -246,6 +325,9 @@ public class FileBrowserManager: ObservableObject {
 
     /// Open a file by full path (used by search results)
     public func readFileFromSearch(_ path: String, name: String) {
+        // Remember that we came from search so back returns to results
+        wasSearchActiveBeforeFile = isSearchActive
+
         // Set the current path to the file's parent directory
         let parent = (path as NSString).deletingLastPathComponent
         if currentPath != parent {
@@ -414,6 +496,8 @@ public class FileBrowserManager: ObservableObject {
             error = connectError
             return
         }
+
+        trackRecentFile(path: path, name: name)
 
         isLoading = true
         error = nil
@@ -1156,6 +1240,54 @@ struct FolderSidebar: View {
                 }
             }
 
+            // Recent files section
+            if !browser.activeRecentFiles.isEmpty {
+                Divider().background(Color.white.opacity(0.1))
+
+                HStack {
+                    Text("RECENT")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.4))
+                        .tracking(1)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+                .padding(.bottom, 2)
+
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(browser.activeRecentFiles) { file in
+                            HStack(spacing: 6) {
+                                Image(systemName: iconForFile(file.name))
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.gray.opacity(0.4))
+                                    .frame(width: 14)
+
+                                Text(file.name)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .lineLimit(1)
+
+                                Spacer()
+
+                                Text((file.path as NSString).deletingLastPathComponent.split(separator: "/").suffix(2).joined(separator: "/"))
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundColor(.gray.opacity(0.25))
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                browser.openRecentFile(file)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 150)
+            }
+
             if !browser.activeFolders.isEmpty {
                 Divider().background(Color.white.opacity(0.1))
                 Text("right-click to remove")
@@ -1226,7 +1358,10 @@ struct NavigationBar: View {
             HStack(spacing: 8) {
                 // Back button
                 Button(action: {
-                    if browser.isSearchActive {
+                    // If viewing a file (from search or directory), navigate back
+                    if browser.viewingFileName != nil {
+                        browser.navigateBack()
+                    } else if browser.isSearchActive {
                         browser.clearSearch()
                     } else {
                         browser.navigateBack()
@@ -1235,11 +1370,11 @@ struct NavigationBar: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(
-                            (browser.currentPath != nil || browser.isSearchActive) ? appState.accentColor : .gray.opacity(0.3)
+                            (browser.currentPath != nil || browser.isSearchActive || browser.viewingFileName != nil) ? appState.accentColor : .gray.opacity(0.3)
                         )
                 }
                 .buttonStyle(.plain)
-                .disabled(browser.currentPath == nil && !browser.isSearchActive)
+                .disabled(browser.currentPath == nil && !browser.isSearchActive && browser.viewingFileName == nil)
 
                 if let fileName = browser.viewingFileName {
                     Image(systemName: iconForFile(fileName))
