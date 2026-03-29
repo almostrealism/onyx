@@ -537,7 +537,7 @@ struct GitLandingView: View {
                                 if !status.stagedFiles.isEmpty {
                                     GitSectionHeader(title: "STAGED", count: status.stagedFiles.count, color: Color(hex: "6BFF8E"))
                                     ForEach(status.stagedFiles) { file in
-                                        GitFileRow(file: file)
+                                        GitFileRow(file: file, showDiffIcon: true)
                                             .contentShape(Rectangle())
                                             .onTapGesture { gitManager.fetchFileDiff(file) }
                                     }
@@ -546,7 +546,7 @@ struct GitLandingView: View {
                                 if !status.unstagedFiles.isEmpty {
                                     GitSectionHeader(title: "UNSTAGED", count: status.unstagedFiles.count, color: Color(hex: "FFD06B"))
                                     ForEach(status.unstagedFiles) { file in
-                                        GitFileRow(file: file)
+                                        GitFileRow(file: file, showDiffIcon: true)
                                             .contentShape(Rectangle())
                                             .onTapGesture { gitManager.fetchFileDiff(file) }
                                     }
@@ -594,6 +594,8 @@ private struct GitSectionHeader: View {
 
 private struct GitFileRow: View {
     let file: GitChangedFile
+    var showDiffIcon: Bool = false
+    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -609,9 +611,17 @@ private struct GitFileRow: View {
                 .truncationMode(.middle)
 
             Spacer()
+
+            if showDiffIcon {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 9))
+                    .foregroundColor(.gray.opacity(isHovered ? 0.6 : 0.25))
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 2)
+        .background(isHovered && showDiffIcon ? Color.white.opacity(0.04) : Color.clear)
+        .onHover { isHovered = $0 }
     }
 }
 
