@@ -867,10 +867,11 @@ public class DockerStatsManager: ObservableObject {
     /// Persists across overlay open/close since DockerStatsManager lives on AppState.
     private var cpuHistory: [String: [(Date, Double)]] = [:]
 
-    /// Containers that have EVER exceeded 1% CPU in collected data.
-    /// Once a container crosses the threshold it stays visible permanently
-    /// (until the app restarts or the container disappears).
-    private var hasExceededThreshold: Set<String> = []
+    /// Per-container recent peak CPU: name → timestamp of last sample >= 1% CPU.
+    /// Container is visible if it exceeded 1% within the visibility window.
+    private var lastActiveTime: [String: Date] = [:]
+    /// How long a container stays visible after its last >=1% CPU sample
+    private let visibilityWindow: TimeInterval = 300 // 5 minutes
 
     private var timer: Timer?
     private let appState: AppState
@@ -879,28 +880,22 @@ public class DockerStatsManager: ObservableObject {
         self.appState = appState
     }
 
-    /// Containers that should be hidden: never seen >=1% CPU in any collected sample.
-    /// Missing data = hidden (container must prove it's active to be shown).
-    public var idleContainerNames: Set<String> {
-        var idle = Set<String>()
-        for container in containers {
-            if !hasExceededThreshold.contains(container.name) {
-                idle.insert(container.name)
-            }
-        }
-        return idle
+    /// Whether a container should be shown (had >=1% CPU recently)
+    private func isContainerActive(_ name: String) -> Bool {
+        guard let lastActive = lastActiveTime[name] else { return false }
+        return Date().timeIntervalSince(lastActive) < visibilityWindow
     }
 
     /// Visible containers (filtered or all)
     public var visibleContainers: [DockerContainerStats] {
         guard !showAllContainers else { return containers }
-        return containers.filter { hasExceededThreshold.contains($0.name) }
+        return containers.filter { isContainerActive($0.name) }
     }
 
     /// Count of hidden idle containers
     public var hiddenIdleCount: Int {
         guard !showAllContainers else { return 0 }
-        return containers.filter { !hasExceededThreshold.contains($0.name) }.count
+        return containers.filter { !isContainerActive($0.name) }.count
     }
 
     public func startPolling() {
@@ -954,13 +949,17 @@ public class DockerStatsManager: ObservableObject {
                     self?.containers = parsed
                     self?.isAvailable = !parsed.isEmpty
 
-                    // Track per-container CPU and threshold crossing
+                    // Track per-container CPU activity
+                    let now = Date()
                     for container in parsed {
                         let pct = Self.parseCPUPct(container.cpu)
                         if pct >= 1.0 {
-                            self?.hasExceededThreshold.insert(container.name)
+                            self?.lastActiveTime[container.name] = now
                         }
                     }
+                    // Prune containers not seen in a while
+                    let cutoff = now.addingTimeInterval(-(self?.visibilityWindow ?? 300) * 2)
+                    self?.lastActiveTime = self?.lastActiveTime.filter { $0.value > cutoff } ?? [:]
                 }
             } catch {
                 DispatchQueue.main.async {
