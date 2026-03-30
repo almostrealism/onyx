@@ -371,6 +371,13 @@ class OnyxTerminalView: NSView {
     // MARK: - Pool Management
 
     /// Activate a session: hide current view, show (or create) the target view
+    /// Scrollback limit for the session type. Utility sessions (logs, top) get a small
+    /// buffer to prevent unbounded memory growth from chatty containers.
+    private func scrollbackFor(_ session: TmuxSession) -> Int {
+        if session.source.isUtility { return 2000 }
+        return 10000
+    }
+
     @discardableResult
     private func activateSession(_ session: TmuxSession, grabFocus: Bool = true) -> LocalProcessTerminalView {
         // Hide the currently active view and stamp its last-active time
@@ -393,8 +400,8 @@ class OnyxTerminalView: NSView {
             return entry.terminalView
         }
 
-        // Create new entry
-        let tv = createTerminalView()
+        // Create new entry with appropriate scrollback for session type
+        let tv = createTerminalView(scrollback: scrollbackFor(session))
         tv.frame = bounds
         addSubview(tv)
         // Hide the scroller after layout creates it
@@ -610,8 +617,9 @@ class OnyxTerminalView: NSView {
 
     // MARK: - Terminal View Factory
 
-    private func createTerminalView() -> LocalProcessTerminalView {
+    private func createTerminalView(scrollback: Int = 10000) -> LocalProcessTerminalView {
         let tv = LocalProcessTerminalView(frame: bounds)
+        tv.terminal.options.scrollback = scrollback
         tv.autoresizingMask = [.width, .height]
 
         tv.nativeBackgroundColor = NSColor(white: 0.04, alpha: 0.0)
