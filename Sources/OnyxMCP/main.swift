@@ -138,7 +138,7 @@ if isHookMode {
 
     // Read all of stdin (the hook event JSON)
     var inputData = Data()
-    while let chunk = try? FileHandle.standardInput.availableData, !chunk.isEmpty {
+    while let chunk = Optional(FileHandle.standardInput.availableData), !chunk.isEmpty {
         inputData.append(chunk)
         // Check if we have a complete JSON object
         if (try? JSONSerialization.jsonObject(with: inputData)) != nil { break }

@@ -438,6 +438,8 @@ public struct AppearanceConfig: Codable {
     public var windowTitle: String = "Onyx"
     public var remindersList: String?       // deprecated: migrated to remindersLists
     public var remindersLists: [String] = [] // empty = "Today" mode
+    /// Last active session ID per window index, for session restore on startup
+    public var lastSessionByWindow: [Int: String] = [:]
 
     public var effectiveTerminalFontSize: Double {
         terminalFontSize ?? fontSize
@@ -645,6 +647,7 @@ public class AppState: ObservableObject {
     @Published public var showSessionManager = false
     @Published public var showTerminalText = false
     @Published public var terminalTextContent: String = ""
+    @Published public var startupStatus: String = "Initializing..."
     public var showFocusOutline = true
 
     /// Tracks which component should logically have keyboard focus.
@@ -1106,7 +1109,10 @@ public class AppState: ObservableObject {
         loadTopology()
         configLoaded = true
 
+        startupStatus = "Loading configuration..."
+
         // Start background monitoring immediately
+        startupStatus = "Starting monitors..."
         monitor.startPolling()
 
         // Start MCP socket server for agent integration
@@ -1134,6 +1140,18 @@ public class AppState: ObservableObject {
         if let data = try? JSONEncoder().encode(appearance) {
             try? data.write(to: appearanceURL)
         }
+    }
+
+    /// Persist which session this window is using
+    public func saveLastSession() {
+        guard let session = activeSession else { return }
+        appearance.lastSessionByWindow[windowIndex] = session.id
+        saveAppearance()
+    }
+
+    /// Get the session ID that should be restored for this window
+    public var restoredSessionID: String? {
+        appearance.lastSessionByWindow[windowIndex]
     }
 
     private func loadFavorites() {

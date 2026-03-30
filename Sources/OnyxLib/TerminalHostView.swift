@@ -231,7 +231,7 @@ class OnyxTerminalView: NSView {
         guard let tv = terminalView else { return nil }
         let terminal = tv.terminal!
         guard row >= 0 && row < terminal.rows else { return nil }
-        guard let line = terminal.getLine(row: row) else { return nil }
+        guard terminal.getLine(row: row) != nil else { return nil }
         // Build string from CharData
         var text = ""
         for col in 0..<terminal.cols {
@@ -325,7 +325,7 @@ class OnyxTerminalView: NSView {
     }
 
     private func restoreFocus() {
-        guard let tv = terminalView else { return }
+        guard terminalView != nil else { return }
         // Only restore if nothing else should have focus
         guard appState.focusedComponent == .terminal else { return }
         // Use async here because this is called from a notification, and we need
@@ -711,7 +711,10 @@ class OnyxTerminalView: NSView {
         reconnectAttempt = 0
         lastStartTime = Date()
 
-        DispatchQueue.main.async { self.appState.connectionError = nil }
+        DispatchQueue.main.async {
+            self.appState.connectionError = nil
+            self.appState.startupStatus = "Discovering sessions..."
+        }
         setPendingStatus(.enumerating)
 
         enumerateAllSessions {
@@ -762,6 +765,10 @@ class OnyxTerminalView: NSView {
         let hostLabel = self.appState.host(for: session.source.hostID)?.label ?? "unknown"
         print("connectToActiveSession: \(session.displayLabel) on \(hostLabel) [id: \(session.id)] reconnect=\(isReconnect)")
 
+        DispatchQueue.main.async {
+            self.appState.startupStatus = "Connecting to \(hostLabel)..."
+        }
+
         // Mark as connecting (SSH handshake in progress)
         setPendingStatus(.connecting, for: session)
 
@@ -783,6 +790,7 @@ class OnyxTerminalView: NSView {
         let (cmd, args) = self.appState.commandForSession(session)
         tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
         self.pool[session.id]?.processRunning = true
+        self.appState.saveLastSession()
         // Now in pool — clear pending status and refresh pool display
         clearPendingStatus(for: session.id)
         publishPoolStatus()
@@ -929,16 +937,18 @@ class OnyxTerminalView: NSView {
                 } else {
                     self.appState.allSessions = finalResults
                     // Only reassign active session if there is none at all.
-                    // Never silently switch to a different session — that causes
-                    // cross-host/cross-container session confusion.
+                    // Prefer: restored session from last use > first favorite > default host session > first found
                     if self.appState.activeSession == nil {
+                        let restoredID = self.appState.restoredSessionID
+                        let restored = restoredID.flatMap { id in finalResults.first { $0.id == id } }
+                        let firstFav = self.appState.favoriteSessions.first
                         let defaultHost = self.appState.hosts.first ?? .localhost
                         let defaultMatch = finalResults.first {
                             $0.source.hostID == defaultHost.id
                                 && $0.name == defaultHost.ssh.tmuxSession
                                 && !$0.source.isDocker
                         }
-                        self.appState.activeSession = defaultMatch ?? finalResults.first
+                        self.appState.activeSession = restored ?? firstFav ?? defaultMatch ?? finalResults.first
                     }
                 }
                 self.appState.isEnumeratingSessions = false
@@ -1019,6 +1029,9 @@ class OnyxTerminalView: NSView {
     }
 
     private func enumerateHostSessions(_ host: HostConfig, completion: @escaping ([TmuxSession], ProbeStatus) -> Void) {
+        DispatchQueue.main.async {
+            self.appState.startupStatus = "Probing \(host.label)..."
+        }
         // For remote hosts, probe first
         if !host.isLocal {
             let result = probeHost(host)

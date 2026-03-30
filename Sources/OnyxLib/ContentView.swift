@@ -190,7 +190,7 @@ public struct ContentView: View {
         }
         .overlay {
             if showStartupAnimation {
-                StartupOverlay(accentHex: appState.appearance.accentHex)
+                StartupOverlay(accentHex: appState.effectiveAccentHex, statusText: appState.startupStatus)
                     .transition(.opacity)
                     .zIndex(999)
             }
@@ -202,10 +202,35 @@ public struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             appState.loadConfig()
-            // Dismiss startup animation after a delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                withAnimation(.easeOut(duration: 0.6)) {
-                    showStartupAnimation = false
+        }
+        .onChange(of: appState.activeSession) { _, session in
+            // Dismiss startup animation once a session is connected
+            if session != nil && showStartupAnimation {
+                // Give it a moment so the terminal view initializes
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    withAnimation(.easeOut(duration: 0.6)) {
+                        showStartupAnimation = false
+                    }
+                }
+            }
+        }
+        .onChange(of: appState.configLoaded) { _, loaded in
+            // If config loaded but no SSH needed (setup screen), dismiss animation
+            if loaded && appState.showSetup {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    withAnimation(.easeOut(duration: 0.6)) {
+                        showStartupAnimation = false
+                    }
+                }
+            }
+            // Safety timeout: dismiss after 15s no matter what
+            if loaded {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
+                    if showStartupAnimation {
+                        withAnimation(.easeOut(duration: 0.6)) {
+                            showStartupAnimation = false
+                        }
+                    }
                 }
             }
         }
@@ -243,6 +268,7 @@ public struct ContentView: View {
 
 private struct StartupOverlay: View {
     let accentHex: String
+    let statusText: String
 
     var body: some View {
         ZStack {
@@ -257,6 +283,12 @@ private struct StartupOverlay: View {
                     .font(.system(size: 18, weight: .ultraLight, design: .monospaced))
                     .foregroundColor(.white.opacity(0.6))
                     .tracking(12)
+
+                Text(statusText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Color(hex: accentHex).opacity(0.5))
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.3), value: statusText)
             }
         }
     }
