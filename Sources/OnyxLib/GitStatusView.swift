@@ -98,7 +98,7 @@ public class GitManager: ObservableObject {
     @Published public var isLoadingDiff = false
 
     private let appState: AppState
-    private var currentRepoPath: String?
+    public internal(set) var currentRepoPath: String?
 
     public init(appState: AppState) {
         self.appState = appState
@@ -449,6 +449,10 @@ struct GitLandingView: View {
     let status: GitRepoStatus
     let accentColor: Color
     @ObservedObject var gitManager: GitManager
+    /// Called to track a file as recently opened (path, name)
+    var onTrackFile: ((String, String) -> Void)? = nil
+    /// Called to navigate to and view a file (path, name) — for untracked files
+    var onViewFile: ((String, String) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -539,7 +543,10 @@ struct GitLandingView: View {
                                     ForEach(status.stagedFiles) { file in
                                         GitFileRow(file: file, showDiffIcon: true)
                                             .contentShape(Rectangle())
-                                            .onTapGesture { gitManager.fetchFileDiff(file) }
+                                            .onTapGesture {
+                                                notifyOpenFile(file)
+                                                gitManager.fetchFileDiff(file)
+                                            }
                                     }
                                 }
 
@@ -548,14 +555,19 @@ struct GitLandingView: View {
                                     ForEach(status.unstagedFiles) { file in
                                         GitFileRow(file: file, showDiffIcon: true)
                                             .contentShape(Rectangle())
-                                            .onTapGesture { gitManager.fetchFileDiff(file) }
+                                            .onTapGesture {
+                                                notifyOpenFile(file)
+                                                gitManager.fetchFileDiff(file)
+                                            }
                                     }
                                 }
 
                                 if !status.untrackedFiles.isEmpty {
                                     GitSectionHeader(title: "UNTRACKED", count: status.untrackedFiles.count, color: .gray.opacity(0.5))
                                     ForEach(status.untrackedFiles) { file in
-                                        GitFileRow(file: file)
+                                        GitFileRow(file: file, showDiffIcon: false)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture { notifyOpenFile(file, viewFile: true) }
                                     }
                                 }
                             }
@@ -564,6 +576,17 @@ struct GitLandingView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Resolve a git-relative file path and notify for recent file tracking / navigation
+    private func notifyOpenFile(_ file: GitChangedFile, viewFile: Bool = false) {
+        guard let repoPath = gitManager.currentRepoPath else { return }
+        let fullPath = repoPath.hasSuffix("/") ? repoPath + file.path : repoPath + "/" + file.path
+        let name = (file.path as NSString).lastPathComponent
+        onTrackFile?(fullPath, name)
+        if viewFile {
+            onViewFile?(fullPath, name)
         }
     }
 }

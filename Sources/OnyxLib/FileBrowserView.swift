@@ -216,7 +216,7 @@ public class FileBrowserManager: ObservableObject {
         }
     }
 
-    private func trackRecentFile(path: String, name: String) {
+    func trackRecentFile(path: String, name: String) {
         let hostID = appState.activeHost?.id ?? HostConfig.localhostID
         let file = RecentFile(path: path, name: name, hostID: hostID)
         // Remove existing entry for same path, then prepend
@@ -304,6 +304,23 @@ public class FileBrowserManager: ObservableObject {
             entries = []
             gitManager.clear()
         }
+    }
+
+    /// Check if the currently viewed file has git changes, returning the GitChangedFile if so
+    public func gitChangedFileForViewing() -> GitChangedFile? {
+        guard let name = viewingFileName, let repoPath = gitManager.currentRepoPath, let status = gitManager.repoStatus else { return nil }
+        guard let current = currentPath else { return nil }
+        // Build relative path from repo root
+        let fullPath = current.hasSuffix("/") ? current + name : current + "/" + name
+        let relativePath: String
+        if fullPath.hasPrefix(repoPath + "/") {
+            relativePath = String(fullPath.dropFirst(repoPath.count + 1))
+        } else if fullPath.hasPrefix(repoPath) {
+            relativePath = String(fullPath.dropFirst(repoPath.count))
+        } else {
+            return nil
+        }
+        return status.changedFiles.first { $0.path == relativePath }
     }
 
     /// Refresh the current directory listing and git status
@@ -1017,6 +1034,9 @@ struct FileBrowserView: View {
                                     let fullPath = path.hasSuffix("/") ? "\(path)\(name)" : "\(path)/\(name)"
                                     browser.downloadPath(fullPath, isDirectory: false)
                                 }
+                            },
+                            onViewDiff: browser.gitChangedFileForViewing().map { file in
+                                { browser.gitManager.fetchFileDiff(file) }
                             }
                         )
                     } else if browser.gitManager.showLog {
@@ -1026,7 +1046,17 @@ struct FileBrowserView: View {
                     } else if browser.currentPath != nil {
                         VStack(spacing: 0) {
                             if browser.gitManager.isGitRepo, let status = browser.gitManager.repoStatus {
-                                GitLandingView(status: status, accentColor: appState.accentColor, gitManager: browser.gitManager)
+                                GitLandingView(
+                                    status: status,
+                                    accentColor: appState.accentColor,
+                                    gitManager: browser.gitManager,
+                                    onTrackFile: { path, name in
+                                        browser.trackRecentFile(path: path, name: name)
+                                    },
+                                    onViewFile: { path, name in
+                                        browser.readFileFromSearch(path, name: name)
+                                    }
+                                )
                                 Divider().background(Color.white.opacity(0.1))
                             }
                             DirectoryListView(appState: appState, browser: browser)
@@ -1717,6 +1747,7 @@ struct FileContentView: View {
     let accentColor: Color
     let onClose: () -> Void
     var onDownload: (() -> Void)? = nil
+    var onViewDiff: (() -> Void)? = nil
 
     private var highlightedContent: AttributedString {
         SyntaxHighlighter.highlight(content, fileName: fileName)
@@ -1724,10 +1755,24 @@ struct FileContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Download bar
-            if let download = onDownload {
-                HStack {
-                    Spacer()
+            // Action bar
+            HStack {
+                if let viewDiff = onViewDiff {
+                    Button(action: viewDiff) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "doc.text.magnifyingglass")
+                                .font(.system(size: 10))
+                            Text("Diff")
+                                .font(.system(size: 10, design: .monospaced))
+                        }
+                        .foregroundColor(accentColor.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Spacer()
+
+                if let download = onDownload {
                     Button(action: download) {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.down.circle")
@@ -1739,10 +1784,10 @@ struct FileContentView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-                .background(Color.white.opacity(0.03))
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .background(Color.white.opacity(0.03))
 
             ScrollView(.vertical) {
                 ScrollView(.horizontal, showsIndicators: false) {
