@@ -107,12 +107,18 @@ public class ShortcutManager {
                 return nil
             }
 
-            // Single-key shortcuts — check the state of the EVENT'S window, not a global flag
+            // Single-key shortcuts — check the state of the EVENT'S window, not a global flag.
+            // Suppress when any overlay with text input is open (settings, session manager,
+            // command palette, window rename, right panels with editors).
             let state = appState(for: event)
             let monitorVisibleInWindow = state?.showMonitor ?? false
-            let rightPanelInWindow = state?.activeRightPanel != nil
+            let hasTextInput = (state?.showSettings ?? false)
+                || (state?.showCommandPalette ?? false)
+                || (state?.showSessionManager ?? false)
+                || (state?.showWindowRename ?? false)
+                || (state?.activeRightPanel != nil)
 
-            if !rightPanelInWindow {
+            if !hasTextInput {
                 // Backtick/tilde key (keyCode 50) → toggle monitor overlay
                 if event.keyCode == 50 && flags.isEmpty {
                     NotificationCenter.default.post(name: .toggleMonitor, object: nil)

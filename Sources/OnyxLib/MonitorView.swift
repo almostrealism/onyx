@@ -579,24 +579,21 @@ struct MonitorView: View {
                     // Time/date on left
                     TimeDisplay(accentColor: appState.accentColor, use12Hour: appState.appearance.use12HourClock)
 
-                    // Extra timezone clocks (suppressed if window is narrow)
-                    GeometryReader { clockGeo in
-                        if clockGeo.size.width > 200 {
-                            HStack(spacing: 16) {
-                                ForEach(appState.appearance.extraTimezones.prefix(3), id: \.self) { tzId in
-                                    if let tz = TimeZone(identifier: tzId) {
-                                        ExtraClockView(
-                                            timeZone: tz,
-                                            accentColor: appState.accentColor,
-                                            use12Hour: appState.appearance.use12HourClock
-                                        )
-                                    }
+                    // Extra timezone clocks
+                    if !appState.appearance.extraTimezones.isEmpty {
+                        HStack(spacing: 16) {
+                            ForEach(appState.appearance.extraTimezones.prefix(3), id: \.self) { tzId in
+                                if let tz = TimeZone(identifier: tzId) {
+                                    ExtraClockView(
+                                        timeZone: tz,
+                                        accentColor: appState.accentColor,
+                                        use12Hour: appState.appearance.use12HourClock
+                                    )
                                 }
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        .layoutPriority(-1) // compress before stat chips
                     }
-                    .frame(maxWidth: appState.appearance.extraTimezones.isEmpty ? 0 : .infinity)
 
                     Spacer()
 
