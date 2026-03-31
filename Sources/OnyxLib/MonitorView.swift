@@ -581,7 +581,7 @@ struct MonitorView: View {
 
                     // Extra timezone clocks
                     if !appState.appearance.extraTimezones.isEmpty {
-                        HStack(spacing: 16) {
+                        HStack(spacing: 20) {
                             ForEach(appState.appearance.extraTimezones.prefix(3), id: \.self) { tzId in
                                 if let tz = TimeZone(identifier: tzId) {
                                     ExtraClockView(
@@ -768,9 +768,17 @@ struct TimeDisplay: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(timeString)
-                .font(.system(size: 36, weight: .ultraLight, design: .monospaced))
-                .foregroundColor(.white.opacity(0.9))
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(timeDigits)
+                    .font(.system(size: 36, weight: .ultraLight, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.9))
+
+                if use12Hour {
+                    Text(ampmSuffix)
+                        .font(.system(size: 14, weight: .light, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
 
             HStack(spacing: 8) {
                 Text(dateString)
@@ -787,9 +795,15 @@ struct TimeDisplay: View {
         }
     }
 
-    private var timeString: String {
+    private var timeDigits: String {
         let f = DateFormatter()
-        f.dateFormat = use12Hour ? "h:mm:ss a" : "HH:mm:ss"
+        f.dateFormat = use12Hour ? "h:mm:ss" : "HH:mm:ss"
+        return f.string(from: currentTime)
+    }
+
+    private var ampmSuffix: String {
+        let f = DateFormatter()
+        f.dateFormat = "a"
         return f.string(from: currentTime)
     }
 
