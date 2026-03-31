@@ -577,7 +577,26 @@ struct MonitorView: View {
                 // Time + stats row
                 HStack(alignment: .center) {
                     // Time/date on left
-                    TimeDisplay(accentColor: appState.accentColor)
+                    TimeDisplay(accentColor: appState.accentColor, use12Hour: appState.appearance.use12HourClock)
+
+                    // Extra timezone clocks (suppressed if window is narrow)
+                    GeometryReader { clockGeo in
+                        if clockGeo.size.width > 200 {
+                            HStack(spacing: 16) {
+                                ForEach(appState.appearance.extraTimezones.prefix(3), id: \.self) { tzId in
+                                    if let tz = TimeZone(identifier: tzId) {
+                                        ExtraClockView(
+                                            timeZone: tz,
+                                            accentColor: appState.accentColor,
+                                            use12Hour: appState.appearance.use12HourClock
+                                        )
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .frame(maxWidth: appState.appearance.extraTimezones.isEmpty ? 0 : .infinity)
 
                     Spacer()
 
@@ -607,7 +626,7 @@ struct MonitorView: View {
                         Text(monitor.useShortInterval ? "5s intervals" : "1m intervals")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.4))
-                        Text("(T interval · M memory · C containers)")
+                        Text("(T interval · M memory · C containers · P 12/24hr)")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.25))
                     }
@@ -729,6 +748,10 @@ struct MonitorView: View {
         .onReceive(NotificationCenter.default.publisher(for: .toggleAllContainers)) { _ in
             dockerStats.showAllContainers.toggle()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleClockFormat)) { _ in
+            appState.appearance.use12HourClock.toggle()
+            appState.saveAppearance()
+        }
         .onAppear {
             dockerStats.startPolling()
             // Trigger an immediate pool status publish via notification
@@ -742,6 +765,7 @@ struct MonitorView: View {
 
 struct TimeDisplay: View {
     let accentColor: Color
+    var use12Hour: Bool = false
     @State private var currentTime = Date()
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -751,9 +775,15 @@ struct TimeDisplay: View {
                 .font(.system(size: 36, weight: .ultraLight, design: .monospaced))
                 .foregroundColor(.white.opacity(0.9))
 
-            Text(dateString)
-                .font(.system(size: 12, weight: .light, design: .monospaced))
-                .foregroundColor(accentColor.opacity(0.6))
+            HStack(spacing: 8) {
+                Text(dateString)
+                    .font(.system(size: 12, weight: .light, design: .monospaced))
+                    .foregroundColor(accentColor.opacity(0.6))
+
+                Text(utcString)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.35))
+            }
         }
         .onReceive(timer) { _ in
             currentTime = Date()
@@ -762,14 +792,59 @@ struct TimeDisplay: View {
 
     private var timeString: String {
         let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss"
+        f.dateFormat = use12Hour ? "h:mm:ss a" : "HH:mm:ss"
         return f.string(from: currentTime)
     }
 
     private var dateString: String {
         let f = DateFormatter()
-        f.dateFormat = "EEEE, MMMM d, yyyy"
+        f.dateFormat = "EEEE, MMMM d"
         return f.string(from: currentTime)
+    }
+
+    private var utcString: String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        f.timeZone = TimeZone(identifier: "UTC")
+        return "UTC " + f.string(from: currentTime)
+    }
+}
+
+struct ExtraClockView: View {
+    let timeZone: TimeZone
+    let accentColor: Color
+    var use12Hour: Bool = false
+    @State private var currentTime = Date()
+    let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(timeString)
+                .font(.system(size: 16, weight: .ultraLight, design: .monospaced))
+                .foregroundColor(.white.opacity(0.7))
+
+            Text(label)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(accentColor.opacity(0.4))
+        }
+        .onReceive(timer) { _ in
+            currentTime = Date()
+        }
+    }
+
+    private var timeString: String {
+        let f = DateFormatter()
+        f.dateFormat = use12Hour ? "h:mm a" : "HH:mm"
+        f.timeZone = timeZone
+        return f.string(from: currentTime)
+    }
+
+    private var label: String {
+        // Use abbreviation if available, otherwise city name from identifier
+        let abbrev = timeZone.abbreviation(for: currentTime) ?? ""
+        let city = timeZone.identifier.split(separator: "/").last.map(String.init) ?? timeZone.identifier
+        let displayCity = city.replacingOccurrences(of: "_", with: " ")
+        return abbrev.isEmpty ? displayCity : "\(displayCity) \(abbrev)"
     }
 }
 

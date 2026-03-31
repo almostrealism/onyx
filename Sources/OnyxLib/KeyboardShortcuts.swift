@@ -136,6 +136,12 @@ public class ShortcutManager {
                     NotificationCenter.default.post(name: .toggleAllContainers, object: nil)
                     return nil
                 }
+
+                // P key (keyCode 35) → toggle 12hr/24hr clock format (only when overlay is visible)
+                if event.keyCode == 35 && flags.isEmpty && monitorVisibleInWindow {
+                    NotificationCenter.default.post(name: .toggleClockFormat, object: nil)
+                    return nil
+                }
             }
 
             // Escape → dismiss top overlay

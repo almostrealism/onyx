@@ -21,6 +21,7 @@ public extension Notification.Name {
     static let refreshPoolStatus = Notification.Name("refreshPoolStatus")
     static let toggleMemoryChart = Notification.Name("toggleMemoryChart")
     static let toggleAllContainers = Notification.Name("toggleAllContainers")
+    static let toggleClockFormat = Notification.Name("toggleClockFormat")
     static let toggleTerminalTextMode = Notification.Name("toggleTerminalTextMode")
     static let cyclePanelSize = Notification.Name("cyclePanelSize")
 }
@@ -440,6 +441,10 @@ public struct AppearanceConfig: Codable {
     public var remindersLists: [String] = [] // empty = "Today" mode
     /// Last active session ID per window index, for session restore on startup
     public var lastSessionByWindow: [Int: String] = [:]
+    /// Up to 3 additional timezone identifiers for monitor clocks (e.g., "America/New_York")
+    public var extraTimezones: [String] = []
+    /// Whether to use 12-hour (AM/PM) format for clocks (UTC always stays 24hr)
+    public var use12HourClock: Bool = false
 
     public var effectiveTerminalFontSize: Double {
         terminalFontSize ?? fontSize

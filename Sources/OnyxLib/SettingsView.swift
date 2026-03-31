@@ -184,6 +184,50 @@ struct SettingsView: View {
                                     }
                                 }
 
+                                // Extra timezone clocks
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("EXTRA CLOCKS")
+                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .tracking(2)
+
+                                    ForEach(0..<3, id: \.self) { i in
+                                        HStack(spacing: 8) {
+                                            Text("\(i + 1).")
+                                                .font(.system(size: 11, design: .monospaced))
+                                                .foregroundColor(.gray.opacity(0.4))
+                                                .frame(width: 16)
+
+                                            let binding = Binding<String>(
+                                                get: { i < appState.appearance.extraTimezones.count ? appState.appearance.extraTimezones[i] : "" },
+                                                set: { newValue in
+                                                    while appState.appearance.extraTimezones.count <= i {
+                                                        appState.appearance.extraTimezones.append("")
+                                                    }
+                                                    appState.appearance.extraTimezones[i] = newValue
+                                                    // Remove trailing empty entries
+                                                    while appState.appearance.extraTimezones.last?.isEmpty == true {
+                                                        appState.appearance.extraTimezones.removeLast()
+                                                    }
+                                                }
+                                            )
+
+                                            TextField("e.g. America/New_York", text: binding)
+                                                .textFieldStyle(.plain)
+                                                .font(.system(size: 11, design: .monospaced))
+                                                .foregroundColor(.white.opacity(0.8))
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 3)
+                                                .background(Color.white.opacity(0.06))
+                                                .cornerRadius(3)
+                                        }
+                                    }
+
+                                    Text("Use IANA timezone IDs (press P in monitor for 12/24hr)")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(.gray.opacity(0.3))
+                                }
+
                                 // Reminders list picker
                                 if remindersManager.accessGranted {
                                     VStack(alignment: .leading, spacing: 4) {
