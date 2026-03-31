@@ -197,6 +197,11 @@ final class MonitorParseTests: XCTestCase {
 
 final class AppStateTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        AppearanceStore.shared.reset()
+    }
+
     // MARK: - HostConfig.isLocal
 
     func testIsLocal_localhost() {

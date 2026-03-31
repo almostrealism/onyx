@@ -118,6 +118,53 @@ public class FavoritesStore: ObservableObject {
     }
 }
 
+// MARK: - Shared Appearance Store
+
+/// Singleton that owns the appearance config. All windows read/write through
+/// this to avoid one window's save overwriting another's changes.
+public class AppearanceStore: ObservableObject {
+    public static let shared = AppearanceStore()
+
+    @Published public var config = AppearanceConfig()
+    private var url: URL?
+    private let lock = NSLock()
+
+    private init() {}
+
+    public func configure(url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard self.url == nil else { return }
+        self.url = url
+        load()
+    }
+
+    private func load() {
+        guard let url = url, let data = try? Data(contentsOf: url) else { return }
+        if var config = try? JSONDecoder().decode(AppearanceConfig.self, from: data) {
+            config.migrateReminders()
+            self.config = config
+        }
+    }
+
+    public func save() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let url = url else { return }
+        if let data = try? JSONEncoder().encode(config) {
+            try? data.write(to: url)
+        }
+    }
+
+    /// Reset for testing — restores default config without saving
+    public func reset() {
+        lock.lock()
+        config = AppearanceConfig()
+        url = nil
+        lock.unlock()
+    }
+}
+
 // MARK: - Focus Tracking
 
 public enum FocusedComponent: Equatable {
@@ -355,7 +402,14 @@ public struct HostGroup: Identifiable {
 
 public class AppState: ObservableObject {
     @Published public var hosts: [HostConfig] = []
-    @Published public var appearance = AppearanceConfig()
+    /// Appearance config shared across all windows via AppearanceStore singleton
+    public var appearance: AppearanceConfig {
+        get { AppearanceStore.shared.config }
+        set {
+            AppearanceStore.shared.config = newValue
+            objectWillChange.send()
+        }
+    }
     @Published public var showSetup = false
     @Published public var activeRightPanel: RightPanel? = nil
     @Published public var showSettings = false
@@ -419,6 +473,7 @@ public class AppState: ObservableObject {
 
     private var monitorCancellable: AnyCancellable?
     private var favoritesCancellable: AnyCancellable?
+    private var appearanceCancellable: AnyCancellable?
     private var topologyCancellable: AnyCancellable?
     public lazy var monitor: MonitorManager = {
         let m = MonitorManager(appState: self)
@@ -463,6 +518,12 @@ public class AppState: ObservableObject {
         // Forward shared favorites store changes to this AppState's publisher
         // so SwiftUI views update when favorites change from any window
         favoritesCancellable = FavoritesStore.shared.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.objectWillChange.send()
+            }
+        }
+        // Forward shared appearance store changes so all windows update together
+        appearanceCancellable = AppearanceStore.shared.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async {
                 self?.objectWillChange.send()
             }
@@ -822,13 +883,7 @@ public class AppState: ObservableObject {
 
         saveHosts()
 
-        if FileManager.default.fileExists(atPath: appearanceURL.path) {
-            if let data = try? Data(contentsOf: appearanceURL),
-               let config = try? JSONDecoder().decode(AppearanceConfig.self, from: data) {
-                appearance = config
-                appearance.migrateReminders()
-            }
-        }
+        AppearanceStore.shared.configure(url: appearanceURL)
 
         loadFavorites()
         loadTopology()
@@ -862,9 +917,7 @@ public class AppState: ObservableObject {
     }
 
     public func saveAppearance() {
-        if let data = try? JSONEncoder().encode(appearance) {
-            try? data.write(to: appearanceURL)
-        }
+        AppearanceStore.shared.save()
     }
 
     /// Persist which session this window is using
