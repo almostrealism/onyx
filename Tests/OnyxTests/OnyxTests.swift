@@ -2525,3 +2525,228 @@ final class NetworkTopologyStoreTests: XCTestCase {
         XCTAssertNotNil(time)
     }
 }
+
+// MARK: - SyntaxHighlighter Tests
+
+final class SyntaxHighlighterTests: XCTestCase {
+
+    func testHighlight_javaFile_hasNonPlainColors() {
+        let javaCode = """
+        public class Main {
+            public static void main(String[] args) {
+                int x = 42;
+                System.out.println("Hello");
+            }
+        }
+        """
+        let result = SyntaxHighlighter.highlight(javaCode, fileName: "Main.java")
+        // The result should be an AttributedString with colored runs,
+        // not just a single plain-white run. Check that it differs from plain.
+        var plain = AttributedString(javaCode)
+        plain.foregroundColor = .white.opacity(0.85)
+        XCTAssertNotEqual(result, plain, "Java code should have syntax-highlighted colors")
+    }
+
+    func testHighlight_pythonFile_hasNonPlainColors() {
+        let pythonCode = """
+        def hello():
+            x = 42
+            return "world"
+        """
+        let result = SyntaxHighlighter.highlight(pythonCode, fileName: "script.py")
+        var plain = AttributedString(pythonCode)
+        plain.foregroundColor = .white.opacity(0.85)
+        XCTAssertNotEqual(result, plain, "Python code should have syntax-highlighted colors")
+    }
+
+    func testHighlight_jsonFile_hasNonPlainColors() {
+        let jsonCode = """
+        {"name": "test", "value": 42, "flag": true}
+        """
+        let result = SyntaxHighlighter.highlight(jsonCode, fileName: "data.json")
+        var plain = AttributedString(jsonCode)
+        plain.foregroundColor = .white.opacity(0.85)
+        XCTAssertNotEqual(result, plain, "JSON code should have syntax-highlighted colors")
+    }
+
+    func testHighlight_unknownExtension_returnsPlain() {
+        let content = "just some text"
+        let result = SyntaxHighlighter.highlight(content, fileName: "readme.xyz")
+        var plain = AttributedString(content)
+        plain.foregroundColor = .white.opacity(0.85)
+        XCTAssertEqual(result, plain, "Unknown extension should return plain white text")
+    }
+}
+
+// MARK: - ClaudeSessionManager Tests
+
+final class ClaudeSessionManagerTests: XCTestCase {
+
+    func testProcessHookEvent_sessionStart_createsSession() {
+        let manager = ClaudeSessionManager()
+        let event: [String: Any] = [
+            "hook_event_name": "SessionStart",
+            "session_id": "test-session-1"
+        ]
+        let response = manager.processHookEvent(event)
+        XCTAssertEqual(response["continue"] as? Bool, true)
+
+        // Session creation happens on main queue; force a drain
+        let expectation = self.expectation(description: "main queue")
+        DispatchQueue.main.async {
+            XCTAssertNotNil(manager.sessions["test-session-1"])
+            expectation.fulfill()
+        }
+        waitForExpectations(timeout: 2)
+    }
+
+    func testProcessHookEvent_preToolUse_updatesSessionStatus() {
+        let manager = ClaudeSessionManager()
+        // First create a session
+        _ = manager.processHookEvent([
+            "hook_event_name": "SessionStart",
+            "session_id": "sess-2"
+        ])
+
+        // Then send a PreToolUse event
+        let event: [String: Any] = [
+            "hook_event_name": "PreToolUse",
+            "session_id": "sess-2",
+            "tool_name": "Bash",
+            "tool_input": ["command": "ls -la"]
+        ]
+        let response = manager.processHookEvent(event)
+        XCTAssertEqual(response["continue"] as? Bool, true)
+
+        let expectation = self.expectation(description: "main queue")
+        DispatchQueue.main.async {
+            let session = manager.sessions["sess-2"]
+            XCTAssertNotNil(session)
+            XCTAssertEqual(session?.toolName, "Bash")
+            if case .running(let tool) = session?.status {
+                XCTAssertEqual(tool, "Bash")
+            } else {
+                XCTFail("Expected .running status after PreToolUse")
+            }
+            expectation.fulfill()
+        }
+        waitForExpectations(timeout: 2)
+    }
+
+    func testProcessHookEvent_postToolUse_resetsToIdle() {
+        let manager = ClaudeSessionManager()
+        _ = manager.processHookEvent([
+            "hook_event_name": "SessionStart",
+            "session_id": "sess-3"
+        ])
+        _ = manager.processHookEvent([
+            "hook_event_name": "PreToolUse",
+            "session_id": "sess-3",
+            "tool_name": "Read",
+            "tool_input": ["file_path": "/tmp/test.txt"]
+        ])
+        _ = manager.processHookEvent([
+            "hook_event_name": "PostToolUse",
+            "session_id": "sess-3"
+        ])
+
+        let expectation = self.expectation(description: "main queue")
+        DispatchQueue.main.async {
+            let session = manager.sessions["sess-3"]
+            XCTAssertNotNil(session)
+            XCTAssertEqual(session?.status, .idle)
+            XCTAssertNil(session?.toolName)
+            expectation.fulfill()
+        }
+        waitForExpectations(timeout: 2)
+    }
+
+    func testProcessHookEvent_stop_marksSessionStopped() {
+        let manager = ClaudeSessionManager()
+        _ = manager.processHookEvent([
+            "hook_event_name": "SessionStart",
+            "session_id": "sess-4"
+        ])
+        let response = manager.processHookEvent([
+            "hook_event_name": "Stop",
+            "session_id": "sess-4"
+        ])
+        XCTAssertEqual(response["continue"] as? Bool, true)
+
+        let expectation = self.expectation(description: "main queue")
+        DispatchQueue.main.async {
+            let session = manager.sessions["sess-4"]
+            XCTAssertEqual(session?.status, .stopped)
+            expectation.fulfill()
+        }
+        waitForExpectations(timeout: 2)
+    }
+}
+
+// MARK: - MonitorManager bucketedCPU Tests
+
+final class MonitorBucketTests: XCTestCase {
+
+    func testBucketedCPU_oneMinuteBuckets_anchorToWallClock() {
+        let state = AppState()
+        let monitor = MonitorManager(appState: state)
+        monitor.useShortInterval = false // use 1-minute buckets
+
+        let calendar = Calendar.current
+        let now = Date()
+        // Round down to start of current minute
+        let currentMinuteStart = calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour, .minute], from: now))!
+
+        // Add samples in the current minute
+        let sample1 = MonitorSample(timestamp: currentMinuteStart.addingTimeInterval(5), cpuUsage: 50.0)
+        let sample2 = MonitorSample(timestamp: currentMinuteStart.addingTimeInterval(10), cpuUsage: 70.0)
+
+        // Add a sample in the previous minute
+        let sample3 = MonitorSample(timestamp: currentMinuteStart.addingTimeInterval(-30), cpuUsage: 30.0)
+
+        monitor.samples = [sample3, sample1, sample2]
+
+        let buckets = monitor.bucketedCPU()
+        XCTAssertEqual(buckets.count, 60, "Should always return 60 buckets")
+
+        // Last bucket (index 59) = current minute, should average sample1 and sample2
+        XCTAssertEqual(buckets[59], 60.0, accuracy: 0.1, "Current minute should average 50 and 70 = 60")
+
+        // Second-to-last bucket (index 58) = previous minute, should be sample3
+        XCTAssertEqual(buckets[58], 30.0, accuracy: 0.1, "Previous minute should have the 30% sample")
+
+        // Older buckets should be 0 (no data)
+        XCTAssertEqual(buckets[0], 0.0, accuracy: 0.01, "Oldest bucket with no data should be 0")
+    }
+
+    func testBucketedCPU_shortInterval_usesDirectValues() {
+        let state = AppState()
+        let monitor = MonitorManager(appState: state)
+        monitor.useShortInterval = true // use 5s direct mode
+
+        let now = Date()
+        monitor.samples = [
+            MonitorSample(timestamp: now.addingTimeInterval(-10), cpuUsage: 25.0),
+            MonitorSample(timestamp: now.addingTimeInterval(-5), cpuUsage: 50.0),
+            MonitorSample(timestamp: now, cpuUsage: 75.0),
+        ]
+
+        let buckets = monitor.bucketedCPU()
+        XCTAssertEqual(buckets.count, 60, "Should return 60 buckets")
+
+        // Last 3 values should be our samples, rest should be 0 (padding)
+        XCTAssertEqual(buckets[57], 25.0, accuracy: 0.01)
+        XCTAssertEqual(buckets[58], 50.0, accuracy: 0.01)
+        XCTAssertEqual(buckets[59], 75.0, accuracy: 0.01)
+        XCTAssertEqual(buckets[0], 0.0, accuracy: 0.01, "Padding should be 0")
+    }
+
+    func testBucketedCPU_noData_returnsEmpty() {
+        let state = AppState()
+        let monitor = MonitorManager(appState: state)
+        monitor.samples = []
+
+        let buckets = monitor.bucketedCPU()
+        XCTAssertTrue(buckets.isEmpty, "No samples should return empty array")
+    }
+}
