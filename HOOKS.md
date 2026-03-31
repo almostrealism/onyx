@@ -43,7 +43,7 @@ From your local machine where the Onyx repo is checked out:
 
 This will:
 1. Build the OnyxMCP binary for the remote architecture
-2. Copy it to the remote host (`~/.local/bin/OnyxMCP`)
+2. Copy it to the remote host (`~/.onyx/bin/OnyxMCP`)
 3. Configure Claude Code hooks on the remote host (`~/.claude/settings.json`)
 
 ### Option 2: Manual
@@ -56,33 +56,43 @@ Copy the pre-built binary:
 swift build --product OnyxMCP
 
 # Copy to remote host
-scp .build/debug/OnyxMCP user@hostname:~/.local/bin/OnyxMCP
-ssh user@hostname 'chmod +x ~/.local/bin/OnyxMCP'
+scp .build/debug/OnyxMCP user@hostname:~/.onyx/bin/OnyxMCP
+ssh user@hostname 'chmod +x ~/.onyx/bin/OnyxMCP'
 ```
 
-If the remote host runs Linux, you'll need to build OnyxMCP on a Linux machine or use cross-compilation. The binary is a simple Swift program with no dependencies.
+If the remote host runs Linux, build a Linux binary first:
+```bash
+# Using Docker (from macOS):
+./build-linux-mcp.sh          # builds for linux/amd64
+./build-linux-mcp.sh arm64    # builds for linux/arm64
+# Output: .build/linux/OnyxMCP
+
+# Or build directly on the Linux host:
+swift build --product OnyxMCP -c release
+cp .build/release/OnyxMCP ~/.onyx/bin/
+```
 
 #### Step 2: Configure Claude Code hooks
 
 On the remote host, run:
 ```bash
-~/.local/bin/OnyxMCP --setup-hooks
+~/.onyx/bin/OnyxMCP --setup-hooks
 ```
 
 Or run the setup script if you have the repo:
 ```bash
-./setup-hooks.sh ~/.local/bin/OnyxMCP
+./setup-hooks.sh ~/.onyx/bin/OnyxMCP
 ```
 
 Or manually add to `~/.claude/settings.json`:
 ```json
 {
   "hooks": {
-    "PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.local/bin/OnyxMCP --hook", "timeout": 10}]}],
-    "PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.local/bin/OnyxMCP --hook", "timeout": 5, "async": true}]}],
-    "PermissionRequest": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.local/bin/OnyxMCP --hook", "timeout": 120}]}],
-    "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.local/bin/OnyxMCP --hook", "timeout": 5, "async": true}]}],
-    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.local/bin/OnyxMCP --hook", "timeout": 5, "async": true}]}]
+    "PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook", "timeout": 10}]}],
+    "PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook", "timeout": 5, "async": true}]}],
+    "PermissionRequest": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook", "timeout": 120}]}],
+    "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook", "timeout": 5, "async": true}]}],
+    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook", "timeout": 5, "async": true}]}]
   }
 }
 ```
@@ -104,7 +114,7 @@ If you run Claude Code locally (not via SSH), just run:
 
 If the section doesn't appear:
 - Check that `ONYX_MCP_PORT` is set: `echo $ONYX_MCP_PORT` (should show `19432`)
-- Check that OnyxMCP can connect: `echo '{}' | ~/.local/bin/OnyxMCP --hook` (should exit silently)
+- Check that OnyxMCP can connect: `echo '{}' | ~/.onyx/bin/OnyxMCP --hook` (should exit silently)
 - Check that hooks are configured: `cat ~/.claude/settings.json | grep OnyxMCP`
 
 ## What Each Hook Does

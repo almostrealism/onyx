@@ -306,6 +306,13 @@ public class FileBrowserManager: ObservableObject {
         }
     }
 
+    /// Refresh the current directory listing and git status
+    public func listCurrentDirectory() {
+        guard let path = currentPath else { return }
+        collapsedEntries = []
+        listDirectory(path)
+    }
+
     public func openEntry(_ entry: RemoteEntry) {
         guard let current = currentPath else { return }
         let fullPath = current.hasSuffix("/") ? "\(current)\(entry.name)" : "\(current)/\(entry.name)"
@@ -1413,6 +1420,21 @@ struct NavigationBar: View {
                     }
                     .buttonStyle(.plain)
                     .help("Collapse single-child directories")
+                }
+
+                // Refresh button
+                if browser.currentPath != nil {
+                    Button(action: {
+                        if let path = browser.currentPath {
+                            browser.listCurrentDirectory()
+                            browser.gitManager.checkAndLoad(path: path)
+                        }
+                    }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11))
+                            .foregroundColor(.gray.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 // Git history button

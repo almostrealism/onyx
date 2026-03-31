@@ -23,8 +23,8 @@ mkdir -p "$INSTALL_DIR"
 cp "$BINARY" "$INSTALL_DIR/OnyxMCP"
 chmod +x "$INSTALL_DIR/OnyxMCP"
 
-# Also install to ~/.local/bin for local use
-LOCAL_BIN="$HOME/.local/bin"
+# Also install to ~/.onyx/bin for local use
+LOCAL_BIN="$HOME/.onyx/bin"
 mkdir -p "$LOCAL_BIN"
 cp "$BINARY" "$LOCAL_BIN/OnyxMCP"
 chmod +x "$LOCAL_BIN/OnyxMCP"

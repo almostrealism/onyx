@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Glibc)
+import Glibc
+#endif
 
 /// OnyxMCP — stdio-to-socket bridge for MCP integration.
 /// Reads JSON-RPC from stdin, forwards to the Onyx app, writes responses to stdout.
@@ -8,8 +11,9 @@ import Foundation
 /// 2. Otherwise: connect via Unix domain socket (local use)
 
 let socketPath: String = {
-    let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-    return appSupport.appendingPathComponent("Onyx/mcp.sock").path
+    // Use ~/.onyx/mcp.sock (cross-platform, no spaces in path)
+    let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+    return home + "/.onyx/mcp.sock"
 }()
 
 func connectToUnixSocket() -> Int32 {

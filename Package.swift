@@ -1,6 +1,8 @@
 // swift-tools-version: 5.9
 import PackageDescription
 
+// OnyxMCP must build on both macOS and Linux (no platform-specific dependencies).
+// OnyxLib and the main Onyx app require macOS 14+.
 let package = Package(
     name: "Onyx",
     platforms: [
@@ -24,6 +26,8 @@ let package = Package(
             exclude: ["Info.plist"],
             resources: [.copy("AppIcon.icns")]
         ),
+        // OnyxMCP: cross-platform (macOS + Linux). No dependencies.
+        // Build on Linux: swift build --product OnyxMCP
         .executableTarget(
             name: "OnyxMCP",
             dependencies: [],

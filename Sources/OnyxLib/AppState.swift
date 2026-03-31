@@ -1171,7 +1171,7 @@ public class AppState: ObservableObject {
         // Find the local OnyxMCP binary
         let possiblePaths = [
             Bundle.main.bundlePath + "/Contents/MacOS/OnyxMCP",
-            ProcessInfo.processInfo.environment["HOME"].map { $0 + "/.local/bin/OnyxMCP" },
+            ProcessInfo.processInfo.environment["HOME"].map { $0 + "/.onyx/bin/OnyxMCP" },
             Optional("/Users/Shared/flowtree/tools/OnyxMCP"),
         ].compactMap { $0 }
 
@@ -1231,8 +1231,8 @@ public class AppState: ObservableObject {
     }
 
     private func configureHooksRemotely(host: HostConfig, localBinary: String) {
-        let remoteBin = ".local/bin/OnyxMCP"
-        let hookCmd = "$HOME/.local/bin/OnyxMCP --hook"
+        let remoteBin = ".onyx/bin/OnyxMCP"
+        let hookCmd = "$HOME/.onyx/bin/OnyxMCP --hook"
 
         // Step 1: Copy binary
         DispatchQueue.main.async { self.hooksSetupStatus = "Copying OnyxMCP to \(host.label)..." }

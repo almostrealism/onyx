@@ -13,7 +13,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SSH_PORT=""
 SSH_IDENTITY=""
-REMOTE_BIN_DIR=".local/bin"
+REMOTE_BIN_DIR=".onyx/bin"
 
 # Parse arguments
 while [[ $# -gt 1 ]]; do
@@ -71,18 +71,32 @@ echo "  [2/4] Checking remote host..."
 REMOTE_ARCH=$(ssh $SSH_ARGS "$REMOTE_HOST" "uname -m" 2>/dev/null)
 LOCAL_ARCH=$(uname -m)
 
-if [ "$REMOTE_ARCH" = "$LOCAL_ARCH" ] && [ "$(uname -s)" = "Darwin" ] && [ "$(ssh $SSH_ARGS "$REMOTE_HOST" uname -s 2>/dev/null)" = "Darwin" ]; then
+REMOTE_OS=$(ssh $SSH_ARGS "$REMOTE_HOST" uname -s 2>/dev/null)
+if [ "$REMOTE_ARCH" = "$LOCAL_ARCH" ] && [ "$(uname -s)" = "$REMOTE_OS" ]; then
     # Same arch, same OS — copy directly
-    echo "        Architecture match ($REMOTE_ARCH), copying binary..."
+    echo "        Architecture match ($REMOTE_ARCH/$REMOTE_OS), copying binary..."
+elif [ "$REMOTE_OS" = "Linux" ] && [ -f "$SCRIPT_DIR/.build/linux/OnyxMCP" ]; then
+    # Linux binary available from Docker build
+    BINARY="$SCRIPT_DIR/.build/linux/OnyxMCP"
+    echo "        Using pre-built Linux binary..."
 else
     echo ""
-    echo "  WARNING: Remote host is $REMOTE_ARCH ($(ssh $SSH_ARGS "$REMOTE_HOST" uname -s 2>/dev/null))"
+    echo "  WARNING: Remote host is $REMOTE_ARCH ($REMOTE_OS)"
     echo "  Local binary is $LOCAL_ARCH ($(uname -s))"
     echo ""
-    echo "  The binary may not work on the remote host."
-    echo "  For Linux remotes, build OnyxMCP on a Linux machine:"
-    echo "    swift build --product OnyxMCP"
-    echo "    scp .build/debug/OnyxMCP $REMOTE_HOST:~/$REMOTE_BIN_DIR/OnyxMCP"
+    if [ "$REMOTE_OS" = "Linux" ]; then
+        echo "  Build a Linux binary first:"
+        echo "    ./build-linux-mcp.sh    (requires Docker)"
+        echo "  Then re-run this script."
+        echo ""
+        echo "  Or build on the remote host directly:"
+        echo "    ssh $REMOTE_HOST"
+        echo "    git clone <repo-url> && cd onyx"
+        echo "    swift build --product OnyxMCP -c release"
+        echo "    mkdir -p ~/.onyx/bin && cp .build/release/OnyxMCP ~/.onyx/bin/"
+    else
+        echo "  The binary may not work. Build OnyxMCP on the remote host."
+    fi
     echo ""
     echo "  Continuing anyway (will fail at runtime if incompatible)..."
     echo ""
@@ -101,7 +115,7 @@ HOOK_CMD="\$HOME/$REMOTE_BIN_DIR/OnyxMCP --hook"
 # Use a heredoc sent via SSH — avoids needing python3 on the remote
 ssh $SSH_ARGS "$REMOTE_HOST" bash <<'REMOTE_SCRIPT'
 set -e
-HOOK_CMD="$HOME/.local/bin/OnyxMCP --hook"
+HOOK_CMD="$HOME/.onyx/bin/OnyxMCP --hook"
 SETTINGS_DIR="$HOME/.claude"
 SETTINGS_FILE="$SETTINGS_DIR/settings.json"
 

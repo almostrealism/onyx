@@ -13,6 +13,7 @@ set -e
 ONYX_MCP="${1:-}"
 if [ -z "$ONYX_MCP" ]; then
     for path in \
+        "$HOME/.onyx/bin/OnyxMCP" \
         "$HOME/.local/bin/OnyxMCP" \
         /Users/Shared/flowtree/tools/OnyxMCP \
         /usr/local/bin/OnyxMCP \

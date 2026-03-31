@@ -528,9 +528,10 @@ public class MCPSocketServer {
 
     public init(artifactManager: ArtifactManager, claudeSessions: ClaudeSessionManager) {
         self.handler = MCPMessageHandler(artifactManager: artifactManager, claudeSessions: claudeSessions)
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let onyxDir = appSupport.appendingPathComponent("Onyx")
-        try? FileManager.default.createDirectory(at: onyxDir, withIntermediateDirectories: true)
+        // Use ~/.onyx/ for the socket (cross-platform, matches OnyxMCP client)
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let onyxDir = home.appendingPathComponent(".onyx")
+        try? FileManager.default.createDirectory(at: onyxDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         self.socketPath = onyxDir.appendingPathComponent("mcp.sock").path
     }
 
