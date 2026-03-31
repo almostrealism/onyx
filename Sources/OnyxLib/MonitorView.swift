@@ -107,17 +107,26 @@ public class MonitorManager: ObservableObject {
             return padding + recent
         }
 
-        // 1-minute buckets: aggregate multiple 5s samples
+        // 1-minute buckets: anchor to wall-clock minutes so bars don't shift.
+        // Each bar represents a fixed minute (e.g., 14:03, 14:04, ...).
+        // Only the current (rightmost) bar changes as new samples arrive.
         let interval: TimeInterval = 60
         let now = Date()
+        // Round "now" down to the start of the current minute
+        let calendar = Calendar.current
+        let currentMinuteStart = calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour, .minute], from: now))!
+        // The rightmost bucket covers [currentMinuteStart, currentMinuteStart+60)
+        // The leftmost bucket covers [currentMinuteStart - 59*60, currentMinuteStart - 58*60)
         var buckets: [Double] = Array(repeating: -1, count: bucketCount)
 
         for i in 0..<bucketCount {
-            let bucketEnd = now.addingTimeInterval(-Double(i) * interval)
-            let bucketStart = bucketEnd.addingTimeInterval(-interval)
-            let vals = data.filter { $0.0 > bucketStart && $0.0 <= bucketEnd }.compactMap { $0.1 }
+            // i=0 is oldest, i=59 is current minute
+            let minuteOffset = bucketCount - 1 - i
+            let bucketStart = currentMinuteStart.addingTimeInterval(-Double(minuteOffset) * interval)
+            let bucketEnd = bucketStart.addingTimeInterval(interval)
+            let vals = data.filter { $0.0 >= bucketStart && $0.0 < bucketEnd }.compactMap { $0.1 }
             if !vals.isEmpty {
-                buckets[bucketCount - 1 - i] = vals.reduce(0, +) / Double(vals.count)
+                buckets[i] = vals.reduce(0, +) / Double(vals.count)
             }
         }
 

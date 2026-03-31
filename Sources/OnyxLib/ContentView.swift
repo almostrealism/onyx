@@ -98,6 +98,23 @@ public struct ContentView: View {
                             if appState.isReconnecting && appState.connectionError == nil {
                                 ReconnectingOverlay(accentColor: appState.accentColor)
                             }
+
+                            // Hooks setup status toast
+                            if let status = appState.hooksSetupStatus {
+                                VStack {
+                                    Spacer()
+                                    Text(status)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundColor(.white.opacity(0.8))
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                        .background(Color.black.opacity(0.8))
+                                        .cornerRadius(6)
+                                        .padding(.bottom, 40)
+                                }
+                                .transition(.opacity)
+                                .allowsHitTesting(false)
+                            }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .modifier(FocusOutline(active: appState.focusedComponent == .terminal, show: appState.showFocusOutline))

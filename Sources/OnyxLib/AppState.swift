@@ -1154,6 +1154,178 @@ public class AppState: ObservableObject {
         appearance.lastSessionByWindow[windowIndex]
     }
 
+    // MARK: - Claude Code Hooks Setup
+
+    @Published public var hooksSetupStatus: String?
+
+    /// Install OnyxMCP and configure Claude Code hooks on the active host.
+    /// Copies the binary from the local app bundle and configures hooks via SSH.
+    public func setupClaudeHooks() {
+        guard let host = activeHost else {
+            hooksSetupStatus = "No active host"
+            return
+        }
+
+        hooksSetupStatus = "Setting up hooks on \(host.label)..."
+
+        // Find the local OnyxMCP binary
+        let possiblePaths = [
+            Bundle.main.bundlePath + "/Contents/MacOS/OnyxMCP",
+            ProcessInfo.processInfo.environment["HOME"].map { $0 + "/.local/bin/OnyxMCP" },
+            Optional("/Users/Shared/flowtree/tools/OnyxMCP"),
+        ].compactMap { $0 }
+
+        let localBinary = possiblePaths.first { FileManager.default.isExecutableFile(atPath: $0) }
+
+        // Also check the build directory
+        let buildBinary = localBinary ?? {
+            let buildDir = (ProcessInfo.processInfo.environment["PWD"] ?? "") + "/.build/debug/OnyxMCP"
+            return FileManager.default.isExecutableFile(atPath: buildDir) ? buildDir : nil
+        }()
+
+        guard let binary = buildBinary else {
+            hooksSetupStatus = "OnyxMCP binary not found. Run install-mcp.sh first."
+            clearStatusAfterDelay()
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+
+            if host.isLocal {
+                // Local setup — just configure hooks
+                self.configureHooksLocally(binary: binary)
+            } else {
+                // Remote setup — copy binary then configure
+                self.configureHooksRemotely(host: host, localBinary: binary)
+            }
+        }
+    }
+
+    private func configureHooksLocally(binary: String) {
+        let hookCmd = binary + " --hook"
+        let hooksJson = buildHooksJson(hookCmd: hookCmd)
+
+        let settingsDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
+        try? FileManager.default.createDirectory(at: settingsDir, withIntermediateDirectories: true)
+        let settingsFile = settingsDir.appendingPathComponent("settings.json")
+
+        var settings: [String: Any] = [:]
+        if let data = try? Data(contentsOf: settingsFile),
+           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            settings = existing
+        }
+
+        if let hooksObj = try? JSONSerialization.jsonObject(with: hooksJson.data(using: .utf8)!) {
+            settings["hooks"] = hooksObj
+        }
+
+        if let data = try? JSONSerialization.data(withJSONObject: settings, options: .prettyPrinted) {
+            try? data.write(to: settingsFile)
+        }
+
+        DispatchQueue.main.async {
+            self.hooksSetupStatus = "Hooks configured for local Claude Code"
+            self.clearStatusAfterDelay()
+        }
+    }
+
+    private func configureHooksRemotely(host: HostConfig, localBinary: String) {
+        let remoteBin = ".local/bin/OnyxMCP"
+        let hookCmd = "$HOME/.local/bin/OnyxMCP --hook"
+
+        // Step 1: Copy binary
+        DispatchQueue.main.async { self.hooksSetupStatus = "Copying OnyxMCP to \(host.label)..." }
+
+        let mkdirScript = "mkdir -p ~/.local/bin"
+        let (mkCmd, mkArgs) = remoteCommand(mkdirScript, host: host)
+        let mkProcess = Process()
+        mkProcess.executableURL = URL(fileURLWithPath: mkCmd)
+        mkProcess.arguments = mkArgs
+        mkProcess.standardOutput = FileHandle.nullDevice
+        mkProcess.standardError = FileHandle.nullDevice
+        try? mkProcess.run()
+        mkProcess.waitUntilExit()
+
+        // SCP the binary
+        var scpArgs = scpBaseArgs(for: host)
+        scpArgs.append(localBinary)
+        scpArgs.append("\(sshUserHost(for: host)):~/\(remoteBin)")
+        let scpProcess = Process()
+        scpProcess.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
+        scpProcess.arguments = scpArgs
+        scpProcess.standardOutput = FileHandle.nullDevice
+        scpProcess.standardError = FileHandle.nullDevice
+        try? scpProcess.run()
+        scpProcess.waitUntilExit()
+
+        guard scpProcess.terminationStatus == 0 else {
+            DispatchQueue.main.async {
+                self.hooksSetupStatus = "Failed to copy OnyxMCP to \(host.label)"
+                self.clearStatusAfterDelay()
+            }
+            return
+        }
+
+        // chmod +x
+        let chmodScript = "chmod +x ~/\(remoteBin)"
+        let (chCmd, chArgs) = remoteCommand(chmodScript, host: host)
+        let chProcess = Process()
+        chProcess.executableURL = URL(fileURLWithPath: chCmd)
+        chProcess.arguments = chArgs
+        chProcess.standardOutput = FileHandle.nullDevice
+        chProcess.standardError = FileHandle.nullDevice
+        try? chProcess.run()
+        chProcess.waitUntilExit()
+
+        // Step 2: Configure hooks
+        DispatchQueue.main.async { self.hooksSetupStatus = "Configuring hooks on \(host.label)..." }
+
+        let hooksJson = buildHooksJson(hookCmd: hookCmd)
+        // Escape for shell
+        let escapedHooks = hooksJson.replacingOccurrences(of: "'", with: "'\\''")
+
+        let configScript = """
+        mkdir -p ~/.claude; \
+        HOOKS='\(escapedHooks)'; \
+        if [ -f ~/.claude/settings.json ] && command -v python3 >/dev/null 2>&1; then \
+        python3 -c "import json; s=json.load(open('$HOME/.claude/settings.json')); s['hooks']=json.loads('$HOOKS'); json.dump(s,open('$HOME/.claude/settings.json','w'),indent=2)" 2>/dev/null; \
+        elif [ -f ~/.claude/settings.json ] && command -v jq >/dev/null 2>&1; then \
+        TMP=$(mktemp); jq --argjson hooks "$HOOKS" '.hooks=$hooks' ~/.claude/settings.json > "$TMP" && mv "$TMP" ~/.claude/settings.json; \
+        else \
+        echo '{"hooks": '"$HOOKS"'}' > ~/.claude/settings.json; \
+        fi
+        """
+
+        let (cfgCmd, cfgArgs) = remoteCommand(configScript, host: host)
+        let cfgProcess = Process()
+        cfgProcess.executableURL = URL(fileURLWithPath: cfgCmd)
+        cfgProcess.arguments = cfgArgs
+        cfgProcess.standardOutput = FileHandle.nullDevice
+        cfgProcess.standardError = FileHandle.nullDevice
+        try? cfgProcess.run()
+        cfgProcess.waitUntilExit()
+
+        DispatchQueue.main.async {
+            self.hooksSetupStatus = cfgProcess.terminationStatus == 0
+                ? "Hooks configured on \(host.label)"
+                : "Hook config may have failed on \(host.label)"
+            self.clearStatusAfterDelay()
+        }
+    }
+
+    private func buildHooksJson(hookCmd: String) -> String {
+        """
+        {"PreToolUse":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":10}]}],"PostToolUse":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":5,"async":true}]}],"PermissionRequest":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":120}]}],"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":5,"async":true}]}],"Stop":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":5,"async":true}]}]}
+        """
+    }
+
+    private func clearStatusAfterDelay() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            self?.hooksSetupStatus = nil
+        }
+    }
+
     private func loadFavorites() {
         FavoritesStore.shared.configure(url: favoritesURL)
     }

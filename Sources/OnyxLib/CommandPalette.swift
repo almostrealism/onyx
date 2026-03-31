@@ -55,6 +55,10 @@ struct CommandPaletteView: View {
                 appState.showCommandPalette = false
                 appState.showSetup = true
             },
+            PaletteAction(title: "Setup Claude Hooks", shortcut: "") {
+                appState.showCommandPalette = false
+                appState.setupClaudeHooks()
+            },
         ]
         if query.isEmpty { return all }
         return all.filter { $0.title.localizedCaseInsensitiveContains(query) }
