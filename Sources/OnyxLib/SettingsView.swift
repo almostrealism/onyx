@@ -192,38 +192,14 @@ struct SettingsView: View {
                                         .tracking(2)
 
                                     ForEach(0..<3, id: \.self) { i in
-                                        HStack(spacing: 8) {
-                                            Text("\(i + 1).")
-                                                .font(.system(size: 11, design: .monospaced))
-                                                .foregroundColor(.gray.opacity(0.4))
-                                                .frame(width: 16)
-
-                                            let binding = Binding<String>(
-                                                get: { i < appState.appearance.extraTimezones.count ? appState.appearance.extraTimezones[i] : "" },
-                                                set: { newValue in
-                                                    while appState.appearance.extraTimezones.count <= i {
-                                                        appState.appearance.extraTimezones.append("")
-                                                    }
-                                                    appState.appearance.extraTimezones[i] = newValue
-                                                    // Remove trailing empty entries
-                                                    while appState.appearance.extraTimezones.last?.isEmpty == true {
-                                                        appState.appearance.extraTimezones.removeLast()
-                                                    }
-                                                }
-                                            )
-
-                                            TextField("e.g. America/New_York", text: binding)
-                                                .textFieldStyle(.plain)
-                                                .font(.system(size: 11, design: .monospaced))
-                                                .foregroundColor(.white.opacity(0.8))
-                                                .padding(.horizontal, 6)
-                                                .padding(.vertical, 3)
-                                                .background(Color.white.opacity(0.06))
-                                                .cornerRadius(3)
-                                        }
+                                        TimezoneField(
+                                            index: i,
+                                            appState: appState,
+                                            accentColor: Color(hex: appState.appearance.accentHex)
+                                        )
                                     }
 
-                                    Text("Use IANA timezone IDs (press P in monitor for 12/24hr)")
+                                    Text("Press P in monitor to toggle 12/24hr")
                                         .font(.system(size: 9, design: .monospaced))
                                         .foregroundColor(.gray.opacity(0.3))
                                 }
@@ -471,5 +447,122 @@ struct SectionHeader: View {
             .foregroundColor(.gray.opacity(0.5))
             .tracking(3)
             .padding(.bottom, 4)
+    }
+}
+
+// MARK: - Timezone Autocomplete Field
+
+private struct TimezoneField: View {
+    let index: Int
+    @ObservedObject var appState: AppState
+    let accentColor: Color
+
+    @State private var query: String = ""
+    @State private var showSuggestions = false
+    @State private var initialized = false
+
+    /// All known timezone IDs with friendly labels for searching
+    private static let allTimezones: [(id: String, label: String)] = {
+        TimeZone.knownTimeZoneIdentifiers.sorted().map { id in
+            let city = id.split(separator: "/").last.map(String.init) ?? id
+            let display = city.replacingOccurrences(of: "_", with: " ")
+            let abbrev = TimeZone(identifier: id)?.abbreviation() ?? ""
+            return (id: id, label: "\(display) (\(abbrev)) — \(id)")
+        }
+    }()
+
+    private var suggestions: [(id: String, label: String)] {
+        let q = query.lowercased()
+        guard !q.isEmpty else { return [] }
+        return Self.allTimezones.filter { $0.label.lowercased().contains(q) }.prefix(8).map { $0 }
+    }
+
+    private var currentValue: String {
+        index < appState.appearance.extraTimezones.count ? appState.appearance.extraTimezones[index] : ""
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Text("\(index + 1).")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+                    .frame(width: 16)
+
+                TextField("Type city or region...", text: $query, onEditingChanged: { editing in
+                    showSuggestions = editing
+                })
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(3)
+                .onAppear {
+                    if !initialized {
+                        query = currentValue
+                        initialized = true
+                    }
+                }
+                .onChange(of: query) { _, newValue in
+                    // If the user typed something that exactly matches an ID, commit it
+                    if TimeZone(identifier: newValue) != nil {
+                        commitTimezone(newValue)
+                    }
+                }
+
+                // Clear button
+                if !query.isEmpty {
+                    Button(action: {
+                        query = ""
+                        commitTimezone("")
+                        showSuggestions = false
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(.gray.opacity(0.4))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            // Suggestions dropdown
+            if showSuggestions && !suggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(suggestions, id: \.id) { tz in
+                        Button(action: {
+                            query = tz.id
+                            commitTimezone(tz.id)
+                            showSuggestions = false
+                        }) {
+                            Text(tz.label)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.7))
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.white.opacity(0.04))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .background(Color(nsColor: NSColor(white: 0.1, alpha: 1.0)))
+                .cornerRadius(4)
+                .padding(.leading, 24) // align with text field
+            }
+        }
+    }
+
+    private func commitTimezone(_ value: String) {
+        while appState.appearance.extraTimezones.count <= index {
+            appState.appearance.extraTimezones.append("")
+        }
+        appState.appearance.extraTimezones[index] = value
+        // Remove trailing empty entries
+        while appState.appearance.extraTimezones.last?.isEmpty == true {
+            appState.appearance.extraTimezones.removeLast()
+        }
     }
 }
