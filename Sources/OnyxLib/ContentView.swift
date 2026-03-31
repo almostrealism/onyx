@@ -549,6 +549,34 @@ private struct ContentViewSessionNotifications: ViewModifier {
 struct TerminalTextOverlay: View {
     @ObservedObject var appState: AppState
 
+    /// Build attributed string with clickable URLs highlighted
+    private var linkedContent: AttributedString {
+        let text = appState.terminalTextContent
+        var result = AttributedString(text)
+        result.foregroundColor = .white.opacity(0.9)
+
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return result
+        }
+
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+
+        for match in detector.matches(in: text, range: range) {
+            guard let url = match.url,
+                  let swiftRange = Range(match.range, in: text) else { continue }
+            let offset = text.distance(from: text.startIndex, to: swiftRange.lowerBound)
+            let length = text.distance(from: swiftRange.lowerBound, to: swiftRange.upperBound)
+            let start = result.index(result.startIndex, offsetByCharacters: offset)
+            let end = result.index(start, offsetByCharacters: length)
+            result[start..<end].link = url
+            result[start..<end].foregroundColor = Color(hex: "66CCFF")
+            result[start..<end].underlineStyle = .single
+        }
+
+        return result
+    }
+
     var body: some View {
         ZStack {
             Color(nsColor: NSColor(white: 0.04, alpha: 0.98))
@@ -564,7 +592,7 @@ struct TerminalTextOverlay: View {
 
                     Spacer()
 
-                    Text("⌘⇧C or Esc to close")
+                    Text("click URLs to open · ⌘⇧C or Esc to close")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.4))
                 }
@@ -574,7 +602,7 @@ struct TerminalTextOverlay: View {
 
                 Divider().background(Color.white.opacity(0.1))
 
-                // Selectable text content
+                // Selectable text content with clickable URLs
                 if appState.terminalTextContent.isEmpty {
                     Spacer()
                     HStack(spacing: 8) {
@@ -586,10 +614,13 @@ struct TerminalTextOverlay: View {
                     Spacer()
                 } else {
                     ScrollView([.vertical, .horizontal]) {
-                        Text(appState.terminalTextContent)
+                        Text(linkedContent)
                             .font(.system(size: CGFloat(appState.appearance.effectiveTerminalFontSize), design: .monospaced))
-                            .foregroundColor(.white.opacity(0.9))
                             .textSelection(.enabled)
+                            .environment(\.openURL, OpenURLAction { url in
+                                NSWorkspace.shared.open(url)
+                                return .handled
+                            })
                             .padding(16)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
