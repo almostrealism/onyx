@@ -424,22 +424,18 @@ class OnyxTerminalView: NSView {
 
     private func destroyPoolEntry(_ sessionID: String) {
         guard let entry = pool.removeValue(forKey: sessionID) else { return }
-        // Terminate the process BEFORE removing the view to avoid
-        // "Resurrection of an object" crash — SwiftTerm's dispatch IO
-        // channel must be closed before the view is deallocated.
+        // Terminate the process BEFORE removing the view. Do NOT SIGKILL —
+        // that races with SwiftTerm's dispatch IO cleanup and causes
+        // "Resurrection of an object" crash (the dispatch source tries to
+        // retain the already-deallocating process object).
         if entry.processRunning {
-            let pid = entry.terminalView.process.shellPid
             entry.terminalView.process.terminate()
-            // If SIGTERM doesn't kill it within 2s, force-kill to free
-            // the remote sshd connection slot
-            if pid > 0 {
-                DispatchQueue.global(qos: .utility).async {
-                    Thread.sleep(forTimeInterval: 2.0)
-                    kill(pid, SIGKILL)
-                }
-            }
         }
-        entry.terminalView.removeFromSuperview()
+        // Defer view removal to let SwiftTerm's IO channel drain
+        let view = entry.terminalView
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            view.removeFromSuperview()
+        }
     }
 
     private func startEvictionTimer() {

@@ -1177,7 +1177,20 @@ public class AppState: ObservableObject {
 
     /// SSH args for short-lived utility commands (stats, enumeration, file browser).
     /// Uses mux for efficiency — these are ephemeral and can retry if mux dies.
+    /// If the mux socket file exists but the master is dead (stale after sleep),
+    /// removes the stale socket so SSH doesn't hang trying to connect through it.
     func sshBaseArgs(for host: HostConfig, batchMode: Bool = true, connectTimeout: Int = 5) -> [String] {
+        // Clean up obviously stale mux sockets — prevents hangs after sleep/wake.
+        // If the socket file hasn't been modified in > 150s (ControlPersist=120 + margin),
+        // the master is certainly dead. Remove the socket so SSH creates a fresh one
+        // instead of hanging trying to connect through the dead socket.
+        let controlPath = sshControlPath(for: host)
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: controlPath),
+           let modified = attrs[.modificationDate] as? Date,
+           Date().timeIntervalSince(modified) > 150 {
+            try? FileManager.default.removeItem(atPath: controlPath)
+        }
+
         var args = sshMuxArgs(for: host)
         if batchMode {
             args.append("-o"); args.append("BatchMode=yes")
