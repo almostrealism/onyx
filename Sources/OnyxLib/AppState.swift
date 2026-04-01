@@ -962,10 +962,13 @@ public class AppState: ObservableObject {
         }()
 
         guard let binary = buildBinary else {
-            hooksSetupStatus = "OnyxMCP binary not found. Run install-mcp.sh first."
+            let searched = possiblePaths.joined(separator: ", ")
+            hooksSetupStatus = "OnyxMCP not found. Run install-mcp.sh first. Searched: \(searched)"
             clearStatusAfterDelay()
             return
         }
+
+        print("setupClaudeHooks: using binary at \(binary) for \(host.label)")
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -1008,53 +1011,62 @@ public class AppState: ObservableObject {
         }
     }
 
+    /// Run a process and capture stderr for error reporting
+    private func runCapturingError(_ executable: String, args: [String]) -> (exitCode: Int32, stderr: String) {
+        let process = Process()
+        let errPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = args
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = errPipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            let errStr = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return (process.terminationStatus, errStr)
+        } catch {
+            return (-1, error.localizedDescription)
+        }
+    }
+
     private func configureHooksRemotely(host: HostConfig, localBinary: String) {
         let remoteBin = ".onyx/bin/OnyxMCP"
         let hookCmd = "$HOME/.onyx/bin/OnyxMCP --hook"
 
-        // Step 1: Copy binary
-        DispatchQueue.main.async { self.hooksSetupStatus = "Copying OnyxMCP to \(host.label)..." }
+        // Step 1: Create remote directory
+        DispatchQueue.main.async { self.hooksSetupStatus = "Creating ~/.onyx/bin on \(host.label)..." }
 
-        let mkdirScript = "mkdir -p ~/.local/bin"
-        let (mkCmd, mkArgs) = remoteCommand(mkdirScript, host: host)
-        let mkProcess = Process()
-        mkProcess.executableURL = URL(fileURLWithPath: mkCmd)
-        mkProcess.arguments = mkArgs
-        mkProcess.standardOutput = FileHandle.nullDevice
-        mkProcess.standardError = FileHandle.nullDevice
-        try? mkProcess.run()
-        mkProcess.waitUntilExit()
-
-        // SCP the binary
-        var scpArgs = scpBaseArgs(for: host)
-        scpArgs.append(localBinary)
-        scpArgs.append("\(sshUserHost(for: host)):~/\(remoteBin)")
-        let scpProcess = Process()
-        scpProcess.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
-        scpProcess.arguments = scpArgs
-        scpProcess.standardOutput = FileHandle.nullDevice
-        scpProcess.standardError = FileHandle.nullDevice
-        try? scpProcess.run()
-        scpProcess.waitUntilExit()
-
-        guard scpProcess.terminationStatus == 0 else {
+        let (mkCmd, mkArgs) = remoteCommand("mkdir -p ~/.onyx/bin", host: host)
+        let mkResult = runCapturingError(mkCmd, args: mkArgs)
+        if mkResult.exitCode != 0 {
             DispatchQueue.main.async {
-                self.hooksSetupStatus = "Failed to copy OnyxMCP to \(host.label)"
+                self.hooksSetupStatus = "Failed to create directory on \(host.label): \(mkResult.stderr)"
                 self.clearStatusAfterDelay()
             }
             return
         }
 
-        // chmod +x
-        let chmodScript = "chmod +x ~/\(remoteBin)"
-        let (chCmd, chArgs) = remoteCommand(chmodScript, host: host)
-        let chProcess = Process()
-        chProcess.executableURL = URL(fileURLWithPath: chCmd)
-        chProcess.arguments = chArgs
-        chProcess.standardOutput = FileHandle.nullDevice
-        chProcess.standardError = FileHandle.nullDevice
-        try? chProcess.run()
-        chProcess.waitUntilExit()
+        // Step 2: SCP the binary
+        DispatchQueue.main.async { self.hooksSetupStatus = "Uploading OnyxMCP to \(host.label)..." }
+
+        var scpArgs = scpBaseArgs(for: host)
+        scpArgs.append(localBinary)
+        scpArgs.append("\(sshUserHost(for: host)):~/\(remoteBin)")
+        let scpResult = runCapturingError("/usr/bin/scp", args: scpArgs)
+
+        guard scpResult.exitCode == 0 else {
+            let detail = scpResult.stderr.isEmpty ? "exit code \(scpResult.exitCode)" : scpResult.stderr
+            DispatchQueue.main.async {
+                self.hooksSetupStatus = "Upload failed: \(detail)"
+                self.clearStatusAfterDelay()
+            }
+            return
+        }
+
+        // Step 3: chmod +x
+        let (chCmd, chArgs) = remoteCommand("chmod +x ~/\(remoteBin)", host: host)
+        _ = runCapturingError(chCmd, args: chArgs)
 
         // Step 2: Configure hooks
         DispatchQueue.main.async { self.hooksSetupStatus = "Configuring hooks on \(host.label)..." }
@@ -1076,18 +1088,15 @@ public class AppState: ObservableObject {
         """
 
         let (cfgCmd, cfgArgs) = remoteCommand(configScript, host: host)
-        let cfgProcess = Process()
-        cfgProcess.executableURL = URL(fileURLWithPath: cfgCmd)
-        cfgProcess.arguments = cfgArgs
-        cfgProcess.standardOutput = FileHandle.nullDevice
-        cfgProcess.standardError = FileHandle.nullDevice
-        try? cfgProcess.run()
-        cfgProcess.waitUntilExit()
+        let cfgResult = runCapturingError(cfgCmd, args: cfgArgs)
 
         DispatchQueue.main.async {
-            self.hooksSetupStatus = cfgProcess.terminationStatus == 0
-                ? "Hooks configured on \(host.label)"
-                : "Hook config may have failed on \(host.label)"
+            if cfgResult.exitCode == 0 {
+                self.hooksSetupStatus = "Hooks configured on \(host.label)"
+            } else {
+                let detail = cfgResult.stderr.isEmpty ? "exit code \(cfgResult.exitCode)" : cfgResult.stderr
+                self.hooksSetupStatus = "Hook config failed: \(detail)"
+            }
             self.clearStatusAfterDelay()
         }
     }
