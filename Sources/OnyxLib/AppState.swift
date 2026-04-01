@@ -1068,26 +1068,73 @@ public class AppState: ObservableObject {
         let (chCmd, chArgs) = remoteCommand("chmod +x ~/\(remoteBin)", host: host)
         _ = runCapturingError(chCmd, args: chArgs)
 
-        // Step 2: Configure hooks
+        // Step 2: Configure hooks by writing a JSON file and a setup script,
+        // then SCPing both to the remote and executing the script.
+        // This avoids all shell quoting issues with inline JSON.
         DispatchQueue.main.async { self.hooksSetupStatus = "Configuring hooks on \(host.label)..." }
 
         let hooksJson = buildHooksJson(hookCmd: hookCmd)
-        // Escape for shell
-        let escapedHooks = hooksJson.replacingOccurrences(of: "'", with: "'\\''")
+        let settingsJson = "{\"hooks\": \(hooksJson)}"
 
-        let configScript = """
-        mkdir -p ~/.claude; \
-        HOOKS='\(escapedHooks)'; \
-        if [ -f ~/.claude/settings.json ] && command -v python3 >/dev/null 2>&1; then \
-        python3 -c "import json; s=json.load(open('$HOME/.claude/settings.json')); s['hooks']=json.loads('$HOOKS'); json.dump(s,open('$HOME/.claude/settings.json','w'),indent=2)" 2>/dev/null; \
-        elif [ -f ~/.claude/settings.json ] && command -v jq >/dev/null 2>&1; then \
-        TMP=$(mktemp); jq --argjson hooks "$HOOKS" '.hooks=$hooks' ~/.claude/settings.json > "$TMP" && mv "$TMP" ~/.claude/settings.json; \
-        else \
-        echo '{"hooks": '"$HOOKS"'}' > ~/.claude/settings.json; \
+        // Write files to a temp directory locally
+        let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent("onyx-hooks-\(ProcessInfo.processInfo.processIdentifier)")
+        try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let hooksFile = tmpDir.appendingPathComponent("hooks.json")
+        try? hooksJson.write(to: hooksFile, atomically: true, encoding: .utf8)
+
+        let setupScript = tmpDir.appendingPathComponent("setup.sh")
+        let scriptContent = """
+        #!/bin/sh
+        mkdir -p ~/.claude
+        HOOKS_FILE=~/.onyx/hooks.json
+        if [ -f ~/.claude/settings.json ] && command -v python3 >/dev/null 2>&1; then
+            python3 -c "
+        import json
+        with open('$HOOKS_FILE') as hf:
+            hooks = json.load(hf)
+        try:
+            with open('$HOME/.claude/settings.json') as sf:
+                settings = json.load(sf)
+        except:
+            settings = {}
+        settings['hooks'] = hooks
+        with open('$HOME/.claude/settings.json', 'w') as sf:
+            json.dump(settings, sf, indent=2)
+            sf.write('\\n')
+        "
+        elif [ -f ~/.claude/settings.json ] && command -v jq >/dev/null 2>&1; then
+            TMP=$(mktemp)
+            jq --slurpfile hooks "$HOOKS_FILE" '.hooks = $hooks[0]' ~/.claude/settings.json > "$TMP" && mv "$TMP" ~/.claude/settings.json
+        else
+            echo '{"hooks": '$(cat "$HOOKS_FILE")'}' > ~/.claude/settings.json
         fi
+        rm -f "$HOOKS_FILE"
         """
+        try? scriptContent.write(to: setupScript, atomically: true, encoding: .utf8)
 
-        let (cfgCmd, cfgArgs) = remoteCommand(configScript, host: host)
+        // SCP the hooks JSON to remote ~/.onyx/hooks.json
+        var scpHooksArgs = scpBaseArgs(for: host)
+        scpHooksArgs.append(hooksFile.path)
+        scpHooksArgs.append("\(sshUserHost(for: host)):~/.onyx/hooks.json")
+        let scpHooksResult = runCapturingError("/usr/bin/scp", args: scpHooksArgs)
+        guard scpHooksResult.exitCode == 0 else {
+            DispatchQueue.main.async {
+                self.hooksSetupStatus = "Failed to upload hooks config: \(scpHooksResult.stderr)"
+                self.clearStatusAfterDelay()
+            }
+            return
+        }
+
+        // SCP the setup script
+        var scpScriptArgs = scpBaseArgs(for: host)
+        scpScriptArgs.append(setupScript.path)
+        scpScriptArgs.append("\(sshUserHost(for: host)):~/.onyx/setup-hooks.sh")
+        _ = runCapturingError("/usr/bin/scp", args: scpScriptArgs)
+
+        // Execute the setup script remotely
+        let (cfgCmd, cfgArgs) = remoteCommand("sh ~/.onyx/setup-hooks.sh && rm -f ~/.onyx/setup-hooks.sh", host: host)
         let cfgResult = runCapturingError(cfgCmd, args: cfgArgs)
 
         DispatchQueue.main.async {
