@@ -574,12 +574,9 @@ struct MonitorView: View {
                 .allowsHitTesting(false)
 
             VStack(spacing: 16) {
-                // Time + stats row
-                HStack(alignment: .center) {
-                    // Time/date on left
-                    TimeDisplay(accentColor: appState.accentColor, use12Hour: appState.appearance.use12HourClock)
-
-                    // Extra timezone clocks
+                // Time + stats row: aux clocks left, main clock center, chips right
+                ZStack {
+                    // LEFT: Extra timezone clocks
                     if !appState.appearance.extraTimezones.isEmpty {
                         HStack(spacing: 20) {
                             ForEach(appState.appearance.extraTimezones.prefix(3), id: \.self) { tzId in
@@ -592,12 +589,14 @@ struct MonitorView: View {
                                 }
                             }
                         }
-                        .layoutPriority(-1) // compress before stat chips
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    Spacer()
+                    // CENTER: Main clock
+                    TimeDisplay(accentColor: appState.accentColor, use12Hour: appState.appearance.use12HourClock)
+                        .frame(maxWidth: .infinity, alignment: .center)
 
-                    // Stat chips on right
+                    // RIGHT: Stat chips
                     if let sample = monitor.latestSample {
                         HStack(spacing: 12) {
                             if let cpu = sample.cpuUsage {
@@ -613,6 +612,7 @@ struct MonitorView: View {
                                 StatChip(label: "TEMP", value: "\(temp)°C", accentColor: Color(hex: "FF6B6B"))
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
                 .padding(.horizontal, 40)
