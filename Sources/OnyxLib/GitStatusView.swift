@@ -453,6 +453,8 @@ struct GitLandingView: View {
     var onTrackFile: ((String, String) -> Void)? = nil
     /// Called to navigate to and view a file (path, name) — for untracked files
     var onViewFile: ((String, String) -> Void)? = nil
+    /// Called to show a dependency graph diagram
+    var onShowDepGraph: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -509,6 +511,20 @@ struct GitLandingView: View {
                                     .font(.system(size: 9))
                                     .foregroundColor(accentColor.opacity(0.5))
                             }
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    // Dependency graph button (for Java repos with changes)
+                    if !status.isClean, let showGraph = onShowDepGraph {
+                        Button(action: showGraph) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "point.3.connected.trianglepath.dotted")
+                                    .font(.system(size: 9))
+                                Text("Deps")
+                                    .font(.system(size: 9, design: .monospaced))
+                            }
+                            .foregroundColor(accentColor.opacity(0.5))
                         }
                         .buttonStyle(.plain)
                     }

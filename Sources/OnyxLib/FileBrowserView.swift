@@ -323,6 +323,22 @@ public class FileBrowserManager: ObservableObject {
         return status.changedFiles.first { $0.path == relativePath }
     }
 
+    /// Analyze Java dependency graph and show as artifact diagram
+    public func analyzeDependencies(repoPath: String, appState: AppState) {
+        let analyzer = DependencyAnalyzer(appState: appState)
+        analyzer.analyze(repoPath: repoPath) { mermaid in
+            guard let mermaid = mermaid, !mermaid.isEmpty else {
+                return
+            }
+            // Display as a Mermaid diagram artifact
+            let content = ArtifactContent.diagram(content: mermaid, format: .mermaid)
+            DispatchQueue.main.async {
+                _ = appState.artifactManager.setSlot(0, title: "Dependency Graph", content: content)
+                appState.activeRightPanel = .artifacts
+            }
+        }
+    }
+
     /// Refresh the current directory listing and git status
     public func listCurrentDirectory() {
         guard let path = currentPath else { return }
@@ -1055,6 +1071,10 @@ struct FileBrowserView: View {
                                     },
                                     onViewFile: { path, name in
                                         browser.readFileFromSearch(path, name: name)
+                                    },
+                                    onShowDepGraph: {
+                                        guard let repoPath = browser.gitManager.currentRepoPath else { return }
+                                        browser.analyzeDependencies(repoPath: repoPath, appState: appState)
                                     }
                                 )
                                 Divider().background(Color.white.opacity(0.1))

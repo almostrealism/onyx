@@ -174,6 +174,7 @@ public class MCPMessageHandler {
                 showModelTool,
                 clearSlotTool,
                 listSlotsTool,
+                analyzeDepsTool,
             ])
         ])
         return JSONRPCResponse(id: request.id, result: tools)
@@ -258,6 +259,23 @@ public class MCPMessageHandler {
         ])
     }
 
+    private var analyzeDepsTool: AnyCodableValue {
+        .object([
+            "name": .string("analyze_deps"),
+            "description": .string("Analyze the dependency graph between changed Java files in a git repo. Parses imports to find relationships between modified files (including unchanged intermediary files that connect them). Displays result as a Mermaid diagram in artifact slot 0. Requires python3 on the remote host."),
+            "inputSchema": .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "repo_path": .object([
+                        "type": .string("string"),
+                        "description": .string("Absolute path to the git repository root")
+                    ])
+                ]),
+                "required": .array([.string("repo_path")])
+            ])
+        ])
+    }
+
     // MARK: - Tool Call Dispatch
 
     private func handleToolsCall(_ request: JSONRPCRequest) -> JSONRPCResponse {
@@ -274,6 +292,7 @@ public class MCPMessageHandler {
         case "show_model": return callShowModel(id: request.id, args: arguments)
         case "clear_slot": return callClearSlot(id: request.id, args: arguments)
         case "list_slots": return callListSlots(id: request.id)
+        case "analyze_deps": return callAnalyzeDeps(id: request.id, args: arguments)
         default:
             return JSONRPCResponse(id: request.id, error: JSONRPCError(code: -32602, message: "Unknown tool: \(toolName)"))
         }
@@ -433,6 +452,54 @@ public class MCPMessageHandler {
             "slots": .array(slotValues)
         ])
         return JSONRPCResponse(id: id, result: result)
+    }
+
+    // MARK: - Dependency Analysis
+
+    private func callAnalyzeDeps(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {
+        guard let repoPath = args["repo_path"]?.stringValue else {
+            return JSONRPCResponse(id: id, error: .invalidParams)
+        }
+
+        // Write the analysis script to a temp file and run locally.
+        // When called via MCP from a remote host, the repo_path is local
+        // to that host — but the MCP handler runs in the Onyx app. So this
+        // only works for local repos or when the agent calls show_diagram
+        // directly with pre-computed Mermaid. For the UI button path, the
+        // DependencyAnalyzer handles remote execution via SSH.
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("onyx-deps-mcp")
+        try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+
+        let scriptFile = tmpDir.appendingPathComponent("analyze_deps.py")
+        try? DependencyAnalyzer.analysisScript.write(to: scriptFile, atomically: true, encoding: .utf8)
+
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = [scriptFile.path, repoPath]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return toolResult(id: id, success: false, message: "python3 not available: \(error.localizedDescription)")
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let mermaid = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if mermaid.isEmpty {
+            return toolResult(id: id, success: true, message: "No Java dependency connections found")
+        }
+
+        let content = ArtifactContent.diagram(content: mermaid, format: .mermaid)
+        DispatchQueue.main.async { [self] in
+            _ = self.artifactManager.setSlot(0, title: "Dependency Graph", content: content)
+        }
+
+        return toolResult(id: id, success: true, message: "Dependency graph displayed in artifact slot 0.\n\nMermaid source:\n\(mermaid)")
     }
 
     // MARK: - Claude Hook Handler
