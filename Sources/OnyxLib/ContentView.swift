@@ -444,6 +444,11 @@ private struct ContentViewNotifications: ViewModifier {
                 if appState.showTerminalText {
                     appState.showTerminalText = false
                     appState.terminalTextContent = ""
+                    // Restore terminal focus after dismissing the overlay
+                    appState.focusedComponent = .terminal
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
+                    }
                 } else {
                     // Content will be captured by TerminalHostView.updateNSView
                     appState.terminalTextContent = ""
@@ -485,6 +490,7 @@ private struct ContentViewNotifications: ViewModifier {
                 let wasMonitoring = appState.showMonitor
                 appState.dismissTopOverlay()
                 if wasMonitoring && !appState.showMonitor { updateWindowTitle() }
+                appState.recalculateFocus()
             }
             .modifier(ContentViewSessionNotifications(appState: appState, hostWindow: hostWindow))
             .onChange(of: appState.activeRightPanel) { _, _ in
