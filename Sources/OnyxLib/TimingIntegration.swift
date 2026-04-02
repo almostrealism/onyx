@@ -272,10 +272,15 @@ public class TimingManager: ObservableObject {
             guard !dateStr.isEmpty else { continue }
 
             var projectTitle = "(no project)"
-            var projectColor = "888888"
+            var projectColor = ""
             if let proj = row["project"] as? [String: Any] {
                 projectTitle = proj["title"] as? String ?? "(no project)"
-                projectColor = (proj["color"] as? String ?? "888888").replacingOccurrences(of: "#", with: "")
+                let rawColor = proj["color"] as? String ?? ""
+                let cleaned = rawColor.replacingOccurrences(of: "#", with: "").trimmingCharacters(in: .whitespaces)
+                projectColor = cleaned.count == 6 ? cleaned : ""
+                if projectColor.isEmpty && entries.count < 3 {
+                    print("Timing: project '\(projectTitle)' color raw='\(rawColor)' cleaned='\(cleaned)' → using palette fallback")
+                }
 
                 // If filtering, determine the display name:
                 // - Direct children of filter project → show their title
@@ -313,6 +318,9 @@ public class TimingManager: ObservableObject {
             projectTotalMap[e.project, default: (e.color, 0)].seconds += e.seconds
         }
 
+        // Color palette for projects without a valid color
+        let palette = ["66CCFF", "6BFF8E", "FFD06B", "C06BFF", "FF6B6B", "FF6BCD", "6BFFD0", "FFB86B"]
+
         // Build daily hours
         var daily: [DailyTime] = []
         var total: Double = 0
@@ -325,8 +333,16 @@ public class TimingManager: ObservableObject {
             let hours = dayTotal / 3600.0
             total += hours
 
-            let slices = dayProjects.map { ProjectSlice(projectTitle: $0.key, color: $0.value.color, hours: $0.value.seconds / 3600.0) }
-                .sorted { $0.hours > $1.hours }
+            // Build slices, assigning palette colors to projects with no valid color
+            let slices = dayProjects.map { entry -> ProjectSlice in
+                var color = entry.value.color
+                if color.isEmpty || color.count != 6 {
+                    // Look up from totals palette (built below, so use project-name-based hash)
+                    let hash = abs(entry.key.hashValue) % palette.count
+                    color = palette[hash]
+                }
+                return ProjectSlice(projectTitle: entry.key, color: color, hours: entry.value.seconds / 3600.0)
+            }.sorted { $0.hours > $1.hours }
 
             daily.append(DailyTime(
                 id: dayLabels[i],
@@ -337,8 +353,15 @@ public class TimingManager: ObservableObject {
             ))
         }
 
-        let totals = projectTotalMap.map { ProjectTotal(title: $0.key, color: $0.value.color, hours: $0.value.seconds / 3600.0) }
-            .sorted { $0.hours > $1.hours }
+        var colorIndex = 0
+        let totals = projectTotalMap.map { entry -> ProjectTotal in
+            var color = entry.value.color
+            if color.isEmpty || color.count != 6 {
+                color = palette[colorIndex % palette.count]
+                colorIndex += 1
+            }
+            return ProjectTotal(title: entry.key, color: color, hours: entry.value.seconds / 3600.0)
+        }.sorted { $0.hours > $1.hours }
 
         dailyHours = daily
         projectTotals = totals
