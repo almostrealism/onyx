@@ -35,40 +35,66 @@ public class DependencyAnalyzer {
 
             if h.isLocal {
                 // Local: run directly
-                let escaped = self.appState.fileBrowserManager.escapeForShell(repoPath)
-                let result = FileBrowserManager.runProcess(
-                    cmd: "/usr/bin/python3",
-                    args: [scriptFile.path, repoPath]
-                )
+                print("DependencyAnalyzer: running locally for \(repoPath)")
+                let result = self.runScript(scriptFile.path, repoPath: repoPath)
                 DispatchQueue.main.async { completion(result) }
             } else {
                 // Remote: SCP script, execute, clean up
+                print("DependencyAnalyzer: uploading script to \(h.label)...")
+                let mkdirResult = self.runRemote("mkdir -p ~/.onyx", host: h)
+                if mkdirResult == nil {
+                    print("DependencyAnalyzer: failed to create ~/.onyx on remote")
+                }
+
                 var scpArgs = self.appState.scpBaseArgs(for: h)
                 scpArgs.append(scriptFile.path)
                 scpArgs.append("\(self.appState.sshUserHost(for: h)):\(remoteScript)")
 
                 let scpProcess = Process()
+                let scpErr = Pipe()
                 scpProcess.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
                 scpProcess.arguments = scpArgs
                 scpProcess.standardOutput = FileHandle.nullDevice
-                scpProcess.standardError = FileHandle.nullDevice
+                scpProcess.standardError = scpErr
                 try? scpProcess.run()
                 scpProcess.waitUntilExit()
 
-                guard scpProcess.terminationStatus == 0 else {
+                if scpProcess.terminationStatus != 0 {
+                    let errData = scpErr.fileHandleForReading.readDataToEndOfFile()
+                    let errStr = String(data: errData, encoding: .utf8) ?? ""
+                    print("DependencyAnalyzer: SCP failed (\(scpProcess.terminationStatus)): \(errStr)")
                     DispatchQueue.main.async { completion(nil) }
                     return
                 }
 
+                print("DependencyAnalyzer: running script on \(h.label)...")
                 let escaped = repoPath.replacingOccurrences(of: "'", with: "'\\''")
                 let (cmd, args) = self.appState.remoteCommand(
-                    "python3 \(remoteScript) '\(escaped)' && rm -f \(remoteScript)",
+                    "python3 \(remoteScript) '\(escaped)'; EXIT=$?; rm -f \(remoteScript); exit $EXIT",
                     host: h
                 )
-                let result = FileBrowserManager.runProcess(cmd: cmd, args: args)
-                DispatchQueue.main.async { completion(result) }
+
+                let result = FileBrowserManager.runProcessWithStatus(cmd: cmd, args: args)
+                print("DependencyAnalyzer: remote exit=\(result.exitCode), output=\(result.output?.prefix(200) ?? "nil")")
+                DispatchQueue.main.async { completion(result.output) }
             }
         }
+    }
+
+    /// Run a script locally and return stdout
+    private func runScript(_ scriptPath: String, repoPath: String) -> String? {
+        let result = FileBrowserManager.runProcessWithStatus(
+            cmd: "/usr/bin/python3",
+            args: [scriptPath, repoPath]
+        )
+        print("DependencyAnalyzer: local exit=\(result.exitCode), output=\(result.output?.prefix(200) ?? "nil")")
+        return result.output
+    }
+
+    /// Run a command on a remote host and return stdout
+    private func runRemote(_ script: String, host: HostConfig) -> String? {
+        let (cmd, args) = appState.remoteCommand(script, host: host)
+        return FileBrowserManager.runProcess(cmd: cmd, args: args)
     }
 
     // MARK: - Analysis Script

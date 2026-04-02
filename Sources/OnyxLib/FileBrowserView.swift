@@ -323,18 +323,30 @@ public class FileBrowserManager: ObservableObject {
         return status.changedFiles.first { $0.path == relativePath }
     }
 
+    /// Status message for dependency analysis
+    @Published public var depsStatus: String?
+
     /// Analyze Java dependency graph and show as artifact diagram
     public func analyzeDependencies(repoPath: String, appState: AppState) {
+        depsStatus = "Analyzing dependencies..."
+        print("analyzeDependencies: starting for \(repoPath)")
+
         let analyzer = DependencyAnalyzer(appState: appState)
-        analyzer.analyze(repoPath: repoPath) { mermaid in
-            guard let mermaid = mermaid, !mermaid.isEmpty else {
-                return
-            }
-            // Display as a Mermaid diagram artifact
-            let content = ArtifactContent.diagram(content: mermaid, format: .mermaid)
-            DispatchQueue.main.async {
+        analyzer.analyze(repoPath: repoPath) { [weak self] mermaid in
+            if let mermaid = mermaid, !mermaid.isEmpty {
+                print("analyzeDependencies: got \(mermaid.count) chars of Mermaid")
+                let content = ArtifactContent.diagram(content: mermaid, format: .mermaid)
                 _ = appState.artifactManager.setSlot(0, title: "Dependency Graph", content: content)
                 appState.activeRightPanel = .artifacts
+                self?.depsStatus = nil
+            } else {
+                print("analyzeDependencies: no output returned")
+                self?.depsStatus = "No dependency data (need python3 + Java files)"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                    if self?.depsStatus?.hasPrefix("No dep") == true {
+                        self?.depsStatus = nil
+                    }
+                }
             }
         }
     }
@@ -1075,7 +1087,8 @@ struct FileBrowserView: View {
                                     onShowDepGraph: {
                                         guard let repoPath = browser.gitManager.currentRepoPath else { return }
                                         browser.analyzeDependencies(repoPath: repoPath, appState: appState)
-                                    }
+                                    },
+                                    depsStatus: browser.depsStatus
                                 )
                                 Divider().background(Color.white.opacity(0.1))
                             }

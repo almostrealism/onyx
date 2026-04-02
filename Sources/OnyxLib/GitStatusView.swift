@@ -455,6 +455,8 @@ struct GitLandingView: View {
     var onViewFile: ((String, String) -> Void)? = nil
     /// Called to show a dependency graph diagram
     var onShowDepGraph: (() -> Void)? = nil
+    /// Status text for dependency analysis
+    var depsStatus: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -515,18 +517,24 @@ struct GitLandingView: View {
                         .buttonStyle(.plain)
                     }
 
-                    // Dependency graph button (for Java repos with changes)
+                    // Dependency graph button (for repos with changes)
                     if !status.isClean, let showGraph = onShowDepGraph {
-                        Button(action: showGraph) {
-                            HStack(spacing: 3) {
-                                Image(systemName: "point.3.connected.trianglepath.dotted")
-                                    .font(.system(size: 9))
-                                Text("Deps")
-                                    .font(.system(size: 9, design: .monospaced))
+                        if let status = depsStatus {
+                            Text(status)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(accentColor.opacity(0.6))
+                        } else {
+                            Button(action: showGraph) {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                                        .font(.system(size: 9))
+                                    Text("Deps")
+                                        .font(.system(size: 9, design: .monospaced))
+                                }
+                                .foregroundColor(accentColor.opacity(0.5))
                             }
-                            .foregroundColor(accentColor.opacity(0.5))
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
 
                     if status.isClean {
