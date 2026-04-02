@@ -628,9 +628,15 @@ struct MonitorView: View {
                             .foregroundColor(.gray.opacity(0.25))
                     }
 
-                    // TOP HALF: Charts + Docker stats side by side
+                    // TOP HALF: Timing + Metric Charts + Docker stats
                     HStack(alignment: .top, spacing: 24) {
-                        // Charts (left or full width)
+                        // Timing.app weekly chart (left, if configured)
+                        if appState.timing.isConfigured {
+                            TimingChartSection(timing: appState.timing, accentColor: appState.accentColor)
+                                .frame(maxWidth: .infinity)
+                        }
+
+                        // CPU/GPU/MEM charts
                         VStack(spacing: 16) {
                             let cpuData = monitor.bucketedCPU()
                             if !cpuData.isEmpty {
@@ -681,13 +687,7 @@ struct MonitorView: View {
                         }
                         .frame(maxWidth: .infinity)
 
-                        // Timing.app weekly chart (if configured)
-                        if appState.timing.isConfigured && !appState.timing.dailyHours.isEmpty {
-                            TimingChartSection(timing: appState.timing, accentColor: appState.accentColor)
-                                .frame(maxWidth: .infinity)
-                        }
-
-                        // Docker container stats (right half, only if available)
+                        // Docker container stats (right, only if available)
                         if dockerStats.isAvailable {
                             DockerStatsSection(appState: appState, dockerStats: dockerStats)
                                 .frame(maxWidth: .infinity)

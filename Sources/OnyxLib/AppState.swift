@@ -494,7 +494,7 @@ public class AppState: ObservableObject {
 
     private var timingCancellable: AnyCancellable?
     public lazy var timing: TimingManager = {
-        let t = TimingManager()
+        let t = TimingManager(windowIndex: windowIndex)
         timingCancellable = t.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
@@ -903,7 +903,8 @@ public class AppState: ObservableObject {
         // Start background monitoring immediately
         startupStatus = "Starting monitors..."
         monitor.startPolling()
-        timing.startPolling()
+        TimingDataStore.shared.startPolling()
+        _ = timing // trigger lazy init so it subscribes to store changes
 
         // Start MCP socket server for agent integration
         mcpServer = MCPSocketServer(artifactManager: artifactManager, claudeSessions: claudeSessions)
