@@ -30,7 +30,11 @@ public class TimingManager: ObservableObject {
     /// Start periodic polling
     public func startPolling() {
         checkConfiguration()
-        guard isConfigured else { return }
+        guard isConfigured else {
+            print("Timing: not configured (no API token)")
+            return
+        }
+        print("Timing: starting polling (interval: \(refreshInterval)s)")
         fetch()
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             self?.fetch()
@@ -56,14 +60,27 @@ public class TimingManager: ObservableObject {
         set {
             UserDefaults.standard.set(newValue, forKey: "timing_api_token")
             isConfigured = !newValue.isEmpty
+            if isConfigured {
+                print("Timing: token configured, fetching...")
+                // Start polling if not already running
+                if timer == nil {
+                    startPolling()
+                } else {
+                    fetch()
+                }
+            }
         }
     }
 
     // MARK: - API
 
     private func fetch() {
-        guard !apiToken.isEmpty else { return }
+        guard !apiToken.isEmpty else {
+            print("Timing: fetch skipped (no token)")
+            return
+        }
         isLoading = true
+        print("Timing: fetching...")
 
         // Calculate current week (Monday to today)
         let calendar = Calendar.current
@@ -92,25 +109,33 @@ public class TimingManager: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 15
 
+        print("Timing: GET \(components.url?.absoluteString ?? "?") range=\(startDate)..\(endDate)")
+
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoading = false
 
                 if let error = error {
+                    print("Timing: network error: \(error.localizedDescription)")
                     self.lastError = error.localizedDescription
                     return
                 }
 
                 guard let data = data else {
+                    print("Timing: no data received")
                     self.lastError = "No data received"
                     return
                 }
 
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                    let body = String(data: data, encoding: .utf8) ?? ""
-                    self.lastError = "HTTP \(httpResponse.statusCode): \(body.prefix(100))"
-                    return
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("Timing: HTTP \(httpResponse.statusCode), \(data.count) bytes")
+                    if httpResponse.statusCode != 200 {
+                        let body = String(data: data, encoding: .utf8) ?? ""
+                        print("Timing: error body: \(body.prefix(300))")
+                        self.lastError = "HTTP \(httpResponse.statusCode): \(body.prefix(100))"
+                        return
+                    }
                 }
 
                 self.lastError = nil
@@ -120,17 +145,26 @@ public class TimingManager: ObservableObject {
     }
 
     private func parseResponse(_ data: Data, monday: Date) {
+        // Log raw response for debugging
+        let rawPreview = String(data: data, encoding: .utf8)?.prefix(500) ?? "nil"
+        print("Timing: raw response: \(rawPreview)")
+
         // Response is a JSON array of objects with "duration" (seconds) and "timespan" fields
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             // Try unwrapping from a "data" key
-            if let wrapper = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let rows = wrapper["data"] as? [[String: Any]] {
-                processRows(rows, monday: monday)
-                return
+            if let wrapper = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                print("Timing: response is object with keys: \(wrapper.keys.sorted())")
+                if let rows = wrapper["data"] as? [[String: Any]] {
+                    print("Timing: found \(rows.count) rows under 'data' key")
+                    processRows(rows, monday: monday)
+                    return
+                }
             }
+            print("Timing: failed to parse response as JSON array or object")
             lastError = "Failed to parse response"
             return
         }
+        print("Timing: parsed \(json.count) rows as top-level array")
         processRows(json, monday: monday)
     }
 
@@ -143,20 +177,25 @@ public class TimingManager: ObservableObject {
 
         // Build a map of date string → duration in seconds
         var durationByDate: [String: Double] = [:]
+        if let firstRow = rows.first {
+            print("Timing: first row keys: \(firstRow.keys.sorted())")
+        }
         for row in rows {
             let duration = (row["duration"] as? Double) ?? (row["duration"] as? Int).map(Double.init) ?? 0
 
             // Extract the date from the timespan field
             if let timespan = row["timespan"] as? [String: Any],
                let start = timespan["start_date"] as? String {
-                // start_date might be "2024-01-15" or "2024-01-15T00:00:00..."
                 let dateStr = String(start.prefix(10))
                 durationByDate[dateStr, default: 0] += duration
             } else if let startDate = row["start_date"] as? String {
                 let dateStr = String(startDate.prefix(10))
                 durationByDate[dateStr, default: 0] += duration
+            } else {
+                print("Timing: row has no timespan or start_date: \(row.keys.sorted())")
             }
         }
+        print("Timing: durationByDate = \(durationByDate.sorted(by: { $0.key < $1.key }).map { "\($0.key): \(Int($0.value))s" })")
 
         // Build daily hours array for Mon-Sun
         var daily: [DailyTime] = []
@@ -178,5 +217,9 @@ public class TimingManager: ObservableObject {
 
         dailyHours = daily
         totalWeekHours = total
+        print("Timing: processed \(rows.count) rows → \(daily.filter { $0.hours > 0 }.count) days with data, total=\(String(format: "%.1f", total))h")
+        for d in daily where d.hours > 0 {
+            print("Timing:   \(d.dayLabel): \(String(format: "%.1f", d.hours))h")
+        }
     }
 }
