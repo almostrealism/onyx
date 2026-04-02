@@ -281,6 +281,54 @@ struct SettingsView: View {
                                     Text("Get token at web.timingapp.com/integrations/tokens")
                                         .font(.system(size: 9, design: .monospaced))
                                         .foregroundColor(.gray.opacity(0.3))
+
+                                    // Project filter
+                                    if appState.timing.isConfigured && !appState.timing.availableProjects.isEmpty {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("FILTER PROJECT")
+                                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                                .foregroundColor(.gray.opacity(0.5))
+                                                .tracking(1)
+
+                                            ScrollView(.horizontal, showsIndicators: false) {
+                                                HStack(spacing: 6) {
+                                                    // "All" option
+                                                    let isAll = appState.timing.filterProjectID.isEmpty
+                                                    Button(action: { appState.timing.filterProjectID = "" }) {
+                                                        Text("All")
+                                                            .font(.system(size: 10, design: .monospaced))
+                                                            .foregroundColor(isAll ? .white : .gray.opacity(0.5))
+                                                            .padding(.horizontal, 8)
+                                                            .padding(.vertical, 3)
+                                                            .background(isAll ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
+                                                            .cornerRadius(3)
+                                                    }
+                                                    .buttonStyle(.plain)
+
+                                                    // Top-level projects only
+                                                    ForEach(appState.timing.availableProjects.filter { $0.depth == 0 }) { proj in
+                                                        let selected = appState.timing.filterProjectID == proj.id
+                                                        Button(action: { appState.timing.filterProjectID = proj.id }) {
+                                                            HStack(spacing: 3) {
+                                                                Circle()
+                                                                    .fill(Color(hex: proj.color))
+                                                                    .frame(width: 6, height: 6)
+                                                                Text(proj.title)
+                                                                    .font(.system(size: 10, design: .monospaced))
+                                                            }
+                                                            .foregroundColor(selected ? .white : .gray.opacity(0.5))
+                                                            .padding(.horizontal, 8)
+                                                            .padding(.vertical, 3)
+                                                            .background(selected ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
+                                                            .cornerRadius(3)
+                                                        }
+                                                        .buttonStyle(.plain)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        .padding(.top, 4)
+                                    }
                                 }
                         }
                     }

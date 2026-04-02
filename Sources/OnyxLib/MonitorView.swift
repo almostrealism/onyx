@@ -1093,6 +1093,9 @@ struct TimingChartSection: View {
         max(timing.dailyHours.map(\.hours).max() ?? 1, 1)
     }
 
+    /// Consistent color palette for projects
+    private static let projectColors = ["66CCFF", "6BFF8E", "FFD06B", "C06BFF", "FF6B6B", "FF6BCD", "6BFFD0"]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -1100,6 +1103,16 @@ struct TimingChartSection: View {
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(accentColor)
                     .tracking(2)
+
+                if !timing.filterProjectID.isEmpty {
+                    Text(timing.filterProjectName)
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundColor(accentColor.opacity(0.6))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(accentColor.opacity(0.1))
+                        .cornerRadius(3)
+                }
 
                 Spacer()
 
@@ -1110,16 +1123,26 @@ struct TimingChartSection: View {
                 }
             }
 
-            // Bar chart: one bar per day
+            // Stacked bar chart: one bar per day, segments per project
             HStack(alignment: .bottom, spacing: 3) {
                 ForEach(timing.dailyHours) { day in
                     VStack(spacing: 2) {
-                        // Bar
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(day.hours > 0 ? accentColor.opacity(0.7) : Color.white.opacity(0.04))
-                            .frame(height: max(2, CGFloat(day.hours / maxHours) * 80))
+                        if day.hours > 0 && day.projects.count > 1 {
+                            // Stacked bar
+                            VStack(spacing: 0) {
+                                ForEach(day.projects) { slice in
+                                    Rectangle()
+                                        .fill(Color(hex: slice.color).opacity(0.75))
+                                        .frame(height: max(1, CGFloat(slice.hours / maxHours) * 80))
+                                }
+                            }
+                            .cornerRadius(2)
+                        } else {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(day.hours > 0 ? Color(hex: day.projects.first?.color ?? "66CCFF").opacity(0.7) : Color.white.opacity(0.04))
+                                .frame(height: max(2, CGFloat(day.hours / maxHours) * 80))
+                        }
 
-                        // Day label
                         Text(day.dayLabel)
                             .font(.system(size: 8, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.4))
@@ -1127,7 +1150,28 @@ struct TimingChartSection: View {
                     .frame(maxWidth: .infinity)
                 }
             }
-            .frame(height: 95) // 80 max bar + 15 label
+            .frame(height: 95)
+
+            // Project totals
+            if timing.projectTotals.count > 1 {
+                HStack(spacing: 8) {
+                    ForEach(timing.projectTotals.prefix(5)) { proj in
+                        HStack(spacing: 3) {
+                            Circle()
+                                .fill(Color(hex: proj.color))
+                                .frame(width: 5, height: 5)
+                            Text("\(proj.title)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.6))
+                                .lineLimit(1)
+                            Text(String(format: "%.0fh", proj.hours))
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.4))
+                        }
+                    }
+                    Spacer()
+                }
+            }
 
             // Total and average
             HStack(spacing: 12) {
@@ -1147,7 +1191,7 @@ struct TimingChartSection: View {
                     Text(String(format: "%.1f", avgPerDay))
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.white.opacity(0.6))
-                    Text("hrs/day avg")
+                    Text("hrs/day")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.4))
                 }
