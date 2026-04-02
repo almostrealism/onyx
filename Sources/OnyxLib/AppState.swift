@@ -492,6 +492,15 @@ public class AppState: ObservableObject {
         return c
     }()
 
+    private var timingCancellable: AnyCancellable?
+    public lazy var timing: TimingManager = {
+        let t = TimingManager()
+        timingCancellable = t.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        return t
+    }()
+
     private var dockerStatsCancellable: AnyCancellable?
     public lazy var dockerStats: DockerStatsManager = {
         let d = DockerStatsManager(appState: self)
@@ -894,6 +903,7 @@ public class AppState: ObservableObject {
         // Start background monitoring immediately
         startupStatus = "Starting monitors..."
         monitor.startPolling()
+        timing.startPolling()
 
         // Start MCP socket server for agent integration
         mcpServer = MCPSocketServer(artifactManager: artifactManager, claudeSessions: claudeSessions)

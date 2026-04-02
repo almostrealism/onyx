@@ -250,6 +250,38 @@ struct SettingsView: View {
                                     }
                                 }
                             }
+
+                                // Timing.app API token
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("TIMING.APP")
+                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .tracking(2)
+
+                                    HStack(spacing: 8) {
+                                        SecureField("API token from web.timingapp.com", text: Binding(
+                                            get: { appState.timing.apiToken },
+                                            set: { appState.timing.apiToken = $0 }
+                                        ))
+                                        .textFieldStyle(.plain)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundColor(.white.opacity(0.8))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 3)
+                                        .background(Color.white.opacity(0.06))
+                                        .cornerRadius(3)
+
+                                        if appState.timing.isConfigured {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .font(.system(size: 12))
+                                                .foregroundColor(Color(hex: "6BFF8E"))
+                                        }
+                                    }
+
+                                    Text("Get token at web.timingapp.com/integrations/tokens")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(.gray.opacity(0.3))
+                                }
                         }
                     }
                 }

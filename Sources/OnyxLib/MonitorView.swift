@@ -681,6 +681,12 @@ struct MonitorView: View {
                         }
                         .frame(maxWidth: .infinity)
 
+                        // Timing.app weekly chart (if configured)
+                        if appState.timing.isConfigured && !appState.timing.dailyHours.isEmpty {
+                            TimingChartSection(timing: appState.timing, accentColor: appState.accentColor)
+                                .frame(maxWidth: .infinity)
+                        }
+
                         // Docker container stats (right half, only if available)
                         if dockerStats.isAvailable {
                             DockerStatsSection(appState: appState, dockerStats: dockerStats)
@@ -1068,6 +1074,94 @@ struct DockerStatsSection: View {
             }
             return t
         }.joined(separator: "/")
+    }
+}
+
+// MARK: - Timing.app Chart
+
+struct TimingChartSection: View {
+    @ObservedObject var timing: TimingManager
+    let accentColor: Color
+
+    private var avgPerDay: Double {
+        let daysWithData = timing.dailyHours.filter { $0.hours > 0 }.count
+        guard daysWithData > 0 else { return 0 }
+        return timing.totalWeekHours / Double(daysWithData)
+    }
+
+    private var maxHours: Double {
+        max(timing.dailyHours.map(\.hours).max() ?? 1, 1)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("TIME THIS WEEK")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(accentColor)
+                    .tracking(2)
+
+                Spacer()
+
+                if timing.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .colorScheme(.dark)
+                }
+            }
+
+            // Bar chart: one bar per day
+            HStack(alignment: .bottom, spacing: 3) {
+                ForEach(timing.dailyHours) { day in
+                    VStack(spacing: 2) {
+                        // Bar
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(day.hours > 0 ? accentColor.opacity(0.7) : Color.white.opacity(0.04))
+                            .frame(height: max(2, CGFloat(day.hours / maxHours) * 80))
+
+                        // Day label
+                        Text(day.dayLabel)
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.4))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: 95) // 80 max bar + 15 label
+
+            // Total and average
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    Text(String(format: "%.1f", timing.totalWeekHours))
+                        .font(.system(size: 16, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.85))
+                    Text("hrs")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.5))
+                }
+
+                Text("·")
+                    .foregroundColor(.gray.opacity(0.3))
+
+                HStack(spacing: 4) {
+                    Text(String(format: "%.1f", avgPerDay))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.6))
+                    Text("hrs/day avg")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.4))
+                }
+
+                Spacer()
+            }
+
+            if let error = timing.lastError {
+                Text(error)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(Color(hex: "FF6B6B").opacity(0.6))
+                    .lineLimit(1)
+            }
+        }
     }
 }
 
