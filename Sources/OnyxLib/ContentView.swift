@@ -556,111 +556,90 @@ struct TerminalTextOverlay: View {
     @ObservedObject var appState: AppState
 
     /// Build attributed string with clickable URLs highlighted.
-    /// Handles URLs that wrap across terminal lines by rejoining before detection.
+    /// Handles URLs that wrap across terminal lines by using a regex-based
+    /// approach that's immune to NSDataDetector's URL normalization issues.
     private var linkedContent: AttributedString {
         let text = appState.terminalTextContent
         var result = AttributedString(text)
         result.foregroundColor = .white.opacity(0.9)
 
-        // Step 1: Detect URLs in the original text (single-line URLs)
-        applyURLDetection(to: &result, text: text)
-
-        // Step 2: Find URLs that span line breaks. Build a version with
-        // line breaks removed where they look like mid-URL wraps, detect
-        // URLs there, and map them back to the original text.
+        // Find URLs using a regex that matches across line boundaries.
+        // Terminal wraps break URLs at arbitrary points, so we first build
+        // a "unwrapped" version where soft line breaks (non-whitespace on
+        // both sides) are removed, detect URLs there, then map back.
         let lines = text.components(separatedBy: "\n")
-        if lines.count > 1 {
-            findWrappedURLs(lines: lines, result: &result, originalText: text)
+
+        // Build unwrapped text and a mapping from unwrapped offset → original offset
+        var unwrapped = ""
+        var offsetMap: [Int] = [] // unwrapped char index → original char index
+        var origOffset = 0
+
+        for (i, line) in lines.enumerated() {
+            for (j, ch) in line.enumerated() {
+                unwrapped.append(ch)
+                offsetMap.append(origOffset + j)
+            }
+            origOffset += line.count
+
+            if i < lines.count - 1 {
+                // Decide: is this a soft wrap (mid-URL) or a real line break?
+                let nextLine = lines[i + 1]
+                let isSoftWrap = !line.isEmpty && !nextLine.isEmpty
+                    && !line.last!.isWhitespace && !nextLine.first!.isWhitespace
+
+                if isSoftWrap {
+                    // Don't add \n to unwrapped — join the lines
+                } else {
+                    unwrapped.append("\n")
+                    offsetMap.append(origOffset) // the \n character
+                }
+                origOffset += 1 // skip past \n in original
+            }
+        }
+
+        // Detect URLs in the unwrapped text
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return result
+        }
+
+        let nsUnwrapped = unwrapped as NSString
+        let range = NSRange(location: 0, length: nsUnwrapped.length)
+
+        for match in detector.matches(in: unwrapped, range: range) {
+            guard let url = match.url,
+                  let swiftRange = Range(match.range, in: unwrapped) else { continue }
+
+            // Map each character in the match back to the original text
+            let matchStart = unwrapped.distance(from: unwrapped.startIndex, to: swiftRange.lowerBound)
+            let matchEnd = unwrapped.distance(from: unwrapped.startIndex, to: swiftRange.upperBound)
+
+            // Apply link to each character's position in the original attributed string
+            // Group consecutive original offsets into ranges for efficiency
+            var i = matchStart
+            while i < matchEnd && i < offsetMap.count {
+                let runStart = offsetMap[i]
+                var runEnd = runStart + 1
+                var j = i + 1
+                // Extend run while consecutive in original text
+                while j < matchEnd && j < offsetMap.count && offsetMap[j] == runEnd {
+                    runEnd += 1
+                    j += 1
+                }
+
+                // Apply link to this run in the original attributed string
+                if runStart < text.count && runEnd <= text.count {
+                    let attrStart = result.index(result.startIndex, offsetByCharacters: runStart)
+                    let attrEnd = result.index(result.startIndex, offsetByCharacters: runEnd)
+                    result[attrStart..<attrEnd].link = url
+                    result[attrStart..<attrEnd].foregroundColor = Color(hex: "66CCFF")
+                    result[attrStart..<attrEnd].underlineStyle = .single
+                }
+
+                i = j
+            }
         }
 
         return result
-    }
-
-    private func applyURLDetection(to result: inout AttributedString, text: String) {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return }
-        let range = NSRange(location: 0, length: (text as NSString).length)
-
-        for match in detector.matches(in: text, range: range) {
-            guard let url = match.url,
-                  let swiftRange = Range(match.range, in: text) else { continue }
-            let offset = text.distance(from: text.startIndex, to: swiftRange.lowerBound)
-            let length = text.distance(from: swiftRange.lowerBound, to: swiftRange.upperBound)
-            let start = result.index(result.startIndex, offsetByCharacters: offset)
-            let end = result.index(start, offsetByCharacters: length)
-            result[start..<end].link = url
-            result[start..<end].foregroundColor = Color(hex: "66CCFF")
-            result[start..<end].underlineStyle = .single
-        }
-    }
-
-    /// Find URLs that are split across terminal line wraps.
-    /// Strategy: for each line ending that looks like it might be mid-URL
-    /// (non-whitespace at end, non-whitespace at start of next line),
-    /// join the lines and check if the joined text contains a URL spanning the break.
-    private func findWrappedURLs(lines: [String], result: inout AttributedString, originalText: String) {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return }
-
-        // Track character offsets for each line start in the original text
-        var lineOffsets: [Int] = []
-        var offset = 0
-        for line in lines {
-            lineOffsets.append(offset)
-            offset += line.count + 1 // +1 for \n
-        }
-
-        for i in 0..<(lines.count - 1) {
-            let thisLine = lines[i]
-            let nextLine = lines[i + 1]
-
-            // Skip if either line is empty or ends/starts with whitespace
-            guard !thisLine.isEmpty && !nextLine.isEmpty else { continue }
-            guard !thisLine.last!.isWhitespace && !nextLine.first!.isWhitespace else { continue }
-
-            // Check if the joined text around the break contains a URL
-            // Use a window: last 100 chars of this line + first 100 chars of next
-            let tailStart = max(0, thisLine.count - 100)
-            let tail = String(thisLine.dropFirst(tailStart))
-            let head = String(nextLine.prefix(100))
-            let joined = tail + head
-
-            let nsJoined = joined as NSString
-            let jRange = NSRange(location: 0, length: nsJoined.length)
-
-            for match in detector.matches(in: joined, range: jRange) {
-                guard let url = match.url else { continue }
-                let matchStart = match.range.location
-                let matchEnd = matchStart + match.range.length
-                let tailLen = tail.count
-
-                // Only care about URLs that actually span the join point
-                guard matchStart < tailLen && matchEnd > tailLen else { continue }
-
-                // Map back to original text offsets
-                let origStart = lineOffsets[i] + tailStart + matchStart
-                // Characters in "tail" part map directly; characters in "head" part
-                // skip the \n in the original (they start at lineOffsets[i+1])
-                let charsInTail = tailLen - matchStart
-                let charsInHead = match.range.length - charsInTail
-
-                // Apply link to the tail portion (on line i)
-                let tailOrigStart = origStart
-                let tailOrigEnd = lineOffsets[i] + thisLine.count
-                applyLink(to: &result, text: originalText, from: tailOrigStart, to: min(tailOrigEnd, tailOrigStart + charsInTail), url: url)
-
-                // Apply link to the head portion (on line i+1)
-                let headOrigStart = lineOffsets[i + 1]
-                applyLink(to: &result, text: originalText, from: headOrigStart, to: headOrigStart + charsInHead, url: url)
-            }
-        }
-    }
-
-    private func applyLink(to result: inout AttributedString, text: String, from: Int, to: Int, url: URL) {
-        guard from >= 0 && to > from && to <= text.count else { return }
-        let start = result.index(result.startIndex, offsetByCharacters: from)
-        let end = result.index(result.startIndex, offsetByCharacters: to)
-        result[start..<end].link = url
-        result[start..<end].foregroundColor = Color(hex: "66CCFF")
-        result[start..<end].underlineStyle = .single
     }
 
     var body: some View {
