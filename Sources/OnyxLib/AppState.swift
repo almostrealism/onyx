@@ -22,6 +22,10 @@ public extension Notification.Name {
     static let toggleMemoryChart = Notification.Name("toggleMemoryChart")
     static let toggleAllContainers = Notification.Name("toggleAllContainers")
     static let toggleClockFormat = Notification.Name("toggleClockFormat")
+    static let tmuxResizeUp = Notification.Name("tmuxResizeUp")
+    static let tmuxResizeDown = Notification.Name("tmuxResizeDown")
+    static let tmuxResizeLeft = Notification.Name("tmuxResizeLeft")
+    static let tmuxResizeRight = Notification.Name("tmuxResizeRight")
     static let toggleTerminalTextMode = Notification.Name("toggleTerminalTextMode")
     static let cyclePanelSize = Notification.Name("cyclePanelSize")
 }

@@ -140,6 +140,19 @@ class OnyxTerminalView: NSView {
         NotificationCenter.default.addObserver(forName: .refreshPoolStatus, object: nil, queue: .main) { [weak self] _ in
             self?.publishPoolStatus()
         }
+
+        // Tmux pane resize shortcuts
+        for (name, dir) in [
+            (Notification.Name.tmuxResizeUp, "U"),
+            (.tmuxResizeDown, "D"),
+            (.tmuxResizeLeft, "L"),
+            (.tmuxResizeRight, "R"),
+        ] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.sendTmuxCommand("resize-pane -\(dir) 4")
+            }
+        }
+
         startPeriodicEnumeration()
 
         // On wake from sleep: clean up stale mux sockets so polling commands
@@ -179,6 +192,18 @@ class OnyxTerminalView: NSView {
             }
         }
         super.mouseDown(with: event)
+    }
+
+    // MARK: - Tmux Commands
+
+    /// Send a tmux command to the active terminal session.
+    /// Writes the tmux prefix key (Ctrl-B) followed by `:command\n`.
+    private func sendTmuxCommand(_ command: String) {
+        guard let tv = terminalView else { return }
+        // Ctrl-B (tmux prefix) = 0x02, then : to enter command mode
+        let prefix = "\u{02}:"
+        let full = prefix + command + "\r"
+        tv.send(txt: full)
     }
 
     // MARK: - URL Detection (Cmd+click)

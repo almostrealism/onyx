@@ -101,6 +101,26 @@ public class ShortcutManager {
                 return nil
             }
 
+            // Cmd+Ctrl+Arrow → resize tmux pane by 4 cells
+            if flags.contains([.command, .control]) {
+                switch event.keyCode {
+                case 126: // Up arrow
+                    NotificationCenter.default.post(name: .tmuxResizeUp, object: nil)
+                    return nil
+                case 125: // Down arrow
+                    NotificationCenter.default.post(name: .tmuxResizeDown, object: nil)
+                    return nil
+                case 123: // Left arrow
+                    NotificationCenter.default.post(name: .tmuxResizeLeft, object: nil)
+                    return nil
+                case 124: // Right arrow
+                    NotificationCenter.default.post(name: .tmuxResizeRight, object: nil)
+                    return nil
+                default:
+                    break
+                }
+            }
+
             // Cmd+D → toggle artifacts panel
             if flags == .command && chars == "d" {
                 NotificationCenter.default.post(name: .toggleArtifacts, object: nil)
