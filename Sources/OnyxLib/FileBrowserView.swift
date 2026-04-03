@@ -393,14 +393,21 @@ public class FileBrowserManager: ObservableObject {
 
     // MARK: - Remote Operations
 
-    /// Check if the active host is remote and has no connected sessions
+    /// Check basic connectivity prerequisites.
+    /// No longer checks for terminal sessions — the file browser uses its own
+    /// SSH connections (via remoteCommand + mux) independent of terminal sessions.
     private func checkRemoteConnectivity() -> String? {
-        guard let host = appState.activeHost, !host.isLocal else { return nil }
-        let hasSession = appState.allSessions.contains { $0.source.hostID == host.id }
-        if !hasSession {
-            return "No active session to \(host.label).\nOpen a terminal session to this host first."
+        guard appState.activeHost != nil else {
+            return "No host configured."
         }
         return nil
+    }
+
+    /// Called when an SSH command fails (exit 255). Marks the mux as stale
+    /// so the next command cleans up the socket and gets a fresh connection.
+    private func handleSSHFailure() {
+        guard let host = appState.activeHost, !host.isLocal else { return }
+        appState.markMuxStale(for: host.id)
     }
 
     private func listDirectory(_ path: String) {
@@ -429,7 +436,8 @@ public class FileBrowserManager: ObservableObject {
                     // Detect SSH connection/auth failures (exit code 255 is SSH error)
                     if result.exitCode == 255 || trimmed.contains("Permission denied (publickey") {
                         let host = self.appState.activeHost?.label ?? "remote host"
-                        self.error = "Cannot connect to \(host).\nOpen a terminal session to this host first."
+                        self.error = "SSH connection failed to \(host). Retrying may help."
+                        self.handleSSHFailure()
                     } else if trimmed.contains("No such file or directory")
                         || trimmed.contains("Permission denied")
                         || trimmed.contains("not a directory")
@@ -591,7 +599,9 @@ public class FileBrowserManager: ObservableObject {
                 guard let self = self else { return }
                 if result.exitCode == 255 {
                     let host = self.appState.activeHost?.label ?? "remote host"
-                    self.error = "Cannot connect to \(host).\nOpen a terminal session to this host first."
+                    self.error = "SSH connection failed to \(host). Retrying may help."
+                    self.handleSSHFailure()
+                    self.handleSSHFailure()
                 } else if let output = result.output {
                     if output.trimmingCharacters(in: .whitespacesAndNewlines) == "__BINARY__" {
                         self.viewingFileName = name
@@ -619,7 +629,8 @@ public class FileBrowserManager: ObservableObject {
                 guard let self = self else { return }
                 if result.exitCode == 255 {
                     let host = self.appState.activeHost?.label ?? "remote host"
-                    self.error = "Cannot connect to \(host).\nOpen a terminal session to this host first."
+                    self.error = "SSH connection failed to \(host). Retrying may help."
+                    self.handleSSHFailure()
                 } else if let output = result.output,
                           let data = Data(base64Encoded: output.trimmingCharacters(in: .whitespacesAndNewlines),
                                           options: .ignoreUnknownCharacters),

@@ -1233,20 +1233,22 @@ public class AppState: ObservableObject {
         ]
     }
 
+    /// Track hosts that had SSH failures — mux socket will be cleaned up before next use
+    private var muxNeedsCleanup: Set<UUID> = []
+
+    /// Mark a host's mux as needing cleanup (called when SSH exit code is 255)
+    public func markMuxStale(for hostID: UUID) {
+        muxNeedsCleanup.insert(hostID)
+    }
+
     /// SSH args for short-lived utility commands (stats, enumeration, file browser).
     /// Uses mux for efficiency — these are ephemeral and can retry if mux dies.
-    /// If the mux socket file exists but the master is dead (stale after sleep),
-    /// removes the stale socket so SSH doesn't hang trying to connect through it.
     func sshBaseArgs(for host: HostConfig, batchMode: Bool = true, connectTimeout: Int = 5) -> [String] {
-        // Clean up obviously stale mux sockets — prevents hangs after sleep/wake.
-        // If the socket file hasn't been modified in > 150s (ControlPersist=120 + margin),
-        // the master is certainly dead. Remove the socket so SSH creates a fresh one
-        // instead of hanging trying to connect through the dead socket.
+        // Clean up mux socket if a previous command flagged it as stale
         let controlPath = sshControlPath(for: host)
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: controlPath),
-           let modified = attrs[.modificationDate] as? Date,
-           Date().timeIntervalSince(modified) > 150 {
+        if muxNeedsCleanup.remove(host.id) != nil {
             try? FileManager.default.removeItem(atPath: controlPath)
+            print("SSH mux: cleaned up stale socket for \(host.label)")
         }
 
         var args = sshMuxArgs(for: host)
