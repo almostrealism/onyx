@@ -1085,7 +1085,6 @@ public class AppState: ObservableObject {
         DispatchQueue.main.async { self.hooksSetupStatus = "Configuring hooks on \(host.label)..." }
 
         let hooksJson = buildHooksJson(hookCmd: hookCmd)
-        let settingsJson = "{\"hooks\": \(hooksJson)}"
 
         // Write files to a temp directory locally
         let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent("onyx-hooks-\(ProcessInfo.processInfo.processIdentifier)")
