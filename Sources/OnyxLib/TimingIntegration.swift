@@ -89,8 +89,12 @@ public class TimingDataStore: ObservableObject {
                   let title = proj["title"] as? String else { continue }
             let titleChain = proj["title_chain"] as? [String] ?? [title]
             let rawColor = (proj["color"] as? String ?? "").replacingOccurrences(of: "#", with: "").trimmingCharacters(in: .whitespaces)
-            let color = rawColor.count == 6 ? rawColor : ""
-            let parent = proj["parent"] as? String
+            let color = rawColor.count >= 6 ? String(rawColor.prefix(6)) : ""
+            let parent: String? = {
+                if let s = proj["parent"] as? String { return s }
+                if let obj = proj["parent"] as? [String: Any] { return obj["self"] as? String }
+                return nil
+            }()
 
             result.append(TimingProject(id: selfRef, title: title, titleChain: titleChain,
                                         color: color, parentID: parent, depth: depth))
@@ -146,8 +150,12 @@ public class TimingDataStore: ObservableObject {
                 }
                 guard let data = data else { self.lastError = "No data"; return }
                 if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                    self.lastError = "HTTP \(http.statusCode)"; return
+                    let body = String(data: data, encoding: .utf8) ?? ""
+                    print("Timing: HTTP \(http.statusCode): \(body.prefix(500))")
+                    self.lastError = "HTTP \(http.statusCode): \(body.prefix(80))"
+                    return
                 }
+                print("Timing: HTTP 200, \(data.count) bytes")
 
                 self.lastError = nil
                 self.parseReport(data)
@@ -156,6 +164,9 @@ public class TimingDataStore: ObservableObject {
     }
 
     private func parseReport(_ data: Data) {
+        let preview = String(data: data, encoding: .utf8)?.prefix(300) ?? "nil"
+        print("Timing: response preview: \(preview)")
+
         let jsonRows: [[String: Any]]
         if let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             jsonRows = arr
@@ -172,7 +183,10 @@ public class TimingDataStore: ObservableObject {
             guard duration > 0 else { continue }
 
             var dateStr = ""
-            if let ts = row["timespan"] as? [String: Any], let s = ts["start_date"] as? String {
+            // start_date is a top-level field; timespan is a display string, not an object
+            if let s = row["start_date"] as? String {
+                dateStr = String(s.prefix(10))
+            } else if let ts = row["timespan"] as? [String: Any], let s = ts["start_date"] as? String {
                 dateStr = String(s.prefix(10))
             }
             guard !dateStr.isEmpty else { continue }
@@ -186,7 +200,12 @@ public class TimingDataStore: ObservableObject {
             if let proj = row["project"] as? [String: Any] {
                 title = proj["title"] as? String ?? "(no project)"
                 selfRef = proj["self"] as? String ?? ""
-                parentRef = proj["parent"] as? String
+                // parent is either a string ref or an object {"self": "/projects/..."}
+                if let parentStr = proj["parent"] as? String {
+                    parentRef = parentStr
+                } else if let parentObj = proj["parent"] as? [String: Any] {
+                    parentRef = parentObj["self"] as? String
+                }
                 titleChain = proj["title_chain"] as? [String] ?? [title]
                 let rawColor = (proj["color"] as? String ?? "").replacingOccurrences(of: "#", with: "").trimmingCharacters(in: .whitespaces)
                 color = rawColor.count == 6 ? rawColor : ""
