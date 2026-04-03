@@ -130,9 +130,11 @@ public class TimingDataStore: ObservableObject {
         var request = URLRequest(url: components.url!)
         request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // Set timezone so date-only values are interpreted in local time, not UTC
+        request.setValue(TimeZone.current.identifier, forHTTPHeaderField: "X-Time-Zone")
         request.timeoutInterval = 15
 
-        print("Timing: fetching report...")
+        print("Timing: fetching report (tz: \(TimeZone.current.identifier))...")
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
