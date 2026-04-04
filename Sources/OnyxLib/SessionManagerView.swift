@@ -154,6 +154,20 @@ struct SessionManagerView: View {
     private func submitNewSession() {
         let name = newSessionName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
+
+        // Check if source is browser or if name looks like a URL
+        if newSessionSource?.isBrowser == true || name.hasPrefix("http://") || name.hasPrefix("https://") {
+            var url = name
+            if !url.contains("://") { url = "https://\(url)" }
+            let displayName = URL(string: url)?.host ?? name
+            let session = TmuxSession(name: displayName, source: .browser(url: url))
+            appState.allSessions.append(session)
+            appState.switchToSession = session
+            appState.showNewSessionPrompt = false
+            newSessionName = ""
+            return
+        }
+
         let source = newSessionSource ?? .host(hostID: appState.hosts.first?.id ?? HostConfig.localhostID)
         appState.createNewSession = TmuxSession(name: name, source: source)
         appState.showNewSessionPrompt = false
@@ -204,11 +218,11 @@ private struct NewSessionPrompt: View {
                 }
             }
 
-            // Source picker (host vs docker containers on selected host)
+            // Source picker (host vs docker vs browser)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     SourceButton(label: "Host", icon: "desktopcomputer",
-                                 selected: !(newSessionSource?.isDocker ?? false),
+                                 selected: !(newSessionSource?.isDocker ?? false) && !(newSessionSource?.isBrowser ?? false),
                                  accentColor: appState.accentColor) {
                         newSessionSource = .host(hostID: effectiveHostID)
                     }
@@ -220,12 +234,18 @@ private struct NewSessionPrompt: View {
                             newSessionSource = source
                         }
                     }
+
+                    SourceButton(label: "Browser", icon: "globe",
+                                 selected: newSessionSource?.isBrowser ?? false,
+                                 accentColor: appState.accentColor) {
+                        newSessionSource = .browser(url: "")
+                    }
                 }
             }
 
             // Name + actions
             HStack(spacing: 6) {
-                TextField("Session name", text: $newSessionName)
+                TextField(newSessionSource?.isBrowser == true ? "URL (e.g., github.com)" : "Session name", text: $newSessionName)
                     .textFieldStyle(.plain)
                     .font(.system(size: sz(11), design: .monospaced))
                     .foregroundColor(.white)

@@ -70,9 +70,20 @@ public struct ContentView: View {
                 GeometryReader { geo in
                     HStack(spacing: 0) {
                         ZStack {
-                            TerminalHostView(appState: appState)
+                            // Show browser or terminal based on active session type
+                            if appState.activeSession?.source.isBrowser == true {
+                                VStack(spacing: 0) {
+                                    URLBar(appState: appState, browserManager: appState.browserManager)
+                                    Divider().background(Color.white.opacity(0.1))
+                                    BrowserHostView(appState: appState, browserManager: appState.browserManager)
+                                }
                                 .opacity(hasOverlay ? 0.3 : 1.0)
                                 .allowsHitTesting(!hasOverlay)
+                            } else {
+                                TerminalHostView(appState: appState)
+                                    .opacity(hasOverlay ? 0.3 : 1.0)
+                                    .allowsHitTesting(!hasOverlay)
+                            }
 
                             // Terminal text mode — selectable text overlay
                             if appState.showTerminalText {

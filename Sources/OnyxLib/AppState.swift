@@ -22,6 +22,7 @@ public extension Notification.Name {
     static let toggleMemoryChart = Notification.Name("toggleMemoryChart")
     static let toggleAllContainers = Notification.Name("toggleAllContainers")
     static let toggleClockFormat = Notification.Name("toggleClockFormat")
+    static let focusURLBar = Notification.Name("focusURLBar")
     static let tmuxResizeUp = Notification.Name("tmuxResizeUp")
     static let tmuxResizeDown = Notification.Name("tmuxResizeDown")
     static let tmuxResizeLeft = Notification.Name("tmuxResizeLeft")
@@ -309,6 +310,7 @@ public enum SessionSource: Codable, Hashable {
     case docker(hostID: UUID, containerName: String)
     case dockerLogs(hostID: UUID, containerName: String)
     case dockerTop(hostID: UUID, containerName: String)
+    case browser(url: String)
 
     public var hostID: UUID {
         switch self {
@@ -316,6 +318,7 @@ public enum SessionSource: Codable, Hashable {
         case .docker(let id, _): return id
         case .dockerLogs(let id, _): return id
         case .dockerTop(let id, _): return id
+        case .browser: return HostConfig.localhostID
         }
     }
 
@@ -325,6 +328,7 @@ public enum SessionSource: Codable, Hashable {
         case .docker(let id, let name): return "docker:\(id.uuidString):\(name)"
         case .dockerLogs(let id, let name): return "dockerlogs:\(id.uuidString):\(name)"
         case .dockerTop(let id, let name): return "dockertop:\(id.uuidString):\(name)"
+        case .browser(let url): return "browser:\(url)"
         }
     }
 
@@ -334,6 +338,10 @@ public enum SessionSource: Codable, Hashable {
         case .docker(_, let name): return name
         case .dockerLogs(_, let name): return "\(name) logs"
         case .dockerTop(_, let name): return "\(name) processes"
+        case .browser(let url):
+            // Show domain for display
+            if let host = URL(string: url)?.host { return host }
+            return "Browser"
         }
     }
 
@@ -354,6 +362,11 @@ public enum SessionSource: Codable, Hashable {
         return false
     }
 
+    public var isBrowser: Bool {
+        if case .browser = self { return true }
+        return false
+    }
+
     /// True for pseudo-sessions that are not interactive tmux sessions
     public var isUtility: Bool {
         isDockerLogs || isDockerTop
@@ -366,6 +379,11 @@ public enum SessionSource: Codable, Hashable {
         case .dockerTop(_, let name): return name
         default: return nil
         }
+    }
+
+    public var browserURL: String? {
+        if case .browser(let url) = self { return url }
+        return nil
     }
 }
 
@@ -388,6 +406,7 @@ public struct TmuxSession: Identifiable, Hashable {
         case .docker(_, let container): return "\(container)/\(name)"
         case .dockerLogs(_, let container): return "\(container)/logs"
         case .dockerTop(_, let container): return "\(container)/top"
+        case .browser: return name
         }
     }
 }
@@ -430,6 +449,8 @@ public class AppState: ObservableObject {
     @Published public var showSessionManager = false
     @Published public var showTerminalText = false
     @Published public var terminalTextContent: String = ""
+    @Published public var showURLBar = false
+    @Published public var urlBarText: String = ""
     @Published public var startupStatus: String = "Initializing..."
     public var showFocusOutline = true
 
@@ -503,6 +524,15 @@ public class AppState: ObservableObject {
             self?.objectWillChange.send()
         }
         return t
+    }()
+
+    private var browserCancellable: AnyCancellable?
+    public lazy var browserManager: BrowserManager = {
+        let b = BrowserManager()
+        browserCancellable = b.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        return b
     }()
 
     private var dockerStatsCancellable: AnyCancellable?
@@ -632,7 +662,7 @@ public class AppState: ObservableObject {
                 result.append(HostGroup(host: host, groups: []))
                 continue
             }
-            // Group by container name for docker/dockerLogs, by stableKey for host
+            // Group by container name for docker/dockerLogs, by stableKey for host/browser
             var groups: [String: [TmuxSession]] = [:]
             for s in hostSessions {
                 let key: String
@@ -640,6 +670,8 @@ public class AppState: ObservableObject {
                 case .host: key = SessionSource.host(hostID: host.id).stableKey
                 case .docker(_, let name), .dockerLogs(_, let name), .dockerTop(_, let name):
                     key = SessionSource.docker(hostID: host.id, containerName: name).stableKey
+                case .browser:
+                    key = "browser:\(host.id.uuidString)"
                 }
                 groups[key, default: []].append(s)
             }
@@ -1455,6 +1487,9 @@ public class AppState: ObservableObject {
             return dockerLogsCommand(host: h, container: containerName)
         case .dockerTop(_, let containerName):
             return dockerTopCommand(host: h, container: containerName)
+        case .browser:
+            // Browser sessions don't use SSH commands
+            return ("/usr/bin/true", [])
         }
     }
 

@@ -38,7 +38,14 @@ struct TerminalHostView: NSViewRepresentable {
             DispatchQueue.main.async {
                 appState.switchToSession = nil
             }
-            nsView.switchToSession(session)
+            if session.source.isBrowser {
+                // Browser sessions are handled by BrowserHostView, not the terminal pool
+                DispatchQueue.main.async {
+                    appState.activeSession = session
+                }
+            } else {
+                nsView.switchToSession(session)
+            }
         }
         if let newSession = appState.createNewSession {
             DispatchQueue.main.async {
@@ -1141,8 +1148,8 @@ class OnyxTerminalView: NSView {
         case .docker(_, let containerName):
             let safe = appState.sanitizedContainer(containerName)
             script = "docker exec \(safe) tmux ls -F \"#{session_name}\" 2>/dev/null || true"
-        case .dockerLogs, .dockerTop:
-            completion([]) // utility sessions are not fetched via tmux
+        case .dockerLogs, .dockerTop, .browser:
+            completion([]) // utility/browser sessions are not fetched via tmux
             return
         }
 
