@@ -2709,7 +2709,7 @@ final class MonitorBucketTests: XCTestCase {
         // Add a sample in the previous minute
         let sample3 = MonitorSample(timestamp: currentMinuteStart.addingTimeInterval(-30), cpuUsage: 30.0)
 
-        monitor.samples = [sample3, sample1, sample2]
+        monitor.injectSamples([sample3, sample1, sample2])
 
         let buckets = monitor.bucketedCPU()
         XCTAssertEqual(buckets.count, 60, "Should always return 60 buckets")
@@ -2730,11 +2730,11 @@ final class MonitorBucketTests: XCTestCase {
         monitor.useShortInterval = true // use 5s direct mode
 
         let now = Date()
-        monitor.samples = [
+        monitor.injectSamples([
             MonitorSample(timestamp: now.addingTimeInterval(-10), cpuUsage: 25.0),
             MonitorSample(timestamp: now.addingTimeInterval(-5), cpuUsage: 50.0),
             MonitorSample(timestamp: now, cpuUsage: 75.0),
-        ]
+        ])
 
         let buckets = monitor.bucketedCPU()
         XCTAssertEqual(buckets.count, 60, "Should return 60 buckets")
@@ -2749,7 +2749,7 @@ final class MonitorBucketTests: XCTestCase {
     func testBucketedCPU_noData_returnsEmpty() {
         let state = AppState()
         let monitor = MonitorManager(appState: state)
-        monitor.samples = []
+        monitor.injectSamples([])
 
         let buckets = monitor.bucketedCPU()
         XCTAssertTrue(buckets.isEmpty, "No samples should return empty array")

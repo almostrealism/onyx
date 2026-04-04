@@ -31,22 +31,45 @@ public struct MonitorSample: Identifiable {
 }
 
 public class MonitorManager: ObservableObject {
-    @Published public var samples: [MonitorSample] = []
-    @Published public var latestSample: MonitorSample?
     @Published public var isPolling = false
     @Published public var lastError: String?
     @Published public var showMemoryChart = false
     @Published public var pollCount = 0
-    @Published public var useShortInterval = true // true = 5s buckets (default), false = 1m buckets
-    /// True once any sample has ever contained GPU data — prevents chart from vanishing on transient failures
-    @Published public var gpuEverSeen = false
+    @Published public var useShortInterval = true
+
+    /// Per-host data storage
+    private var hostData: [UUID: HostMonitorData] = [:]
+
+    /// Data for the active host (computed from hostData)
+    public var samples: [MonitorSample] { activeHostData.samples }
+    public var latestSample: MonitorSample? { activeHostData.latestSample }
+    public var gpuEverSeen: Bool { activeHostData.gpuEverSeen }
 
     private var timer: Timer?
     private let appState: AppState
-    private let maxSamples = 720 // 1 hour at 5s intervals
-    /// Count of consecutive GPU-less polls (to detect persistent loss)
-    private var consecutiveGpuMisses = 0
-    private let gpuMissThreshold = 60  // after 60 misses (5 min at 5s) consider GPU truly gone
+    private let maxSamples = 720
+
+    /// Active host's data (or creates empty)
+    private var activeHostData: HostMonitorData {
+        let id = appState.activeHost?.id ?? HostConfig.localhostID
+        return hostData[id] ?? HostMonitorData()
+    }
+
+    /// Inject samples for testing (sets data for the active host)
+    public func injectSamples(_ samples: [MonitorSample]) {
+        let id = appState.activeHost?.id ?? HostConfig.localhostID
+        var data = hostData[id] ?? HostMonitorData()
+        data.samples = samples
+        data.latestSample = samples.last
+        hostData[id] = data
+    }
+
+    private struct HostMonitorData {
+        var samples: [MonitorSample] = []
+        var latestSample: MonitorSample?
+        var gpuEverSeen = false
+        var consecutiveGpuMisses = 0
+    }
 
     public init(appState: AppState) {
         self.appState = appState
@@ -134,6 +157,7 @@ public class MonitorManager: ObservableObject {
     }
 
     private func poll() {
+        let hostID = appState.activeHost?.id ?? HostConfig.localhostID
         let (cmd, args) = appState.statsCommand()
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let process = Process()
@@ -174,24 +198,27 @@ public class MonitorManager: ObservableObject {
 
                 if let sample = Self.parse(output: output) {
                     DispatchQueue.main.async {
-                        self?.lastError = nil
-                        self?.latestSample = sample
-                        self?.samples.append(sample)
-                        if let count = self?.samples.count, count > (self?.maxSamples ?? 720) {
-                            self?.samples.removeFirst(count - (self?.maxSamples ?? 720))
+                        guard let self = self else { return }
+                        self.lastError = nil
+
+                        // Store sample in per-host data
+                        var data = self.hostData[hostID] ?? HostMonitorData()
+                        data.latestSample = sample
+                        data.samples.append(sample)
+                        if data.samples.count > self.maxSamples {
+                            data.samples.removeFirst(data.samples.count - self.maxSamples)
                         }
-                        // Track GPU presence: once seen, keep showing until
-                        // many consecutive polls come back without GPU data
                         if sample.gpuUsage != nil {
-                            self?.gpuEverSeen = true
-                            self?.consecutiveGpuMisses = 0
-                        } else if self?.gpuEverSeen == true {
-                            self?.consecutiveGpuMisses += 1
-                            if let misses = self?.consecutiveGpuMisses,
-                               misses >= (self?.gpuMissThreshold ?? 60) {
-                                self?.gpuEverSeen = false
+                            data.gpuEverSeen = true
+                            data.consecutiveGpuMisses = 0
+                        } else if data.gpuEverSeen {
+                            data.consecutiveGpuMisses += 1
+                            if data.consecutiveGpuMisses >= 60 {
+                                data.gpuEverSeen = false
                             }
                         }
+                        self.hostData[hostID] = data
+                        self.objectWillChange.send()
                     }
                 }
             } catch {
