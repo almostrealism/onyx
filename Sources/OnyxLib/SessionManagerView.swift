@@ -162,8 +162,9 @@ struct SessionManagerView: View {
             let displayName = URL(string: url)?.host ?? name
             let session = TmuxSession(name: displayName, source: .browser(url: url))
             appState.allSessions.append(session)
-            appState.switchToSession = session
+            appState.activeSession = session
             appState.showNewSessionPrompt = false
+            appState.showSessionManager = false
             newSessionName = ""
             return
         }
