@@ -196,14 +196,33 @@ class OnyxTerminalView: NSView {
 
     // MARK: - Tmux Commands
 
-    /// Send a tmux command to the active terminal session.
-    /// Writes the tmux prefix key (Ctrl-B) followed by `:command\n`.
+    /// Run a tmux command for the active session via a background process.
+    /// Uses `tmux <command>` CLI which communicates with the tmux server
+    /// directly, avoiding terminal input stream issues.
     private func sendTmuxCommand(_ command: String) {
-        guard let tv = terminalView else { return }
-        // Ctrl-B (tmux prefix) = 0x02, then : to enter command mode
-        let prefix = "\u{02}:"
-        let full = prefix + command + "\r"
-        tv.send(txt: full)
+        guard let session = appState.activeSession else { return }
+        let host = appState.host(for: session.source.hostID) ?? .localhost
+
+        // Build the tmux CLI command
+        let tmuxCmd: String
+        switch session.source {
+        case .docker(_, let container):
+            let safe = appState.sanitizedContainer(container)
+            tmuxCmd = "docker exec \(safe) tmux \(command)"
+        default:
+            tmuxCmd = "tmux \(command)"
+        }
+
+        let (cmd, args) = appState.remoteCommand(tmuxCmd, host: host)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: cmd)
+            process.arguments = args
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try? process.run()
+            process.waitUntilExit()
+        }
     }
 
     // MARK: - URL Detection (Cmd+click)
