@@ -2755,3 +2755,111 @@ final class MonitorBucketTests: XCTestCase {
         XCTAssertTrue(buckets.isEmpty, "No samples should return empty array")
     }
 }
+
+// MARK: - Session Independence Tests
+
+final class SessionIndependenceTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        AppearanceStore.shared.reset()
+    }
+
+    private let hostA = UUID()
+    private let hostB = UUID()
+
+    func testReconnectingOverlay_onlyAffectsActiveHost() {
+        let state = AppState()
+        let sessionA = TmuxSession(name: "dev", source: .host(hostID: hostA))
+        let sessionB = TmuxSession(name: "dev", source: .host(hostID: hostB))
+        state.allSessions = [sessionA, sessionB]
+
+        // Reconnecting on host A
+        state.isReconnecting = true
+        state.reconnectingHostID = hostA
+
+        // When session A is active, should show reconnecting
+        state.activeSession = sessionA
+        XCTAssertTrue(state.isActiveSessionReconnecting)
+
+        // When session B is active, should NOT show reconnecting
+        state.activeSession = sessionB
+        XCTAssertFalse(state.isActiveSessionReconnecting)
+    }
+
+    func testConnectionError_onlyAffectsActiveHost() {
+        let state = AppState()
+        let sessionA = TmuxSession(name: "dev", source: .host(hostID: hostA))
+        let sessionB = TmuxSession(name: "dev", source: .host(hostID: hostB))
+        state.allSessions = [sessionA, sessionB]
+
+        // Error on host A
+        state.connectionErrorHostID = hostA
+        state.connectionError = "Connection failed"
+
+        // When session A is active, should show error
+        state.activeSession = sessionA
+        XCTAssertTrue(state.activeSessionHasError)
+
+        // When session B is active, should NOT show error
+        state.activeSession = sessionB
+        XCTAssertFalse(state.activeSessionHasError)
+    }
+
+    func testClearingConnectionError_clearsHostID() {
+        let state = AppState()
+        state.connectionErrorHostID = hostA
+        state.connectionError = "Connection failed"
+        XCTAssertNotNil(state.connectionErrorHostID)
+
+        state.connectionError = nil
+        XCTAssertNil(state.connectionErrorHostID)
+    }
+
+    func testClearingReconnecting_clearsHostID() {
+        let state = AppState()
+        state.reconnectingHostID = hostA
+        state.isReconnecting = true
+        XCTAssertNotNil(state.reconnectingHostID)
+
+        state.isReconnecting = false
+        XCTAssertNil(state.reconnectingHostID)
+    }
+
+    func testBrowserSession_notAffectedBySSHReconnect() {
+        let state = AppState()
+        let terminal = TmuxSession(name: "dev", source: .host(hostID: hostA))
+        let browser = TmuxSession(name: "github.com", source: .browser(url: "https://github.com"))
+        state.allSessions = [terminal, browser]
+
+        state.isReconnecting = true
+        state.reconnectingHostID = hostA
+
+        // Browser session should not show reconnecting
+        state.activeSession = browser
+        XCTAssertFalse(state.isActiveSessionReconnecting)
+    }
+
+    func testBrowserSession_notAffectedByConnectionError() {
+        let state = AppState()
+        let browser = TmuxSession(name: "github.com", source: .browser(url: "https://github.com"))
+        state.allSessions = [browser]
+
+        state.connectionErrorHostID = hostA
+        state.connectionError = "SSH failed"
+
+        state.activeSession = browser
+        // Browser hostID is localhostID, not hostA
+        XCTAssertFalse(state.activeSessionHasError)
+    }
+
+    func testNoReconnecting_whenNoHostIDSet() {
+        let state = AppState()
+        let session = TmuxSession(name: "dev", source: .host(hostID: hostA))
+        state.activeSession = session
+
+        state.isReconnecting = true
+        // reconnectingHostID not set
+        XCTAssertFalse(state.isActiveSessionReconnecting)
+    }
+}

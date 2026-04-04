@@ -100,13 +100,13 @@ public struct ContentView: View {
                                     .transition(.opacity)
                             }
 
-                            // Connection error overlay
-                            if appState.connectionError != nil {
+                            // Connection error overlay (only for active session's host)
+                            if appState.activeSessionHasError {
                                 ConnectionErrorOverlay(appState: appState)
                             }
 
-                            // Reconnecting indicator
-                            if appState.isReconnecting && appState.connectionError == nil {
+                            // Reconnecting indicator (only for active session's host)
+                            if appState.isActiveSessionReconnecting && !appState.activeSessionHasError {
                                 ReconnectingOverlay(accentColor: appState.accentColor)
                             }
 
@@ -835,8 +835,8 @@ struct FavoritesBar: View {
             // Connection indicator + host
             HStack(spacing: 5) {
                 Circle()
-                    .fill(appState.connectionError != nil ? Color(hex: "FF6B6B") :
-                          appState.isReconnecting ? Color(hex: "FFD06B") : Color(hex: "6BFF8E"))
+                    .fill(appState.activeSessionHasError ? Color(hex: "FF6B6B") :
+                          appState.isActiveSessionReconnecting ? Color(hex: "FFD06B") : Color(hex: "6BFF8E"))
                     .frame(width: 5, height: 5)
 
                 Text(appState.activeHost?.label ?? "local")

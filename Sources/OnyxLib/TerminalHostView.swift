@@ -1344,11 +1344,14 @@ class OnyxTerminalView: NSView {
         let targetSession = appState.activeSession
 
         // Stop auto-reconnecting after too many consecutive failures
+        let hostID = targetSession?.source.hostID
         if reconnectAttempt >= maxReconnectAttempts {
             let hostLabel = targetSession.flatMap { appState.host(for: $0.source.hostID)?.label } ?? "remote host"
             DispatchQueue.main.async { [weak self] in
                 self?.appState.isReconnecting = false
+                self?.appState.reconnectingHostID = nil
                 self?.appState.connectionError = "Connection to \(hostLabel) failed after \(self?.maxReconnectAttempts ?? 10) attempts.\nUse ⌘K → Reconnect SSH to try again."
+                self?.appState.connectionErrorHostID = hostID
             }
             if let session = targetSession {
                 clearPendingStatus(for: session.id)
@@ -1363,6 +1366,7 @@ class OnyxTerminalView: NSView {
 
         DispatchQueue.main.async {
             self.appState.isReconnecting = true
+            self.appState.reconnectingHostID = hostID
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in

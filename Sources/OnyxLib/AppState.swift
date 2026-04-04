@@ -438,17 +438,48 @@ public class AppState: ObservableObject {
     @Published public var showSettings = false
     @Published public var showCommandPalette = false
     @Published public var showMonitor = false
-    @Published public var isReconnecting = false
+    @Published public var reconnectingHostID: UUID?
+    public var isReconnecting: Bool {
+        get { _isReconnecting }
+        set {
+            _isReconnecting = newValue
+            if !newValue { reconnectingHostID = nil }
+            objectWillChange.send()
+        }
+    }
+    @Published private var _isReconnecting = false
     @Published public var reconnectRequested = false
     @Published public var refreshSessionList = false
     @Published public var createNoteRequested = false
     @Published public var showWindowRename = false
-    @Published public var connectionError: String?
+    @Published public var connectionErrorHostID: UUID?  // which host has the error
+    /// Connection error message — setting to nil also clears the hostID
+    public var connectionError: String? {
+        get { _connectionError }
+        set {
+            _connectionError = newValue
+            if newValue == nil { connectionErrorHostID = nil }
+            objectWillChange.send()
+        }
+    }
+    @Published private var _connectionError: String?
     @Published public var needsKeySetup = false
     @Published public var keySetupInProgress = false
     @Published public var showSessionManager = false
     @Published public var showTerminalText = false
     @Published public var terminalTextContent: String = ""
+    /// Whether the reconnecting state applies to the active session's host
+    public var isActiveSessionReconnecting: Bool {
+        guard isReconnecting, let hostID = reconnectingHostID else { return false }
+        return activeSession?.source.hostID == hostID
+    }
+
+    /// Whether the connection error applies to the active session's host
+    public var activeSessionHasError: Bool {
+        guard connectionError != nil, let hostID = connectionErrorHostID else { return false }
+        return activeSession?.source.hostID == hostID
+    }
+
     @Published public var showURLBar = false
     @Published public var urlBarText: String = ""
     @Published public var startupStatus: String = "Initializing..."
