@@ -161,11 +161,15 @@ struct SessionManagerView: View {
             if !url.contains("://") { url = "https://\(url)" }
             let displayName = URL(string: url)?.host ?? name
             let session = TmuxSession(name: displayName, source: .browser(url: url))
-            appState.allSessions.append(session)
-            appState.activeSession = session
+            // Dismiss UI first, then activate session after a tick to avoid
+            // SwiftUI update cycle (terminal→browser swap during view update)
             appState.showNewSessionPrompt = false
             appState.showSessionManager = false
             newSessionName = ""
+            DispatchQueue.main.async {
+                appState.allSessions.append(session)
+                appState.activeSession = session
+            }
             return
         }
 

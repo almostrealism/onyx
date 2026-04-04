@@ -34,17 +34,20 @@ struct TerminalHostView: NSViewRepresentable {
             }
             nsView.startKeySetup()
         }
-        if let session = appState.switchToSession, !session.source.isBrowser {
-            DispatchQueue.main.async {
+        if let session = appState.switchToSession {
+            if session.source.isBrowser {
+                // Browser sessions bypass the terminal pool.
+                // Clear switchToSession immediately to prevent re-entry,
+                // defer activeSession change to next run loop tick.
                 appState.switchToSession = nil
-            }
-            nsView.switchToSession(session)
-        } else if appState.switchToSession?.source.isBrowser == true {
-            // Browser sessions bypass the terminal pool — handled via activeSession directly
-            let session = appState.switchToSession!
-            DispatchQueue.main.async {
-                appState.switchToSession = nil
-                appState.activeSession = session
+                DispatchQueue.main.async {
+                    appState.activeSession = session
+                }
+            } else {
+                DispatchQueue.main.async {
+                    appState.switchToSession = nil
+                }
+                nsView.switchToSession(session)
             }
         }
         if let newSession = appState.createNewSession {
