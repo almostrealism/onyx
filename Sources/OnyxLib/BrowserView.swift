@@ -1,10 +1,12 @@
 import SwiftUI
 import WebKit
+import Combine
 
 // MARK: - Browser Manager
 
-/// Manages WKWebView instances for browser sessions, similar to how
-/// OnyxTerminalView pools terminal views for tmux sessions.
+/// Manages WKWebView instances for browser sessions.
+/// State properties are updated via KVO on the active web view,
+/// NOT during SwiftUI updateNSView (which would cause infinite loops).
 public class BrowserManager: ObservableObject {
     @Published public var currentURL: String = ""
     @Published public var currentTitle: String = ""
@@ -12,9 +14,10 @@ public class BrowserManager: ObservableObject {
     @Published public var canGoBack: Bool = false
     @Published public var canGoForward: Bool = false
 
-    private var webViews: [String: WKWebView] = [:] // session ID → web view
+    private var webViews: [String: WKWebView] = [:]
     private var activeSessionID: String?
     private var delegates: [String: BrowserDelegate] = [:]
+    private var kvoObservations: [NSKeyValueObservation] = []
 
     public init() {}
 
@@ -25,8 +28,6 @@ public class BrowserManager: ObservableObject {
         }
 
         let config = WKWebViewConfiguration()
-        config.preferences.isElementFullscreenEnabled = true
-
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.setValue(false, forKey: "drawsBackground")
         wv.allowsBackForwardNavigationGestures = true
@@ -35,7 +36,6 @@ public class BrowserManager: ObservableObject {
         let delegate = BrowserDelegate(manager: self, sessionID: session.id)
         wv.navigationDelegate = delegate
         delegates[session.id] = delegate
-
         webViews[session.id] = wv
 
         // Load initial URL
@@ -46,25 +46,50 @@ public class BrowserManager: ObservableObject {
         return wv
     }
 
-    /// Switch to showing a specific session's web view
-    public func activate(session: TmuxSession) {
-        activeSessionID = session.id
-        if let wv = webViews[session.id] {
-            updateState(from: wv)
-        }
+    /// Switch to a session — sets up KVO on the new web view.
+    /// MUST NOT be called from updateNSView; call from makeNSView or user actions only.
+    public func activate(sessionID: String) {
+        guard sessionID != activeSessionID else { return }
+        activeSessionID = sessionID
+
+        // Remove old KVO observations
+        kvoObservations.removeAll()
+
+        guard let wv = webViews[sessionID] else { return }
+
+        // Observe WKWebView properties via KVO — updates arrive outside SwiftUI's update cycle
+        kvoObservations.append(wv.observe(\.url, options: .new) { [weak self] wv, _ in
+            DispatchQueue.main.async { self?.currentURL = wv.url?.absoluteString ?? "" }
+        })
+        kvoObservations.append(wv.observe(\.title, options: .new) { [weak self] wv, _ in
+            DispatchQueue.main.async { self?.currentTitle = wv.title ?? "" }
+        })
+        kvoObservations.append(wv.observe(\.isLoading, options: .new) { [weak self] wv, _ in
+            DispatchQueue.main.async { self?.isLoading = wv.isLoading }
+        })
+        kvoObservations.append(wv.observe(\.canGoBack, options: .new) { [weak self] wv, _ in
+            DispatchQueue.main.async { self?.canGoBack = wv.canGoBack }
+        })
+        kvoObservations.append(wv.observe(\.canGoForward, options: .new) { [weak self] wv, _ in
+            DispatchQueue.main.async { self?.canGoForward = wv.canGoForward }
+        })
+
+        // Set initial state
+        currentURL = wv.url?.absoluteString ?? ""
+        currentTitle = wv.title ?? ""
+        isLoading = wv.isLoading
+        canGoBack = wv.canGoBack
+        canGoForward = wv.canGoForward
     }
 
-    /// Navigate the active browser to a URL
     public func navigate(to urlString: String) {
         guard let id = activeSessionID, let wv = webViews[id] else { return }
         var urlStr = urlString.trimmingCharacters(in: .whitespaces)
 
-        // Add https:// if no scheme
         if !urlStr.contains("://") {
             if urlStr.contains(".") && !urlStr.contains(" ") {
                 urlStr = "https://\(urlStr)"
             } else {
-                // Treat as search
                 urlStr = "https://www.google.com/search?q=\(urlStr.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? urlStr)"
             }
         }
@@ -88,26 +113,13 @@ public class BrowserManager: ObservableObject {
         wv.reload()
     }
 
-    /// Remove a browser session's web view
     public func destroySession(_ sessionID: String) {
+        if sessionID == activeSessionID {
+            kvoObservations.removeAll()
+            activeSessionID = nil
+        }
         webViews.removeValue(forKey: sessionID)
         delegates.removeValue(forKey: sessionID)
-    }
-
-    fileprivate func updateState(from wv: WKWebView) {
-        currentURL = wv.url?.absoluteString ?? ""
-        currentTitle = wv.title ?? ""
-        isLoading = wv.isLoading
-        canGoBack = wv.canGoBack
-        canGoForward = wv.canGoForward
-    }
-
-    fileprivate func didUpdate(sessionID: String, wv: WKWebView) {
-        if sessionID == activeSessionID {
-            DispatchQueue.main.async {
-                self.updateState(from: wv)
-            }
-        }
     }
 }
 
@@ -122,17 +134,9 @@ private class BrowserDelegate: NSObject, WKNavigationDelegate {
         self.sessionID = sessionID
     }
 
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        manager?.didUpdate(sessionID: sessionID, wv: webView)
-    }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        manager?.didUpdate(sessionID: sessionID, wv: webView)
-    }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        manager?.didUpdate(sessionID: sessionID, wv: webView)
-    }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {}
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {}
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {}
 }
 
 // MARK: - Browser Host View
@@ -140,6 +144,10 @@ private class BrowserDelegate: NSObject, WKNavigationDelegate {
 struct BrowserHostView: NSViewRepresentable {
     @ObservedObject var appState: AppState
     @ObservedObject var browserManager: BrowserManager
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
 
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
@@ -150,21 +158,31 @@ struct BrowserHostView: NSViewRepresentable {
 
     func updateNSView(_ container: NSView, context: Context) {
         guard let session = appState.activeSession, session.source.isBrowser else {
-            // Remove all web views when not in browser mode
             for sub in container.subviews { sub.removeFromSuperview() }
+            context.coordinator.activeID = nil
             return
         }
 
-        let wv = browserManager.webView(for: session)
-        browserManager.activate(session: session)
+        // Only act when the session actually changes — prevents re-entry
+        guard session.id != context.coordinator.activeID else { return }
+        context.coordinator.activeID = session.id
 
-        // If this web view isn't already a subview, add it
-        if wv.superview !== container {
-            for sub in container.subviews { sub.removeFromSuperview() }
-            wv.frame = container.bounds
-            wv.autoresizingMask = [.width, .height]
-            container.addSubview(wv)
+        let wv = browserManager.webView(for: session)
+
+        // Swap the web view in the container
+        for sub in container.subviews { sub.removeFromSuperview() }
+        wv.frame = container.bounds
+        wv.autoresizingMask = [.width, .height]
+        container.addSubview(wv)
+
+        // Activate KVO observation — deferred to avoid modifying @Published during update
+        DispatchQueue.main.async {
+            browserManager.activate(sessionID: session.id)
         }
+    }
+
+    class Coordinator {
+        var activeID: String?
     }
 }
 
@@ -177,7 +195,6 @@ struct URLBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Back/Forward
             Button(action: { browserManager.goBack() }) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 12, weight: .medium))
@@ -201,7 +218,6 @@ struct URLBar: View {
             }
             .buttonStyle(.plain)
 
-            // URL field
             TextField("Search or enter URL...", text: $appState.urlBarText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .monospaced))
@@ -220,7 +236,6 @@ struct URLBar: View {
                     appState.urlBarText = browserManager.currentURL
                 }
 
-            // Page title (truncated)
             if !browserManager.currentTitle.isEmpty && !isFocused {
                 Text(browserManager.currentTitle)
                     .font(.system(size: 10, design: .monospaced))
