@@ -555,11 +555,18 @@ class OnyxTerminalView: NSView {
 
         // Check if the underlying process is actually still alive
         if !entry.terminalView.process.running {
-            print("Health check: active session \(id) process is dead, triggering reconnect")
+            print("Health check: session \(id) process is dead")
             pool[id]?.processRunning = false
 
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
+                // Only reconnect if this dead session is STILL the active one in AppState.
+                // The user may have already switched to a different session.
+                guard self.appState.activeSession?.id == id else {
+                    print("Health check: session \(id) died but is no longer active, skipping reconnect")
+                    self.destroyPoolEntry(id)
+                    return
+                }
                 guard self.appState.connectionError == nil else { return }
                 self.reconnect()
             }
@@ -1372,8 +1379,18 @@ class OnyxTerminalView: NSView {
             self.appState.reconnectingHostID = hostID
         }
 
+        let targetID = targetSession?.id
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self else { return }
+
+            // If the user switched to a different session during the backoff,
+            // abandon this reconnect — don't fight the user's explicit choice.
+            if let tid = targetID, self.appState.activeSession?.id != tid {
+                print("reconnect: user switched away from \(tid), abandoning reconnect")
+                self.appState.isReconnecting = false
+                if let session = targetSession { self.clearPendingStatus(for: session.id) }
+                return
+            }
 
             // Check if the host is actually reachable before attempting reconnect.
             // This avoids burning through retry attempts on a sleeping/unreachable host.
@@ -1417,8 +1434,16 @@ class OnyxTerminalView: NSView {
         // finishes tearing down, hitting MaxSessions limits.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self = self else { return }
+            // Only restore the target session if the user hasn't switched away
+            // during the delay. Overwriting a user's explicit session switch is wrong.
             if let target = targetSession {
-                self.appState.activeSession = target
+                let currentID = self.appState.activeSession?.id
+                if currentID == nil || currentID == target.id {
+                    self.appState.activeSession = target
+                } else {
+                    print("performReconnect: user switched to \(currentID ?? "nil"), not restoring \(target.id)")
+                    return // user switched — don't reconnect the old session
+                }
             }
             self.connectToActiveSession(isReconnect: true)
         }
@@ -1509,8 +1534,15 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
         }
 
         // Active session died — auto-reconnect (except read-only log streams)
+        let deadSessionID = terminatedSessionID ?? activeSessionID
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
+            // Re-verify the dead session is still the active one — user may have
+            // switched during the async dispatch
+            if let deadID = deadSessionID, self.appState.activeSession?.id != deadID {
+                print("processTerminated: session \(deadID) died but user already switched, skipping reconnect")
+                return
+            }
             if self.appState.connectionError != nil {
                 self.appState.isReconnecting = false
                 return
