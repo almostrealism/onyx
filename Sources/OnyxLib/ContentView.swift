@@ -580,6 +580,11 @@ struct TerminalTextOverlay: View {
         // both sides) are removed, detect URLs there, then map back.
         let lines = text.components(separatedBy: "\n")
 
+        // Detect terminal width: the max line length is likely the terminal column count.
+        // Only lines at this width were soft-wrapped by the terminal; shorter lines
+        // were intentionally broken by the program and should NOT be joined.
+        let terminalWidth = lines.map(\.count).max() ?? 80
+
         // Build unwrapped text and a mapping from unwrapped offset → original offset
         var unwrapped = ""
         var offsetMap: [Int] = [] // unwrapped char index → original char index
@@ -593,9 +598,12 @@ struct TerminalTextOverlay: View {
             origOffset += line.count
 
             if i < lines.count - 1 {
-                // Decide: is this a soft wrap (mid-URL) or a real line break?
+                // A soft wrap (mid-URL break) only occurs when:
+                // 1. This line is at the terminal width (it was wrapped by the terminal)
+                // 2. Both sides have non-whitespace (the break is inside a word/URL)
                 let nextLine = lines[i + 1]
-                let isSoftWrap = !line.isEmpty && !nextLine.isEmpty
+                let isSoftWrap = line.count >= terminalWidth
+                    && !line.isEmpty && !nextLine.isEmpty
                     && !line.last!.isWhitespace && !nextLine.first!.isWhitespace
 
                 if isSoftWrap {
