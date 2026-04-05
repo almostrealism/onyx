@@ -32,7 +32,6 @@ public struct MonitorSample: Identifiable {
 
 public class MonitorManager: ObservableObject {
     @Published public var isPolling = false
-    @Published public var lastError: String?
     @Published public var showMemoryChart = false
     @Published public var pollCount = 0
     @Published public var useShortInterval = true
@@ -44,6 +43,7 @@ public class MonitorManager: ObservableObject {
     public var samples: [MonitorSample] { activeHostData.samples }
     public var latestSample: MonitorSample? { activeHostData.latestSample }
     public var gpuEverSeen: Bool { activeHostData.gpuEverSeen }
+    public var lastError: String? { activeHostData.lastError }
 
     private var timer: Timer?
     private let appState: AppState
@@ -69,6 +69,7 @@ public class MonitorManager: ObservableObject {
         var latestSample: MonitorSample?
         var gpuEverSeen = false
         var consecutiveGpuMisses = 0
+        var lastError: String?
     }
 
     public init(appState: AppState) {
@@ -185,24 +186,37 @@ public class MonitorManager: ObservableObject {
 
                 DispatchQueue.main.async { self?.pollCount += 1 }
 
-                guard process.terminationStatus == 0 else {
+                // Exit code 255 = SSH connection failed; other non-zero may just
+                // mean the stats script had a partial failure (GPU check, etc.)
+                // Still try to parse output even on non-zero exit codes.
+                if process.terminationStatus == 255 {
                     DispatchQueue.main.async {
-                        self?.lastError = "SSH exited with code \(process.terminationStatus). Check that key-based auth works for this host."
+                        guard let self = self else { return }
+                        var data = self.hostData[hostID] ?? HostMonitorData()
+                        data.lastError = "SSH connection failed (code 255)"
+                        self.hostData[hostID] = data
+                        self.objectWillChange.send()
                     }
                     return
                 }
                 guard !output.isEmpty else {
-                    DispatchQueue.main.async { self?.lastError = "Empty response from remote" }
+                    DispatchQueue.main.async {
+                        guard let self = self else { return }
+                        var data = self.hostData[hostID] ?? HostMonitorData()
+                        data.lastError = "Empty response from remote"
+                        self.hostData[hostID] = data
+                        self.objectWillChange.send()
+                    }
                     return
                 }
 
                 if let sample = Self.parse(output: output) {
                     DispatchQueue.main.async {
                         guard let self = self else { return }
-                        self.lastError = nil
 
-                        // Store sample in per-host data
+                        // Store sample in per-host data — clear any previous error
                         var data = self.hostData[hostID] ?? HostMonitorData()
+                        data.lastError = nil
                         data.latestSample = sample
                         data.samples.append(sample)
                         if data.samples.count > self.maxSamples {
@@ -223,7 +237,11 @@ public class MonitorManager: ObservableObject {
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self?.lastError = "Failed to run ssh: \(error.localizedDescription)"
+                    guard let self = self else { return }
+                    var data = self.hostData[hostID] ?? HostMonitorData()
+                    data.lastError = "Failed to run ssh: \(error.localizedDescription)"
+                    self.hostData[hostID] = data
+                    self.objectWillChange.send()
                 }
             }
         }
