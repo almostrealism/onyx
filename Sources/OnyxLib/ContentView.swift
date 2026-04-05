@@ -70,8 +70,16 @@ public struct ContentView: View {
                 GeometryReader { geo in
                     HStack(spacing: 0) {
                         ZStack {
-                            // Show browser or terminal based on active session type
-                            if appState.activeSession?.source.isBrowser == true {
+                            // Both terminal and browser are always in the tree so
+                            // updateNSView fires for session switching. The inactive
+                            // one is hidden behind the active one.
+                            let isBrowser = appState.activeSession?.source.isBrowser == true
+
+                            TerminalHostView(appState: appState)
+                                .opacity(isBrowser ? 0 : (hasOverlay ? 0.3 : 1.0))
+                                .allowsHitTesting(!isBrowser && !hasOverlay)
+
+                            if isBrowser {
                                 VStack(spacing: 0) {
                                     URLBar(appState: appState, browserManager: appState.browserManager)
                                     Divider().background(Color.white.opacity(0.1))
@@ -79,10 +87,6 @@ public struct ContentView: View {
                                 }
                                 .opacity(hasOverlay ? 0.3 : 1.0)
                                 .allowsHitTesting(!hasOverlay)
-                            } else {
-                                TerminalHostView(appState: appState)
-                                    .opacity(hasOverlay ? 0.3 : 1.0)
-                                    .allowsHitTesting(!hasOverlay)
                             }
 
                             // Terminal text mode — selectable text overlay
