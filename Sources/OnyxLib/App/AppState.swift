@@ -31,7 +31,6 @@ public extension Notification.Name {
     static let cyclePanelSize = Notification.Name("cyclePanelSize")
 }
 
-
 // MARK: - Window Index
 
 /// Tracks which window indices are in use across all AppState instances.
@@ -61,7 +60,6 @@ private class WindowIndexPool {
         lock.unlock()
     }
 }
-
 
 // MARK: - Focus Tracking
 
@@ -106,7 +104,6 @@ public enum RightPanel: Equatable {
     case artifacts
 }
 
-
 /// AppState.
 public class AppState: ObservableObject {
     @Published public var hosts: [HostConfig] = []
@@ -119,7 +116,7 @@ public class AppState: ObservableObject {
         }
     }
     @Published public var showSetup = false
-    @Published public var activeRightPanel: RightPanel? = nil
+    @Published public var activeRightPanel: RightPanel?
     @Published public var showSettings = false
     @Published public var showCommandPalette = false
     @Published public var showMonitor = false

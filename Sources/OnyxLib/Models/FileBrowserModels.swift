@@ -1,7 +1,6 @@
 import Foundation
 import Combine
 
-
 /// RemoteEntry.
 public struct RemoteEntry: Identifiable, Comparable {
     /// Id.
@@ -71,7 +70,7 @@ public class SearchResultTree: ObservableObject {
 
         var currentChildren = roots
         var currentFullPath = basePath
-        var parentNode: SearchTreeNode? = nil
+        var parentNode: SearchTreeNode?
 
         for (i, component) in components.enumerated() {
             currentFullPath = currentFullPath.hasSuffix("/")

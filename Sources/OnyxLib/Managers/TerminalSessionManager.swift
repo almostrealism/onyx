@@ -459,7 +459,7 @@ class OnyxTerminalView: NSView {
     /// Publish the current pool state to AppState for the monitor overlay
     private func publishPoolStatus() {
         let poolIDs = Set(pool.keys)
-        let infos: [ConnectionInfo] = pool.map { (sessionID, entry) in
+        let infos: [ConnectionInfo] = pool.map { sessionID, entry in
             let session = appState.allSessions.first { $0.id == sessionID }
             let hostID = session?.source.hostID
             let hostLabel = hostID.flatMap { id in appState.hosts.first { $0.id == id }?.label } ?? "local"

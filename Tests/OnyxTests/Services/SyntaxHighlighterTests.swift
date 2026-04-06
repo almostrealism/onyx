@@ -52,4 +52,3 @@ final class SyntaxHighlighterTests: XCTestCase {
         XCTAssertEqual(result, plain, "Unknown extension should return plain white text")
     }
 }
-

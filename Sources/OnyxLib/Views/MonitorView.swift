@@ -197,7 +197,7 @@ public class RemindersManager: ObservableObject {
     }
 
     public func toggleComplete(_ reminder: EKReminder) {
-        reminder.isCompleted = !reminder.isCompleted
+        reminder.isCompleted.toggle()
         try? store.save(reminder, commit: true)
         fetchReminders()
     }
@@ -361,7 +361,6 @@ struct MonitorView: View {
                     }
                     .padding(.horizontal, 40)
                     .padding(.top, 4)
-
                 } else if let error = monitor.lastError {
                     VStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle")
@@ -1171,9 +1170,9 @@ struct RemindersSection: View {
 
                 Spacer()
 
-                let count = reminders.totalCount
-                if count > 0 {
-                    Text("\(count)")
+                let total = reminders.totalCount
+                if total > 0 {
+                    Text("\(total)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.4))
                 }

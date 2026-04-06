@@ -194,4 +194,3 @@ final class MonitorParseTests: XCTestCase {
         XCTAssertNil(sample!.memUsed)
     }
 }
-

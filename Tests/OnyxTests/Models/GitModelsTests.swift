@@ -161,4 +161,3 @@ final class GitParserTests: XCTestCase {
         XCTAssertEqual(status.untrackedFiles.count, 1)
     }
 }
-

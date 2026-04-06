@@ -711,4 +711,3 @@ final class FavoriteParsingTests: XCTestCase {
         XCTAssertEqual(session?.source.hostID, unknownID)
     }
 }
-

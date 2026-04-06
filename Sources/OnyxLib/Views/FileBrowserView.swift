@@ -392,7 +392,7 @@ struct FolderSidebar: View {
 
 struct FolderRow: View {
     let path: String
-    var hostLabel: String? = nil
+    var hostLabel: String?
     let isSelected: Bool
     let accentColor: Color
 
@@ -799,8 +799,8 @@ struct FileContentView: View {
     let content: String
     let accentColor: Color
     let onClose: () -> Void
-    var onDownload: (() -> Void)? = nil
-    var onViewDiff: (() -> Void)? = nil
+    var onDownload: (() -> Void)?
+    var onViewDiff: (() -> Void)?
 
     private var highlightedContent: AttributedString {
         SyntaxHighlighter.highlight(content, fileName: fileName)
@@ -859,7 +859,7 @@ struct ImageContentView: View {
     let imageData: Data
     let accentColor: Color
     let onClose: () -> Void
-    var onDownload: (() -> Void)? = nil
+    var onDownload: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -913,7 +913,7 @@ struct UnsupportedFileView: View {
     let fileName: String
     let accentColor: Color
     let onClose: () -> Void
-    var onDownload: (() -> Void)? = nil
+    var onDownload: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 16) {

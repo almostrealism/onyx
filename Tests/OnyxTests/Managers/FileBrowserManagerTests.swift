@@ -443,4 +443,3 @@ class SearchCommandTests: XCTestCase {
         XCTAssertEqual(sources.children[1].children.count, 2)
     }
 }
-

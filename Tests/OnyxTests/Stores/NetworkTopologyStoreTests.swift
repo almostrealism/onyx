@@ -185,4 +185,3 @@ final class NetworkTopologyStoreTests: XCTestCase {
         XCTAssertNotNil(time)
     }
 }
-

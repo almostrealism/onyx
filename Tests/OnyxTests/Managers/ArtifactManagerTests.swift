@@ -137,4 +137,3 @@ final class ArtifactManagerTests: XCTestCase {
         XCTAssertEqual(manager.slots[0]?.content, .model3D(data: data, format: .obj))
     }
 }
-

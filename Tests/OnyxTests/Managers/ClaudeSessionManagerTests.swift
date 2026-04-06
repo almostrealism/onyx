@@ -105,4 +105,3 @@ final class ClaudeSessionManagerTests: XCTestCase {
         waitForExpectations(timeout: 2)
     }
 }
-

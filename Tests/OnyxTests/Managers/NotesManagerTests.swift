@@ -48,4 +48,3 @@ final class NoteTests: XCTestCase {
         XCTAssertEqual(manager2.notes[0].content, "Hello, World!")
     }
 }
-

@@ -160,4 +160,3 @@ final class MonitorManagerPerHostIsolationTests: XCTestCase {
         }
     }
 }
-

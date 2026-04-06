@@ -81,14 +81,7 @@ public enum AnyCodableValue: Codable, Equatable {
     /// Create a new instance.
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let v = try? container.decode(Bool.self) { self = .bool(v) }
-        else if let v = try? container.decode(Int.self) { self = .int(v) }
-        else if let v = try? container.decode(Double.self) { self = .double(v) }
-        else if let v = try? container.decode(String.self) { self = .string(v) }
-        else if let v = try? container.decode([AnyCodableValue].self) { self = .array(v) }
-        else if let v = try? container.decode([String: AnyCodableValue].self) { self = .object(v) }
-        else if container.decodeNil() { self = .null }
-        else { throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported type") }
+        if let v = try? container.decode(Bool.self) { self = .bool(v) } else if let v = try? container.decode(Int.self) { self = .int(v) } else if let v = try? container.decode(Double.self) { self = .double(v) } else if let v = try? container.decode(String.self) { self = .string(v) } else if let v = try? container.decode([AnyCodableValue].self) { self = .array(v) } else if let v = try? container.decode([String: AnyCodableValue].self) { self = .object(v) } else if container.decodeNil() { self = .null } else { throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported type") }
     }
 
     /// Encode.
@@ -361,7 +354,7 @@ public class MCPMessageHandler {
         }
 
         let content: String
-        var fileExtension: String? = nil
+        var fileExtension: String?
 
         if let filePath = args["file"]?.stringValue {
             // Load file content

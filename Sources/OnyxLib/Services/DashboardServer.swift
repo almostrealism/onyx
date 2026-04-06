@@ -48,7 +48,7 @@ public class DashboardServer {
 
     private func handleConnection(_ connection: NWConnection) {
         connection.start(queue: .global(qos: .utility))
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] content, _, _, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] content, _, _, _ in
             guard let self = self, let data = content, let request = String(data: data, encoding: .utf8) else {
                 connection.cancel()
                 return

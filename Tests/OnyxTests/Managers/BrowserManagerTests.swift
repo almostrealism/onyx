@@ -165,4 +165,3 @@ final class BrowserSessionTests: XCTestCase {
         // Should not hang or crash with rapid switching
     }
 }
-

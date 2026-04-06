@@ -405,4 +405,3 @@ final class MCPForwardingTests: XCTestCase {
             "New hosts should have unique IDs, not the built-in localhost ID")
     }
 }
-

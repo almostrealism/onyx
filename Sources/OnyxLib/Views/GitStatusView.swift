@@ -8,13 +8,13 @@ struct GitLandingView: View {
     let accentColor: Color
     @ObservedObject var gitManager: GitManager
     /// Called to track a file as recently opened (path, name)
-    var onTrackFile: ((String, String) -> Void)? = nil
+    var onTrackFile: ((String, String) -> Void)?
     /// Called to navigate to and view a file (path, name) — for untracked files
-    var onViewFile: ((String, String) -> Void)? = nil
+    var onViewFile: ((String, String) -> Void)?
     /// Called to show a dependency graph diagram
-    var onShowDepGraph: (() -> Void)? = nil
+    var onShowDepGraph: (() -> Void)?
     /// Status text for dependency analysis
-    var depsStatus: String? = nil
+    var depsStatus: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

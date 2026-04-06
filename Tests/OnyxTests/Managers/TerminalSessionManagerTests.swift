@@ -250,4 +250,3 @@ final class ReconnectionSafetyTests: XCTestCase {
         XCTAssertFalse(state.isReconnecting)
     }
 }
-

@@ -246,4 +246,3 @@ final class JSONRPCCodableTests: XCTestCase {
         XCTAssertEqual(JSONRPCError.invalidParams.code, -32602)
     }
 }
-

@@ -175,7 +175,6 @@ if isHookMode {
     // No response or error — exit 0 silently (Claude Code continues normally)
 
     close(fd)
-
 } else {
     // MCP BRIDGE MODE (original behavior): stdio JSON-RPC bridge
 

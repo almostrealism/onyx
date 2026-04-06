@@ -30,7 +30,7 @@ public class TimingDataStore: ObservableObject {
     @Published public var rawRows: [ReportRow] = []
     @Published public var isLoading = false
     @Published public var lastError: String?
-    @Published public var weekMonday: Date = Date()
+    @Published public var weekMonday = Date()
 
     private var timer: Timer?
     private let refreshInterval: TimeInterval = 300
@@ -234,7 +234,7 @@ public class TimingDataStore: ObservableObject {
             var title = "(no project)"
             var color = ""
             var selfRef = ""
-            var parentRef: String? = nil
+            var parentRef: String?
             var titleChain: [String] = []
 
             if let proj = row["project"] as? [String: Any] {
