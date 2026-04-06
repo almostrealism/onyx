@@ -22,18 +22,26 @@ import Foundation
 
 // MARK: - Network Topology
 
+/// ProbeStatus.
 public enum ProbeStatus: String, Codable {
     case ok
     case unreachable
     case keyAuthFailed
 }
 
+/// TopologyEntry.
 public struct TopologyEntry: Codable {
+    /// Id.
     public var id: String           // session ID
+    /// Name.
     public var name: String
+    /// Source.
     public var source: SessionSource
+    /// Last seen.
     public var lastSeen: Date       // last confirmed alive
+    /// Last enumerated.
     public var lastEnumerated: Date // last time we checked
+    /// Alive.
     public var alive: Bool
 
     /// Confidence score: 1.0 = seen within 30s, decays to 0.0 over 10 minutes
@@ -45,21 +53,33 @@ public struct TopologyEntry: Codable {
     }
 }
 
+/// ContainerEntry.
 public struct ContainerEntry: Codable {
+    /// Name.
     public var name: String
+    /// Last seen.
     public var lastSeen: Date
+    /// Alive.
     public var alive: Bool
 }
 
+/// HostTopology.
 public struct HostTopology: Codable {
+    /// Host id.
     public var hostID: UUID
+    /// Containers.
     public var containers: [String: ContainerEntry]   // name -> entry
+    /// Sessions.
     public var sessions: [String: TopologyEntry]       // sessionID -> entry
+    /// Last probe time.
     public var lastProbeTime: Date?
+    /// Last probe result.
     public var lastProbeResult: ProbeStatus?
 }
 
+/// NetworkTopologyStore.
 public class NetworkTopologyStore: ObservableObject {
+    /// Shared.
     public static let shared = NetworkTopologyStore()
 
     @Published public var hosts: [UUID: HostTopology] = [:]
@@ -68,6 +88,7 @@ public class NetworkTopologyStore: ObservableObject {
 
     private init() {}
 
+    /// Configure.
     public func configure(url: URL) {
         lock.lock()
         defer { lock.unlock() }
@@ -83,6 +104,7 @@ public class NetworkTopologyStore: ObservableObject {
         }
     }
 
+    /// Save.
     public func save() {
         lock.lock()
         defer { lock.unlock() }

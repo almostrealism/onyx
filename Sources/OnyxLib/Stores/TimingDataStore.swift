@@ -23,6 +23,7 @@ import Combine
 /// Singleton that owns the API token, project list, and raw report data.
 /// All windows read from this; each window applies its own project filter.
 public class TimingDataStore: ObservableObject {
+    /// Shared.
     public static let shared = TimingDataStore()
 
     @Published public var availableProjects: [TimingProject] = []
@@ -34,18 +35,27 @@ public class TimingDataStore: ObservableObject {
     private var timer: Timer?
     private let refreshInterval: TimeInterval = 300
 
+    /// ReportRow.
     public struct ReportRow {
+        /// Date.
         public let date: String       // "2026-04-01"
+        /// Project ref.
         public let projectRef: String // "/projects/123" or ""
+        /// Project title.
         public let projectTitle: String
+        /// Project color.
         public let projectColor: String // 6-char hex or ""
+        /// Parent ref.
         public let parentRef: String?
+        /// Title chain.
         public let titleChain: [String]
+        /// Seconds.
         public let seconds: Double
     }
 
     private init() {}
 
+    /// Api token.
     public var apiToken: String {
         get { UserDefaults.standard.string(forKey: "timing_api_token") ?? "" }
         set {
@@ -58,8 +68,10 @@ public class TimingDataStore: ObservableObject {
         }
     }
 
+    /// Is configured.
     public var isConfigured: Bool { !apiToken.isEmpty }
 
+    /// Start polling.
     public func startPolling() {
         guard isConfigured else {
             print("Timing: not configured")
@@ -249,13 +261,21 @@ public class TimingDataStore: ObservableObject {
 
 // MARK: - Project Model
 
+/// TimingProject.
 public struct TimingProject: Identifiable, Hashable {
+    /// Id.
     public let id: String
+    /// Title.
     public let title: String
+    /// Title chain.
     public let titleChain: [String]
+    /// Color.
     public let color: String
+    /// Parent id.
     public let parentID: String?
+    /// Depth.
     public let depth: Int
 
+    /// Display name.
     public var displayName: String { titleChain.joined(separator: " > ") }
 }

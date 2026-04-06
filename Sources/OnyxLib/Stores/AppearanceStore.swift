@@ -21,6 +21,7 @@ import Combine
 /// Singleton that owns the appearance config. All windows read/write through
 /// this to avoid one window's save overwriting another's changes.
 public class AppearanceStore: ObservableObject {
+    /// Shared.
     public static let shared = AppearanceStore()
 
     @Published public var config = AppearanceConfig()
@@ -29,6 +30,7 @@ public class AppearanceStore: ObservableObject {
 
     private init() {}
 
+    /// Configure.
     public func configure(url: URL) {
         lock.lock()
         defer { lock.unlock() }
@@ -45,6 +47,7 @@ public class AppearanceStore: ObservableObject {
         }
     }
 
+    /// Save.
     public func save() {
         lock.lock()
         defer { lock.unlock() }

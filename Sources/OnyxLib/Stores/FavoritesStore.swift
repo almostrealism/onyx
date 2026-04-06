@@ -20,11 +20,14 @@ import Combine
 
 // MARK: - Favorite Entry
 
+/// FavoriteEntry.
 public struct FavoriteEntry: Codable, Equatable {
+    /// Session id.
     public var sessionID: String
     /// Window indices (0-3) where this favorite is visible. Empty = visible nowhere.
     public var windows: Set<Int>
 
+    /// Create a new instance.
     public init(sessionID: String, windows: Set<Int> = [0]) {
         self.sessionID = sessionID
         self.windows = windows
@@ -36,6 +39,7 @@ public struct FavoriteEntry: Codable, Equatable {
 /// Singleton that owns the favorites data. All windows read/write through this
 /// to avoid race conditions on the shared JSON file.
 public class FavoritesStore: ObservableObject {
+    /// Shared.
     public static let shared = FavoritesStore()
 
     @Published public var entries: [FavoriteEntry] = []
@@ -44,6 +48,7 @@ public class FavoritesStore: ObservableObject {
 
     private init() {}
 
+    /// Configure.
     public func configure(url: URL) {
         lock.lock()
         defer { lock.unlock() }
@@ -63,6 +68,7 @@ public class FavoritesStore: ObservableObject {
         }
     }
 
+    /// Save.
     public func save() {
         lock.lock()
         defer { lock.unlock() }
