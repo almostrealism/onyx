@@ -771,36 +771,51 @@ struct TimingChartSection: View {
                 }
             }
 
-            // Stacked bar chart: one bar per day, segments per project
-            HStack(alignment: .bottom, spacing: 3) {
-                ForEach(timing.dailyHours) { day in
-                    VStack(spacing: 2) {
-                        if day.hours > 0 && day.projects.count > 1 {
-                            // Stacked bar
+            // Top row: week bar chart (left) + 12-week heatmap (right)
+            HStack(alignment: .top, spacing: 12) {
+                // Stacked bar chart: one bar per day, segments per project
+                VStack(spacing: 2) {
+                    HStack(alignment: .bottom, spacing: 3) {
+                        ForEach(timing.dailyHours) { day in
                             VStack(spacing: 0) {
-                                ForEach(day.projects) { slice in
-                                    Rectangle()
-                                        .fill(Color(hex: slice.color).opacity(0.75))
-                                        .frame(height: max(1, CGFloat(slice.hours / maxHours) * 80))
+                                Spacer(minLength: 0)
+                                if day.hours > 0 && day.projects.count > 1 {
+                                    VStack(spacing: 0) {
+                                        ForEach(day.projects) { slice in
+                                            Rectangle()
+                                                .fill(Color(hex: slice.color).opacity(0.75))
+                                                .frame(height: max(1, CGFloat(slice.hours / maxHours) * 76))
+                                        }
+                                    }
+                                    .cornerRadius(2)
+                                } else {
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(day.hours > 0 ? Color(hex: day.projects.first?.color ?? "66CCFF").opacity(0.7) : Color.white.opacity(0.04))
+                                        .frame(height: max(2, CGFloat(day.hours / maxHours) * 76))
                                 }
                             }
-                            .cornerRadius(2)
-                        } else {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(day.hours > 0 ? Color(hex: day.projects.first?.color ?? "66CCFF").opacity(0.7) : Color.white.opacity(0.04))
-                                .frame(height: max(2, CGFloat(day.hours / maxHours) * 80))
+                            .frame(maxWidth: .infinity)
                         }
-
-                        Text(day.dayLabel)
-                            .font(.system(size: 8, design: .monospaced))
-                            .foregroundColor(.gray.opacity(0.4))
                     }
-                    .frame(maxWidth: .infinity)
+                    .frame(height: 76)
+                    HStack(spacing: 3) {
+                        ForEach(timing.dailyHours) { day in
+                            Text(day.dayLabel)
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundColor(.gray.opacity(0.4))
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                // 12-week heatmap, forced square cells
+                if !timing.heatmap.isEmpty {
+                    TimingHeatmapGrid(weeks: timing.heatmap)
                 }
             }
-            .frame(height: 95)
 
-            // Project totals
+            // Project totals legend
             if timing.projectTotals.count > 1 {
                 HStack(spacing: 8) {
                     ForEach(timing.projectTotals.prefix(5)) { proj in
@@ -821,70 +836,47 @@ struct TimingChartSection: View {
                 }
             }
 
-            // Total and average
-            HStack(spacing: 12) {
-                HStack(spacing: 4) {
-                    Text(String(format: "%.1f", timing.totalWeekHours))
-                        .font(.system(size: 16, weight: .medium, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.85))
-                    Text("hrs")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.gray.opacity(0.5))
+            // Stats: two columns, big current number + small longer-range avg
+            HStack(alignment: .top, spacing: 24) {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(String(format: "%.1f", timing.totalWeekHours))
+                            .font(.system(size: 18, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.9))
+                        Text("hrs")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.5))
+                    }
+                    HStack(spacing: 3) {
+                        Text(String(format: "%.1f hrs/wk", timing.avgHoursPerWeekLast4))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.5))
+                        Text("(4w avg)")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.35))
+                    }
                 }
 
-                Text("·")
-                    .foregroundColor(.gray.opacity(0.3))
-
-                HStack(spacing: 4) {
-                    Text(String(format: "%.1f", avgPerDay))
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.6))
-                    Text("hrs/day")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.gray.opacity(0.4))
-                }
-
-                Spacer()
-            }
-
-            // Longer-range stats: 4-week and 30-day averages
-            HStack(spacing: 12) {
-                HStack(spacing: 4) {
-                    Text(String(format: "%.1f", timing.avgHoursPerWeekLast4))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.55))
-                    Text("hrs/wk")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.gray.opacity(0.35))
-                    Text("(4w avg)")
-                        .font(.system(size: 8, design: .monospaced))
-                        .foregroundColor(.gray.opacity(0.3))
-                }
-
-                Text("·")
-                    .foregroundColor(.gray.opacity(0.3))
-
-                HStack(spacing: 4) {
-                    Text(String(format: "%.1f", timing.avgHoursPerDayLast30))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.55))
-                    Text("hrs/day")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.gray.opacity(0.35))
-                    Text("(30d avg)")
-                        .font(.system(size: 8, design: .monospaced))
-                        .foregroundColor(.gray.opacity(0.3))
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(String(format: "%.1f", avgPerDay))
+                            .font(.system(size: 18, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.9))
+                        Text("hrs/day")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.5))
+                    }
+                    HStack(spacing: 3) {
+                        Text(String(format: "%.1f hrs/day", timing.avgHoursPerDayLast30))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.5))
+                        Text("(30d avg)")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.35))
+                    }
                 }
 
                 Spacer()
-            }
-
-            // 12-week heatmap: cols = weeks (oldest left, current right),
-            // rows = days (Mon top, Sun bottom). Color encodes hours vs a
-            // 40-hr/week target (~5.71 hrs/day = 100%).
-            if !timing.heatmap.isEmpty {
-                TimingHeatmapGrid(weeks: timing.heatmap)
-                    .padding(.top, 2)
             }
 
             if let error = timing.lastError {
@@ -941,39 +933,43 @@ struct TimingHeatmapGrid: View {
         return Color(red: stops.last!.1, green: stops.last!.2, blue: stops.last!.3)
     }
 
+    /// Fixed square cell size — guarantees the grid never stretches.
+    private static let cellSize: CGFloat = 9
+    private static let cellGap: CGFloat = 1
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            VStack(spacing: 2) {
+        VStack(alignment: .leading, spacing: 2) {
+            VStack(spacing: Self.cellGap) {
                 ForEach(0..<7, id: \.self) { day in
-                    HStack(spacing: 2) {
+                    HStack(spacing: Self.cellGap) {
                         ForEach(0..<weeks.count, id: \.self) { week in
                             let hours = weeks[week][day]
                             RoundedRectangle(cornerRadius: 1.5)
                                 .fill(Self.heatColor(hours: hours))
-                                .frame(height: 10)
+                                .frame(width: Self.cellSize, height: Self.cellSize)
                                 .help(String(format: "%.1f hrs", hours))
                         }
                     }
                 }
             }
-            HStack(spacing: 4) {
+            // Legend directly under the grid, same width
+            HStack(spacing: 3) {
                 Text("12W")
                     .font(.system(size: 7, design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.3))
-                // Tiny legend: gradient bar from 0 to the 5.71h reference
+                    .foregroundColor(.gray.opacity(0.35))
                 HStack(spacing: 0) {
-                    ForEach(0..<20, id: \.self) { i in
+                    ForEach(0..<24, id: \.self) { i in
                         Rectangle()
-                            .fill(Self.heatColor(hours: Double(i) / 20 * Self.dayReference))
-                            .frame(width: 4, height: 3)
+                            .fill(Self.heatColor(hours: Double(i) / 24 * Self.dayReference))
+                            .frame(width: 3, height: 3)
                     }
                 }
-                Text("40h/wk")
+                Text("40h")
                     .font(.system(size: 7, design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.3))
-                Spacer()
+                    .foregroundColor(.gray.opacity(0.35))
             }
         }
+        .fixedSize()
     }
 }
 
