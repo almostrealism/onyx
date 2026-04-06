@@ -1,3 +1,20 @@
+//
+// ClaudeSessionManager.swift
+//
+// Responsibility: Tracks active Claude Code CLI sessions reported via hook
+//                 events, surfaces pending permission requests, and routes
+//                 user approve/deny decisions back to the waiting hook.
+// Scope: Per-window (lives on AppState).
+// Threading: Hook events arrive on background queues; mutations to @Published
+//            state are dispatched onto the main queue. An NSLock guards the
+//            permissionCallbacks map shared with hook responders.
+// Invariants:
+//   - Each PermissionRequest.id maps to at most one callback in
+//     permissionCallbacks; resolved requests remove their callback
+//   - sessions[id].lastSeen monotonically advances per session
+//   - recentTools is bounded (oldest entries pruned)
+//
+
 import Foundation
 import Combine
 

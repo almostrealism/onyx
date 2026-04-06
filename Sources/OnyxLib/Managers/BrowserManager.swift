@@ -1,3 +1,21 @@
+//
+// BrowserManager.swift
+//
+// Responsibility: Owns one WKWebView per browser-typed TmuxSession and exposes
+//                 the active view's URL/title/loading state to SwiftUI.
+// Scope: Per-window (lives on AppState).
+// Threading: Main actor for @Published mutations; KVO callbacks bounce through
+//            DispatchQueue.main.async before touching state.
+// Invariants:
+//   - At most one activeSessionID at a time; kvoObservations always belong to
+//     the currently active web view
+//   - activate(sessionID:) MUST NOT be called from SwiftUI updateNSView — only
+//     from makeNSView or user actions (would otherwise loop)
+//   - destroySession removes both the web view and its delegate
+//
+// See: ADR-002 (KVO pattern for WKWebView state propagation)
+//
+
 import SwiftUI
 import WebKit
 import Combine

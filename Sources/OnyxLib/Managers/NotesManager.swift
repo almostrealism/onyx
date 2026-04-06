@@ -1,3 +1,17 @@
+//
+// NotesManager.swift
+//
+// Responsibility: Loads, creates, saves, renames, and deletes plain-text /
+//                 markdown notes from a single on-disk directory.
+// Scope: Per-window (lives on AppState; directory itself is shared on disk).
+// Threading: Main actor only — all file I/O is synchronous and called from
+//            the main queue (notes are small, latency is negligible).
+// Invariants:
+//   - notes is always sorted by modification date, newest first
+//   - selectedNoteID, when non-nil, references an existing note id
+//   - Note ids are filenames (with .md or .txt extension)
+//
+
 import Foundation
 import Combine
 

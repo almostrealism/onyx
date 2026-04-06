@@ -1,3 +1,23 @@
+//
+// NetworkTopology.swift
+//
+// Responsibility: Tracks per-host topology — which tmux sessions and docker
+//                 containers have been observed alive, with confidence decay
+//                 and grace periods after probe failures.
+// Scope: Shared singleton (NetworkTopologyStore.shared) — all managers feed
+//        observations into it; views read aggregated status from it.
+// Threading: An NSLock serializes load/save; @Published mutations should be
+//            made from the main queue.
+// Invariants:
+//   - hosts is keyed by host UUID; per-host state never leaks across hosts
+//   - TopologyEntry.confidence linearly decays from 1.0 (≤30s) to 0.0 (≥600s)
+//   - alive=false implies confidence=0
+//   - Containers/sessions are not deleted on a single missed probe — they
+//     stay through a grace window before being marked unreachable
+//
+// See: ADR-003 (topology grace periods), ADR-004 (per-host isolation)
+//
+
 import Foundation
 
 // MARK: - Network Topology

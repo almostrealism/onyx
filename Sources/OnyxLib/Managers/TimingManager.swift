@@ -1,3 +1,20 @@
+//
+// TimingManager.swift
+//
+// Responsibility: Per-window view model over TimingDataStore — applies the
+//                 window's project filter and rolls up daily/weekly hours
+//                 plus per-project totals for the timing panel.
+// Scope: Per-window (lives on AppState); subscribes to the shared store.
+// Threading: Main actor — store change notifications are dispatched to main
+//            before recompute() runs.
+// Invariants:
+//   - filterProjectID persists in UserDefaults under the window index key
+//   - dailyHours always contains exactly 7 entries (Mon..Sun of weekMonday)
+//   - totalWeekHours == sum of dailyHours[*].hours
+//   - When filterProjectID is empty, all rows are included; otherwise rows
+//     matching the project or any descendant are rolled up to direct children
+//
+
 import Foundation
 import Combine
 

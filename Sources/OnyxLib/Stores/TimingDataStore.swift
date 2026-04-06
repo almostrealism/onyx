@@ -1,3 +1,20 @@
+//
+// TimingDataStore.swift
+//
+// Responsibility: Owns the Timing.app API token, project list, raw report
+//                 rows, and the current week boundary; refreshes from the
+//                 Timing API on a 5-minute timer.
+// Scope: Shared singleton (TimingDataStore.shared); per-window TimingManager
+//        instances subscribe and apply their own project filters.
+// Threading: Timer fires on main; URL fetches use URLSession completion
+//            handlers and dispatch back to main before mutating state.
+// Invariants:
+//   - apiToken is stored in UserDefaults; setting an empty token is allowed
+//     but isConfigured returns false
+//   - timer is non-nil iff polling is active; startPolling is idempotent
+//   - rawRows always corresponds to the week beginning weekMonday
+//
+
 import Foundation
 import Combine
 

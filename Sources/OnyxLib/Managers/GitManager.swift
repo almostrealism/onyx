@@ -1,3 +1,21 @@
+//
+// GitManager.swift
+//
+// Responsibility: Runs git queries (status, log, commit detail, file diff)
+//                 against a path on the active host and publishes results to
+//                 the file browser UI.
+// Scope: Per-window (owned by FileBrowserManager, which is per-window).
+// Threading: Shell-out work on DispatchQueue.global(.userInitiated); all
+//            @Published mutations dispatched back to main.
+// Invariants:
+//   - currentRepoPath reflects the path of the most recent checkAndLoad call
+//   - isGitRepo and repoStatus are cleared when checkAndLoad finds no repo
+//   - All commands are issued via AppState.remoteCommand against the
+//     currently active host
+//
+// See: ADR-004 (per-host isolation)
+//
+
 import Foundation
 import Combine
 import SwiftUI

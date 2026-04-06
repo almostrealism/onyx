@@ -1,3 +1,26 @@
+//
+// TerminalSessionManager.swift  (OnyxTerminalView)
+//
+// Responsibility: Hosts a pool of LocalProcessTerminalView instances — one
+//                 per tmux session — manages SSH spawn, reconnect with
+//                 exponential backoff, idle eviction, focus/scroll handling,
+//                 and session switching across hosts.
+// Scope: Per-window (one OnyxTerminalView per window content view).
+// Threading: Main actor (NSView) for all UI work; SSH child processes run
+//            independently and feed bytes back through SwiftTerm. Async
+//            session-switch boundaries must re-validate session identity to
+//            avoid races against rapid switching.
+// Invariants:
+//   - activeSessionID, when non-nil, has a corresponding entry in `pool`
+//   - Pooled entries idle beyond evictionTimeout (5 min) are reaped
+//   - reconnectAttempt resets on successful spawn; capped at
+//     maxReconnectAttempts before giving up
+//   - Each pooled terminalView is bound to exactly one session id for life
+//
+// See: ADR-001 (session identity at async boundaries),
+//      ADR-005 (mux paths)
+//
+
 import SwiftUI
 import AppKit
 import SwiftTerm

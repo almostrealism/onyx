@@ -1,3 +1,17 @@
+//
+// ArtifactManager.swift
+//
+// Responsibility: Owns up to 8 numbered artifact slots (text/data payloads)
+//                 produced by tools or pasted by the user, plus the active slot.
+// Scope: Per-window (lives on AppState).
+// Threading: Main actor only — all mutations occur from UI/MCP server callbacks
+//            already dispatched onto the main queue.
+// Invariants:
+//   - slot index is always in 0..<slotCount (8)
+//   - activeSlot points to an existing key in `slots`, or 0 if empty
+//   - clearing the active slot reassigns activeSlot to the next occupied slot
+//
+
 import Foundation
 import Combine
 

@@ -1,3 +1,22 @@
+//
+// FileBrowserManager.swift
+//
+// Responsibility: Remote/local file browsing — saved folders, directory
+//                 listing, file preview (text/image/binary), search, recent
+//                 files, and path-collapsing. Owns the per-window GitManager.
+// Scope: Per-window (lives on AppState); all per-host state is keyed by host.
+// Threading: Main actor for @Published state; shell-out work runs on
+//            DispatchQueue.global(.userInitiated) and bounces back to main.
+//            A long-running search Process is tracked and cancellable.
+// Invariants:
+//   - savedFolders / recentFiles are filtered by activeHost.id at read time
+//   - currentPath, when set, refers to a path on the currently active host
+//   - At most one searchProcess is running at a time
+//   - recentFiles is bounded by maxRecentFiles per host
+//
+// See: ADR-004 (per-host isolation)
+//
+
 import Foundation
 import Combine
 import AppKit

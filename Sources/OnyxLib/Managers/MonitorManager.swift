@@ -1,3 +1,22 @@
+//
+// MonitorManager.swift
+//
+// Responsibility: Polls system metrics (CPU, mem, GPU, etc) on the active
+//                 host every 5s and maintains a per-host rolling sample
+//                 buffer for charts and the status pill.
+// Scope: Per-window (lives on AppState); state is partitioned per host UUID.
+// Threading: Timer fires on main; sample collection shells out on a background
+//            queue and dispatches back to main to mutate hostData.
+// Invariants:
+//   - hostData is keyed by host UUID; reads for the active host fall back to
+//     an empty HostMonitorData if missing
+//   - Each host's samples array is capped at maxSamples (720 ≈ 1h @ 5s)
+//   - Switching the active host does NOT clear other hosts' buffers
+//   - isPolling is true iff `timer` is non-nil
+//
+// See: ADR-004 (per-host isolation)
+//
+
 import Foundation
 import Combine
 

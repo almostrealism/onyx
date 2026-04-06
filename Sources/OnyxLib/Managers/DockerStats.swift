@@ -1,3 +1,21 @@
+//
+// DockerStats.swift
+//
+// Responsibility: Polls `docker stats` on the active host every 5s and
+//                 publishes per-container CPU/mem/net/block/pid metrics, with
+//                 a rolling 5-minute activity window for visibility filtering.
+// Scope: Per-window (DockerStatsManager lives on AppState).
+// Threading: Background poll on DispatchQueue.global(.utility); results
+//            dispatched to main. A 10s kill timer guards against hung ssh.
+// Invariants:
+//   - lastActiveTime[name] is updated only when CPU% >= 1.0
+//   - visibleContainers respects the 5-minute window unless showAllContainers
+//   - lastActiveTime is pruned to entries newer than 2× visibilityWindow
+//   - Successful polls feed NetworkTopologyStore.confirmContainersAlive
+//
+// See: ADR-004 (per-host isolation)
+//
+
 import Foundation
 
 // MARK: - Docker Stats
