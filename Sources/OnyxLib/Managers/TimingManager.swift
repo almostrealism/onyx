@@ -26,6 +26,20 @@ public class TimingManager: ObservableObject {
     @Published public var projectTotals: [ProjectTotal] = []
     @Published public var totalWeekHours: Double = 0
 
+    /// 12 columns × 7 rows heatmap cells. Column 0 is the oldest week, column
+    /// 11 is the current (in-progress) week. Row 0 is Monday, row 6 is Sunday.
+    /// Each value is hours on that day, already filtered by the project filter.
+    @Published public var heatmap: [[Double]] = []
+
+    /// Average hours/week across the last 4 *completed* weeks, excluding the
+    /// current in-progress week. Zero if there's no data.
+    @Published public var avgHoursPerWeekLast4: Double = 0
+
+    /// Average hours/day across the last 30 days, excluding today (to avoid a
+    /// partial-day reading). Denominator is 30 — days with no data still count,
+    /// so this reflects an honest daily average including off-days.
+    @Published public var avgHoursPerDayLast30: Double = 0
+
     private var storeCancellable: AnyCancellable?
     private let windowIndex: Int
 
@@ -212,5 +226,72 @@ public class TimingManager: ObservableObject {
         dailyHours = daily
         projectTotals = totals
         totalWeekHours = total
+
+        // Build a date → hours map over ALL filtered entries (12 weeks) for
+        // the new stats and heatmap. Uses the same entries list we already
+        // filtered above.
+        var hoursByDate: [String: Double] = [:]
+        for e in entries {
+            hoursByDate[e.date, default: 0] += e.seconds / 3600.0
+        }
+
+        let today = Date()
+        heatmap = Self.buildHeatmap(hoursByDate: hoursByDate, anchorMonday: monday)
+        avgHoursPerWeekLast4 = Self.avgHoursPerWeek(hoursByDate: hoursByDate, currentMonday: monday, weeks: 4)
+        avgHoursPerDayLast30 = Self.avgHoursPerDay(hoursByDate: hoursByDate, today: today, days: 30)
+    }
+
+    // MARK: - Pure helpers (testable without a TimingManager instance)
+
+    /// Build a 12-column × 7-row heatmap of hours, where column 0 is 11 weeks
+    /// before `anchorMonday` and column 11 is the week starting `anchorMonday`.
+    /// Row 0 is Monday, row 6 is Sunday.
+    public static func buildHeatmap(hoursByDate: [String: Double], anchorMonday: Date) -> [[Double]] {
+        let calendar = Calendar.current
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        var grid: [[Double]] = Array(repeating: Array(repeating: 0.0, count: 7), count: 12)
+        for week in 0..<12 {
+            let weekStart = calendar.date(byAdding: .day, value: -(11 - week) * 7, to: anchorMonday)!
+            for day in 0..<7 {
+                let date = calendar.date(byAdding: .day, value: day, to: weekStart)!
+                grid[week][day] = hoursByDate[df.string(from: date)] ?? 0
+            }
+        }
+        return grid
+    }
+
+    /// Average hours/week over the N most recent *completed* weeks preceding
+    /// `currentMonday` (so the in-progress week is excluded). Denominator is
+    /// always `weeks`, so weeks with no data pull the average down.
+    public static func avgHoursPerWeek(hoursByDate: [String: Double], currentMonday: Date, weeks: Int) -> Double {
+        guard weeks > 0 else { return 0 }
+        let calendar = Calendar.current
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        var total: Double = 0
+        for w in 1...weeks {
+            let weekStart = calendar.date(byAdding: .day, value: -w * 7, to: currentMonday)!
+            for day in 0..<7 {
+                let date = calendar.date(byAdding: .day, value: day, to: weekStart)!
+                total += hoursByDate[df.string(from: date)] ?? 0
+            }
+        }
+        return total / Double(weeks)
+    }
+
+    /// Average hours/day over the N days preceding `today` (today itself is
+    /// excluded). Denominator is always `days`.
+    public static func avgHoursPerDay(hoursByDate: [String: Double], today: Date, days: Int) -> Double {
+        guard days > 0 else { return 0 }
+        let calendar = Calendar.current
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        var total: Double = 0
+        for d in 1...days {
+            let date = calendar.date(byAdding: .day, value: -d, to: today)!
+            total += hoursByDate[df.string(from: date)] ?? 0
+        }
+        return total / Double(days)
     }
 }

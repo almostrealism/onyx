@@ -146,13 +146,20 @@ public class TimingDataStore: ObservableObject {
         let sunday = calendar.date(byAdding: .day, value: 6 - daysFromMonday, to: today)!
         weekMonday = monday
 
+        // Fetch 12 weeks of data: the current week plus 11 prior weeks.
+        // This backs the week view, the 4-week / 30-day stats, and the
+        // 12-week heatmap. 12 weeks ≈ max a few thousand rows — fine for one
+        // fetch.
+        let rangeStart = calendar.date(byAdding: .day, value: -11 * 7, to: monday)!
+        let rangeEnd = sunday
+
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
 
         var components = URLComponents(string: "https://web.timingapp.com/api/v1/report")!
         components.queryItems = [
-            URLQueryItem(name: "start_date_min", value: df.string(from: monday)),
-            URLQueryItem(name: "start_date_max", value: df.string(from: sunday)),
+            URLQueryItem(name: "start_date_min", value: df.string(from: rangeStart)),
+            URLQueryItem(name: "start_date_max", value: df.string(from: rangeEnd)),
             URLQueryItem(name: "timespan_grouping_mode", value: "day"),
             URLQueryItem(name: "columns[]", value: "timespan"),
             URLQueryItem(name: "columns[]", value: "project"),

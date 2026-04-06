@@ -847,11 +847,131 @@ struct TimingChartSection: View {
                 Spacer()
             }
 
+            // Longer-range stats: 4-week and 30-day averages
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    Text(String(format: "%.1f", timing.avgHoursPerWeekLast4))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.55))
+                    Text("hrs/wk")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.35))
+                    Text("(4w avg)")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.3))
+                }
+
+                Text("·")
+                    .foregroundColor(.gray.opacity(0.3))
+
+                HStack(spacing: 4) {
+                    Text(String(format: "%.1f", timing.avgHoursPerDayLast30))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.55))
+                    Text("hrs/day")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.35))
+                    Text("(30d avg)")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.3))
+                }
+
+                Spacer()
+            }
+
+            // 12-week heatmap: cols = weeks (oldest left, current right),
+            // rows = days (Mon top, Sun bottom). Color encodes hours vs a
+            // 40-hr/week target (~5.71 hrs/day = 100%).
+            if !timing.heatmap.isEmpty {
+                TimingHeatmapGrid(weeks: timing.heatmap)
+                    .padding(.top, 2)
+            }
+
             if let error = timing.lastError {
                 Text(error)
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(Color(hex: "FF6B6B").opacity(0.6))
                     .lineLimit(1)
+            }
+        }
+    }
+}
+
+/// 12×7 grid showing daily hours over the last 12 weeks, colored against a
+/// 40-hour-week target. Colors encode how close a single day is to the
+/// one-seventh-of-40 = 5.71-hour ceiling: black = no data, blue = light,
+/// green = healthy, red = over-target.
+struct TimingHeatmapGrid: View {
+    let weeks: [[Double]]  // [week][day] — week 0 oldest, day 0 Monday
+
+    /// Reference hours for a "full" day under a 40-hour workweek.
+    private static let dayReference: Double = 40.0 / 7.0
+
+    /// Piecewise color ramp against the 40-hr-week target:
+    ///   0%   → black
+    ///   25%  → cold blue (low activity)
+    ///   50%  → healthy green
+    ///   75%  → red (at/over target)
+    ///  100%+ → saturated red
+    ///
+    /// Between stops we interpolate linearly in RGB. 62.5% lands halfway
+    /// between green (50%) and red (75%) — roughly half-green half-red.
+    static func heatColor(hours: Double) -> Color {
+        let t = min(max(hours / dayReference, 0), 1)
+        // Stops: (threshold, r, g, b)
+        let stops: [(Double, Double, Double, Double)] = [
+            (0.00, 0.00, 0.00, 0.00),   // black
+            (0.25, 0.15, 0.45, 0.95),   // cold blue
+            (0.50, 0.20, 0.80, 0.40),   // healthy green
+            (0.75, 1.00, 0.30, 0.20),   // red
+            (1.00, 1.00, 0.20, 0.20)    // saturated red
+        ]
+        for i in 0..<(stops.count - 1) {
+            let a = stops[i], b = stops[i + 1]
+            if t <= b.0 {
+                let span = b.0 - a.0
+                let frac = span > 0 ? (t - a.0) / span : 0
+                return Color(
+                    red: a.1 + (b.1 - a.1) * frac,
+                    green: a.2 + (b.2 - a.2) * frac,
+                    blue: a.3 + (b.3 - a.3) * frac
+                )
+            }
+        }
+        return Color(red: stops.last!.1, green: stops.last!.2, blue: stops.last!.3)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            VStack(spacing: 2) {
+                ForEach(0..<7, id: \.self) { day in
+                    HStack(spacing: 2) {
+                        ForEach(0..<weeks.count, id: \.self) { week in
+                            let hours = weeks[week][day]
+                            RoundedRectangle(cornerRadius: 1.5)
+                                .fill(Self.heatColor(hours: hours))
+                                .frame(height: 10)
+                                .help(String(format: "%.1f hrs", hours))
+                        }
+                    }
+                }
+            }
+            HStack(spacing: 4) {
+                Text("12W")
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.3))
+                // Tiny legend: gradient bar from 0 to the 5.71h reference
+                HStack(spacing: 0) {
+                    ForEach(0..<20, id: \.self) { i in
+                        Rectangle()
+                            .fill(Self.heatColor(hours: Double(i) / 20 * Self.dayReference))
+                            .frame(width: 4, height: 3)
+                    }
+                }
+                Text("40h/wk")
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.3))
+                Spacer()
             }
         }
     }
