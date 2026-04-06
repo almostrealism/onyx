@@ -65,6 +65,7 @@ private class WindowIndexPool {
 
 // MARK: - Focus Tracking
 
+/// FocusedComponent.
 public enum FocusedComponent: Equatable {
     case terminal
     case rightPanel
@@ -98,6 +99,7 @@ extension AppState {
 
 // MARK: - Right Panel
 
+/// RightPanel.
 public enum RightPanel: Equatable {
     case notes
     case fileBrowser
@@ -105,6 +107,7 @@ public enum RightPanel: Equatable {
 }
 
 
+/// AppState.
 public class AppState: ObservableObject {
     @Published public var hosts: [HostConfig] = []
     /// Appearance config shared across all windows via AppearanceStore singleton
@@ -121,6 +124,7 @@ public class AppState: ObservableObject {
     @Published public var showCommandPalette = false
     @Published public var showMonitor = false
     @Published public var reconnectingHostID: UUID?
+    /// Is reconnecting.
     public var isReconnecting: Bool {
         get { _isReconnecting }
         set {
@@ -165,6 +169,7 @@ public class AppState: ObservableObject {
     @Published public var showURLBar = false
     @Published public var urlBarText: String = ""
     @Published public var startupStatus: String = "Initializing..."
+    /// Show focus outline.
     public var showFocusOutline = true
 
     /// Tracks which component should logically have keyboard focus.
@@ -172,16 +177,19 @@ public class AppState: ObservableObject {
     @Published public var focusedComponent: FocusedComponent = .terminal
 
     // Convenience accessors for right panel types
+    /// Show notes.
     public var showNotes: Bool {
         get { activeRightPanel == .notes }
         set { activeRightPanel = newValue ? .notes : nil }
     }
 
+    /// Show file browser.
     public var showFileBrowser: Bool {
         get { activeRightPanel == .fileBrowser }
         set { activeRightPanel = newValue ? .fileBrowser : nil }
     }
 
+    /// Show artifacts.
     public var showArtifacts: Bool {
         get { activeRightPanel == .artifacts }
         set { activeRightPanel = newValue ? .artifacts : nil }
@@ -213,6 +221,7 @@ public class AppState: ObservableObject {
     private var favoritesCancellable: AnyCancellable?
     private var appearanceCancellable: AnyCancellable?
     private var topologyCancellable: AnyCancellable?
+    /// Monitor.
     public lazy var monitor: MonitorManager = {
         let m = MonitorManager(appState: self)
         monitorCancellable = m.objectWillChange.sink { [weak self] _ in
@@ -222,6 +231,7 @@ public class AppState: ObservableObject {
     }()
 
     private var claudeSessionCancellable: AnyCancellable?
+    /// Claude sessions.
     public lazy var claudeSessions: ClaudeSessionManager = {
         let c = ClaudeSessionManager()
         claudeSessionCancellable = c.objectWillChange.sink { [weak self] _ in
@@ -231,6 +241,7 @@ public class AppState: ObservableObject {
     }()
 
     private var timingCancellable: AnyCancellable?
+    /// Timing.
     public lazy var timing: TimingManager = {
         let t = TimingManager(windowIndex: windowIndex)
         timingCancellable = t.objectWillChange.sink { [weak self] _ in
@@ -240,6 +251,7 @@ public class AppState: ObservableObject {
     }()
 
     private var browserCancellable: AnyCancellable?
+    /// Browser manager.
     public lazy var browserManager: BrowserManager = {
         let b = BrowserManager()
         browserCancellable = b.objectWillChange.sink { [weak self] _ in
@@ -249,6 +261,7 @@ public class AppState: ObservableObject {
     }()
 
     private var dockerStatsCancellable: AnyCancellable?
+    /// Docker stats.
     public lazy var dockerStats: DockerStatsManager = {
         let d = DockerStatsManager(appState: self)
         dockerStatsCancellable = d.objectWillChange.sink { [weak self] _ in
@@ -258,6 +271,7 @@ public class AppState: ObservableObject {
     }()
 
     private var artifactCancellable: AnyCancellable?
+    /// Artifact manager.
     public lazy var artifactManager: ArtifactManager = {
         let a = ArtifactManager()
         artifactCancellable = a.objectWillChange.sink { [weak self] _ in
@@ -269,6 +283,7 @@ public class AppState: ObservableObject {
     private var mcpServer: MCPSocketServer?
     private var dashboardServer: DashboardServer?
 
+    /// Create a new instance.
     public init() {
         self.windowIndex = WindowIndexPool.shared.claim()
         // Forward shared favorites store changes to this AppState's publisher
@@ -298,10 +313,12 @@ public class AppState: ObservableObject {
 
     // MARK: - Host Helpers
 
+    /// Host.
     public func host(for id: UUID) -> HostConfig? {
         hosts.first { $0.id == id }
     }
 
+    /// Active host.
     public var activeHost: HostConfig? {
         if let session = activeSession {
             return host(for: session.source.hostID)
@@ -314,15 +331,18 @@ public class AppState: ObservableObject {
         activeHost?.ssh ?? SSHConfig()
     }
 
+    /// Host for session.
     public func hostForSession(_ session: TmuxSession) -> HostConfig? {
         host(for: session.source.hostID)
     }
 
+    /// Add host.
     public func addHost(_ host: HostConfig) {
         hosts.append(host)
         saveHosts()
     }
 
+    /// Remove host.
     public func removeHost(_ hostID: UUID) {
         guard hostID != HostConfig.localhostID else { return }
         // Tear down SSH mux on background thread to avoid blocking UI
@@ -352,6 +372,7 @@ public class AppState: ObservableObject {
         saveFavorites()
     }
 
+    /// Update host.
     public func updateHost(_ host: HostConfig) {
         if let idx = hosts.firstIndex(where: { $0.id == host.id }) {
             hosts[idx] = host
@@ -361,6 +382,7 @@ public class AppState: ObservableObject {
 
     // MARK: - Session Helpers
 
+    /// Active session name.
     public var activeSessionName: String {
         activeSession?.name ?? ""
     }
@@ -461,6 +483,7 @@ public class AppState: ObservableObject {
         saveFavorites()
     }
 
+    /// Is favorited.
     public func isFavorited(_ session: TmuxSession) -> Bool {
         favoriteEntries.contains { $0.sessionID == session.id }
     }
@@ -515,6 +538,7 @@ public class AppState: ObservableObject {
         }
     }
 
+    /// Move favorite.
     public func moveFavorite(from source: IndexSet, to destination: Int) {
         favoriteEntries.move(fromOffsets: source, toOffset: destination)
         saveFavorites()
@@ -531,6 +555,7 @@ public class AppState: ObservableObject {
 
     // MARK: - Window Title
 
+    /// Effective window title.
     public var effectiveWindowTitle: String {
         var title = appearance.windowTitle
         if showMonitor {
@@ -574,24 +599,29 @@ public class AppState: ObservableObject {
         appSupportDir.appendingPathComponent("topology.json")
     }
 
+    /// Notes directory.
     public var notesDirectory: URL {
         let dir = appSupportDir.appendingPathComponent("notes")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
+    /// Notes manager.
     public lazy var notesManager: NotesManager = {
         NotesManager(directory: notesDirectory)
     }()
 
+    /// File browser manager.
     public lazy var fileBrowserManager: FileBrowserManager = {
         FileBrowserManager(appState: self)
     }()
 
+    /// Saved folders url.
     public var savedFoldersURL: URL {
         appSupportDir.appendingPathComponent("folders.json")
     }
 
+    /// Accent color.
     public var accentColor: Color {
         let hex = appearance.windowAccents[windowIndex] ?? appearance.accentHex
         return Color(hex: hex)
@@ -612,6 +642,7 @@ public class AppState: ObservableObject {
         (base * uiScale).rounded()
     }
 
+    /// Load config.
     public func loadConfig() {
         // Try loading multi-host config
         if FileManager.default.fileExists(atPath: hostsURL.path) {
@@ -664,6 +695,7 @@ public class AppState: ObservableObject {
         dashboardServer?.start()
     }
 
+    /// Save hosts.
     public func saveHosts() {
         if let data = try? JSONEncoder().encode(hosts) {
             try? data.write(to: hostsURL)
@@ -676,6 +708,7 @@ public class AppState: ObservableObject {
         showSetup = false
     }
 
+    /// Save appearance.
     public func saveAppearance() {
         AppearanceStore.shared.save()
     }
@@ -932,6 +965,7 @@ public class AppState: ObservableObject {
         FavoritesStore.shared.save()
     }
 
+    /// Dismiss top overlay.
     public func dismissTopOverlay() {
         if showCommandPalette {
             showCommandPalette = false
