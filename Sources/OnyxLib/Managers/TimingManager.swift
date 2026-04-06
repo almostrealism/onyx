@@ -176,20 +176,32 @@ public class TimingManager: ObservableObject {
             entries.append(Entry(date: row.date, project: displayTitle, color: displayColor, seconds: row.seconds))
         }
 
-        // Aggregate
-        var byDateProject: [String: [String: (color: String, seconds: Double)]] = [:]
-        var projectTotalMap: [String: (color: String, seconds: Double)] = [:]
-
-        for e in entries {
-            byDateProject[e.date, default: [:]][e.project, default: (e.color, 0)].seconds += e.seconds
-            projectTotalMap[e.project, default: (e.color, 0)].seconds += e.seconds
-        }
-
         let calendar = Calendar.current
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
         let dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         let monday = store.weekMonday
+
+        // Set of date strings for the current week, used to scope the bar
+        // chart and the project-totals legend to this week only. The longer
+        // trailing averages and the heatmap intentionally use the full
+        // 12-week entries list.
+        var currentWeekDates = Set<String>()
+        for i in 0..<7 {
+            let d = calendar.date(byAdding: .day, value: i, to: monday)!
+            currentWeekDates.insert(df.string(from: d))
+        }
+
+        // Aggregate — project totals and the bar chart must only see
+        // current-week entries; projectTotalMap was previously summing
+        // the whole 12-week dataset which produced misleading huge numbers.
+        var byDateProject: [String: [String: (color: String, seconds: Double)]] = [:]
+        var projectTotalMap: [String: (color: String, seconds: Double)] = [:]
+
+        for e in entries where currentWeekDates.contains(e.date) {
+            byDateProject[e.date, default: [:]][e.project, default: (e.color, 0)].seconds += e.seconds
+            projectTotalMap[e.project, default: (e.color, 0)].seconds += e.seconds
+        }
 
         var daily: [DailyTime] = []
         var total: Double = 0
