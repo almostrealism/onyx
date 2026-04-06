@@ -6,15 +6,18 @@ import Network
 public class DashboardServer {
     private var listener: NWListener?
     private weak var appState: AppState?
+    /// private(set) var port: UInt16?
     public private(set) var port: UInt16?
 
     /// Fixed port so browser bookmarks/new-tab settings work across restarts
     public static let defaultPort: UInt16 = 19433
 
+    /// Create a new instance.
     public init(appState: AppState) {
         self.appState = appState
     }
 
+    /// Start.
     public func start() {
         do {
             let params = NWParameters.tcp
@@ -36,6 +39,7 @@ public class DashboardServer {
         }
     }
 
+    /// Stop.
     public func stop() {
         listener?.cancel()
         listener = nil

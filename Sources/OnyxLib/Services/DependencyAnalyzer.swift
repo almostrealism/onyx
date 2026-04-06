@@ -10,6 +10,7 @@ import Foundation
 public class DependencyAnalyzer {
     private let appState: AppState
 
+    /// Create a new instance.
     public init(appState: AppState) {
         self.appState = appState
     }
