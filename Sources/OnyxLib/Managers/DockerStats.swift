@@ -20,16 +20,25 @@ import Foundation
 
 // MARK: - Docker Stats
 
+/// DockerContainerStats.
 public struct DockerContainerStats: Identifiable {
+    /// Id.
     public let id: String // container name
+    /// Name.
     public let name: String
+    /// Cpu.
     public let cpu: String
+    /// Mem usage.
     public let memUsage: String
+    /// Net io.
     public let netIO: String
+    /// Block io.
     public let blockIO: String
+    /// Pids.
     public let pids: String
 }
 
+/// DockerStatsManager.
 public class DockerStatsManager: ObservableObject {
     @Published public var containers: [DockerContainerStats] = []
     @Published public var isAvailable = false
@@ -49,6 +58,7 @@ public class DockerStatsManager: ObservableObject {
     private var timer: Timer?
     private let appState: AppState
 
+    /// Create a new instance.
     public init(appState: AppState) {
         self.appState = appState
     }
@@ -71,6 +81,7 @@ public class DockerStatsManager: ObservableObject {
         return containers.filter { !isContainerActive($0.name) }.count
     }
 
+    /// Start polling.
     public func startPolling() {
         poll()
         timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
@@ -78,6 +89,7 @@ public class DockerStatsManager: ObservableObject {
         }
     }
 
+    /// Stop polling.
     public func stopPolling() {
         timer?.invalidate()
         timer = nil
@@ -147,6 +159,7 @@ public class DockerStatsManager: ObservableObject {
         Double(s.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "%", with: "")) ?? 0
     }
 
+    /// Parse.
     public static func parse(output: String) -> (cores: Int, containers: [DockerContainerStats]) {
         var cores = 1
         let containers = output.components(separatedBy: "\n")

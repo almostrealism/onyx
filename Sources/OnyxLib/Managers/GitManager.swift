@@ -22,6 +22,7 @@ import SwiftUI
 
 // MARK: - GitManager
 
+/// GitManager.
 public class GitManager: ObservableObject {
     @Published public var repoStatus: GitRepoStatus?
     @Published public var isGitRepo = false
@@ -36,12 +37,15 @@ public class GitManager: ObservableObject {
     @Published public var isLoadingDiff = false
 
     private let appState: AppState
+    /// internal(set) var currentRepoPath: String?
     public internal(set) var currentRepoPath: String?
 
+    /// Create a new instance.
     public init(appState: AppState) {
         self.appState = appState
     }
 
+    /// Check and load.
     public func checkAndLoad(path: String) {
         isLoading = true
         currentRepoPath = path
@@ -81,6 +85,7 @@ public class GitManager: ObservableObject {
         }
     }
 
+    /// Clear.
     public func clear() {
         isGitRepo = false
         repoStatus = nil
@@ -94,6 +99,7 @@ public class GitManager: ObservableObject {
 
     // MARK: - Git Log
 
+    /// Fetch log.
     public func fetchLog(forFile filePath: String? = nil) {
         guard let repoPath = currentRepoPath else { return }
         isLoadingLog = true
@@ -124,6 +130,7 @@ public class GitManager: ObservableObject {
         }
     }
 
+    /// Fetch commit detail.
     public func fetchCommitDetail(hash: String) {
         guard let repoPath = currentRepoPath else { return }
         isLoadingCommit = true
@@ -149,6 +156,7 @@ public class GitManager: ObservableObject {
         }
     }
 
+    /// Close log.
     public func closeLog() {
         showLog = false
         commitDetail = nil
@@ -212,6 +220,7 @@ public class GitManager: ObservableObject {
         }
     }
 
+    /// Close diff.
     public func closeDiff() {
         fileDiff = nil
         fileDiffTitle = nil

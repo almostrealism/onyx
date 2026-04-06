@@ -15,12 +15,18 @@
 import Foundation
 import Combine
 
+/// Note.
 public struct Note: Identifiable, Comparable {
+    /// Id.
     public let id: String // filename
+    /// Title.
     public var title: String
+    /// Content.
     public var content: String
+    /// Modified.
     public var modified: Date
 
+    /// Create a new instance.
     public init(id: String, title: String, content: String, modified: Date) {
         self.id = id
         self.title = title
@@ -28,21 +34,26 @@ public struct Note: Identifiable, Comparable {
         self.modified = modified
     }
 
+    /// .
     public static func < (lhs: Note, rhs: Note) -> Bool {
         lhs.modified > rhs.modified // newest first
     }
 }
 
+/// NotesManager.
 public class NotesManager: ObservableObject {
     @Published public var notes: [Note] = []
     @Published public var selectedNoteID: String?
+    /// Directory.
     public let directory: URL
 
+    /// Create a new instance.
     public init(directory: URL) {
         self.directory = directory
         loadNotes()
     }
 
+    /// Load notes.
     public func loadNotes() {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
@@ -56,6 +67,7 @@ public class NotesManager: ObservableObject {
         }.sorted()
     }
 
+    /// Create note.
     public func createNote() {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
@@ -66,11 +78,13 @@ public class NotesManager: ObservableObject {
         selectedNoteID = filename
     }
 
+    /// Save note.
     public func saveNote(_ note: Note) {
         let url = directory.appendingPathComponent(note.id)
         try? note.content.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    /// Delete note.
     public func deleteNote(_ note: Note) {
         let url = directory.appendingPathComponent(note.id)
         try? FileManager.default.removeItem(at: url)
@@ -80,6 +94,7 @@ public class NotesManager: ObservableObject {
         loadNotes()
     }
 
+    /// Rename note.
     public func renameNote(_ note: Note, to newTitle: String) {
         let oldURL = directory.appendingPathComponent(note.id)
         let ext = (note.id as NSString).pathExtension

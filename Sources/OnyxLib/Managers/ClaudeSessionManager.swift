@@ -22,12 +22,18 @@ import Combine
 
 /// Represents an active Claude Code session detected via hooks
 public struct ClaudeActivity: Identifiable {
+    /// Id.
     public let id: String          // session_id
+    /// Tool name.
     public var toolName: String?   // current tool being used
+    /// Tool input.
     public var toolInput: String?  // summary of tool input
+    /// Last seen.
     public var lastSeen: Date
+    /// Status.
     public var status: ClaudeStatus
 
+    /// ClaudeStatus.
     public enum ClaudeStatus: Equatable {
         case idle
         case running(tool: String)
@@ -38,11 +44,17 @@ public struct ClaudeActivity: Identifiable {
 
 /// A pending permission request from Claude Code
 public struct PermissionRequest: Identifiable {
+    /// Id.
     public let id: String          // unique request ID
+    /// Session id.
     public let sessionId: String
+    /// Tool name.
     public let toolName: String
+    /// Tool input.
     public let toolInput: [String: Any]
+    /// Timestamp.
     public let timestamp: Date
+    /// Resolved.
     public var resolved: Bool = false
 
     /// Human-readable summary of what's being requested
@@ -72,6 +84,7 @@ public class ClaudeSessionManager: ObservableObject {
     /// Completion handlers waiting for permission responses, keyed by request ID
     private var permissionCallbacks: [String: (String) -> Void] = [:]
 
+    /// Create a new instance.
     public init() {}
 
     // MARK: - Hook Event Processing

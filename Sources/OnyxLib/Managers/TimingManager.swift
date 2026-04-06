@@ -29,28 +29,45 @@ public class TimingManager: ObservableObject {
     private var storeCancellable: AnyCancellable?
     private let windowIndex: Int
 
+    /// DailyTime.
     public struct DailyTime: Identifiable {
+        /// Id.
         public let id: String
+        /// Day label.
         public let dayLabel: String
+        /// Date.
         public let date: Date
+        /// Hours.
         public let hours: Double
+        /// Projects.
         public let projects: [ProjectSlice]
     }
 
+    /// ProjectSlice.
     public struct ProjectSlice: Identifiable {
+        /// Id.
         public var id: String { projectTitle }
+        /// Project title.
         public let projectTitle: String
+        /// Color.
         public let color: String
+        /// Hours.
         public let hours: Double
     }
 
+    /// ProjectTotal.
     public struct ProjectTotal: Identifiable {
+        /// Id.
         public var id: String { title }
+        /// Title.
         public let title: String
+        /// Color.
         public let color: String
+        /// Hours.
         public let hours: Double
     }
 
+    /// Create a new instance.
     public init(windowIndex: Int) {
         self.windowIndex = windowIndex
         storeCancellable = TimingDataStore.shared.objectWillChange.sink { [weak self] _ in
@@ -60,6 +77,7 @@ public class TimingManager: ObservableObject {
 
     // MARK: - Per-window filter
 
+    /// Filter project id.
     public var filterProjectID: String {
         get { UserDefaults.standard.string(forKey: "timing_filter_\(windowIndex)") ?? "" }
         set {
@@ -71,15 +89,21 @@ public class TimingManager: ObservableObject {
 
     // MARK: - Convenience accessors for shared state
 
+    /// Is configured.
     public var isConfigured: Bool { TimingDataStore.shared.isConfigured }
+    /// Is loading.
     public var isLoading: Bool { TimingDataStore.shared.isLoading }
+    /// Last error.
     public var lastError: String? { TimingDataStore.shared.lastError }
+    /// Available projects.
     public var availableProjects: [TimingProject] { TimingDataStore.shared.availableProjects }
+    /// Api token.
     public var apiToken: String {
         get { TimingDataStore.shared.apiToken }
         set { TimingDataStore.shared.apiToken = newValue }
     }
 
+    /// Filter project name.
     public var filterProjectName: String {
         if filterProjectID.isEmpty { return "All" }
         return availableProjects.first(where: { $0.id == filterProjectID })?.title ?? filterProjectID
@@ -87,6 +111,7 @@ public class TimingManager: ObservableObject {
 
     // MARK: - Recompute filtered view
 
+    /// Recompute.
     public func recompute() {
         let store = TimingDataStore.shared
         let filterID = filterProjectID

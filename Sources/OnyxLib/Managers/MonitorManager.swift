@@ -20,6 +20,7 @@
 import Foundation
 import Combine
 
+/// MonitorManager.
 public class MonitorManager: ObservableObject {
     @Published public var isPolling = false
     @Published public var showMemoryChart = false
@@ -31,8 +32,11 @@ public class MonitorManager: ObservableObject {
 
     /// Data for the active host (computed from hostData)
     public var samples: [MonitorSample] { activeHostData.samples }
+    /// Latest sample.
     public var latestSample: MonitorSample? { activeHostData.latestSample }
+    /// Gpu ever seen.
     public var gpuEverSeen: Bool { activeHostData.gpuEverSeen }
+    /// Last error.
     public var lastError: String? { activeHostData.lastError }
 
     private var timer: Timer?
@@ -62,10 +66,12 @@ public class MonitorManager: ObservableObject {
         var lastError: String?
     }
 
+    /// Create a new instance.
     public init(appState: AppState) {
         self.appState = appState
     }
 
+    /// Start polling.
     public func startPolling() {
         guard !isPolling else { return }
         isPolling = true
@@ -75,12 +81,14 @@ public class MonitorManager: ObservableObject {
         }
     }
 
+    /// Stop polling.
     public func stopPolling() {
         isPolling = false
         timer?.invalidate()
         timer = nil
     }
 
+    /// Toggle interval.
     public func toggleInterval() {
         useShortInterval.toggle()
     }
@@ -90,6 +98,7 @@ public class MonitorManager: ObservableObject {
         return bucket(samples.map { ($0.timestamp, $0.cpuUsage) }, for: "cpu")
     }
 
+    /// Bucketed memory.
     public func bucketedMemory() -> [Double] {
         return bucket(samples.map { s -> (Date, Double?) in
             guard let u = s.memUsed, let t = s.memTotal, t > 0 else { return (s.timestamp, nil) }
@@ -97,6 +106,7 @@ public class MonitorManager: ObservableObject {
         }, for: "mem")
     }
 
+    /// Bucketed gpu.
     public func bucketedGPU() -> [Double] {
         let data = bucket(samples.map { ($0.timestamp, $0.gpuUsage) }, for: "gpu")
         // If GPU was ever seen but current data is empty (transient failure),
@@ -276,6 +286,7 @@ public class MonitorManager: ObservableObject {
         return nil
     }
 
+    /// Parse.
     public static func parse(output: String) -> MonitorSample? {
         let sections = output.components(separatedBy: "---")
         var loadAvg1: Double?, loadAvg5: Double?, loadAvg15: Double?

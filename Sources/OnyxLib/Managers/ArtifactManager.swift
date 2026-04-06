@@ -17,13 +17,17 @@ import Combine
 
 // MARK: - Artifact Manager
 
+/// ArtifactManager.
 public class ArtifactManager: ObservableObject {
     @Published public var slots: [Int: Artifact] = [:]
     @Published public var activeSlot: Int = 0
+    /// Slot count.
     public static let slotCount = 8
 
+    /// Create a new instance.
     public init() {}
 
+    /// Set slot.
     public func setSlot(_ index: Int, title: String, content: ArtifactContent) -> Bool {
         guard (0..<Self.slotCount).contains(index) else { return false }
         let now = Date()
@@ -38,6 +42,7 @@ public class ArtifactManager: ObservableObject {
         return true
     }
 
+    /// Clear slot.
     public func clearSlot(_ index: Int) -> Bool {
         guard (0..<Self.slotCount).contains(index) else { return false }
         slots.removeValue(forKey: index)
@@ -48,11 +53,13 @@ public class ArtifactManager: ObservableObject {
         return true
     }
 
+    /// Clear all.
     public func clearAll() {
         slots.removeAll()
         activeSlot = 0
     }
 
+    /// List slots.
     public func listSlots() -> [(slot: Int, title: String, type: String)] {
         (0..<Self.slotCount).compactMap { i in
             guard let artifact = slots[i] else { return nil }
@@ -60,10 +67,12 @@ public class ArtifactManager: ObservableObject {
         }
     }
 
+    /// Occupied slot count.
     public var occupiedSlotCount: Int {
         slots.count
     }
 
+    /// Has artifacts.
     public var hasArtifacts: Bool {
         !slots.isEmpty
     }

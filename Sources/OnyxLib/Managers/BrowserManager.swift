@@ -37,6 +37,7 @@ public class BrowserManager: ObservableObject {
     private var delegates: [String: BrowserDelegate] = [:]
     private var kvoObservations: [NSKeyValueObservation] = []
 
+    /// Create a new instance.
     public init() {}
 
     /// Get or create the web view for a session
@@ -100,6 +101,7 @@ public class BrowserManager: ObservableObject {
         canGoForward = wv.canGoForward
     }
 
+    /// Navigate.
     public func navigate(to urlString: String) {
         guard let id = activeSessionID, let wv = webViews[id],
               let url = Self.normalizeURL(urlString) else { return }
@@ -123,21 +125,25 @@ public class BrowserManager: ObservableObject {
         return URL(string: urlStr)
     }
 
+    /// Go back.
     public func goBack() {
         guard let id = activeSessionID, let wv = webViews[id] else { return }
         wv.goBack()
     }
 
+    /// Go forward.
     public func goForward() {
         guard let id = activeSessionID, let wv = webViews[id] else { return }
         wv.goForward()
     }
 
+    /// Reload.
     public func reload() {
         guard let id = activeSessionID, let wv = webViews[id] else { return }
         wv.reload()
     }
 
+    /// Destroy session.
     public func destroySession(_ sessionID: String) {
         if sessionID == activeSessionID {
             kvoObservations.removeAll()

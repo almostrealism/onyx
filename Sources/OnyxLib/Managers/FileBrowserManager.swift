@@ -21,6 +21,7 @@ import Foundation
 import Combine
 import AppKit
 
+/// FileBrowserManager.
 public class FileBrowserManager: ObservableObject {
     @Published public var savedFolders: [SavedFolder] = []
     @Published public var currentPath: String?
@@ -64,6 +65,7 @@ public class FileBrowserManager: ObservableObject {
     private let appState: AppState
     private var gitCancellable: AnyCancellable?
 
+    /// Git manager.
     public lazy var gitManager: GitManager = {
         let g = GitManager(appState: appState)
         gitCancellable = g.objectWillChange.sink { [weak self] _ in
@@ -77,6 +79,7 @@ public class FileBrowserManager: ObservableObject {
         return appSupport.appendingPathComponent("Onyx/recent-files.json")
     }
 
+    /// Create a new instance.
     public init(appState: AppState) {
         self.appState = appState
         loadSavedFolders()
@@ -146,6 +149,7 @@ public class FileBrowserManager: ObservableObject {
         readFile(file.path, name: file.name)
     }
 
+    /// Add folder.
     public func addFolder(_ path: String) {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         let hostID = appState.activeHost?.id ?? HostConfig.localhostID
@@ -155,6 +159,7 @@ public class FileBrowserManager: ObservableObject {
         saveFolders()
     }
 
+    /// Remove folder.
     public func removeFolder(_ folder: SavedFolder) {
         savedFolders.removeAll { $0 == folder }
         saveFolders()
@@ -170,6 +175,7 @@ public class FileBrowserManager: ObservableObject {
 
     // MARK: - Navigation
 
+    /// Navigate to.
     public func navigateTo(_ path: String) {
         fileContent = nil
         imageData = nil
@@ -184,6 +190,7 @@ public class FileBrowserManager: ObservableObject {
         gitManager.checkAndLoad(path: path)
     }
 
+    /// Navigate back.
     public func navigateBack() {
         // If viewing a file and we came from search, return to search results
         if viewingFileName != nil && wasSearchActiveBeforeFile {
@@ -264,6 +271,7 @@ public class FileBrowserManager: ObservableObject {
         listDirectory(path)
     }
 
+    /// Open entry.
     public func openEntry(_ entry: RemoteEntry) {
         guard let current = currentPath else { return }
         let fullPath = current.hasSuffix("/") ? "\(current)\(entry.name)" : "\(current)/\(entry.name)"
@@ -274,6 +282,7 @@ public class FileBrowserManager: ObservableObject {
         }
     }
 
+    /// Close file.
     public func closeFile() {
         fileContent = nil
         imageData = nil
@@ -589,6 +598,7 @@ public class FileBrowserManager: ObservableObject {
         }
     }
 
+    /// Parse ls output.
     public func parseLsOutput(_ output: String) -> [RemoteEntry] {
         var results: [RemoteEntry] = []
         let lines = output.components(separatedBy: "\n")
@@ -617,6 +627,7 @@ public class FileBrowserManager: ObservableObject {
 
     // MARK: - Search
 
+    /// Start search.
     public func startSearch(_ query: String) {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty,
               let basePath = currentPath ?? activeFolders.first?.path else { return }
@@ -705,6 +716,7 @@ public class FileBrowserManager: ObservableObject {
         }
     }
 
+    /// Cancel search.
     public func cancelSearch() {
         if let process = searchProcess, process.isRunning {
             process.terminate()
@@ -713,6 +725,7 @@ public class FileBrowserManager: ObservableObject {
         isSearching = false
     }
 
+    /// Clear search.
     public func clearSearch() {
         cancelSearch()
         searchQuery = ""
@@ -725,6 +738,7 @@ public class FileBrowserManager: ObservableObject {
     @Published public var uploadStatus: String?
     @Published public var isUploading = false
 
+    /// Upload files.
     public func uploadFiles(_ urls: [URL]) {
         guard let dest = currentPath else { return }
         isUploading = true
@@ -807,12 +821,14 @@ public class FileBrowserManager: ObservableObject {
     @Published public var downloadStatus: String?
     @Published public var isDownloading = false
 
+    /// Download entry.
     public func downloadEntry(_ entry: RemoteEntry) {
         guard let current = currentPath else { return }
         let fullPath = current.hasSuffix("/") ? "\(current)\(entry.name)" : "\(current)/\(entry.name)"
         downloadPath(fullPath, isDirectory: entry.isDirectory)
     }
 
+    /// Download path.
     public func downloadPath(_ remotePath: String, isDirectory: Bool) {
         // Show save panel to pick local destination
         let panel = NSSavePanel()
