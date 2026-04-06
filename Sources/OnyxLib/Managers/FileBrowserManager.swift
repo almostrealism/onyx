@@ -325,6 +325,23 @@ public class FileBrowserManager: ObservableObject {
         appState.markMuxStale(for: host.id)
     }
 
+    /// Run a remote script and, on a transient failure (exit 255 with no
+    /// useful output), mark the mux stale and retry exactly once. The retry
+    /// pays for the inevitable cold-start cost of the next ssh invocation
+    /// after a stale-mux cleanup. Called from a background queue.
+    private func runRemoteScriptWithRetry(_ script: String, timeout: TimeInterval = 30) -> ProcessResult {
+        let (cmd, args) = appState.remoteCommand(script)
+        let first = Self.runProcessWithStatus(cmd: cmd, args: args, timeout: timeout)
+        let trimmed = first.output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let isTransient = first.exitCode == 255 && trimmed.isEmpty && !first.timedOut
+        guard isTransient else { return first }
+
+        // Mark stale and retry once with a fresh mux.
+        DispatchQueue.main.sync { self.handleSSHFailure() }
+        let (cmd2, args2) = appState.remoteCommand(script)
+        return Self.runProcessWithStatus(cmd: cmd2, args: args2, timeout: timeout)
+    }
+
     private func listDirectory(_ path: String) {
         if let connectError = checkRemoteConnectivity() {
             error = connectError
@@ -345,18 +362,16 @@ public class FileBrowserManager: ObservableObject {
             DispatchQueue.main.async {
                 self?.isLoading = false
                 guard let self = self else { return }
-                if let output = result.output {
-                    let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmed = result.output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-                    // Detect SSH connection/auth failures (exit code 255 is SSH error)
-                    if result.exitCode == 255 || trimmed.contains("Permission denied (publickey") {
-                        let host = self.appState.activeHost?.label ?? "remote host"
-                        self.error = "SSH connection failed to \(host). Retrying may help."
-                        self.handleSSHFailure()
-                    } else if trimmed.contains("No such file or directory")
-                        || trimmed.contains("Permission denied")
-                        || trimmed.contains("not a directory")
-                        || trimmed.hasPrefix("ls:") {
+                // Auth failure surfaces as a recognizable string regardless of exit code
+                if trimmed.contains("Permission denied (publickey") {
+                    self.error = self.formatProcessError(result, action: "List \(path)")
+                    self.handleSSHFailure()
+                } else if let output = result.output, result.exitCode != 255 {
+                    if trimmed.contains("No such file or directory")
+                        || trimmed.hasPrefix("ls:")
+                        || trimmed.contains("not a directory") {
                         self.error = trimmed
                     } else {
                         self.entries = self.parseLsOutput(output)
@@ -369,7 +384,8 @@ public class FileBrowserManager: ObservableObject {
                         }
                     }
                 } else {
-                    self.error = "Failed to list directory"
+                    self.error = self.formatProcessError(result, action: "List \(path)")
+                    if result.exitCode == 255 { self.handleSSHFailure() }
                 }
             }
         }
@@ -505,19 +521,16 @@ public class FileBrowserManager: ObservableObject {
         if echo "$FILE_TYPE" | grep -qi binary; then echo "__BINARY__"; \
         else head -2000 \(escaped) 2>&1; fi
         """
-        let (cmd, args) = appState.remoteCommand(script)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Self.runProcessWithStatus(cmd: cmd, args: args)
+            // Run with retry: a stale mux frequently causes a transient
+            // failure that the very next call cleans up automatically.
+            let result = self?.runRemoteScriptWithRetry(script, timeout: 30)
+                ?? ProcessResult(output: nil, exitCode: -1, timedOut: false)
             DispatchQueue.main.async {
                 self?.isLoading = false
                 guard let self = self else { return }
-                if result.exitCode == 255 {
-                    let host = self.appState.activeHost?.label ?? "remote host"
-                    self.error = "SSH connection failed to \(host). Retrying may help."
-                    self.handleSSHFailure()
-                    self.handleSSHFailure()
-                } else if let output = result.output {
+                if result.exitCode == 0, let output = result.output {
                     if output.trimmingCharacters(in: .whitespacesAndNewlines) == "__BINARY__" {
                         self.viewingFileName = name
                         self.isUnsupportedFile = true
@@ -525,8 +538,17 @@ public class FileBrowserManager: ObservableObject {
                         self.fileContent = output
                         self.viewingFileName = name
                     }
+                } else if let output = result.output,
+                          !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                          result.exitCode != 255 {
+                    // Non-zero exit but real output: it's the remote command's
+                    // own error (file not found, permission denied, etc).
+                    // Show it as the file content rather than the error so the
+                    // user sees the diagnostic in the file panel.
+                    self.fileContent = output
+                    self.viewingFileName = name
                 } else {
-                    self.error = "Failed to read file"
+                    self.error = self.formatProcessError(result, action: "Read \(name)")
                 }
             }
         }
@@ -538,14 +560,13 @@ public class FileBrowserManager: ObservableObject {
         let (cmd, args) = appState.remoteCommand(script)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Self.runProcessWithStatus(cmd: cmd, args: args)
+            let result = Self.runProcessWithStatus(cmd: cmd, args: args, timeout: 30)
             DispatchQueue.main.async {
                 self?.isLoading = false
                 guard let self = self else { return }
-                if result.exitCode == 255 {
-                    let host = self.appState.activeHost?.label ?? "remote host"
-                    self.error = "SSH connection failed to \(host). Retrying may help."
-                    self.handleSSHFailure()
+                if result.exitCode != 0 && result.exitCode != -1 {
+                    self.error = self.formatProcessError(result, action: "Read image \(name)")
+                    if result.exitCode == 255 { self.handleSSHFailure() }
                 } else if let output = result.output,
                           let data = Data(base64Encoded: output.trimmingCharacters(in: .whitespacesAndNewlines),
                                           options: .ignoreUnknownCharacters),
@@ -564,6 +585,7 @@ public class FileBrowserManager: ObservableObject {
     struct ProcessResult {
         let output: String?
         let exitCode: Int32
+        let timedOut: Bool
     }
 
     static func runProcess(cmd: String, args: [String]) -> String? {
@@ -571,7 +593,7 @@ public class FileBrowserManager: ObservableObject {
         return result.output
     }
 
-    static func runProcessWithStatus(cmd: String, args: [String]) -> ProcessResult {
+    static func runProcessWithStatus(cmd: String, args: [String], timeout: TimeInterval = 10) -> ProcessResult {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: cmd)
@@ -582,9 +604,17 @@ public class FileBrowserManager: ObservableObject {
         do {
             try process.run()
 
+            // Track whether OUR timer killed the process so callers can
+            // distinguish a timeout from a remote-side error of the same code.
+            let timedOutFlag = TimeoutFlag()
             let killTimer = DispatchSource.makeTimerSource(queue: .global())
-            killTimer.schedule(deadline: .now() + 10)
-            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
+            killTimer.schedule(deadline: .now() + timeout)
+            killTimer.setEventHandler {
+                if process.isRunning {
+                    timedOutFlag.tripped = true
+                    process.terminate()
+                }
+            }
             killTimer.resume()
 
             process.waitUntilExit()
@@ -592,10 +622,38 @@ public class FileBrowserManager: ObservableObject {
 
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(data: data, encoding: .utf8)
-            return ProcessResult(output: output, exitCode: process.terminationStatus)
+            return ProcessResult(output: output, exitCode: process.terminationStatus, timedOut: timedOutFlag.tripped)
         } catch {
-            return ProcessResult(output: nil, exitCode: -1)
+            return ProcessResult(output: nil, exitCode: -1, timedOut: false)
         }
+    }
+
+    /// Tiny boxed flag so the kill-timer closure can write to it from another queue.
+    private final class TimeoutFlag {
+        var tripped: Bool = false
+    }
+
+    /// Build a user-facing error message from a failed ProcessResult. Prefers
+    /// the captured stdout/stderr (which contains the real failure detail)
+    /// over a generic message. Only claims "SSH connection failed" when
+    /// there's literally no output to show — and even then names what we
+    /// actually know (the exit code) so the user has something to act on.
+    private func formatProcessError(_ result: ProcessResult, action: String) -> String {
+        let host = appState.activeHost?.label ?? "remote host"
+        if result.timedOut {
+            return "\(action) timed out on \(host) (>10s). Try again."
+        }
+        let trimmed = result.output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty {
+            // Show the real error. Cap length so a runaway stderr doesn't
+            // overwhelm the panel.
+            let snippet = trimmed.count > 400 ? String(trimmed.prefix(400)) + "…" : trimmed
+            return "\(action) failed: \(snippet)"
+        }
+        if result.exitCode == 255 {
+            return "\(action) failed: ssh exit 255 to \(host) (no output). Retry usually works."
+        }
+        return "\(action) failed: exit code \(result.exitCode), no output."
     }
 
     /// Parse ls output.
