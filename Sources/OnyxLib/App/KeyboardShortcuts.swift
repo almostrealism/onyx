@@ -1,5 +1,6 @@
 import AppKit
 
+/// ShortcutManager.
 public class ShortcutManager {
     /// Per-window AppState registry — keyboard handler queries this to check
     /// overlay state for the specific window that received the event.
@@ -30,6 +31,7 @@ public class ShortcutManager {
         return getter?()
     }
 
+    /// Setup menu shortcuts.
     public static func setupMenuShortcuts() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

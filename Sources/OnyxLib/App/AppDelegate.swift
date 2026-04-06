@@ -1,12 +1,15 @@
 import AppKit
 
+/// AppDelegate.
 public class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Application will finish launching.
     public func applicationWillFinishLaunching(_ notification: Notification) {
         // Force the process to be a regular GUI app with menu bar and focus
         NSApplication.shared.setActivationPolicy(.regular)
         ShortcutManager.setupMenuShortcuts()
     }
 
+    /// Application did finish launching.
     public func applicationDidFinishLaunching(_ notification: Notification) {
         // Activate and bring to front
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -29,10 +32,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Application should terminate after last window closed.
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
 
+    /// Style window.
     public static func styleWindow(_ window: NSWindow) {
         window.isOpaque = false
         window.backgroundColor = .clear
