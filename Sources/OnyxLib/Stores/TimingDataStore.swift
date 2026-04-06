@@ -99,7 +99,7 @@ public class TimingDataStore: ObservableObject {
         }.resume()
     }
 
-    private static func flattenProjects(_ projects: [[String: Any]], depth: Int, into result: inout [TimingProject]) {
+    static func flattenProjects(_ projects: [[String: Any]], depth: Int, into result: inout [TimingProject]) {
         for proj in projects {
             guard let selfRef = proj["self"] as? String,
                   let title = proj["title"] as? String else { continue }
@@ -183,6 +183,18 @@ public class TimingDataStore: ObservableObject {
         let preview = String(data: data, encoding: .utf8)?.prefix(300) ?? "nil"
         print("Timing: response preview: \(preview)")
 
+        guard let rows = Self.parseReportRows(data) else {
+            lastError = "Parse error"; return
+        }
+        rawRows = rows
+        print("Timing: \(rows.count) report rows")
+    }
+
+    /// Pure parser for Timing API report payloads — extracted for testability.
+    /// Accepts either a bare array or `{"data": [...]}`. Returns nil on JSON parse
+    /// failure; returns `[]` if JSON is valid but contains no usable rows.
+    /// Rows with duration <= 0 or no start_date are filtered out.
+    static func parseReportRows(_ data: Data) -> [ReportRow]? {
         let jsonRows: [[String: Any]]
         if let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             jsonRows = arr
@@ -190,7 +202,7 @@ public class TimingDataStore: ObservableObject {
                   let arr = wrapper["data"] as? [[String: Any]] {
             jsonRows = arr
         } else {
-            lastError = "Parse error"; return
+            return nil
         }
 
         var rows: [ReportRow] = []
@@ -231,9 +243,7 @@ public class TimingDataStore: ObservableObject {
                                   projectColor: color, parentRef: parentRef,
                                   titleChain: titleChain, seconds: duration))
         }
-
-        rawRows = rows
-        print("Timing: \(rows.count) report rows")
+        return rows
     }
 }
 

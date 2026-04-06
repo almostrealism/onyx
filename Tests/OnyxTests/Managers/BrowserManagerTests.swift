@@ -74,6 +74,82 @@ final class BrowserSessionTests: XCTestCase {
         XCTAssertTrue(state.activeSession?.source.isBrowser == true)
     }
 
+    // MARK: - URL normalization regression tests
+
+    /// A bare host with a dot becomes https://
+    func testNormalizeURL_bareHost() {
+        let url = BrowserManager.normalizeURL("github.com")
+        XCTAssertEqual(url?.absoluteString, "https://github.com")
+    }
+
+    /// A full URL passes through unchanged
+    func testNormalizeURL_fullURL() {
+        let url = BrowserManager.normalizeURL("https://example.com/path")
+        XCTAssertEqual(url?.absoluteString, "https://example.com/path")
+    }
+
+    /// Non-https schemes pass through (http:// works too)
+    func testNormalizeURL_httpScheme() {
+        let url = BrowserManager.normalizeURL("http://localhost:8080")
+        XCTAssertEqual(url?.absoluteString, "http://localhost:8080")
+    }
+
+    /// A multi-word query becomes a Google search
+    func testNormalizeURL_multiWordSearch() {
+        let url = BrowserManager.normalizeURL("swift programming language")
+        XCTAssertEqual(url?.scheme, "https")
+        XCTAssertEqual(url?.host, "www.google.com")
+        XCTAssertTrue(url?.query?.contains("swift") ?? false)
+    }
+
+    /// A single word without a dot also becomes a search (not a broken host)
+    func testNormalizeURL_singleWordSearch() {
+        let url = BrowserManager.normalizeURL("claude")
+        XCTAssertEqual(url?.host, "www.google.com")
+    }
+
+    /// Whitespace gets trimmed
+    func testNormalizeURL_trimsWhitespace() {
+        let url = BrowserManager.normalizeURL("  github.com  ")
+        XCTAssertEqual(url?.absoluteString, "https://github.com")
+    }
+
+    /// Empty input returns nil (don't navigate)
+    func testNormalizeURL_emptyReturnsNil() {
+        XCTAssertNil(BrowserManager.normalizeURL(""))
+        XCTAssertNil(BrowserManager.normalizeURL("   "))
+    }
+
+    // MARK: - KVO activation regression tests
+
+    /// Regression (ADR-002): activate() must be idempotent — calling it
+    /// repeatedly with the same session ID must not re-register KVO
+    /// observers, re-fire @Published writes, or cause re-entry.
+    func testActivate_idempotentSameSession() {
+        let manager = BrowserManager()
+        let session = TmuxSession(name: "test", source: .browser(url: "https://example.com"))
+        _ = manager.webView(for: session)
+        manager.activate(sessionID: session.id)
+        let firstURL = manager.currentURL
+        manager.activate(sessionID: session.id)
+        manager.activate(sessionID: session.id)
+        XCTAssertEqual(manager.currentURL, firstURL,
+                       "Re-activating the same session must not mutate state")
+    }
+
+    /// Regression (ADR-002): destroying the active session must clear KVO
+    /// observations so later destruction of the web view doesn't fire into
+    /// a dangling observer.
+    func testDestroySession_clearsActiveState() {
+        let manager = BrowserManager()
+        let session = TmuxSession(name: "test", source: .browser(url: "https://example.com"))
+        _ = manager.webView(for: session)
+        manager.activate(sessionID: session.id)
+        manager.destroySession(session.id)
+        // Re-activating a destroyed session should not crash
+        manager.activate(sessionID: session.id)
+    }
+
     func testBrowserSession_switchDoesNotModifyPublishedDuringUpdate() {
         // Verify that activate() with a new session ID doesn't cause issues
         // when called outside of updateNSView

@@ -101,8 +101,17 @@ public class BrowserManager: ObservableObject {
     }
 
     public func navigate(to urlString: String) {
-        guard let id = activeSessionID, let wv = webViews[id] else { return }
-        var urlStr = urlString.trimmingCharacters(in: .whitespaces)
+        guard let id = activeSessionID, let wv = webViews[id],
+              let url = Self.normalizeURL(urlString) else { return }
+        wv.load(URLRequest(url: url))
+    }
+
+    /// Turn a URL-bar string into a URL: bare hosts get https://, anything
+    /// else with spaces or without a dot becomes a Google search.
+    /// Extracted for testability.
+    public static func normalizeURL(_ input: String) -> URL? {
+        var urlStr = input.trimmingCharacters(in: .whitespaces)
+        guard !urlStr.isEmpty else { return nil }
 
         if !urlStr.contains("://") {
             if urlStr.contains(".") && !urlStr.contains(" ") {
@@ -111,9 +120,7 @@ public class BrowserManager: ObservableObject {
                 urlStr = "https://www.google.com/search?q=\(urlStr.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? urlStr)"
             }
         }
-
-        guard let url = URL(string: urlStr) else { return }
-        wv.load(URLRequest(url: url))
+        return URL(string: urlStr)
     }
 
     public func goBack() {
