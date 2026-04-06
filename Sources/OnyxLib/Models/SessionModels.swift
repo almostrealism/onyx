@@ -2,6 +2,7 @@ import Foundation
 
 // MARK: - Session Model
 
+/// SessionSource.
 public enum SessionSource: Codable, Hashable {
     case host(hostID: UUID)
     case docker(hostID: UUID, containerName: String)
@@ -9,6 +10,7 @@ public enum SessionSource: Codable, Hashable {
     case dockerTop(hostID: UUID, containerName: String)
     case browser(url: String)
 
+    /// Host id.
     public var hostID: UUID {
         switch self {
         case .host(let id): return id
@@ -19,6 +21,7 @@ public enum SessionSource: Codable, Hashable {
         }
     }
 
+    /// Stable key.
     public var stableKey: String {
         switch self {
         case .host(let id): return "host:\(id.uuidString)"
@@ -29,6 +32,7 @@ public enum SessionSource: Codable, Hashable {
         }
     }
 
+    /// Display name.
     public var displayName: String {
         switch self {
         case .host: return "Host"
@@ -42,6 +46,7 @@ public enum SessionSource: Codable, Hashable {
         }
     }
 
+    /// Is docker.
     public var isDocker: Bool {
         switch self {
         case .docker, .dockerLogs, .dockerTop: return true
@@ -49,16 +54,19 @@ public enum SessionSource: Codable, Hashable {
         }
     }
 
+    /// Is docker logs.
     public var isDockerLogs: Bool {
         if case .dockerLogs = self { return true }
         return false
     }
 
+    /// Is docker top.
     public var isDockerTop: Bool {
         if case .dockerTop = self { return true }
         return false
     }
 
+    /// Is browser.
     public var isBrowser: Bool {
         if case .browser = self { return true }
         return false
@@ -69,6 +77,7 @@ public enum SessionSource: Codable, Hashable {
         isDockerLogs || isDockerTop
     }
 
+    /// Container name.
     public var containerName: String? {
         switch self {
         case .docker(_, let name): return name
@@ -78,25 +87,33 @@ public enum SessionSource: Codable, Hashable {
         }
     }
 
+    /// Browser url.
     public var browserURL: String? {
         if case .browser(let url) = self { return url }
         return nil
     }
 }
 
+/// TmuxSession.
 public struct TmuxSession: Identifiable, Hashable {
+    /// Name.
     public let name: String
+    /// Source.
     public let source: SessionSource
+    /// Unavailable.
     public let unavailable: Bool
 
+    /// Create a new instance.
     public init(name: String, source: SessionSource, unavailable: Bool = false) {
         self.name = name
         self.source = source
         self.unavailable = unavailable
     }
 
+    /// Id.
     public var id: String { "\(source.stableKey):\(name)" }
 
+    /// Display label.
     public var displayLabel: String {
         switch source {
         case .host: return name
@@ -108,14 +125,22 @@ public struct TmuxSession: Identifiable, Hashable {
     }
 }
 
+/// SessionGroup.
 public struct SessionGroup: Identifiable {
+    /// Id.
     public var id: String { source.stableKey }
+    /// Source.
     public let source: SessionSource
+    /// Sessions.
     public let sessions: [TmuxSession]
 }
 
+/// HostGroup.
 public struct HostGroup: Identifiable {
+    /// Id.
     public var id: UUID { host.id }
+    /// Host.
     public let host: HostConfig
+    /// Groups.
     public let groups: [SessionGroup]
 }

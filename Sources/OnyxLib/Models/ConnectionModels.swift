@@ -2,6 +2,7 @@ import Foundation
 
 // MARK: - Connection Pool Info
 
+/// ConnectionStatus.
 public enum ConnectionStatus: Equatable {
     case active         // currently displayed, process running
     case connected      // pooled, process running, not displayed
@@ -10,6 +11,7 @@ public enum ConnectionStatus: Equatable {
     case reconnecting   // backoff delay before retry
     case enumerating    // re-enumerating sessions before connecting
 
+    /// Label.
     public var label: String {
         switch self {
         case .active: return "active"
@@ -21,6 +23,7 @@ public enum ConnectionStatus: Equatable {
         }
     }
 
+    /// Color.
     public var color: String {
         switch self {
         case .active: return "6BFF8E"           // green
@@ -32,6 +35,7 @@ public enum ConnectionStatus: Equatable {
         }
     }
 
+    /// Is transient.
     public var isTransient: Bool {
         switch self {
         case .connecting, .reconnecting, .enumerating: return true
@@ -40,16 +44,27 @@ public enum ConnectionStatus: Equatable {
     }
 }
 
+/// ConnectionInfo.
 public struct ConnectionInfo: Identifiable {
+    /// Id.
     public let id: String           // session ID from pool
+    /// Label.
     public let label: String        // display name
+    /// Host label.
     public let hostLabel: String    // host name
+    /// Is running.
     public let isRunning: Bool      // process is alive
+    /// Is active.
     public let isActive: Bool       // currently displayed terminal
+    /// Last active time.
     public let lastActiveTime: Date
+    /// Source.
     public let source: SessionSource?
+    /// Connection status.
     public let connectionStatus: ConnectionStatus
 
+    /// Status.
     public var status: String { connectionStatus.label }
+    /// Status color.
     public var statusColor: String { connectionStatus.color }
 }

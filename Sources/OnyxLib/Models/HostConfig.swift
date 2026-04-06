@@ -2,13 +2,20 @@ import Foundation
 
 // MARK: - Host Config
 
+/// SSHConfig.
 public struct SSHConfig: Codable, Hashable {
+    /// Host.
     public var host: String = ""
+    /// User.
     public var user: String = ""
+    /// Port.
     public var port: Int = 22
+    /// Tmux session.
     public var tmuxSession: String = "onyx"
+    /// Identity file.
     public var identityFile: String = ""
 
+    /// Create a new instance.
     public init(host: String = "", user: String = "", port: Int = 22, tmuxSession: String = "onyx", identityFile: String = "") {
         self.host = host
         self.user = user
@@ -18,41 +25,59 @@ public struct SSHConfig: Codable, Hashable {
     }
 }
 
+/// HostConfig.
 public struct HostConfig: Codable, Identifiable, Hashable {
+    /// Id.
     public var id: UUID
+    /// Label.
     public var label: String
+    /// Ssh.
     public var ssh: SSHConfig
 
+    /// Create a new instance.
     public init(id: UUID = UUID(), label: String, ssh: SSHConfig = SSHConfig()) {
         self.id = id
         self.label = label
         self.ssh = ssh
     }
 
+    /// Is local.
     public var isLocal: Bool {
         let h = ssh.host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return h == "localhost" || h == "127.0.0.1" || h == "::1" || h.isEmpty
     }
 
+    /// Localhost id.
     public static let localhostID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
+    /// Localhost.
     public static var localhost: HostConfig {
         HostConfig(id: localhostID, label: "localhost", ssh: SSHConfig())
     }
 }
 
+/// AppearanceConfig.
 public struct AppearanceConfig: Codable {
+    /// Font size.
     public var fontSize: Double = 13           // legacy, maps to terminalFontSize
+    /// Terminal font size.
     public var terminalFontSize: Double?        // nil = use fontSize for backward compat
+    /// Terminal font name.
     public var terminalFontName: String = "SF Mono"
+    /// Ui font size.
     public var uiFontSize: Double = 12
+    /// Window opacity.
     public var windowOpacity: Double = 0.82
+    /// Accent hex.
     public var accentHex: String = "66CCFF"
     /// Per-window accent color overrides. Key = window index (0-3), value = hex color.
     /// Windows without an entry use the global accentHex.
     public var windowAccents: [Int: String] = [:]
+    /// Window title.
     public var windowTitle: String = "Onyx"
+    /// Reminders list.
     public var remindersList: String?       // deprecated: migrated to remindersLists
+    /// Reminders lists.
     public var remindersLists: [String] = [] // empty = "Today" mode
     /// Last active session ID per window index, for session restore on startup
     public var lastSessionByWindow: [Int: String] = [:]
@@ -61,18 +86,22 @@ public struct AppearanceConfig: Codable {
     /// Whether to use 12-hour (AM/PM) format for clocks (UTC always stays 24hr)
     public var use12HourClock: Bool = false
 
+    /// Effective terminal font size.
     public var effectiveTerminalFontSize: Double {
         terminalFontSize ?? fontSize
     }
 
+    /// Accent options.
     public static let accentOptions = ["66CCFF", "FF6B6B", "6BFF8E", "FFD06B", "C06BFF", "FF6BCD"]
 
+    /// Terminal font options.
     public static let terminalFontOptions = [
         "SF Mono", "Menlo", "Monaco", "Courier New", "Andale Mono",
         "JetBrains Mono", "Fira Code", "Source Code Pro", "IBM Plex Mono",
         "Hack", "Inconsolata"
     ]
 
+    /// Create a new instance.
     public init(fontSize: Double = 13, windowOpacity: Double = 0.82, accentHex: String = "66CCFF", windowTitle: String = "Onyx", remindersLists: [String] = []) {
         self.fontSize = fontSize
         self.windowOpacity = windowOpacity
