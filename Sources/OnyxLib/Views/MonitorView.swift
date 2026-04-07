@@ -942,6 +942,32 @@ struct TimingHeatmapGrid: View {
     private static let cellSize: CGFloat = 9
     private static let cellGap: CGFloat = 1
 
+    private static let dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    /// Sum of all 7 days for a given week column.
+    private func weekTotal(_ week: Int) -> Double {
+        weeks[week].reduce(0, +)
+    }
+
+    /// "Wed · 4.2 hrs · 28% of 15.0h week" — or just hours if the week was empty.
+    private func tooltip(week: Int, day: Int) -> String {
+        let hours = weeks[week][day]
+        let total = weekTotal(week)
+        let weeksAgo = (weeks.count - 1) - week
+        let weekLabel: String = {
+            if weeksAgo == 0 { return "this wk" }
+            if weeksAgo == 1 { return "1 wk ago" }
+            return "\(weeksAgo) wks ago"
+        }()
+        let dayName = Self.dayNames[day]
+        if total <= 0 {
+            return String(format: "%@ %@: %.1f hrs", dayName, weekLabel, hours)
+        }
+        let pct = hours / total * 100
+        return String(format: "%@ %@: %.1f hrs · %.0f%% of %.1fh week",
+                      dayName, weekLabel, hours, pct, total)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             VStack(spacing: Self.cellGap) {
@@ -952,7 +978,7 @@ struct TimingHeatmapGrid: View {
                             RoundedRectangle(cornerRadius: 1.5)
                                 .fill(Self.heatColor(hours: hours))
                                 .frame(width: Self.cellSize, height: Self.cellSize)
-                                .help(String(format: "%.1f hrs", hours))
+                                .help(tooltip(week: week, day: day))
                         }
                     }
                 }
