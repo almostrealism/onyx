@@ -194,3 +194,72 @@ final class MonitorParseTests: XCTestCase {
         XCTAssertNil(sample!.memUsed)
     }
 }
+
+// MARK: - Uptime parsing
+
+final class DockerUptimeTests: XCTestCase {
+
+    func test_compactUptime_numericForms() {
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Up 5 seconds"), "5s")
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Up 5 minutes"), "5m")
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Up 2 hours"), "2h")
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Up 3 days"), "3d")
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Up 1 week"), "1w")
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Up 4 months"), "4mo")
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Up 1 year"), "1y")
+    }
+
+    func test_compactUptime_aboutForms() {
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Up About a minute"), "1m")
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Up About an hour"), "1h")
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Up Less than a second"), "<1s")
+    }
+
+    func test_compactUptime_stripsHealthAnnotation() {
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Up 2 hours (healthy)"), "2h")
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Up 5 minutes (unhealthy)"), "5m")
+    }
+
+    func test_compactUptime_nonUpStatusPassesThrough() {
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Exited (0) 5 minutes ago"),
+                       "Exited (0) 5 minutes ago")
+        XCTAssertEqual(DockerStatsManager.compactUptime(from: "Restarting (1) 2 seconds ago"),
+                       "Restarting (1) 2 seconds ago")
+    }
+
+    func test_parse_joinsStatAndPsByName() {
+        let output = """
+        CORES=8
+        STAT|nginx|0.05%|12.34MiB / 7.656GiB|1.2kB / 0B|0B / 0B|5
+        STAT|redis|1.23%|45.6MiB / 7.656GiB|500B / 200B|4.1kB / 0B|4
+        PS|nginx|Up 2 hours
+        PS|redis|Up 5 minutes (healthy)
+        """
+        let (cores, stats) = DockerStatsManager.parse(output: output)
+        XCTAssertEqual(cores, 8)
+        XCTAssertEqual(stats.count, 2)
+        let byName = Dictionary(uniqueKeysWithValues: stats.map { ($0.name, $0) })
+        XCTAssertEqual(byName["nginx"]?.uptime, "2h")
+        XCTAssertEqual(byName["redis"]?.uptime, "5m")
+        XCTAssertEqual(byName["nginx"]?.cpu, "0.05%")
+    }
+
+    func test_parse_uptimeMissingForContainerIsEmpty() {
+        // STAT row with no matching PS row → uptime is empty, not crashing
+        let output = """
+        STAT|orphan|0.5%|10MiB / 1GiB|0B / 0B|0B / 0B|1
+        """
+        let (_, stats) = DockerStatsManager.parse(output: output)
+        XCTAssertEqual(stats.count, 1)
+        XCTAssertEqual(stats[0].uptime, "")
+    }
+
+    func test_parse_backwardsCompatibleWithUntaggedRows() {
+        // Older format (no STAT/PS prefix) still parses for the existing tests
+        let output = "nginx|0.05%|12MiB / 1GiB|0B / 0B|0B / 0B|5"
+        let (_, stats) = DockerStatsManager.parse(output: output)
+        XCTAssertEqual(stats.count, 1)
+        XCTAssertEqual(stats[0].name, "nginx")
+        XCTAssertEqual(stats[0].uptime, "")
+    }
+}

@@ -626,6 +626,8 @@ struct DockerStatsSection: View {
                 HStack(spacing: 0) {
                     Text("NAME")
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("UP")
+                        .frame(width: 38, alignment: .trailing)
                     Text("CPU")
                         .frame(width: 55, alignment: .trailing)
                     Text("MEM")
@@ -650,6 +652,9 @@ struct DockerStatsSection: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                        Text(container.uptime)
+                            .frame(width: 38, alignment: .trailing)
+                            .foregroundColor(.white.opacity(0.5))
                         Text(container.cpu)
                             .frame(width: 55, alignment: .trailing)
                         Text(shortMem(container.memUsage))

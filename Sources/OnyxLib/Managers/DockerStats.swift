@@ -36,6 +36,14 @@ public struct DockerContainerStats: Identifiable {
     public let blockIO: String
     /// Pids.
     public let pids: String
+    /// Uptime, e.g. "2h", "5d". Empty if unknown.
+    public let uptime: String
+
+    public init(id: String, name: String, cpu: String, memUsage: String,
+                netIO: String, blockIO: String, pids: String, uptime: String = "") {
+        self.id = id; self.name = name; self.cpu = cpu; self.memUsage = memUsage
+        self.netIO = netIO; self.blockIO = blockIO; self.pids = pids; self.uptime = uptime
+    }
 }
 
 /// DockerStatsManager.
@@ -96,7 +104,17 @@ public class DockerStatsManager: ObservableObject {
     }
 
     private func poll() {
-        let script = "echo CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1); docker stats --no-stream --format \"{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}\" 2>/dev/null"
+        // Two docker calls in one ssh round-trip:
+        // - `docker stats` for live CPU/mem/io/pids
+        // - `docker ps` for the Status field which contains uptime
+        //   ("Up 2 hours", "Up 5 minutes (healthy)", etc).
+        // Each line is tagged STAT|... or PS|... so the parser can join
+        // them by container name.
+        let script = """
+        echo CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1); \
+        docker stats --no-stream --format "STAT|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}" 2>/dev/null; \
+        docker ps --format "PS|{{.Names}}|{{.Status}}" 2>/dev/null
+        """
         let (cmd, args) = appState.remoteCommand(script)
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -162,27 +180,70 @@ public class DockerStatsManager: ObservableObject {
     /// Parse.
     public static func parse(output: String) -> (cores: Int, containers: [DockerContainerStats]) {
         var cores = 1
-        let containers = output.components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .compactMap { line -> DockerContainerStats? in
-                // Parse CORES=N line
-                if line.hasPrefix("CORES=") {
-                    cores = Int(line.dropFirst(6)) ?? 1
-                    return nil
-                }
-                let parts = line.components(separatedBy: "|")
-                guard parts.count >= 6 else { return nil }
-                return DockerContainerStats(
-                    id: parts[0],
-                    name: parts[0],
-                    cpu: parts[1],
-                    memUsage: parts[2],
-                    netIO: parts[3],
-                    blockIO: parts[4],
-                    pids: parts[5]
-                )
+        var uptimeByName: [String: String] = [:]
+        var statRows: [(name: String, cpu: String, mem: String, net: String, block: String, pids: String)] = []
+
+        for raw in output.components(separatedBy: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.isEmpty { continue }
+            if line.hasPrefix("CORES=") {
+                cores = Int(line.dropFirst(6)) ?? 1
+                continue
             }
+            let parts = line.components(separatedBy: "|")
+            if parts.first == "PS", parts.count >= 3 {
+                uptimeByName[parts[1]] = compactUptime(from: parts[2])
+            } else if parts.first == "STAT", parts.count >= 7 {
+                statRows.append((parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]))
+            } else if parts.count >= 6 {
+                // Backwards-compat: lines without the STAT/PS tag (older
+                // format used in tests and for fallback)
+                statRows.append((parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]))
+            }
+        }
+
+        let containers = statRows.map { row in
+            DockerContainerStats(
+                id: row.name, name: row.name,
+                cpu: row.cpu, memUsage: row.mem, netIO: row.net,
+                blockIO: row.block, pids: row.pids,
+                uptime: uptimeByName[row.name] ?? ""
+            )
+        }
         return (cores, containers)
     }
+
+    /// Turn a docker `Status` field ("Up 2 hours", "Up 5 minutes (healthy)",
+    /// "Up 3 days", "Up About a minute") into a compact "2h" / "5m" / "3d"
+    /// suitable for a narrow table column. Non-Up statuses pass through.
+    static func compactUptime(from status: String) -> String {
+        let s = status.trimmingCharacters(in: .whitespaces)
+        guard s.hasPrefix("Up ") else { return s }
+        // Strip "Up " and any trailing health annotation in parens
+        var rest = String(s.dropFirst(3))
+        if let paren = rest.range(of: " (") { rest = String(rest[..<paren.lowerBound]) }
+        rest = rest.trimmingCharacters(in: .whitespaces)
+
+        // Numeric forms first: "2 hours", "5 minutes", "3 days", "1 week"
+        let parts = rest.split(separator: " ", maxSplits: 1).map(String.init)
+        if parts.count == 2, let n = Int(parts[0]) {
+            let unit = parts[1].lowercased()
+            if unit.hasPrefix("second") { return "\(n)s" }
+            if unit.hasPrefix("minute") { return "\(n)m" }
+            if unit.hasPrefix("hour")   { return "\(n)h" }
+            if unit.hasPrefix("day")    { return "\(n)d" }
+            if unit.hasPrefix("week")   { return "\(n)w" }
+            if unit.hasPrefix("month")  { return "\(n)mo" }
+            if unit.hasPrefix("year")   { return "\(n)y" }
+            return rest
+        }
+
+        // Word forms: "Less than a second", "About a minute", "About an hour"
+        let lower = rest.lowercased()
+        if lower.contains("less than") && lower.contains("second") { return "<1s" }
+        if lower.hasPrefix("about a minute") || lower == "a minute" { return "1m" }
+        if lower.hasPrefix("about an hour") || lower == "an hour" { return "1h" }
+        return rest
+    }
+
 }
