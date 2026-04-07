@@ -277,90 +277,73 @@ struct MonitorView: View {
                             .foregroundColor(.gray.opacity(0.25))
                     }
 
-                    // TOP HALF: Timing + Metric Charts + Docker stats
-                    HStack(alignment: .top, spacing: 24) {
-                        // Timing.app weekly chart (left, if configured)
-                        if appState.timing.isConfigured {
-                            TimingChartSection(timing: appState.timing, accentColor: appState.accentColor)
-                                .frame(maxWidth: .infinity)
-                        }
-
-                        // CPU/GPU/MEM charts
-                        VStack(spacing: 16) {
-                            let cpuData = monitor.bucketedCPU()
-                            if !cpuData.isEmpty {
-                                GridChart(
-                                    title: "CPU",
-                                    values: cpuData,
-                                    accentColor: Color(hex: "66CCFF")
-                                )
-                            }
-
-                            // Memory + GPU area: fixed total height, charts share space
-                            let memData = monitor.showMemoryChart ? monitor.bucketedMemory() : []
-                            let gpuData = monitor.bucketedGPU()
-                            let hasMem = !memData.isEmpty && monitor.showMemoryChart
-                            let hasGpu = !gpuData.isEmpty
-                            let subChartHeight: CGFloat = 100 // total area for mem+gpu
-
-                            if hasMem && hasGpu {
-                                // Both: split the space evenly
-                                let halfHeight = (subChartHeight - 16) / 2 // 16 = spacing
-                                GridChart(
-                                    title: "MEMORY",
-                                    values: memData,
-                                    accentColor: Color(hex: "FFD06B"),
-                                    height: halfHeight
-                                )
-                                GridChart(
-                                    title: "GPU",
-                                    values: gpuData,
-                                    accentColor: Color(hex: "C06BFF"),
-                                    height: halfHeight
-                                )
-                            } else if hasMem {
-                                GridChart(
-                                    title: "MEMORY",
-                                    values: memData,
-                                    accentColor: Color(hex: "FFD06B"),
-                                    height: subChartHeight
-                                )
-                            } else if hasGpu {
-                                GridChart(
-                                    title: "GPU",
-                                    values: gpuData,
-                                    accentColor: Color(hex: "C06BFF"),
-                                    height: subChartHeight
-                                )
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-
-                        // Docker container stats (right, only if available)
-                        if dockerStats.isAvailable {
-                            DockerStatsSection(appState: appState, dockerStats: dockerStats)
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
-                    .padding(.horizontal, 40)
-
-                    Divider().background(Color.white.opacity(0.1)).padding(.horizontal, 40)
-
-                    // Claude Code sessions (if any active)
+                    // Claude Code sessions banner (if any active) — stays
+                    // full-width above the split.
                     if !appState.claudeSessions.activeSessions.isEmpty || !appState.claudeSessions.pendingPermissions.isEmpty {
                         ClaudeSessionsSection(appState: appState)
                             .padding(.horizontal, 40)
                     }
 
-                    // BOTTOM HALF: Reminders + Connections side by side
-                    HStack(alignment: .top, spacing: 24) {
-                        RemindersSection(appState: appState)
-                            .frame(maxWidth: .infinity)
-                        ConnectionPoolSection(appState: appState)
-                            .frame(maxWidth: .infinity)
+                    // Main region: vertical split. Left ~65% holds timing,
+                    // CPU/MEM/GPU charts, then reminders directly underneath.
+                    // Right ~35% holds containers then connections.
+                    GeometryReader { geo in
+                        let rightWidth = max(280, geo.size.width * 0.35)
+                        HStack(alignment: .top, spacing: 0) {
+                            VStack(alignment: .leading, spacing: 16) {
+                                if appState.timing.isConfigured {
+                                    TimingChartSection(timing: appState.timing, accentColor: appState.accentColor)
+                                }
+
+                                let cpuData = monitor.bucketedCPU()
+                                if !cpuData.isEmpty {
+                                    GridChart(
+                                        title: "CPU",
+                                        values: cpuData,
+                                        accentColor: Color(hex: "66CCFF")
+                                    )
+                                }
+
+                                let memData = monitor.showMemoryChart ? monitor.bucketedMemory() : []
+                                let gpuData = monitor.bucketedGPU()
+                                let hasMem = !memData.isEmpty && monitor.showMemoryChart
+                                let hasGpu = !gpuData.isEmpty
+                                let subChartHeight: CGFloat = 100
+
+                                if hasMem && hasGpu {
+                                    let halfHeight = (subChartHeight - 16) / 2
+                                    GridChart(title: "MEMORY", values: memData,
+                                              accentColor: Color(hex: "FFD06B"), height: halfHeight)
+                                    GridChart(title: "GPU", values: gpuData,
+                                              accentColor: Color(hex: "C06BFF"), height: halfHeight)
+                                } else if hasMem {
+                                    GridChart(title: "MEMORY", values: memData,
+                                              accentColor: Color(hex: "FFD06B"), height: subChartHeight)
+                                } else if hasGpu {
+                                    GridChart(title: "GPU", values: gpuData,
+                                              accentColor: Color(hex: "C06BFF"), height: subChartHeight)
+                                }
+
+                                // Reminders flow directly below the charts
+                                RemindersSection(appState: appState)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(.trailing, 20)
+
+                            Divider()
+                                .background(Color.white.opacity(0.1))
+
+                            VStack(alignment: .leading, spacing: 16) {
+                                if dockerStats.isAvailable {
+                                    DockerStatsSection(appState: appState, dockerStats: dockerStats)
+                                }
+                                ConnectionPoolSection(appState: appState)
+                            }
+                            .frame(width: rightWidth, alignment: .topLeading)
+                            .padding(.leading, 20)
+                        }
                     }
                     .padding(.horizontal, 40)
-                    .padding(.top, 4)
                 } else if let error = monitor.lastError {
                     VStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle")
