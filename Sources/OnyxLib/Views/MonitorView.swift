@@ -294,7 +294,15 @@ struct MonitorView: View {
                                 if appState.timing.isConfigured {
                                     TimingChartSection(timing: appState.timing, accentColor: appState.accentColor)
                                 }
+                                RemindersSection(appState: appState)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(.trailing, 20)
 
+                            Divider()
+                                .background(Color.white.opacity(0.1))
+
+                            VStack(alignment: .leading, spacing: 16) {
                                 let cpuData = monitor.bucketedCPU()
                                 if !cpuData.isEmpty {
                                     GridChart(
@@ -324,16 +332,6 @@ struct MonitorView: View {
                                               accentColor: Color(hex: "C06BFF"), height: subChartHeight)
                                 }
 
-                                // Reminders flow directly below the charts
-                                RemindersSection(appState: appState)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .padding(.trailing, 20)
-
-                            Divider()
-                                .background(Color.white.opacity(0.1))
-
-                            VStack(alignment: .leading, spacing: 16) {
                                 if dockerStats.isAvailable {
                                     DockerStatsSection(appState: appState, dockerStats: dockerStats)
                                 }
