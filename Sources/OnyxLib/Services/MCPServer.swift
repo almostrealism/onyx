@@ -683,13 +683,27 @@ public class MCPSocketServer {
     }
 
     private func handleConnection(_ connection: NWConnection) {
+        // Always cancel on terminal states so we don't leak fds in
+        // CLOSE_WAIT when the peer (OnyxMCP) goes away. Without this the
+        // SSH -R forward accumulates dead connections that block new ones.
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .failed, .cancelled:
+                connection.cancel()
+            default:
+                break
+            }
+        }
         connection.start(queue: .global(qos: .utility))
         receiveMessage(on: connection)
     }
 
     private func receiveMessage(on connection: NWConnection) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1_000_000) { [weak self] content, _, isComplete, error in
-            guard let self = self else { return }
+            guard let self = self else {
+                connection.cancel()
+                return
+            }
             if let data = content, !data.isEmpty {
                 if let text = String(data: data, encoding: .utf8) {
                     for line in text.components(separatedBy: "\n") where !line.isEmpty {
@@ -701,9 +715,13 @@ public class MCPSocketServer {
                     }
                 }
             }
-            if !isComplete && error == nil {
-                self.receiveMessage(on: connection)
+            if isComplete || error != nil {
+                // Peer closed (FIN) or hard error — close our end too.
+                // This is what was missing and causing the CLOSE_WAIT pile-up.
+                connection.cancel()
+                return
             }
+            self.receiveMessage(on: connection)
         }
     }
 }

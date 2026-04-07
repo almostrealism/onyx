@@ -14,9 +14,10 @@ import Foundation
 /// What we *can* test deterministically here without launching a GUI app:
 ///   1. Binary exists and launches (XCTSkip otherwise)
 ///   2. Stdin-close → process exits within a small timeout
-///   3. When no Onyx socket is reachable, the bridge writes a well-formed
-///      JSON-RPC error frame to stdout and exits non-zero (this is the
-///      `guard fd >= 0` path in `Sources/OnyxMCP/main.swift`)
+///   3. When no Onyx socket is reachable, sending a JSON-RPC line produces
+///      a well-formed error frame on stdout (the bridge does NOT exit —
+///      it keeps trying so subsequent requests can succeed when the
+///      backend comes back)
 ///   4. Hook mode (`--hook`) with a malformed payload exits cleanly
 ///
 /// Tests for the actual MCP tool surface (`show_text`, `show_diagram`, etc.)
@@ -51,50 +52,70 @@ final class MCPStdioTests: XCTestCase {
         XCTAssertNotNil(exit, "OnyxMCP did not exit within 2s of stdin close")
     }
 
-    func testNoSocketProducesJSONRPCErrorFrame() throws {
+    func testRequestWithNoSocketProducesJSONRPCErrorFrame() throws {
         let binary = try IntegrationTestHelpers.requireOnyxMCPBinary()
-        // With sandboxed HOME, ~/.onyx/mcp.sock cannot exist.
+        // Send one valid JSON-RPC request, then close stdin so the bridge
+        // exits cleanly. With no backend socket the bridge retries and then
+        // emits a per-request error frame — but importantly does NOT exit
+        // until stdin is closed.
+        let request = #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"# + "\n"
         let result = IntegrationTestHelpers.runProcess(
             binary,
             arguments: [],
-            stdin: nil,
+            stdin: request,
             environment: sandboxEnvironment(),
-            timeout: 3.0
+            timeout: 8.0  // 3 retries with backoff can take a few seconds
         )
-        XCTAssertFalse(result.timedOut, "OnyxMCP hung instead of failing fast on missing socket")
-        XCTAssertNotEqual(result.exitCode, 0, "Expected non-zero exit when Onyx socket is unreachable")
-
-        // Stdout should contain a JSON-RPC error frame per main.swift
+        XCTAssertFalse(result.timedOut, "OnyxMCP hung instead of returning error frame")
+        // Exit code on stdin close: process exits normally (0 or 1 either is OK).
         XCTAssertTrue(result.stdout.contains("\"jsonrpc\""), "Missing jsonrpc field. stdout=\(result.stdout)")
         XCTAssertTrue(result.stdout.contains("\"error\""), "Missing error field. stdout=\(result.stdout)")
         XCTAssertTrue(result.stdout.contains("-32000"), "Expected error code -32000. stdout=\(result.stdout)")
+        // The error should reference the new behavior (retries / unreachable)
+        XCTAssertTrue(result.stdout.contains("unreachable") || result.stdout.contains("retr"),
+                      "Error message should mention retries or unreachable backend. stdout=\(result.stdout)")
     }
 
-    func testStderrMentionsConnectionFailure() throws {
+    func testStderrMentionsRetries() throws {
         let binary = try IntegrationTestHelpers.requireOnyxMCPBinary()
+        let request = #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"# + "\n"
         let result = IntegrationTestHelpers.runProcess(
             binary,
-            stdin: nil,
+            stdin: request,
             environment: sandboxEnvironment(),
-            timeout: 3.0
+            timeout: 8.0
         )
+        // Bridge logs retry attempts on stderr; verify any OnyxMCP: line appears
         XCTAssertTrue(
-            result.stderr.lowercased().contains("cannot connect") || result.stderr.contains("OnyxMCP:"),
-            "Expected diagnostic on stderr; got: \(result.stderr)"
+            result.stderr.contains("OnyxMCP:"),
+            "Expected OnyxMCP diagnostic on stderr; got: \(result.stderr)"
         )
     }
 
-    func testInvalidJSONLineProducesErrorFrameWhenSocketMissing() throws {
-        // Even with a malformed line, with no socket the bridge should fail
-        // before parsing — we just verify it doesn't crash and exits cleanly.
+    func testBridgeStaysAliveAfterFailedRequest() throws {
+        // Send TWO requests through the bridge with no backend. Both should
+        // produce error frames (the bridge does NOT exit after the first
+        // failure — it keeps reading stdin so a transient backend outage
+        // doesn't tear down the Claude session).
         let binary = try IntegrationTestHelpers.requireOnyxMCPBinary()
+        let requests = """
+        {"jsonrpc":"2.0","id":1,"method":"initialize"}
+        {"jsonrpc":"2.0","id":2,"method":"tools/list"}
+
+        """
         let result = IntegrationTestHelpers.runProcess(
             binary,
-            stdin: "not-json\n",
+            arguments: [],
+            stdin: requests,
             environment: sandboxEnvironment(),
-            timeout: 3.0
+            timeout: 15.0
         )
         XCTAssertFalse(result.timedOut)
-        XCTAssertNotEqual(result.exitCode, 0)
+        // Should see TWO JSON-RPC error frames (one per request)
+        let lines = result.stdout.split(separator: "\n").filter { $0.contains("\"jsonrpc\"") }
+        XCTAssertEqual(lines.count, 2,
+                       "Expected 2 error frames (bridge must survive first failure). stdout=\(result.stdout)")
+        XCTAssertTrue(result.stdout.contains("\"id\":1"))
+        XCTAssertTrue(result.stdout.contains("\"id\":2"))
     }
 }

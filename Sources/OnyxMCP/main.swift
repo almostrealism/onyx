@@ -9,12 +9,19 @@ import Glibc
 /// Connection modes:
 /// 1. If ONYX_MCP_PORT is set: connect via TCP to 127.0.0.1:<port> (remote SSH forwarding)
 /// 2. Otherwise: connect via Unix domain socket (local use)
+///
+/// Resilience: the bridge process stays alive for the lifetime of the Claude
+/// session. Each request transparently reconnects on failure (up to 3 attempts
+/// with exponential backoff). Stale fds are always closed before reconnecting,
+/// so the process never accumulates CLOSE_WAIT half-open sockets. Read framing
+/// loops on `read()` until a newline so multi-packet responses don't truncate.
 
 let socketPath: String = {
-    // Use ~/.onyx/mcp.sock (cross-platform, no spaces in path)
     let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
     return home + "/.onyx/mcp.sock"
 }()
+
+// MARK: - Low-level socket helpers
 
 func connectToUnixSocket() -> Int32 {
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -23,7 +30,7 @@ func connectToUnixSocket() -> Int32 {
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
     let pathBytes = socketPath.utf8CString
-    guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { return -1 }
+    guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { close(fd); return -1 }
     withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
         ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dest in
             for (i, byte) in pathBytes.enumerated() {
@@ -68,145 +75,222 @@ func connectToTCP(port: UInt16) -> Int32 {
 }
 
 func connectToOnyx() -> Int32 {
-    // Check for TCP port (set by Onyx via SSH -R forwarding)
     if let portStr = ProcessInfo.processInfo.environment["ONYX_MCP_PORT"],
        let port = UInt16(portStr) {
         let fd = connectToTCP(port: port)
-        if fd >= 0 {
-            FileHandle.standardError.write(Data("OnyxMCP: connected via TCP port \(port)\n".utf8))
-            return fd
-        }
-        FileHandle.standardError.write(Data("OnyxMCP: TCP port \(port) failed, trying Unix socket\n".utf8))
+        if fd >= 0 { return fd }
     }
-
-    // Fall back to Unix domain socket (local use)
-    let fd = connectToUnixSocket()
-    if fd >= 0 {
-        FileHandle.standardError.write(Data("OnyxMCP: connected via Unix socket\n".utf8))
-    }
-    return fd
+    return connectToUnixSocket()
 }
 
-/// Set a receive timeout on a socket (in seconds)
 func setReceiveTimeout(fd: Int32, seconds: Int) {
     var tv = timeval(tv_sec: seconds, tv_usec: 0)
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 }
 
-func sendAndReceive(fd: Int32, message: String) -> String? {
-    let data = message + "\n"
-    guard data.withCString({ ptr in write(fd, ptr, strlen(ptr)) }) > 0 else { return nil }
-
-    var buffer = [UInt8](repeating: 0, count: 1_000_000)
-    let bytesRead = read(fd, &buffer, buffer.count - 1)
-    guard bytesRead > 0 else { return nil }
-    return String(bytes: buffer[0..<bytesRead], encoding: .utf8)?
-        .trimmingCharacters(in: .newlines)
+func setSendTimeout(fd: Int32, seconds: Int) {
+    var tv = timeval(tv_sec: seconds, tv_usec: 0)
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 }
+
+/// Write all bytes, looping over short writes.
+func writeAll(fd: Int32, data: [UInt8]) -> Bool {
+    var written = 0
+    while written < data.count {
+        let n = data[written...].withUnsafeBufferPointer { ptr -> Int in
+            #if canImport(Glibc)
+            return write(fd, ptr.baseAddress, data.count - written)
+            #else
+            return write(fd, ptr.baseAddress, data.count - written)
+            #endif
+        }
+        if n <= 0 { return false }
+        written += n
+    }
+    return true
+}
+
+/// Read until newline. Returns the line without the trailing \n, or nil on EOF/error.
+func readLine(fd: Int32) -> String? {
+    var bytes: [UInt8] = []
+    bytes.reserveCapacity(4096)
+    var byte: UInt8 = 0
+    while true {
+        let n = read(fd, &byte, 1)
+        if n == 0 { return nil }       // EOF — peer closed
+        if n < 0 { return nil }        // error or timeout
+        if byte == UInt8(ascii: "\n") {
+            return String(bytes: bytes, encoding: .utf8)
+        }
+        bytes.append(byte)
+        if bytes.count > 16 * 1024 * 1024 {
+            // 16MB sanity cap
+            return nil
+        }
+    }
+}
+
+// MARK: - Reconnecting connection wrapper
+
+final class OnyxConnection {
+    private var fd: Int32 = -1
+    private let receiveTimeout: Int
+
+    init(receiveTimeout: Int) {
+        self.receiveTimeout = receiveTimeout
+    }
+
+    deinit {
+        closeFd()
+    }
+
+    private func closeFd() {
+        if fd >= 0 { close(fd); fd = -1 }
+    }
+
+    /// Ensure we have a live fd. Returns true on success.
+    @discardableResult
+    private func ensureConnected() -> Bool {
+        if fd >= 0 { return true }
+        let newFd = connectToOnyx()
+        guard newFd >= 0 else { return false }
+        setReceiveTimeout(fd: newFd, seconds: receiveTimeout)
+        setSendTimeout(fd: newFd, seconds: 10)
+        fd = newFd
+        return true
+    }
+
+    /// Send a request and read one response line, transparently reconnecting
+    /// on failure. Up to `attempts` total tries with exponential backoff.
+    func sendRequest(_ message: String, attempts: Int = 3) -> String? {
+        let payload = Array((message + "\n").utf8)
+        for attempt in 0..<attempts {
+            if !ensureConnected() {
+                logRetry(attempt: attempt, reason: "connect failed")
+                backoff(attempt: attempt)
+                continue
+            }
+
+            // Send
+            if !writeAll(fd: fd, data: payload) {
+                logRetry(attempt: attempt, reason: "write failed (peer likely closed)")
+                closeFd()
+                backoff(attempt: attempt)
+                continue
+            }
+
+            // Receive one line
+            if let response = readLine(fd: fd) {
+                return response
+            }
+            logRetry(attempt: attempt, reason: "read failed/EOF")
+            closeFd()
+            backoff(attempt: attempt)
+        }
+        return nil
+    }
+
+    private func logRetry(attempt: Int, reason: String) {
+        let msg = "OnyxMCP: attempt \(attempt + 1) — \(reason)\n"
+        FileHandle.standardError.write(Data(msg.utf8))
+    }
+
+    private func backoff(attempt: Int) {
+        // 100ms, 300ms, 900ms ...
+        let micros: UInt32 = 100_000 * UInt32(pow(3.0, Double(attempt)))
+        usleep(min(micros, 2_000_000))
+    }
+}
+
+// MARK: - JSON-RPC helpers
 
 /// Extract the "id" field from a JSON-RPC request string for error responses
 func extractRequestId(_ json: String) -> String {
-    // Simple extraction — look for "id": <value>
     if let range = json.range(of: #""id"\s*:\s*"#, options: .regularExpression) {
         let after = json[range.upperBound...]
-        // Could be number, string, or null
         if after.hasPrefix("null") { return "null" }
         if after.hasPrefix("\"") {
             if let end = after.dropFirst().firstIndex(of: "\"") {
                 return String(after[after.startIndex...end])
             }
         }
-        // Number
         let digits = after.prefix(while: { $0.isNumber || $0 == "-" })
         if !digits.isEmpty { return String(digits) }
     }
     return "null"
 }
 
-// Detect mode from command-line args
+func errorResponse(id: String, message: String) -> String {
+    // Escape quotes and backslashes in the message
+    let escaped = message
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+    return "{\"jsonrpc\":\"2.0\",\"id\":\(id),\"error\":{\"code\":-32000,\"message\":\"\(escaped)\"}}"
+}
+
+// MARK: - Modes
+
 let isHookMode = CommandLine.arguments.contains("--hook")
 
 if isHookMode {
-    // HOOK MODE: Read Claude Code hook event from stdin, send to Onyx, output response.
-    // Used as a Claude Code hook command: OnyxMCP --hook
-    // Permission requests use a 120s timeout to wait for user response in Onyx UI.
-
+    // HOOK MODE — read one Claude Code hook event from stdin, forward, exit.
     let hookTimeout = 120
+    let conn = OnyxConnection(receiveTimeout: hookTimeout)
 
-    let fd = connectToOnyx()
-    guard fd >= 0 else {
-        // Can't connect — exit 0 with no output so Claude Code falls through to normal behavior
-        exit(0)
-    }
-    setReceiveTimeout(fd: fd, seconds: hookTimeout)
-
-    // Read all of stdin (the hook event JSON)
     var inputData = Data()
     while let chunk = Optional(FileHandle.standardInput.availableData), !chunk.isEmpty {
         inputData.append(chunk)
-        // Check if we have a complete JSON object
         if (try? JSONSerialization.jsonObject(with: inputData)) != nil { break }
     }
 
     guard !inputData.isEmpty, let inputString = String(data: inputData, encoding: .utf8) else {
-        close(fd)
         exit(0)
     }
 
-    // Wrap in JSON-RPC call to claude/hook
     let requestId = "hook_\(ProcessInfo.processInfo.processIdentifier)"
     let jsonRPC = """
     {"jsonrpc":"2.0","id":"\(requestId)","method":"claude/hook","params":\(inputString)}
     """
 
-    if let response = sendAndReceive(fd: fd, message: jsonRPC) {
-        // Parse the JSON-RPC response and extract the result
-        if let data = response.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let result = json["result"] {
-            // Output just the result (not the JSON-RPC wrapper) for Claude Code
-            if let resultData = try? JSONSerialization.data(withJSONObject: result),
-               let resultString = String(data: resultData, encoding: .utf8) {
-                print(resultString)
-                fflush(stdout)
-            }
-        }
-    }
-    // No response or error — exit 0 silently (Claude Code continues normally)
-
-    close(fd)
-} else {
-    // MCP BRIDGE MODE (original behavior): stdio JSON-RPC bridge
-
-    let responseTimeout = 30
-
-    let fd = connectToOnyx()
-    guard fd >= 0 else {
-        FileHandle.standardError.write(Data("OnyxMCP: Cannot connect to Onyx. Is it running?\n".utf8))
-        let errorResponse = """
-        {"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"Cannot connect to Onyx app. Is it running?"}}
-        """
-        print(errorResponse)
+    if let response = conn.sendRequest(jsonRPC, attempts: 2),
+       let data = response.data(using: .utf8),
+       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       let result = json["result"],
+       let resultData = try? JSONSerialization.data(withJSONObject: result),
+       let resultString = String(data: resultData, encoding: .utf8) {
+        print(resultString)
         fflush(stdout)
-        exit(1)
     }
+    // Silent fall-through on any failure — Claude Code continues normally.
+} else {
+    // BRIDGE MODE — long-lived stdio JSON-RPC bridge.
+    //
+    // The bridge process MUST stay alive for the lifetime of the Claude
+    // session. Backend restarts (Onyx desktop quitting/relaunching, SSH
+    // tunnel reconnecting, network blips) are handled inside sendRequest
+    // via reconnect + backoff. Individual requests may return an error
+    // when the backend is unreachable, but subsequent requests will
+    // automatically reconnect once it comes back.
 
-    setReceiveTimeout(fd: fd, seconds: responseTimeout)
+    let conn = OnyxConnection(receiveTimeout: 30)
 
-    while let line = readLine(strippingNewline: true) {
+    // Best-effort first connect, but DO NOT exit on failure: the backend
+    // may come up later (e.g. desktop launch after MCP started).
+    while let line = Swift.readLine(strippingNewline: true) {
         guard !line.isEmpty else { continue }
 
-        if let response = sendAndReceive(fd: fd, message: line) {
+        if let response = conn.sendRequest(line) {
             print(response)
             fflush(stdout)
         } else {
             let reqId = extractRequestId(line)
-            let errMsg = "Onyx did not respond within \(responseTimeout) seconds. The app may need to be rebuilt with the latest MCP server code."
-            FileHandle.standardError.write(Data("OnyxMCP: timeout/error for request\n".utf8))
-            print("{\"jsonrpc\":\"2.0\",\"id\":\(reqId),\"error\":{\"code\":-32000,\"message\":\"\(errMsg)\"}}")
+            let err = errorResponse(
+                id: reqId,
+                message: "Onyx backend unreachable after retries. The next request will retry automatically."
+            )
+            FileHandle.standardError.write(Data("OnyxMCP: request failed after retries\n".utf8))
+            print(err)
             fflush(stdout)
         }
     }
-
-    close(fd)
 }
