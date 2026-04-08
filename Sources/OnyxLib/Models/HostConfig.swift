@@ -95,6 +95,10 @@ public struct AppearanceConfig: Codable {
     public var extraTimezones: [String] = []
     /// Whether to use 12-hour (AM/PM) format for clocks (UTC always stays 24hr)
     public var use12HourClock: Bool = false
+    /// When true, Claude Code PreToolUse hooks block waiting for the user to
+    /// approve/deny a tool call from the Onyx UI. Off by default — when off,
+    /// Claude's normal in-terminal permission prompt is used.
+    public var claudeHooksGatePermissions: Bool = false
 
     /// Effective terminal font size.
     public var effectiveTerminalFontSize: Double {

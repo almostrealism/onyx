@@ -84,6 +84,15 @@ public class ClaudeSessionManager: ObservableObject {
     /// Completion handlers waiting for permission responses, keyed by request ID
     private var permissionCallbacks: [String: (String) -> Void] = [:]
 
+    /// When true, PreToolUse hooks block waiting for the user to approve or
+    /// deny gated tool calls in the Onyx UI. When false (default), PreToolUse
+    /// is informational only and Claude's normal terminal prompt runs.
+    public var gatePermissions: Bool = false
+
+    /// Tools that get gated when gatePermissions is on. Other tools (Read,
+    /// Glob, Grep, etc) remain unblocked since they're side-effect-free.
+    public var gatedTools: Set<String> = ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"]
+
     /// Create a new instance.
     public init() {}
 
@@ -149,8 +158,70 @@ public class ClaudeSessionManager: ObservableObject {
             }
         }
 
-        // Allow — we don't make permission decisions here, that's PermissionRequest's job
+        // If gating is on AND this is a gated tool, block waiting for the
+        // user's decision in the Onyx UI. The response uses Claude Code's
+        // PreToolUse hookSpecificOutput.permissionDecision shape, which is
+        // the only documented way for a hook to override the default prompt.
+        if gatePermissions && gatedTools.contains(toolName) {
+            let decision = blockForPermission(sessionId: sessionId, toolName: toolName, toolInput: toolInput)
+            return [
+                "hookSpecificOutput": [
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": decision  // "allow" | "deny" | "ask"
+                ] as [String: Any]
+            ]
+        }
+
+        // Otherwise: informational only, let Claude's normal prompt run.
         return ["continue": true]
+    }
+
+    /// Block until the user approves or denies, or 120s elapses (then "ask").
+    private func blockForPermission(sessionId: String, toolName: String, toolInput: [String: Any]) -> String {
+        let requestId = "\(sessionId)_\(Int(Date().timeIntervalSince1970 * 1000))"
+        let request = PermissionRequest(
+            id: requestId,
+            sessionId: sessionId,
+            toolName: toolName,
+            toolInput: toolInput,
+            timestamp: Date()
+        )
+
+        DispatchQueue.main.async {
+            var session = self.sessions[sessionId] ?? ClaudeActivity(id: sessionId, lastSeen: Date(), status: .idle)
+            session.status = .waitingPermission
+            session.toolName = toolName
+            session.lastSeen = Date()
+            self.sessions[sessionId] = session
+            self.pendingPermissions.append(request)
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var decision = "ask"
+
+        lock.lock()
+        permissionCallbacks[requestId] = { response in
+            decision = response
+            semaphore.signal()
+        }
+        lock.unlock()
+
+        let result = semaphore.wait(timeout: .now() + 120)
+        if result == .timedOut { decision = "ask" }
+
+        lock.lock()
+        permissionCallbacks.removeValue(forKey: requestId)
+        lock.unlock()
+
+        DispatchQueue.main.async {
+            self.pendingPermissions.removeAll { $0.id == requestId }
+            if var session = self.sessions[sessionId] {
+                session.status = .idle
+                self.sessions[sessionId] = session
+            }
+        }
+
+        return decision
     }
 
     private func handlePostToolUse(_ event: [String: Any], sessionId: String) -> [String: Any] {
@@ -166,65 +237,17 @@ public class ClaudeSessionManager: ObservableObject {
         return ["continue": true]
     }
 
+    /// Legacy handler retained for backwards compatibility with any older
+    /// hooks.json that still references PermissionRequest. Claude Code itself
+    /// does NOT fire this event — permission decisions go through PreToolUse.
     private func handlePermissionRequest(_ event: [String: Any], sessionId: String) -> [String: Any] {
         let toolName = event["tool_name"] as? String ?? "unknown"
         let toolInput = event["tool_input"] as? [String: Any] ?? [:]
-        let requestId = "\(sessionId)_\(Int(Date().timeIntervalSince1970 * 1000))"
-
-        let request = PermissionRequest(
-            id: requestId,
-            sessionId: sessionId,
-            toolName: toolName,
-            toolInput: toolInput,
-            timestamp: Date()
-        )
-
-        // Update session status
-        DispatchQueue.main.async {
-            var session = self.sessions[sessionId] ?? ClaudeActivity(id: sessionId, lastSeen: Date(), status: .idle)
-            session.status = .waitingPermission
-            session.toolName = toolName
-            session.lastSeen = Date()
-            self.sessions[sessionId] = session
-            self.pendingPermissions.append(request)
-        }
-
-        // Block until user responds (up to 120 seconds)
-        let semaphore = DispatchSemaphore(value: 0)
-        var decision = "ask" // default: show normal Claude permission prompt
-
-        lock.lock()
-        permissionCallbacks[requestId] = { response in
-            decision = response
-            semaphore.signal()
-        }
-        lock.unlock()
-
-        let timeout = semaphore.wait(timeout: .now() + 120)
-        if timeout == .timedOut {
-            decision = "ask" // fall through to normal prompt on timeout
-        }
-
-        lock.lock()
-        permissionCallbacks.removeValue(forKey: requestId)
-        lock.unlock()
-
-        // Clean up
-        DispatchQueue.main.async {
-            self.pendingPermissions.removeAll { $0.id == requestId }
-            if var session = self.sessions[sessionId] {
-                session.status = .idle
-                self.sessions[sessionId] = session
-            }
-        }
-
-        // Return decision
+        let decision = blockForPermission(sessionId: sessionId, toolName: toolName, toolInput: toolInput)
         return [
             "hookSpecificOutput": [
                 "hookEventName": "PermissionRequest",
-                "decision": [
-                    "behavior": decision
-                ]
+                "decision": ["behavior": decision]
             ] as [String: Any]
         ]
     }

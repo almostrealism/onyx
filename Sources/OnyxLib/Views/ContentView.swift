@@ -130,6 +130,27 @@ public struct ContentView: View {
                                 .transition(.opacity)
                                 .allowsHitTesting(false)
                             }
+
+                            // Pending Claude permission requests — floating
+                            // banner so the user sees them regardless of
+                            // which overlay (or none) is active.
+                            if !appState.claudeSessions.pendingPermissions.isEmpty {
+                                VStack(spacing: 6) {
+                                    ForEach(appState.claudeSessions.pendingPermissions) { request in
+                                        ClaudePermissionBanner(
+                                            request: request,
+                                            accentColor: appState.accentColor,
+                                            onAllow: { appState.claudeSessions.approvePermission(request.id) },
+                                            onDeny: { appState.claudeSessions.denyPermission(request.id) }
+                                        )
+                                    }
+                                    Spacer()
+                                }
+                                .padding(.top, 12)
+                                .padding(.horizontal, 24)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                                .zIndex(50)
+                            }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .modifier(FocusOutline(active: appState.focusedComponent == .terminal, show: appState.showFocusOutline))
@@ -917,5 +938,74 @@ struct FavoritesBar: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(Color(nsColor: NSColor(white: 0.04, alpha: 1.0)))
+    }
+}
+
+/// Floating banner shown at the top of the window when Claude Code is
+/// blocked waiting for the user to approve or deny a tool call.
+struct ClaudePermissionBanner: View {
+    let request: PermissionRequest
+    let accentColor: Color
+    let onAllow: () -> Void
+    let onDeny: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.shield.fill")
+                .font(.system(size: 16))
+                .foregroundColor(Color(hex: "FFD06B"))
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("Claude wants to run")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.7))
+                    Text(request.toolName)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.white)
+                }
+                Text(request.summary)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            Button(action: onDeny) {
+                Text("Deny")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(Color(hex: "FF6B6B"))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color(hex: "FF6B6B").opacity(0.15))
+                    .cornerRadius(4)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.escape)
+
+            Button(action: onAllow) {
+                Text("Allow")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(Color(hex: "6BFF8E"))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color(hex: "6BFF8E").opacity(0.15))
+                    .cornerRadius(4)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.return)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.black.opacity(0.92))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color(hex: "FFD06B").opacity(0.5), lineWidth: 1)
+                )
+        )
     }
 }

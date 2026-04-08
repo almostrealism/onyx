@@ -231,11 +231,18 @@ public class AppState: ObservableObject {
     /// Claude sessions.
     public lazy var claudeSessions: ClaudeSessionManager = {
         let c = ClaudeSessionManager()
+        c.gatePermissions = AppearanceStore.shared.config.claudeHooksGatePermissions
         claudeSessionCancellable = c.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
         return c
     }()
+
+    /// Sync the gate-permissions setting from appearance config into the
+    /// session manager. Call after the user toggles the setting in Settings.
+    public func syncClaudeGatePermissions() {
+        claudeSessions.gatePermissions = appearance.claudeHooksGatePermissions
+    }
 
     private var timingCancellable: AnyCancellable?
     /// Timing.
@@ -951,8 +958,12 @@ public class AppState: ObservableObject {
     }
 
     private func buildHooksJson(hookCmd: String) -> String {
+        // PreToolUse uses a 120s timeout to allow blocking for user approval
+        // when permission gating is enabled in Onyx settings. Claude Code does
+        // not have a "PermissionRequest" event — permission decisions are made
+        // by PreToolUse responding with hookSpecificOutput.permissionDecision.
         """
-        {"PreToolUse":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":10}]}],"PostToolUse":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":5,"async":true}]}],"PermissionRequest":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":120}]}],"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":5,"async":true}]}],"Stop":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":5,"async":true}]}]}
+        {"PreToolUse":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":120}]}],"PostToolUse":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":5}]}],"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":5}]}],"Stop":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":5}]}]}
         """
     }
 

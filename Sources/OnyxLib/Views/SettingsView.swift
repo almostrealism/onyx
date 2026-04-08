@@ -204,6 +204,32 @@ struct SettingsView: View {
                                         .foregroundColor(.gray.opacity(0.3))
                                 }
 
+                                // Claude Code permission gating
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("CLAUDE CODE HOOKS")
+                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .tracking(2)
+
+                                    Toggle(isOn: Binding(
+                                        get: { appState.appearance.claudeHooksGatePermissions },
+                                        set: {
+                                            appState.appearance.claudeHooksGatePermissions = $0
+                                            appState.syncClaudeGatePermissions()
+                                        }
+                                    )) {
+                                        Text("Approve tool calls in Onyx UI")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.8))
+                                    }
+                                    .toggleStyle(.switch)
+
+                                    Text("When on, Claude Code blocks on Bash/Edit/Write/MultiEdit/NotebookEdit and shows a banner here. Requires hooks installed via 'setup hooks' on the remote host.")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(.gray.opacity(0.4))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+
                                 // Reminders list picker
                                 if remindersManager.accessGranted {
                                     VStack(alignment: .leading, spacing: 4) {
