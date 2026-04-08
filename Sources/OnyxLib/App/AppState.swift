@@ -386,15 +386,18 @@ public class AppState: ObservableObject {
 
     /// Sessions grouped by host, then by source within each host.
     /// Docker logs sessions are merged into the same group as their container's docker sessions.
+    /// Browser sessions are pulled out into a synthetic "Browsers" group at
+    /// the end so they're visible regardless of which hosts are configured.
     public var hostGroupedSessions: [HostGroup] {
         var result: [HostGroup] = []
         for host in hosts {
-            let hostSessions = allSessions.filter { $0.source.hostID == host.id }
+            // Browser sessions are not host-bound; render them in the synthetic group below.
+            let hostSessions = allSessions.filter { $0.source.hostID == host.id && !$0.source.isBrowser }
             guard !hostSessions.isEmpty else {
                 result.append(HostGroup(host: host, groups: []))
                 continue
             }
-            // Group by container name for docker/dockerLogs, by stableKey for host/browser
+            // Group by container name for docker/dockerLogs, by stableKey for host
             var groups: [String: [TmuxSession]] = [:]
             for s in hostSessions {
                 let key: String
@@ -403,7 +406,7 @@ public class AppState: ObservableObject {
                 case .docker(_, let name), .dockerLogs(_, let name), .dockerTop(_, let name):
                     key = SessionSource.docker(hostID: host.id, containerName: name).stableKey
                 case .browser:
-                    key = "browser:\(host.id.uuidString)"
+                    continue  // already filtered out above
                 }
                 groups[key, default: []].append(s)
             }
@@ -426,6 +429,16 @@ public class AppState: ObservableObject {
             }
             result.append(HostGroup(host: host, groups: sessionGroups))
         }
+
+        // Synthetic "Browsers" group containing every browser session,
+        // regardless of which host (if any) is configured.
+        let browserSessions = allSessions.filter { $0.source.isBrowser }
+        if !browserSessions.isEmpty {
+            let sorted = browserSessions.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            let group = SessionGroup(source: sorted[0].source, sessions: sorted)
+            result.append(HostGroup(host: HostConfig.browsersHost, groups: [group]))
+        }
+
         return result
     }
 
