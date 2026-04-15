@@ -20,13 +20,21 @@ import Combine
 
 /// Singleton that owns the appearance config. All windows read/write through
 /// this to avoid one window's save overwriting another's changes.
+///
+/// Auto-saves to disk on every change via a Combine subscription on
+/// `config`. The deferred-save design (only writing on explicit save()
+/// calls) lost data when the app crashed, was force-quit, or when the
+/// save call path was never reached.
 public class AppearanceStore: ObservableObject {
     /// Shared.
     public static let shared = AppearanceStore()
 
-    @Published public var config = AppearanceConfig()
+    @Published public var config = AppearanceConfig() {
+        didSet { scheduleSave() }
+    }
     private var url: URL?
     private let lock = NSLock()
+    private var saveWorkItem: DispatchWorkItem?
 
     private init() {}
 
@@ -41,27 +49,52 @@ public class AppearanceStore: ObservableObject {
 
     private func load() {
         guard let url = url, let data = try? Data(contentsOf: url) else { return }
-        if var config = try? JSONDecoder().decode(AppearanceConfig.self, from: data) {
-            config.migrateReminders()
-            self.config = config
+        if var loaded = try? JSONDecoder().decode(AppearanceConfig.self, from: data) {
+            loaded.migrateReminders()
+            // Set without triggering didSet (which would scheduleSave).
+            // We use the lock-guarded _skipDidSet flag for this.
+            _skipDidSet = true
+            self.config = loaded
+            _skipDidSet = false
         }
     }
+    private var _skipDidSet = false
 
-    /// Save.
+    /// Debounced auto-save: coalesces rapid mutations into a single disk
+    /// write 0.5s after the last change. Called from config's didSet.
+    private func scheduleSave() {
+        guard !_skipDidSet else { return }
+        saveWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.save() }
+        saveWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
+    }
+
+    /// Write config to disk immediately. Also callable manually.
     public func save() {
         lock.lock()
         defer { lock.unlock() }
-        guard let url = url else { return }
-        if let data = try? JSONEncoder().encode(config) {
-            try? data.write(to: url)
+        guard let url = url else {
+            print("AppearanceStore.save: url is nil, skipping")
+            return
+        }
+        do {
+            let data = try JSONEncoder().encode(config)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            print("AppearanceStore.save failed: \(error)")
         }
     }
 
     /// Reset for testing — restores default config without saving
     public func reset() {
         lock.lock()
+        _skipDidSet = true
         config = AppearanceConfig()
         url = nil
+        saveWorkItem?.cancel()
+        saveWorkItem = nil
+        _skipDidSet = false
         lock.unlock()
     }
 }
