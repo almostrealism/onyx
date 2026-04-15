@@ -88,14 +88,16 @@ Or manually add to `~/.claude/settings.json`:
 ```json
 {
   "hooks": {
-    "PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook", "timeout": 10}]}],
-    "PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook", "timeout": 5, "async": true}]}],
-    "PermissionRequest": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook", "timeout": 120}]}],
-    "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook", "timeout": 5, "async": true}]}],
-    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook", "timeout": 5, "async": true}]}]
+    "PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook PreToolUse", "timeout": 10}]}],
+    "PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook PostToolUse", "timeout": 5}]}],
+    "PermissionRequest": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook PermissionRequest", "timeout": 120}]}],
+    "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook SessionStart", "timeout": 5}]}],
+    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "~/.onyx/bin/OnyxMCP --hook Stop", "timeout": 5}]}]
   }
 }
 ```
+
+**Important:** Each hook command includes the event name as an argument (e.g. `--hook PreToolUse`) so OnyxMCP can tag the JSON-RPC payload. Without this, the desktop can't route events to the correct handler.
 
 ### Option 3: Local only
 

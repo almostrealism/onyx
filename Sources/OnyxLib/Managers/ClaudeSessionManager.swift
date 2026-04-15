@@ -84,14 +84,16 @@ public class ClaudeSessionManager: ObservableObject {
     /// Completion handlers waiting for permission responses, keyed by request ID
     private var permissionCallbacks: [String: (String) -> Void] = [:]
 
-    /// When true, PreToolUse hooks block waiting for the user to approve or
-    /// deny gated tool calls in the Onyx UI. When false (default), PreToolUse
-    /// is informational only and Claude's normal terminal prompt runs.
+    /// When true, PermissionRequest hooks block waiting for the user to
+    /// approve/deny in the Onyx UI banner. When false (default), Claude's
+    /// normal in-terminal permission prompt is used.
+    ///
+    /// Unlike the earlier approach that gated ALL tool calls via PreToolUse,
+    /// PermissionRequest only fires when Claude would actually show a prompt
+    /// — meaning auto-allowed tools (Read, Grep, etc., plus anything the
+    /// user's settings.json has explicitly allowed) never trigger it. This
+    /// naturally respects the user's existing permission configuration.
     public var gatePermissions: Bool = false
-
-    /// Tools that get gated when gatePermissions is on. Other tools (Read,
-    /// Glob, Grep, etc) remain unblocked since they're side-effect-free.
-    public var gatedTools: Set<String> = ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"]
 
     /// Create a new instance.
     public init() {}
@@ -158,22 +160,15 @@ public class ClaudeSessionManager: ObservableObject {
             }
         }
 
-        // If gating is on AND this is a gated tool, block waiting for the
-        // user's decision in the Onyx UI. The response uses Claude Code's
-        // PreToolUse hookSpecificOutput.permissionDecision shape, which is
-        // the only documented way for a hook to override the default prompt.
-        if gatePermissions && gatedTools.contains(toolName) {
-            let decision = blockForPermission(sessionId: sessionId, toolName: toolName, toolInput: toolInput)
-            return [
-                "hookSpecificOutput": [
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": decision  // "allow" | "deny" | "ask"
-                ] as [String: Any]
-            ]
-        }
-
-        // Otherwise: informational only, let Claude's normal prompt run.
-        return ["continue": true]
+        // Always defer — never block. Permission gating is handled by the
+        // PermissionRequest hook (which only fires when Claude would actually
+        // prompt the user, respecting their existing allow/deny rules).
+        return [
+            "hookSpecificOutput": [
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "defer"
+            ] as [String: Any]
+        ]
     }
 
     /// Block until the user approves or denies, or 120s elapses (then "ask").
@@ -237,17 +232,27 @@ public class ClaudeSessionManager: ObservableObject {
         return ["continue": true]
     }
 
-    /// Legacy handler retained for backwards compatibility with any older
-    /// hooks.json that still references PermissionRequest. Claude Code itself
-    /// does NOT fire this event — permission decisions go through PreToolUse.
+    /// Handle a PermissionRequest event. This fires ONLY when Claude Code
+    /// would normally show a terminal permission prompt — meaning auto-allowed
+    /// tools and explicitly-allowed commands DON'T trigger it. This naturally
+    /// respects the user's existing permission configuration.
+    ///
+    /// When gatePermissions is on, block and surface the request in the Onyx
+    /// UI. When off, return immediately and let the normal prompt appear.
     private func handlePermissionRequest(_ event: [String: Any], sessionId: String) -> [String: Any] {
         let toolName = event["tool_name"] as? String ?? "unknown"
         let toolInput = event["tool_input"] as? [String: Any] ?? [:]
+
+        guard gatePermissions else {
+            // Not gating — let the normal Claude terminal prompt handle it.
+            return ["continue": true]
+        }
+
         let decision = blockForPermission(sessionId: sessionId, toolName: toolName, toolInput: toolInput)
         return [
             "hookSpecificOutput": [
                 "hookEventName": "PermissionRequest",
-                "decision": ["behavior": decision]
+                "permissionDecision": decision  // "allow" | "deny" | "ask"
             ] as [String: Any]
         ]
     }

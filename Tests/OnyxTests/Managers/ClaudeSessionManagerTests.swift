@@ -39,7 +39,9 @@ final class ClaudeSessionManagerTests: XCTestCase {
             "tool_input": ["command": "ls -la"]
         ]
         let response = manager.processHookEvent(event)
-        XCTAssertEqual(response["continue"] as? Bool, true)
+        // PreToolUse returns hookSpecificOutput with permissionDecision: "defer"
+        let hookOutput = response["hookSpecificOutput"] as? [String: Any]
+        XCTAssertEqual(hookOutput?["permissionDecision"] as? String, "defer")
 
         let expectation = self.expectation(description: "main queue")
         DispatchQueue.main.async {

@@ -958,12 +958,18 @@ public class AppState: ObservableObject {
     }
 
     private func buildHooksJson(hookCmd: String) -> String {
-        // PreToolUse uses a 120s timeout to allow blocking for user approval
-        // when permission gating is enabled in Onyx settings. Claude Code does
-        // not have a "PermissionRequest" event — permission decisions are made
-        // by PreToolUse responding with hookSpecificOutput.permissionDecision.
+        // Each event type passes its name as a CLI arg so OnyxMCP can tag
+        // the JSON-RPC payload and the desktop routes the event correctly.
+        //
+        // PermissionRequest fires ONLY when Claude would show a permission
+        // prompt — meaning auto-allowed tools DON'T trigger it — so gating
+        // it naturally respects the user's existing allow/deny rules.
+        // The 120s timeout lets the user respond in the Onyx UI.
+        //
+        // PreToolUse/PostToolUse track session activity for the monitor.
+        // SessionStart/Stop track session lifecycle.
         """
-        {"PreToolUse":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":120}]}],"PostToolUse":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":5}]}],"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":5}]}],"Stop":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd)","timeout":5}]}]}
+        {"PreToolUse":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd) PreToolUse","timeout":10}]}],"PostToolUse":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd) PostToolUse","timeout":5}]}],"PermissionRequest":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd) PermissionRequest","timeout":120}]}],"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd) SessionStart","timeout":5}]}],"Stop":[{"matcher":"","hooks":[{"type":"command","command":"\(hookCmd) Stop","timeout":5}]}]}
         """
     }
 

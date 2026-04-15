@@ -230,11 +230,26 @@ func errorResponse(id: String, message: String) -> String {
 
 // MARK: - Modes
 
-let isHookMode = CommandLine.arguments.contains("--hook")
+let hookIndex = CommandLine.arguments.firstIndex(of: "--hook")
+let isHookMode = hookIndex != nil
 
 if isHookMode {
     // HOOK MODE — read one Claude Code hook event from stdin, forward, exit.
-    let hookTimeout = 120
+    //
+    // Usage: OnyxMCP --hook <EventName>
+    // The event name (PreToolUse, PostToolUse, PermissionRequest, etc.) is
+    // passed as the arg after --hook so we can tag the JSON-RPC payload.
+    // Claude Code itself does NOT include the event type in the stdin JSON.
+    let eventName: String = {
+        if let idx = hookIndex, idx + 1 < CommandLine.arguments.count {
+            return CommandLine.arguments[idx + 1]
+        }
+        return "Unknown"
+    }()
+
+    // PermissionRequest may block up to 120s waiting for user interaction.
+    // Other events should be fast.
+    let hookTimeout = eventName == "PermissionRequest" ? 120 : 10
     let conn = OnyxConnection(receiveTimeout: hookTimeout)
 
     var inputData = Data()
@@ -247,9 +262,26 @@ if isHookMode {
         exit(0)
     }
 
+    // Inject hook_event_name into the params so the desktop can route the
+    // event to the correct handler. Claude's stdin payload has tool_name
+    // etc but NOT the event type.
     let requestId = "hook_\(ProcessInfo.processInfo.processIdentifier)"
+    let enrichedParams: String
+    if let data = inputData as Data?,
+       var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+        dict["hook_event_name"] = eventName
+        if let enriched = try? JSONSerialization.data(withJSONObject: dict),
+           let str = String(data: enriched, encoding: .utf8) {
+            enrichedParams = str
+        } else {
+            enrichedParams = inputString
+        }
+    } else {
+        enrichedParams = inputString
+    }
+
     let jsonRPC = """
-    {"jsonrpc":"2.0","id":"\(requestId)","method":"claude/hook","params":\(inputString)}
+    {"jsonrpc":"2.0","id":"\(requestId)","method":"claude/hook","params":\(enrichedParams)}
     """
 
     if let response = conn.sendRequest(jsonRPC, attempts: 2),
