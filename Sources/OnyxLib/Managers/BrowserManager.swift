@@ -37,6 +37,11 @@ public class BrowserManager: ObservableObject {
     private var delegates: [String: BrowserDelegate] = [:]
     private var kvoObservations: [NSKeyValueObservation] = []
 
+    /// Called when the active session's URL host changes (e.g. navigating from
+    /// github.com to google.com). The callback receives (sessionID, newHost)
+    /// so the owner can update the session name in allSessions.
+    public var onHostChanged: ((String, String) -> Void)?
+
     /// Create a new instance.
     public init() {}
 
@@ -78,7 +83,17 @@ public class BrowserManager: ObservableObject {
 
         // Observe WKWebView properties via KVO — updates arrive outside SwiftUI's update cycle
         kvoObservations.append(wv.observe(\.url, options: .new) { [weak self] wv, _ in
-            DispatchQueue.main.async { self?.currentURL = wv.url?.absoluteString ?? "" }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                let newURL = wv.url?.absoluteString ?? ""
+                let oldHost = URL(string: self.currentURL)?.host
+                let newHost = wv.url?.host
+                self.currentURL = newURL
+                // Notify owner when the host changes so the session name can update
+                if let sid = self.activeSessionID, let nh = newHost, nh != oldHost {
+                    self.onHostChanged?(sid, nh)
+                }
+            }
         })
         kvoObservations.append(wv.observe(\.title, options: .new) { [weak self] wv, _ in
             DispatchQueue.main.async { self?.currentTitle = wv.title ?? "" }

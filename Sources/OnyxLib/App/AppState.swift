@@ -261,8 +261,27 @@ public class AppState: ObservableObject {
         browserCancellable = b.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        b.onHostChanged = { [weak self] sessionID, newHost in
+            self?.updateBrowserSessionName(sessionID: sessionID, newHost: newHost)
+        }
         return b
     }()
+
+    /// Update a browser session's name when the URL host changes.
+    /// Replaces the session in allSessions with a new instance carrying the
+    /// updated name, preserving favorites (which key by source.stableKey:name
+    /// — but browser stableKey is "browser:<url>" so name changes are safe).
+    private func updateBrowserSessionName(sessionID: String, newHost: String) {
+        guard let idx = allSessions.firstIndex(where: { $0.id == sessionID }),
+              allSessions[idx].name != newHost else { return }
+        let old = allSessions[idx]
+        let updated = TmuxSession(name: newHost, source: old.source, unavailable: old.unavailable)
+        allSessions[idx] = updated
+        if activeSession?.id == sessionID {
+            activeSession = updated
+        }
+        saveLocalSessions()
+    }
 
     private var dockerStatsCancellable: AnyCancellable?
     /// Docker stats.
