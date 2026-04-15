@@ -64,44 +64,45 @@ final class BrowserSessionTests: XCTestCase {
 
     // MARK: - Browsers group surfacing in session list
 
-    /// Regression: browser sessions used to disappear from the session list
-    /// when the user had no localhost in their hosts array. They now always
-    /// appear under a synthetic "Browsers" host group.
-    func testBrowserSessions_appearInSyntheticGroup_withoutLocalhost() {
+    /// Browser sessions group under localhost (their groupHostID).
+    func testBrowserSessions_groupUnderLocalhost() {
         let state = AppState()
-        state.hosts = []  // no hosts at all
+        state.hosts = [.localhost]
         let b1 = TmuxSession(name: "github.com", source: .browser(url: "https://github.com"))
         let b2 = TmuxSession(name: "claude.ai", source: .browser(url: "https://claude.ai"))
         state.allSessions = [b1, b2]
 
         let groups = state.hostGroupedSessions
-        XCTAssertEqual(groups.count, 1, "Should have one synthetic Browsers group")
-        XCTAssertEqual(groups.first?.host.id, HostConfig.browsersID)
-        XCTAssertEqual(groups.first?.host.label, "Browsers")
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.first?.host.id, HostConfig.localhostID)
         let sessions = groups.first?.groups.flatMap(\.sessions) ?? []
         XCTAssertEqual(sessions.count, 2)
         XCTAssertEqual(Set(sessions.map(\.name)), Set(["github.com", "claude.ai"]))
     }
 
-    /// Browsers group is appended at the end alongside real host groups.
+    /// Browsers group alongside real hosts — browsers under localhost, terminals under remote.
     func testBrowserSessions_appearAlongsideRealHosts() {
         let state = AppState()
         let host = HostConfig(id: UUID(), label: "remote")
-        state.hosts = [host]
+        state.hosts = [.localhost, host]
         let term = TmuxSession(name: "dev", source: .host(hostID: host.id))
         let browser = TmuxSession(name: "github.com", source: .browser(url: "https://github.com"))
         state.allSessions = [term, browser]
 
         let groups = state.hostGroupedSessions
         XCTAssertEqual(groups.count, 2)
-        XCTAssertEqual(groups[0].host.label, "remote")
-        XCTAssertEqual(groups[1].host.label, "Browsers")
-        // Browser session must NOT also leak into the remote host group
-        let remoteSessions = groups[0].groups.flatMap(\.sessions)
+        // Browser should be under localhost, not remote
+        let localhostGroup = groups.first(where: { $0.host.id == HostConfig.localhostID })
+        let remoteGroup = groups.first(where: { $0.host.id == host.id })
+        XCTAssertNotNil(localhostGroup)
+        XCTAssertNotNil(remoteGroup)
+        let remoteSessions = remoteGroup?.groups.flatMap(\.sessions) ?? []
         XCTAssertFalse(remoteSessions.contains(where: { $0.source.isBrowser }))
+        let localSessions = localhostGroup?.groups.flatMap(\.sessions) ?? []
+        XCTAssertTrue(localSessions.contains(where: { $0.source.isBrowser }))
     }
 
-    /// No browsers → no synthetic group at all (don't show empty section).
+    /// No browsers → localhost group is empty (no browser sub-groups).
     func testBrowsersGroup_omittedWhenNoBrowserSessions() {
         let state = AppState()
         let host = HostConfig(id: UUID(), label: "remote")

@@ -710,4 +710,68 @@ final class FavoriteParsingTests: XCTestCase {
         XCTAssertNotNil(session)
         XCTAssertEqual(session?.source.hostID, unknownID)
     }
+
+    func testParseFavoriteID_browserSession() {
+        let state = AppState()
+        let original = TmuxSession(name: "github.com", source: .browser(url: "https://github.com"))
+        let parsed = state.parseFavoriteID(original.id)
+        XCTAssertNotNil(parsed)
+        XCTAssertEqual(parsed?.id, original.id)
+        XCTAssertEqual(parsed?.name, "github.com")
+        XCTAssertEqual(parsed?.source.browserURL, "https://github.com")
+    }
+
+    func testParseFavoriteID_browserSession_roundTrip() {
+        let state = AppState()
+        let original = TmuxSession(name: "claude.ai", source: .browser(url: "https://claude.ai"))
+        let parsed = state.parseFavoriteID(original.id)
+        XCTAssertNotNil(parsed)
+        XCTAssertEqual(parsed?.source, original.source)
+    }
+}
+
+// MARK: - SessionSource grouping properties
+
+final class SessionSourceGroupingTests: XCTestCase {
+
+    func testGroupHostID_hostSession() {
+        let id = UUID()
+        XCTAssertEqual(SessionSource.host(hostID: id).groupHostID, id)
+    }
+
+    func testGroupHostID_dockerSession() {
+        let id = UUID()
+        XCTAssertEqual(SessionSource.docker(hostID: id, containerName: "app").groupHostID, id)
+    }
+
+    func testGroupHostID_browserSession() {
+        XCTAssertEqual(SessionSource.browser(url: "https://example.com").groupHostID, HostConfig.localhostID)
+    }
+
+    func testIsLocal_browserTrue() {
+        XCTAssertTrue(SessionSource.browser(url: "https://x.com").isLocal)
+    }
+
+    func testIsLocal_hostFalse() {
+        XCTAssertFalse(SessionSource.host(hostID: UUID()).isLocal)
+    }
+
+    func testIsLocal_dockerFalse() {
+        XCTAssertFalse(SessionSource.docker(hostID: UUID(), containerName: "x").isLocal)
+    }
+
+    func testSubGroupKey_dockerLogsMergesWithDocker() {
+        let id = UUID()
+        let docker = SessionSource.docker(hostID: id, containerName: "app")
+        let logs = SessionSource.dockerLogs(hostID: id, containerName: "app")
+        let top = SessionSource.dockerTop(hostID: id, containerName: "app")
+        XCTAssertEqual(docker.subGroupKey, logs.subGroupKey)
+        XCTAssertEqual(docker.subGroupKey, top.subGroupKey)
+    }
+
+    func testSubGroupKey_differentBrowsersHaveDifferentKeys() {
+        let a = SessionSource.browser(url: "https://a.com")
+        let b = SessionSource.browser(url: "https://b.com")
+        XCTAssertNotEqual(a.subGroupKey, b.subGroupKey)
+    }
 }

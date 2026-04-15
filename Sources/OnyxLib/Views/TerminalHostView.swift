@@ -35,8 +35,8 @@ struct TerminalHostView: NSViewRepresentable {
             nsView.startKeySetup()
         }
         if let session = appState.switchToSession {
-            if session.source.isBrowser {
-                // Browser sessions bypass the terminal pool.
+            if session.source.isLocal {
+                // Local sessions (browser, etc.) bypass the terminal pool.
                 // Clear switchToSession immediately to prevent re-entry,
                 // defer activeSession change to next run loop tick.
                 appState.switchToSession = nil
@@ -54,7 +54,20 @@ struct TerminalHostView: NSViewRepresentable {
             DispatchQueue.main.async {
                 appState.createNewSession = nil
             }
-            nsView.createNewTmuxSession(newSession)
+            if newSession.source.isLocal {
+                // Local sessions (browser, etc.) don't need terminal pool creation.
+                // Add to session list and activate, deferring to next tick.
+                DispatchQueue.main.async {
+                    if !appState.allSessions.contains(where: { $0.id == newSession.id }) {
+                        appState.allSessions.append(newSession)
+                    }
+                    appState.activeSession = newSession
+                    appState.showSessionManager = false
+                    appState.saveLocalSessions()
+                }
+            } else {
+                nsView.createNewTmuxSession(newSession)
+            }
         }
         // Capture terminal text when entering text mode
         if appState.showTerminalText && appState.terminalTextContent.isEmpty {

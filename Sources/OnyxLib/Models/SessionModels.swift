@@ -92,6 +92,40 @@ public enum SessionSource: Codable, Hashable {
         if case .browser(let url) = self { return url }
         return nil
     }
+
+    /// Grouping key for the session list. Sessions with the same groupKey
+    /// appear under the same header. Host/docker use the host UUID;
+    /// browser and future local types use the localhost UUID.
+    public var groupHostID: UUID {
+        switch self {
+        case .host(let id), .docker(let id, _), .dockerLogs(let id, _), .dockerTop(let id, _):
+            return id
+        case .browser:
+            return HostConfig.localhostID
+        }
+    }
+
+    /// Sub-group key within a host group. Docker variants group by container;
+    /// host sessions share a single key; browsers each get their own entry.
+    public var subGroupKey: String {
+        switch self {
+        case .host(let id):
+            return SessionSource.host(hostID: id).stableKey
+        case .docker(let id, let name), .dockerLogs(let id, let name), .dockerTop(let id, let name):
+            return SessionSource.docker(hostID: id, containerName: name).stableKey
+        case .browser:
+            return stableKey
+        }
+    }
+
+    /// True for session types that are not bound to a specific remote host
+    /// (browser, and future local-only types like editors, players, etc.)
+    public var isLocal: Bool {
+        switch self {
+        case .browser: return true
+        default: return false
+        }
+    }
 }
 
 /// TmuxSession.
@@ -143,4 +177,17 @@ public struct HostGroup: Identifiable {
     public let host: HostConfig
     /// Groups.
     public let groups: [SessionGroup]
+}
+
+/// A persisted browser session entry for saving/loading from disk.
+public struct PersistedSession: Codable {
+    /// Display name.
+    public let name: String
+    /// Stable key from SessionSource (e.g. "browser:https://github.com").
+    public let sourceStableKey: String
+
+    public init(name: String, sourceStableKey: String) {
+        self.name = name
+        self.sourceStableKey = sourceStableKey
+    }
 }

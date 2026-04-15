@@ -1006,6 +1006,14 @@ class OnyxTerminalView: NSView {
             // Only recreate if we know the host is reachable (it returned sessions or is local)
             guard host.isLocal || reachableHostIDs.contains(hostID) else { continue }
 
+            // Local sessions (browser, etc.) don't need remote recreation —
+            // just add them back to the session list.
+            if session.source.isLocal {
+                print("recreateMissingFavorites: restored local session \(session.displayLabel)")
+                created.append(session)
+                continue
+            }
+
             let safeName = appState.sanitizedSession(session.name)
             let script: String
 

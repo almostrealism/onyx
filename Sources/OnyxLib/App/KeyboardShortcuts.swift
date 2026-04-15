@@ -123,12 +123,10 @@ public class ShortcutManager {
                 }
             }
 
-            // Cmd+L → focus URL bar (when in browser session)
+            // Cmd+L → focus URL bar (the URLBar ignores it if not visible)
             if flags == .command && chars == "l" {
-                if let state = appState(for: event), state.activeSession?.source.isBrowser == true {
-                    NotificationCenter.default.post(name: .focusURLBar, object: nil)
-                    return nil
-                }
+                NotificationCenter.default.post(name: .focusURLBar, object: nil)
+                return nil
             }
 
             // Cmd+D → toggle artifacts panel

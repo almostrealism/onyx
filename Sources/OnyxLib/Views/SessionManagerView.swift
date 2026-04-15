@@ -155,26 +155,19 @@ struct SessionManagerView: View {
         let name = newSessionName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
 
-        // Check if source is browser or if name looks like a URL
+        let source: SessionSource
         if newSessionSource?.isBrowser == true || name.hasPrefix("http://") || name.hasPrefix("https://") {
             var url = name
             if !url.contains("://") { url = "https://\(url)" }
             let displayName = URL(string: url)?.host ?? name
-            let session = TmuxSession(name: displayName, source: .browser(url: url))
-            // Dismiss UI first, then activate session after a tick to avoid
-            // SwiftUI update cycle (terminal→browser swap during view update)
-            appState.showNewSessionPrompt = false
-            appState.showSessionManager = false
-            newSessionName = ""
-            DispatchQueue.main.async {
-                appState.allSessions.append(session)
-                appState.activeSession = session
-            }
-            return
+            source = .browser(url: url)
+            let session = TmuxSession(name: displayName, source: source)
+            appState.createNewSession = session
+        } else {
+            source = newSessionSource ?? .host(hostID: appState.hosts.first?.id ?? HostConfig.localhostID)
+            appState.createNewSession = TmuxSession(name: name, source: source)
         }
 
-        let source = newSessionSource ?? .host(hostID: appState.hosts.first?.id ?? HostConfig.localhostID)
-        appState.createNewSession = TmuxSession(name: name, source: source)
         appState.showNewSessionPrompt = false
         newSessionName = ""
     }

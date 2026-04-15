@@ -50,19 +50,9 @@ public struct HostConfig: Codable, Identifiable, Hashable {
     /// Localhost id.
     public static let localhostID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
-    /// Synthetic host UUID for the "Browsers" group in the session list.
-    /// Browser sessions are not bound to any real host — this gives the UI a
-    /// stable identifier so it can render and favorite them as a top-level group.
-    public static let browsersID = UUID(uuidString: "00000000-0000-0000-0000-0000000B0000")!
-
     /// Localhost.
     public static var localhost: HostConfig {
         HostConfig(id: localhostID, label: "localhost", ssh: SSHConfig())
-    }
-
-    /// Synthetic "Browsers" pseudo-host.
-    public static var browsersHost: HostConfig {
-        HostConfig(id: browsersID, label: "Browsers", ssh: SSHConfig())
     }
 }
 

@@ -70,24 +70,11 @@ public struct ContentView: View {
                 GeometryReader { geo in
                     HStack(spacing: 0) {
                         ZStack {
-                            // Both terminal and browser are always in the tree so
-                            // updateNSView fires for session switching. The inactive
-                            // one is hidden behind the active one.
-                            let isBrowser = appState.activeSession?.source.isBrowser == true
-
-                            TerminalHostView(appState: appState)
-                                .opacity(isBrowser ? 0 : (hasOverlay ? 0.3 : 1.0))
-                                .allowsHitTesting(!isBrowser && !hasOverlay)
-
-                            if isBrowser {
-                                VStack(spacing: 0) {
-                                    URLBar(appState: appState, browserManager: appState.browserManager)
-                                    Divider().background(Color.white.opacity(0.1))
-                                    BrowserHostView(appState: appState, browserManager: appState.browserManager)
-                                }
-                                .opacity(hasOverlay ? 0.3 : 1.0)
-                                .allowsHitTesting(!hasOverlay)
-                            }
+                            SessionContentView(
+                                appState: appState,
+                                browserManager: appState.browserManager,
+                                hasOverlay: hasOverlay
+                            )
 
                             // Terminal text mode — selectable text overlay
                             if appState.showTerminalText {
@@ -313,6 +300,40 @@ public struct ContentView: View {
     private func updateWindowTitle() {
         DispatchQueue.main.async {
             hostWindow?.title = appState.effectiveWindowTitle
+        }
+    }
+}
+
+// MARK: - Session Content View
+
+/// Unified session rendering — the ONE place that checks session type for display.
+/// ContentView uses this without knowing about session source types.
+private struct SessionContentView: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var browserManager: BrowserManager
+    let hasOverlay: Bool
+
+    private var isLocalSession: Bool {
+        appState.activeSession?.source.isLocal == true
+    }
+
+    var body: some View {
+        ZStack {
+            // Terminal view — always in tree so updateNSView fires for session switching
+            TerminalHostView(appState: appState)
+                .opacity(isLocalSession ? 0 : (hasOverlay ? 0.3 : 1.0))
+                .allowsHitTesting(!isLocalSession && !hasOverlay)
+
+            // Browser view — shown when active session is a browser
+            if isLocalSession {
+                VStack(spacing: 0) {
+                    URLBar(appState: appState, browserManager: browserManager)
+                    Divider().background(Color.white.opacity(0.1))
+                    BrowserHostView(appState: appState, browserManager: browserManager)
+                }
+                .opacity(hasOverlay ? 0.3 : 1.0)
+                .allowsHitTesting(!hasOverlay)
+            }
         }
     }
 }

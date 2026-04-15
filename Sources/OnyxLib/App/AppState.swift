@@ -393,32 +393,24 @@ public class AppState: ObservableObject {
 
     /// Sessions grouped by host, then by source within each host.
     /// Docker logs sessions are merged into the same group as their container's docker sessions.
-    /// Browser sessions are pulled out into a synthetic "Browsers" group at
-    /// the end so they're visible regardless of which hosts are configured.
+    /// Local sessions (browser, and future local types) are grouped under the
+    /// localhost host entry — no special-casing by session type.
     public var hostGroupedSessions: [HostGroup] {
         var result: [HostGroup] = []
         for host in hosts {
-            // Browser sessions are not host-bound; render them in the synthetic group below.
-            let hostSessions = allSessions.filter { $0.source.hostID == host.id && !$0.source.isBrowser }
+            let hostSessions = allSessions.filter { $0.source.groupHostID == host.id }
             guard !hostSessions.isEmpty else {
                 result.append(HostGroup(host: host, groups: []))
                 continue
             }
-            // Group by container name for docker/dockerLogs, by stableKey for host
+            // Group by subGroupKey (container name for docker, stableKey for host, etc.)
             var groups: [String: [TmuxSession]] = [:]
             for s in hostSessions {
-                let key: String
-                switch s.source {
-                case .host: key = SessionSource.host(hostID: host.id).stableKey
-                case .docker(_, let name), .dockerLogs(_, let name), .dockerTop(_, let name):
-                    key = SessionSource.docker(hostID: host.id, containerName: name).stableKey
-                case .browser:
-                    continue  // already filtered out above
-                }
-                groups[key, default: []].append(s)
+                groups[s.source.subGroupKey, default: []].append(s)
             }
             var sessionGroups: [SessionGroup] = []
             let hostKey = SessionSource.host(hostID: host.id).stableKey
+            // Host sessions first
             if let sessions = groups[hostKey], !sessions.isEmpty {
                 let sorted = sessions.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
                 sessionGroups.append(SessionGroup(source: .host(hostID: host.id), sessions: sorted))
@@ -435,15 +427,6 @@ public class AppState: ObservableObject {
                 }
             }
             result.append(HostGroup(host: host, groups: sessionGroups))
-        }
-
-        // Synthetic "Browsers" group containing every browser session,
-        // regardless of which host (if any) is configured.
-        let browserSessions = allSessions.filter { $0.source.isBrowser }
-        if !browserSessions.isEmpty {
-            let sorted = browserSessions.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            let group = SessionGroup(source: sorted[0].source, sessions: sorted)
-            result.append(HostGroup(host: HostConfig.browsersHost, groups: [group]))
         }
 
         return result
@@ -528,27 +511,50 @@ public class AppState: ObservableObject {
         // Split on ":" — the session name is everything after the source key
         // host:UUID:name → source = host(UUID), name = name
         // docker:UUID:container:name → source = docker(UUID, container), name = name
+        // browser:url:name → source = browser(url), name = display name
         // dockerlogs:UUID:container:name → utility, skip
         // dockertop:UUID:container:name → utility, skip
         let parts = id.split(separator: ":", maxSplits: 10).map(String.init)
-        guard parts.count >= 3 else { return nil }
+        guard parts.count >= 2 else { return nil }
 
         let kind = parts[0]
-        guard let hostID = UUID(uuidString: parts[1]) else { return nil }
 
         switch kind {
         case "host":
-            // host:UUID:sessionName
+            guard parts.count >= 3, let hostID = UUID(uuidString: parts[1]) else { return nil }
             let name = parts.dropFirst(2).joined(separator: ":")
             guard !name.isEmpty else { return nil }
             return TmuxSession(name: name, source: .host(hostID: hostID))
         case "docker":
-            // docker:UUID:containerName:sessionName
-            guard parts.count >= 4 else { return nil }
+            guard parts.count >= 4, let hostID = UUID(uuidString: parts[1]) else { return nil }
             let container = parts[2]
             let name = parts.dropFirst(3).joined(separator: ":")
             guard !name.isEmpty else { return nil }
             return TmuxSession(name: name, source: .docker(hostID: hostID, containerName: container))
+        case "browser":
+            // browser:url:name — the URL is everything between "browser:" and the last ":name"
+            // Session ID format: "browser:URL:displayName"
+            // We need to reconstruct the URL which may contain colons (e.g. https://...)
+            // The stableKey is "browser:URL", and the session ID is "stableKey:name"
+            // So: browser:https://github.com:github.com
+            guard parts.count >= 3 else { return nil }
+            // The URL starts at parts[1] and the session name is the last component after the stableKey
+            // Since stableKey = "browser:URL" and id = "stableKey:name",
+            // we need to find where the URL ends and name begins.
+            // URL always contains "://" so the name is the last segment after the full URL.
+            let afterBrowser = parts.dropFirst(1).joined(separator: ":")
+            // The session ID is: "browser:" + url + ":" + name
+            // The stableKey is: "browser:" + url
+            // So afterBrowser = url + ":" + name
+            // We need to split off the last ":" segment as the name, but the URL may contain ":"
+            // Actually, from the code: id = "\(source.stableKey):\(name)" = "browser:\(url):\(name)"
+            // Since URLs contain "://", we can find the name by looking at the last ":" after the URL
+            // Simplest: the name is everything after the last ":"
+            guard let lastColon = afterBrowser.lastIndex(of: ":") else { return nil }
+            let url = String(afterBrowser[afterBrowser.startIndex..<lastColon])
+            let name = String(afterBrowser[afterBrowser.index(after: lastColon)...])
+            guard !url.isEmpty, !name.isEmpty else { return nil }
+            return TmuxSession(name: name, source: .browser(url: url))
         default:
             // dockerlogs, dockertop — utility sessions don't need recreation
             return nil
@@ -610,6 +616,10 @@ public class AppState: ObservableObject {
 
     private var favoritesURL: URL {
         appSupportDir.appendingPathComponent("favorites.json")
+    }
+
+    private var sessionsURL: URL {
+        appSupportDir.appendingPathComponent("sessions.json")
     }
 
     private var topologyURL: URL {
@@ -693,6 +703,7 @@ public class AppState: ObservableObject {
 
         loadFavorites()
         loadTopology()
+        loadLocalSessions()
         configLoaded = true
 
         startupStatus = "Loading configuration..."
@@ -990,6 +1001,33 @@ public class AppState: ObservableObject {
 
     private func saveFavorites() {
         FavoritesStore.shared.save()
+    }
+
+    /// Save local sessions (browser, etc.) so they survive app restarts.
+    public func saveLocalSessions() {
+        let entries = allSessions
+            .filter { $0.source.isLocal }
+            .map { PersistedSession(name: $0.name, sourceStableKey: $0.source.stableKey) }
+        if let data = try? JSONEncoder().encode(entries) {
+            try? data.write(to: sessionsURL)
+        }
+    }
+
+    /// Load persisted local sessions and add them to allSessions.
+    private func loadLocalSessions() {
+        guard let data = try? Data(contentsOf: sessionsURL),
+              let entries = try? JSONDecoder().decode([PersistedSession].self, from: data) else { return }
+        for entry in entries {
+            // Parse the stableKey back into a source
+            guard entry.sourceStableKey.hasPrefix("browser:") else { continue }
+            let url = String(entry.sourceStableKey.dropFirst("browser:".count))
+            guard !url.isEmpty else { continue }
+            let session = TmuxSession(name: entry.name, source: .browser(url: url))
+            // Avoid duplicates
+            if !allSessions.contains(where: { $0.id == session.id }) {
+                allSessions.append(session)
+            }
+        }
     }
 
     /// Dismiss top overlay.

@@ -1311,31 +1311,29 @@ struct RemindersSection: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.4))
             } else if reminders.isMultiList {
-                // Grouped display: each list shown with its own header
-                if reminders.groupedReminders.isEmpty || reminders.groupedReminders.allSatisfy({ $0.reminders.isEmpty }) {
+                // Grouped display: 2-column grid layout
+                let nonEmpty = reminders.groupedReminders.filter { !$0.reminders.isEmpty }
+                if nonEmpty.isEmpty {
                     Text(reminders.emptyMessage)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.3))
                 } else {
-                    ForEach(reminders.groupedReminders) { group in
-                        if !group.reminders.isEmpty {
-                            // List header
-                            Text(group.name.uppercased())
-                                .font(.system(size: 9, weight: .medium, design: .monospaced))
-                                .foregroundColor(appState.accentColor.opacity(0.6))
-                                .tracking(1)
-                                .padding(.top, group.id == reminders.groupedReminders.first?.id ? 0 : 4)
-
-                            let visible = Array(group.reminders.prefix(5))
-                            ForEach(visible, id: \.calendarItemIdentifier) { reminder in
-                                ReminderRow(reminder: reminder, appState: appState, manager: reminders)
-                            }
-                            if group.reminders.count > 5 {
-                                Text("+\(group.reminders.count - 5) more")
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundColor(.gray.opacity(0.3))
+                    HStack(alignment: .top, spacing: 12) {
+                        // Column 1: odd-indexed groups (0, 2, 4, ...)
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(nonEmpty.enumerated()).filter { $0.offset % 2 == 0 }, id: \.element.id) { _, group in
+                                ReminderListColumn(group: group, appState: appState, reminders: reminders)
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        // Column 2: even-indexed groups (1, 3, 5, ...)
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(nonEmpty.enumerated()).filter { $0.offset % 2 == 1 }, id: \.element.id) { _, group in
+                                ReminderListColumn(group: group, appState: appState, reminders: reminders)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             } else if reminders.reminders.isEmpty {
@@ -1344,12 +1342,12 @@ struct RemindersSection: View {
                     .foregroundColor(.gray.opacity(0.3))
             } else {
                 // Single list or Today: flat display
-                let visible = Array(reminders.reminders.prefix(7))
+                let visible = Array(reminders.reminders.prefix(14))
                 ForEach(visible, id: \.calendarItemIdentifier) { reminder in
                     ReminderRow(reminder: reminder, appState: appState, manager: reminders)
                 }
-                if reminders.reminders.count > 7 {
-                    Text("+\(reminders.reminders.count - 7) more")
+                if reminders.reminders.count > 14 {
+                    Text("+\(reminders.reminders.count - 14) more")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.3))
                 }
@@ -1362,6 +1360,31 @@ struct RemindersSection: View {
         .onChange(of: appState.appearance.remindersLists) { _, newValue in
             reminders.selectedLists = newValue
             reminders.fetchReminders()
+        }
+    }
+}
+
+private struct ReminderListColumn: View {
+    let group: ReminderListGroup
+    @ObservedObject var appState: AppState
+    let reminders: RemindersManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(group.name.uppercased())
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(appState.accentColor.opacity(0.6))
+                .tracking(1)
+
+            let visible = Array(group.reminders.prefix(14))
+            ForEach(visible, id: \.calendarItemIdentifier) { reminder in
+                ReminderRow(reminder: reminder, appState: appState, manager: reminders)
+            }
+            if group.reminders.count > 14 {
+                Text("+\(group.reminders.count - 14) more")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.3))
+            }
         }
     }
 }
