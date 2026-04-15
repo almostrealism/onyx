@@ -1000,6 +1000,7 @@ public class AppState: ObservableObject {
             showWindowRename = false
         } else if showSettings {
             showSettings = false
+            saveAppearance()
         } else if showTerminalText {
             showTerminalText = false
             terminalTextContent = ""
