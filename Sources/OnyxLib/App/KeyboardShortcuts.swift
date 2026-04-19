@@ -135,45 +135,52 @@ public class ShortcutManager {
                 return nil
             }
 
-            // Single-key shortcuts — check the state of the EVENT'S window, not a global flag.
-            // Suppress when any overlay with text input is open (settings, session manager,
-            // command palette, window rename, right panels with editors).
+            // Single-key shortcuts — check the state of the EVENT'S window.
             let state = appState(for: event)
             let monitorVisibleInWindow = state?.showMonitor ?? false
-            let hasTextInput = (state?.showSettings ?? false)
+
+            // "Real" text-input overlays that should block ALL unmodified keys:
+            // settings, command palette, session manager, window rename.
+            // Right panels (notes, file browser, artifacts) do NOT block
+            // monitor-specific shortcuts (P/T/M/C) because the monitor
+            // overlay is visually on top of the panel and the user expects
+            // those keys to work.
+            let hasRealTextInput = (state?.showSettings ?? false)
                 || (state?.showCommandPalette ?? false)
                 || (state?.showSessionManager ?? false)
                 || (state?.showWindowRename ?? false)
+
+            // For non-monitor shortcuts, also suppress when a right panel
+            // with an editor is open (notes, file browser text fields).
+            let hasAnyTextInput = hasRealTextInput
                 || (state?.activeRightPanel != nil)
 
-            if !hasTextInput {
+            // Monitor-specific shortcuts: fire when monitor is visible
+            // and no real text overlay is active. Right panels don't block.
+            if monitorVisibleInWindow && !hasRealTextInput && flags.isEmpty {
+                switch event.keyCode {
+                case 17: // T → toggle interval
+                    NotificationCenter.default.post(name: .toggleMonitorInterval, object: nil)
+                    return nil
+                case 46: // M → toggle memory chart
+                    NotificationCenter.default.post(name: .toggleMemoryChart, object: nil)
+                    return nil
+                case 8:  // C → toggle all containers
+                    NotificationCenter.default.post(name: .toggleAllContainers, object: nil)
+                    return nil
+                case 35: // P → toggle 12/24hr clock
+                    NotificationCenter.default.post(name: .toggleClockFormat, object: nil)
+                    return nil
+                default:
+                    break
+                }
+            }
+
+            // Other single-key shortcuts: suppress when any text input is active
+            if !hasAnyTextInput {
                 // Backtick/tilde key (keyCode 50) → toggle monitor overlay
                 if event.keyCode == 50 && flags.isEmpty {
                     NotificationCenter.default.post(name: .toggleMonitor, object: nil)
-                    return nil
-                }
-
-                // T key (keyCode 17) → toggle monitor time interval (only when overlay is visible in THIS window)
-                if event.keyCode == 17 && flags.isEmpty && monitorVisibleInWindow {
-                    NotificationCenter.default.post(name: .toggleMonitorInterval, object: nil)
-                    return nil
-                }
-
-                // M key (keyCode 46) → toggle memory chart (only when overlay is visible in THIS window)
-                if event.keyCode == 46 && flags.isEmpty && monitorVisibleInWindow {
-                    NotificationCenter.default.post(name: .toggleMemoryChart, object: nil)
-                    return nil
-                }
-
-                // C key (keyCode 8) → toggle showing all containers (only when overlay is visible in THIS window)
-                if event.keyCode == 8 && flags.isEmpty && monitorVisibleInWindow {
-                    NotificationCenter.default.post(name: .toggleAllContainers, object: nil)
-                    return nil
-                }
-
-                // P key (keyCode 35) → toggle 12hr/24hr clock format (only when overlay is visible)
-                if event.keyCode == 35 && flags.isEmpty && monitorVisibleInWindow {
-                    NotificationCenter.default.post(name: .toggleClockFormat, object: nil)
                     return nil
                 }
             }
