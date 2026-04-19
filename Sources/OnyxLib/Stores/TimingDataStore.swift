@@ -146,11 +146,10 @@ public class TimingDataStore: ObservableObject {
         let sunday = calendar.date(byAdding: .day, value: 6 - daysFromMonday, to: today)!
         weekMonday = monday
 
-        // Fetch 12 weeks of data: the current week plus 11 prior weeks.
+        // Fetch 24 weeks of data: the current week plus 23 prior weeks.
         // This backs the week view, the 4-week / 30-day stats, and the
-        // 12-week heatmap. 12 weeks ≈ max a few thousand rows — fine for one
-        // fetch.
-        let rangeStart = calendar.date(byAdding: .day, value: -11 * 7, to: monday)!
+        // 24-week heatmap. ~6 months of daily rows — fine for one fetch.
+        let rangeStart = calendar.date(byAdding: .day, value: -23 * 7, to: monday)!
         let rangeEnd = sunday
 
         let df = DateFormatter()

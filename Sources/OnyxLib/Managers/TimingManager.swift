@@ -26,8 +26,8 @@ public class TimingManager: ObservableObject {
     @Published public var projectTotals: [ProjectTotal] = []
     @Published public var totalWeekHours: Double = 0
 
-    /// 12 columns × 7 rows heatmap cells. Column 0 is the oldest week, column
-    /// 11 is the current (in-progress) week. Row 0 is Monday, row 6 is Sunday.
+    /// 24 columns × 7 rows heatmap cells. Column 0 is the oldest week, column
+    /// 23 is the current (in-progress) week. Row 0 is Monday, row 6 is Sunday.
     /// Each value is hours on that day, already filtered by the project filter.
     @Published public var heatmap: [[Double]] = []
 
@@ -185,7 +185,7 @@ public class TimingManager: ObservableObject {
         // Set of date strings for the current week, used to scope the bar
         // chart and the project-totals legend to this week only. The longer
         // trailing averages and the heatmap intentionally use the full
-        // 12-week entries list.
+        // 24-week entries list.
         var currentWeekDates = Set<String>()
         for i in 0..<7 {
             let d = calendar.date(byAdding: .day, value: i, to: monday)!
@@ -194,7 +194,7 @@ public class TimingManager: ObservableObject {
 
         // Aggregate — project totals and the bar chart must only see
         // current-week entries; projectTotalMap was previously summing
-        // the whole 12-week dataset which produced misleading huge numbers.
+        // the whole 24-week dataset which produced misleading huge numbers.
         var byDateProject: [String: [String: (color: String, seconds: Double)]] = [:]
         var projectTotalMap: [String: (color: String, seconds: Double)] = [:]
 
@@ -239,7 +239,7 @@ public class TimingManager: ObservableObject {
         projectTotals = totals
         totalWeekHours = total
 
-        // Build a date → hours map over ALL filtered entries (12 weeks) for
+        // Build a date → hours map over ALL filtered entries (24 weeks) for
         // the new stats and heatmap. Uses the same entries list we already
         // filtered above.
         var hoursByDate: [String: Double] = [:]
@@ -255,16 +255,19 @@ public class TimingManager: ObservableObject {
 
     // MARK: - Pure helpers (testable without a TimingManager instance)
 
-    /// Build a 12-column × 7-row heatmap of hours, where column 0 is 11 weeks
-    /// before `anchorMonday` and column 11 is the week starting `anchorMonday`.
+    /// Number of weeks shown in the heatmap grid.
+    public static let heatmapWeeks = 24
+
+    /// Build a heatmap grid of hours. Column 0 is the oldest week, column
+    /// (heatmapWeeks-1) is the week starting `anchorMonday`.
     /// Row 0 is Monday, row 6 is Sunday.
     public static func buildHeatmap(hoursByDate: [String: Double], anchorMonday: Date) -> [[Double]] {
         let calendar = Calendar.current
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
-        var grid: [[Double]] = Array(repeating: Array(repeating: 0.0, count: 7), count: 12)
-        for week in 0..<12 {
-            let weekStart = calendar.date(byAdding: .day, value: -(11 - week) * 7, to: anchorMonday)!
+        var grid: [[Double]] = Array(repeating: Array(repeating: 0.0, count: 7), count: heatmapWeeks)
+        for week in 0..<heatmapWeeks {
+            let weekStart = calendar.date(byAdding: .day, value: -(heatmapWeeks - 1 - week) * 7, to: anchorMonday)!
             for day in 0..<7 {
                 let date = calendar.date(byAdding: .day, value: day, to: weekStart)!
                 grid[week][day] = hoursByDate[df.string(from: date)] ?? 0

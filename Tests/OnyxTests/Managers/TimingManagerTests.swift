@@ -25,9 +25,11 @@ final class TimingManagerStatsTests: XCTestCase {
 
     // MARK: - buildHeatmap
 
-    func test_heatmap_has12x7Shape() {
+    private let W = TimingManager.heatmapWeeks
+
+    func test_heatmap_hasCorrectShape() {
         let grid = TimingManager.buildHeatmap(hoursByDate: [:], anchorMonday: fixedMonday)
-        XCTAssertEqual(grid.count, 12)
+        XCTAssertEqual(grid.count, W)
         XCTAssertTrue(grid.allSatisfy { $0.count == 7 })
     }
 
@@ -38,19 +40,19 @@ final class TimingManagerStatsTests: XCTestCase {
         }
     }
 
-    /// Most recent week (column 11) starts on anchorMonday; its row 0 is
+    /// Most recent week (last column) starts on anchorMonday; its row 0 is
     /// anchorMonday itself.
     func test_heatmap_currentWeekIsRightmostColumn() {
         let hours = [df.string(from: fixedMonday): 3.5]
         let grid = TimingManager.buildHeatmap(hoursByDate: hours, anchorMonday: fixedMonday)
-        XCTAssertEqual(grid[11][0], 3.5, "Current Monday should be grid[11][0]")
-        XCTAssertEqual(grid[10][0], 0, "Previous Monday should still be 0")
+        XCTAssertEqual(grid[W - 1][0], 3.5, "Current Monday should be grid[last][0]")
+        XCTAssertEqual(grid[W - 2][0], 0, "Previous Monday should still be 0")
     }
 
-    /// Oldest week (column 0) is 11 weeks before anchorMonday.
-    func test_heatmap_oldestColumnIs11WeeksBack() {
-        let eleven = Calendar.current.date(byAdding: .day, value: -11 * 7, to: fixedMonday)!
-        let hours = [df.string(from: eleven): 2.0]
+    /// Oldest week (column 0) is (heatmapWeeks-1) weeks before anchorMonday.
+    func test_heatmap_oldestColumnIsNWeeksBack() {
+        let oldest = Calendar.current.date(byAdding: .day, value: -(W - 1) * 7, to: fixedMonday)!
+        let hours = [df.string(from: oldest): 2.0]
         let grid = TimingManager.buildHeatmap(hoursByDate: hours, anchorMonday: fixedMonday)
         XCTAssertEqual(grid[0][0], 2.0)
     }
@@ -63,7 +65,7 @@ final class TimingManagerStatsTests: XCTestCase {
         }
         let grid = TimingManager.buildHeatmap(hoursByDate: hours, anchorMonday: fixedMonday)
         for day in 0..<7 {
-            XCTAssertEqual(grid[11][day], Double(day + 1),
+            XCTAssertEqual(grid[W - 1][day], Double(day + 1),
                            "Day row \(day) should be \(day + 1) hours")
         }
     }

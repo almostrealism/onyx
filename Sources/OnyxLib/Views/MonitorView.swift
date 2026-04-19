@@ -757,7 +757,7 @@ struct TimingChartSection: View {
                 }
             }
 
-            // Top row: week bar chart (left) + 12-week heatmap (right)
+            // Top row: week bar chart (left) + 24-week heatmap (right)
             HStack(alignment: .top, spacing: 12) {
                 // Stacked bar chart: one bar per day, segments per project
                 VStack(spacing: 2) {
@@ -795,7 +795,7 @@ struct TimingChartSection: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                // 12-week heatmap, forced square cells
+                // 24-week heatmap, forced square cells
                 if !timing.heatmap.isEmpty {
                     TimingHeatmapGrid(weeks: timing.heatmap)
                 }
@@ -875,7 +875,7 @@ struct TimingChartSection: View {
     }
 }
 
-/// 12×7 grid showing daily hours over the last 12 weeks, colored against a
+/// 24×7 grid showing daily hours over the last 24 weeks, colored against a
 /// 40-hour-week target. Colors encode how close a single day is to the
 /// one-seventh-of-40 = 5.71-hour ceiling: black = no data, blue = light,
 /// green = healthy, red = over-target.
@@ -966,7 +966,7 @@ struct TimingHeatmapGrid: View {
             }
             // Legend directly under the grid, same width
             HStack(spacing: 3) {
-                Text("12W")
+                Text("24W")
                     .font(.system(size: 7, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.35))
                 HStack(spacing: 0) {
