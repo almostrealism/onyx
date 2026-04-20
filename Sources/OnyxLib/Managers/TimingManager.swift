@@ -40,6 +40,9 @@ public class TimingManager: ObservableObject {
     /// so this reflects an honest daily average including off-days.
     @Published public var avgHoursPerDayLast30: Double = 0
 
+    /// The Monday that anchors the heatmap's rightmost column (current week).
+    @Published public var heatmapAnchorMonday: Date = Date()
+
     private var storeCancellable: AnyCancellable?
     private let windowIndex: Int
 
@@ -185,7 +188,7 @@ public class TimingManager: ObservableObject {
         // Set of date strings for the current week, used to scope the bar
         // chart and the project-totals legend to this week only. The longer
         // trailing averages and the heatmap intentionally use the full
-        // 24-week entries list.
+        // 26-week entries list.
         var currentWeekDates = Set<String>()
         for i in 0..<7 {
             let d = calendar.date(byAdding: .day, value: i, to: monday)!
@@ -194,7 +197,7 @@ public class TimingManager: ObservableObject {
 
         // Aggregate — project totals and the bar chart must only see
         // current-week entries; projectTotalMap was previously summing
-        // the whole 24-week dataset which produced misleading huge numbers.
+        // the whole 26-week dataset which produced misleading huge numbers.
         var byDateProject: [String: [String: (color: String, seconds: Double)]] = [:]
         var projectTotalMap: [String: (color: String, seconds: Double)] = [:]
 
@@ -239,7 +242,7 @@ public class TimingManager: ObservableObject {
         projectTotals = totals
         totalWeekHours = total
 
-        // Build a date → hours map over ALL filtered entries (24 weeks) for
+        // Build a date → hours map over ALL filtered entries (26 weeks) for
         // the new stats and heatmap. Uses the same entries list we already
         // filtered above.
         var hoursByDate: [String: Double] = [:]
@@ -248,6 +251,7 @@ public class TimingManager: ObservableObject {
         }
 
         let today = Date()
+        heatmapAnchorMonday = monday
         heatmap = Self.buildHeatmap(hoursByDate: hoursByDate, anchorMonday: monday)
         avgHoursPerWeekLast4 = Self.avgHoursPerWeek(hoursByDate: hoursByDate, currentMonday: monday, weeks: 4)
         avgHoursPerDayLast30 = Self.avgHoursPerDay(hoursByDate: hoursByDate, today: today, days: 30)
@@ -256,7 +260,7 @@ public class TimingManager: ObservableObject {
     // MARK: - Pure helpers (testable without a TimingManager instance)
 
     /// Number of weeks shown in the heatmap grid.
-    public static let heatmapWeeks = 24
+    public static let heatmapWeeks = 26
 
     /// Build a heatmap grid of hours. Column 0 is the oldest week, column
     /// (heatmapWeeks-1) is the week starting `anchorMonday`.

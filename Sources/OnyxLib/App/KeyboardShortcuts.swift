@@ -155,9 +155,13 @@ public class ShortcutManager {
             let hasAnyTextInput = hasRealTextInput
                 || (state?.activeRightPanel != nil)
 
-            // Monitor-specific shortcuts: fire when monitor is visible
-            // and no real text overlay is active. Right panels don't block.
-            if monitorVisibleInWindow && !hasRealTextInput && flags.isEmpty {
+            // Monitor-specific shortcuts: fire when monitor is visible,
+            // no real text overlay is active, AND the focus ring is on the
+            // terminal (not on a right panel like file browser or notes).
+            // When a right panel has focus, the user expects to type into
+            // it — the orange focus ring makes this visually clear.
+            let rightPanelHasFocus = (state?.focusedComponent == .rightPanel)
+            if monitorVisibleInWindow && !hasRealTextInput && !rightPanelHasFocus && flags.isEmpty {
                 switch event.keyCode {
                 case 17: // T → toggle interval
                     NotificationCenter.default.post(name: .toggleMonitorInterval, object: nil)

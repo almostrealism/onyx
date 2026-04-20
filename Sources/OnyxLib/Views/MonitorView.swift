@@ -757,7 +757,7 @@ struct TimingChartSection: View {
                 }
             }
 
-            // Top row: week bar chart (left) + 24-week heatmap (right)
+            // Top row: week bar chart (left) + 26-week heatmap (right)
             HStack(alignment: .top, spacing: 12) {
                 // Stacked bar chart: one bar per day, segments per project
                 VStack(spacing: 2) {
@@ -795,9 +795,9 @@ struct TimingChartSection: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                // 24-week heatmap, forced square cells
+                // 26-week heatmap, forced square cells
                 if !timing.heatmap.isEmpty {
-                    TimingHeatmapGrid(weeks: timing.heatmap)
+                    TimingHeatmapGrid(weeks: timing.heatmap, anchorMonday: timing.heatmapAnchorMonday)
                 }
             }
 
@@ -875,12 +875,13 @@ struct TimingChartSection: View {
     }
 }
 
-/// 24×7 grid showing daily hours over the last 24 weeks, colored against a
+/// 26×7 grid showing daily hours over the last 26 weeks (half a year), colored against a
 /// 40-hour-week target. Colors encode how close a single day is to the
 /// one-seventh-of-40 = 5.71-hour ceiling: black = no data, blue = light,
 /// green = healthy, red = over-target.
 struct TimingHeatmapGrid: View {
     let weeks: [[Double]]  // [week][day] — week 0 oldest, day 0 Monday
+    let anchorMonday: Date  // Monday of the rightmost (current) week
 
     /// Reference hours for a "full" day under a 40-hour workweek.
     private static let dayReference: Double = 40.0 / 7.0
@@ -930,23 +931,32 @@ struct TimingHeatmapGrid: View {
         weeks[week].reduce(0, +)
     }
 
-    /// "Wed · 4.2 hrs · 28% of 15.0h week" — or just hours if the week was empty.
+    private static let tooltipDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
+    /// Compute the actual date for a cell.
+    private func cellDate(week: Int, day: Int) -> Date {
+        let weeksBack = (weeks.count - 1) - week
+        let daysBack = weeksBack * 7 - day
+        return Calendar.current.date(byAdding: .day, value: -daysBack, to: anchorMonday)!
+    }
+
+    /// "Wed Apr 2: 4.2 hrs · 28% of 15.0h week"
     private func tooltip(week: Int, day: Int) -> String {
         let hours = weeks[week][day]
         let total = weekTotal(week)
-        let weeksAgo = (weeks.count - 1) - week
-        let weekLabel: String = {
-            if weeksAgo == 0 { return "this wk" }
-            if weeksAgo == 1 { return "1 wk ago" }
-            return "\(weeksAgo) wks ago"
-        }()
+        let date = cellDate(week: week, day: day)
         let dayName = Self.dayNames[day]
+        let dateStr = Self.tooltipDateFormatter.string(from: date)
         if total <= 0 {
-            return String(format: "%@ %@: %.1f hrs", dayName, weekLabel, hours)
+            return String(format: "%@ %@: %.1f hrs", dayName, dateStr, hours)
         }
         let pct = hours / total * 100
         return String(format: "%@ %@: %.1f hrs · %.0f%% of %.1fh week",
-                      dayName, weekLabel, hours, pct, total)
+                      dayName, dateStr, hours, pct, total)
     }
 
     var body: some View {
@@ -966,7 +976,7 @@ struct TimingHeatmapGrid: View {
             }
             // Legend directly under the grid, same width
             HStack(spacing: 3) {
-                Text("24W")
+                Text("26W")
                     .font(.system(size: 7, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.35))
                 HStack(spacing: 0) {
