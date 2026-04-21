@@ -163,20 +163,22 @@ class OnyxTerminalView: NSView {
     // MARK: - Tmux Commands
 
     /// Run a tmux command for the active session via a background process.
-    /// Uses `tmux <command>` CLI which communicates with the tmux server
-    /// directly, avoiding terminal input stream issues.
+    /// Uses `tmux -t <session> <command>` to target the specific tmux
+    /// session the user is looking at, not whichever session was most
+    /// recently active on the remote host.
     private func sendTmuxCommand(_ command: String) {
         guard let session = appState.activeSession else { return }
         let host = appState.host(for: session.source.hostID) ?? .localhost
+        let target = appState.sanitizedSession(session.name)
 
-        // Build the tmux CLI command
+        // Build the tmux CLI command targeting the active session
         let tmuxCmd: String
         switch session.source {
         case .docker(_, let container):
             let safe = appState.sanitizedContainer(container)
-            tmuxCmd = "docker exec \(safe) tmux \(command)"
+            tmuxCmd = "docker exec \(safe) tmux -t \(target) \(command)"
         default:
-            tmuxCmd = "tmux \(command)"
+            tmuxCmd = "tmux -t \(target) \(command)"
         }
 
         let (cmd, args) = appState.remoteCommand(tmuxCmd, host: host)
