@@ -977,3 +977,176 @@ private func iconForFile(_ name: String) -> String {
         return "doc"
     }
 }
+
+// MARK: - Full-Window File Browser (⌘⇧O)
+
+/// Full-window file browser with three columns: folder sidebar,
+/// directory listing / search results, and file content side by side.
+/// Unlike the right-panel mode where viewing a file replaces the
+/// directory listing, the full-window mode keeps the tree visible so
+/// you can navigate and read files simultaneously.
+struct FullFileBrowserView: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var browser: FileBrowserManager
+
+    init(appState: AppState) {
+        self.appState = appState
+        self.browser = appState.fileBrowserManager
+    }
+
+    /// Whether the right pane (file content) has something to show.
+    private var hasFileContent: Bool {
+        browser.fileContent != nil || browser.imageData != nil || browser.isUnsupportedFile
+            || browser.gitManager.showLog
+    }
+
+    var body: some View {
+        ZStack {
+            Color(nsColor: NSColor(white: 0.04, alpha: 0.98))
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Header
+                HStack {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(appState.accentColor)
+                    Text("FILE BROWSER")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(appState.accentColor)
+                        .tracking(2)
+                    Spacer()
+                    Text("⌘⇧O close  ·  ⌘O panel mode")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.3))
+                    Button(action: { appState.showFullFileBrowser = false; appState.recalculateFocus() }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11))
+                            .foregroundColor(.gray.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+
+                Divider().background(Color.white.opacity(0.1))
+
+                // Three-column layout
+                HStack(spacing: 0) {
+                    // Column 1: Folder sidebar
+                    FolderSidebar(appState: appState, browser: browser)
+                        .frame(width: 200)
+
+                    Divider().background(Color.white.opacity(0.1))
+
+                    // Column 2: Directory listing / search / git landing
+                    VStack(spacing: 0) {
+                        NavigationBar(appState: appState, browser: browser)
+                        Divider().background(Color.white.opacity(0.1))
+
+                        if browser.isLoading && !browser.isUploading {
+                            Spacer()
+                            HStack(spacing: 8) {
+                                ProgressView().scaleEffect(0.7).colorScheme(.dark)
+                                Text("Loading...")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(.gray.opacity(0.5))
+                            }
+                            Spacer()
+                        } else if let error = browser.error {
+                            Spacer()
+                            Text(error)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
+                                .padding()
+                            Spacer()
+                        } else if browser.isSearchActive {
+                            SearchResultsView(appState: appState, browser: browser, tree: browser.searchResults)
+                        } else if browser.currentPath != nil {
+                            VStack(spacing: 0) {
+                                if browser.gitManager.isGitRepo, let status = browser.gitManager.repoStatus {
+                                    GitLandingView(
+                                        status: status,
+                                        accentColor: appState.accentColor,
+                                        gitManager: browser.gitManager,
+                                        onTrackFile: { path, name in
+                                            browser.trackRecentFile(path: path, name: name)
+                                        },
+                                        onViewFile: { path, name in
+                                            browser.readFileFromSearch(path, name: name)
+                                        },
+                                        onShowDepGraph: {
+                                            guard let repoPath = browser.gitManager.currentRepoPath else { return }
+                                            browser.analyzeDependencies(repoPath: repoPath, appState: appState)
+                                        },
+                                        depsStatus: browser.depsStatus
+                                    )
+                                    Divider().background(Color.white.opacity(0.1))
+                                }
+                                DirectoryListView(appState: appState, browser: browser)
+                            }
+                        } else {
+                            Spacer()
+                            VStack(spacing: 8) {
+                                Image(systemName: "folder")
+                                    .font(.system(size: 28))
+                                    .foregroundColor(.gray.opacity(0.3))
+                                Text("Select a folder to browse")
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundColor(.gray.opacity(0.5))
+                            }
+                            Spacer()
+                        }
+                    }
+                    .frame(minWidth: 250)
+                    .frame(maxWidth: hasFileContent ? .infinity : .infinity)
+
+                    // Column 3: File content (only when a file is selected)
+                    if hasFileContent {
+                        Divider().background(Color.white.opacity(0.1))
+
+                        VStack(spacing: 0) {
+                            if let data = browser.imageData {
+                                ImageContentView(
+                                    fileName: browser.viewingFileName ?? "image",
+                                    imageData: data,
+                                    accentColor: appState.accentColor,
+                                    onClose: { browser.closeFile() },
+                                    onDownload: { downloadCurrentFile() }
+                                )
+                            } else if browser.isUnsupportedFile {
+                                UnsupportedFileView(
+                                    fileName: browser.viewingFileName ?? "file",
+                                    accentColor: appState.accentColor,
+                                    onClose: { browser.closeFile() },
+                                    onDownload: { downloadCurrentFile() }
+                                )
+                            } else if let content = browser.fileContent {
+                                FileContentView(
+                                    fileName: browser.viewingFileName ?? "file",
+                                    content: content,
+                                    accentColor: appState.accentColor,
+                                    onClose: { browser.closeFile() },
+                                    onDownload: { downloadCurrentFile() },
+                                    onViewDiff: browser.gitChangedFileForViewing().map { file in
+                                        { browser.gitManager.fetchFileDiff(file) }
+                                    }
+                                )
+                            } else if browser.gitManager.showLog {
+                                GitLogView(gitManager: browser.gitManager, accentColor: appState.accentColor)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+    }
+
+    private func downloadCurrentFile() {
+        if let path = browser.currentPath, let name = browser.viewingFileName {
+            let fullPath = path.hasSuffix("/") ? "\(path)\(name)" : "\(path)/\(name)"
+            browser.downloadPath(fullPath, isDirectory: false)
+        }
+    }
+}

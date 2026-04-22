@@ -196,6 +196,13 @@ public struct ContentView: View {
                         ))
                 }
 
+                // Full-window file browser (Cmd+Shift+O)
+                if appState.showFullFileBrowser {
+                    FullFileBrowserView(appState: appState)
+                        .modifier(FocusOutline(active: appState.focusedComponent == .rightPanel, show: appState.showFocusOutline))
+                        .transition(.opacity)
+                }
+
                 // Setup screen
                 if appState.showSetup {
                     SetupView(appState: appState)
@@ -466,6 +473,7 @@ private struct ContentViewAnimations: ViewModifier {
             .animation(.easeInOut(duration: 0.15), value: appState.showCommandPalette)
             .animation(.easeInOut(duration: 0.2), value: appState.showSetup)
             .animation(.easeInOut(duration: 0.2), value: appState.showSessionManager)
+            .animation(.easeInOut(duration: 0.2), value: appState.showFullFileBrowser)
     }
 }
 
@@ -491,6 +499,54 @@ private struct ContentViewNotifications: ViewModifier {
                 appState.activeRightPanel = .notes
                 appState.createNoteRequested = true
             }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleMonitor)) { _ in
+                guard isKeyWindow else { return }
+                appState.showMonitor.toggle()
+                updateWindowTitle()
+            }
+            .modifier(ContentViewPanelNotifications(appState: appState, hostWindow: hostWindow))
+            .modifier(ContentViewOverlayNotifications(appState: appState, hostWindow: hostWindow))
+            .modifier(ContentViewSessionNotifications(appState: appState, hostWindow: hostWindow))
+            .onChange(of: appState.activeRightPanel) { _, _ in
+                appState.recalculateFocus()
+            }
+            .onChange(of: appState.showSettings) { _, _ in
+                appState.recalculateFocus()
+            }
+            .onChange(of: appState.showCommandPalette) { _, _ in
+                appState.recalculateFocus()
+            }
+            .onChange(of: appState.showSessionManager) { _, _ in
+                appState.recalculateFocus()
+            }
+            .onChange(of: appState.appearance.windowTitle) { _, _ in updateWindowTitle() }
+            .onChange(of: appState.activeSession?.id) { _, _ in updateWindowTitle() }
+    }
+}
+
+private struct ContentViewPanelNotifications: ViewModifier {
+    @ObservedObject var appState: AppState
+    var hostWindow: NSWindow?
+    private var isKeyWindow: Bool { hostWindow?.isKeyWindow == true }
+
+    private func handleToggleFileBrowser(full: Bool) {
+        appState.showCommandPalette = false
+        appState.showSettings = false
+        if full {
+            appState.showFullFileBrowser.toggle()
+            if appState.showFullFileBrowser { appState.activeRightPanel = nil }
+        } else {
+            if appState.showFullFileBrowser {
+                appState.showFullFileBrowser = false
+            } else {
+                appState.activeRightPanel = appState.activeRightPanel == .fileBrowser ? nil : .fileBrowser
+            }
+        }
+        appState.recalculateFocus()
+    }
+
+    func body(content: Content) -> some View {
+        content
             .onReceive(NotificationCenter.default.publisher(for: .toggleCommandPalette)) { _ in
                 guard isKeyWindow else { return }
                 appState.showCommandPalette.toggle()
@@ -501,28 +557,33 @@ private struct ContentViewNotifications: ViewModifier {
                 if appState.showTerminalText {
                     appState.showTerminalText = false
                     appState.terminalTextContent = ""
-                    // Restore terminal focus after dismissing the overlay
                     appState.focusedComponent = .terminal
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
                     }
                 } else {
-                    // Content will be captured by TerminalHostView.updateNSView
                     appState.terminalTextContent = ""
                     appState.showTerminalText = true
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: .toggleMonitor)) { _ in
-                guard isKeyWindow else { return }
-                appState.showMonitor.toggle()
-                updateWindowTitle()
-            }
             .onReceive(NotificationCenter.default.publisher(for: .toggleFileBrowser)) { _ in
                 guard isKeyWindow else { return }
-                appState.showCommandPalette = false
-                appState.showSettings = false
-                appState.activeRightPanel = appState.activeRightPanel == .fileBrowser ? nil : .fileBrowser
+                handleToggleFileBrowser(full: false)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleFullFileBrowser)) { _ in
+                guard isKeyWindow else { return }
+                handleToggleFileBrowser(full: true)
+            }
+    }
+}
+
+private struct ContentViewOverlayNotifications: ViewModifier {
+    @ObservedObject var appState: AppState
+    var hostWindow: NSWindow?
+    private var isKeyWindow: Bool { hostWindow?.isKeyWindow == true }
+
+    func body(content: Content) -> some View {
+        content
             .onReceive(NotificationCenter.default.publisher(for: .toggleSessionManager)) { _ in
                 guard isKeyWindow else { return }
                 appState.showCommandPalette = false
@@ -546,24 +607,11 @@ private struct ContentViewNotifications: ViewModifier {
                 guard isKeyWindow else { return }
                 let wasMonitoring = appState.showMonitor
                 appState.dismissTopOverlay()
-                if wasMonitoring && !appState.showMonitor { updateWindowTitle() }
+                if wasMonitoring && !appState.showMonitor {
+                    hostWindow?.title = appState.effectiveWindowTitle
+                }
                 appState.recalculateFocus()
             }
-            .modifier(ContentViewSessionNotifications(appState: appState, hostWindow: hostWindow))
-            .onChange(of: appState.activeRightPanel) { _, _ in
-                appState.recalculateFocus()
-            }
-            .onChange(of: appState.showSettings) { _, _ in
-                appState.recalculateFocus()
-            }
-            .onChange(of: appState.showCommandPalette) { _, _ in
-                appState.recalculateFocus()
-            }
-            .onChange(of: appState.showSessionManager) { _, _ in
-                appState.recalculateFocus()
-            }
-            .onChange(of: appState.appearance.windowTitle) { _, _ in updateWindowTitle() }
-            .onChange(of: appState.activeSession?.id) { _, _ in updateWindowTitle() }
     }
 }
 

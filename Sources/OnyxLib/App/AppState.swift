@@ -11,6 +11,7 @@ public extension Notification.Name {
     static let escapePressed = Notification.Name("escapePressed")
     static let toggleMonitorInterval = Notification.Name("toggleMonitorInterval")
     static let toggleFileBrowser = Notification.Name("toggleFileBrowser")
+    static let toggleFullFileBrowser = Notification.Name("toggleFullFileBrowser")
     static let cycleTmuxSession = Notification.Name("cycleTmuxSession")
     static let createTmuxSession = Notification.Name("createTmuxSession")
     static let toggleSessionManager = Notification.Name("toggleSessionManager")
@@ -81,6 +82,7 @@ extension AppState {
         if showCommandPalette { return .commandPalette }
         // Monitor overlay doesn't have text input, so terminal keeps focus
         if showSessionManager { return .sessionManager }
+        if showFullFileBrowser { return .rightPanel }
         if activeRightPanel != nil { return .rightPanel }
         return .terminal
     }
@@ -163,6 +165,7 @@ public class AppState: ObservableObject {
         return activeSession?.source.hostID == hostID
     }
 
+    @Published public var showFullFileBrowser = false
     @Published public var showURLBar = false
     @Published public var urlBarText: String = ""
     @Published public var startupStatus: String = "Initializing..."
@@ -1063,6 +1066,8 @@ public class AppState: ObservableObject {
             terminalTextContent = ""
         } else if showSessionManager {
             showSessionManager = false
+        } else if showFullFileBrowser {
+            showFullFileBrowser = false
         } else if showMonitor {
             showMonitor = false
         } else if activeRightPanel != nil {

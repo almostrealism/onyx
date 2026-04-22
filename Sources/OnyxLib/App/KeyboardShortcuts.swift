@@ -61,10 +61,17 @@ public class ShortcutManager {
                 return nil
             }
 
-            // Cmd+O → toggle file browser
-            if flags == .command && chars == "o" {
-                NotificationCenter.default.post(name: .toggleFileBrowser, object: nil)
-                return nil
+            // Cmd+O → toggle file browser (right panel)
+            // Cmd+Shift+O → toggle full-window file browser
+            if chars.lowercased() == "o" {
+                if flags == .command {
+                    NotificationCenter.default.post(name: .toggleFileBrowser, object: nil)
+                    return nil
+                }
+                if flags.contains([.command, .shift]) {
+                    NotificationCenter.default.post(name: .toggleFullFileBrowser, object: nil)
+                    return nil
+                }
             }
 
             // Cmd+J → toggle session manager
