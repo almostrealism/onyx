@@ -1060,7 +1060,9 @@ struct FullFileBrowserView: View {
                                 .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
                                 .padding()
                             Spacer()
-                        } else if browser.isSearchActive {
+                        } else if browser.isSearchActive || browser.wasSearchActiveBeforeFile {
+                            // Show search results even when a file is open (the
+                            // file appears in the right column in full mode)
                             SearchResultsView(appState: appState, browser: browser, tree: browser.searchResults)
                         } else if browser.currentPath != nil {
                             VStack(spacing: 0) {
@@ -1148,5 +1150,64 @@ struct FullFileBrowserView: View {
             let fullPath = path.hasSuffix("/") ? "\(path)\(name)" : "\(path)/\(name)"
             browser.downloadPath(fullPath, isDirectory: false)
         }
+    }
+}
+
+// MARK: - File Preview Overlay (Space bar)
+
+/// Full-screen overlay that shows file content over everything else.
+/// Triggered by pressing Space while viewing a file in the file browser.
+/// Press Space or Escape to dismiss.
+struct FilePreviewOverlay: View {
+    let fileName: String
+    let content: String
+    let accentColor: Color
+    let onClose: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.92)
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Header
+                HStack {
+                    Image(systemName: iconForFile(fileName))
+                        .font(.system(size: 13))
+                        .foregroundColor(accentColor)
+                    Text(fileName)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.9))
+                    Spacer()
+                    Text("Space or Esc to close")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.4))
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 10)
+
+                Divider().background(accentColor.opacity(0.3))
+
+                // File content with syntax highlighting
+                ScrollView {
+                    Text(attributedContent)
+                        .font(.system(size: 13, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(24)
+                }
+            }
+        }
+    }
+
+    private var attributedContent: AttributedString {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        return SyntaxHighlighter.highlight(content, fileName: fileName)
     }
 }

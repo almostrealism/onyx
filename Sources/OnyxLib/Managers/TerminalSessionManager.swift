@@ -163,22 +163,32 @@ class OnyxTerminalView: NSView {
     // MARK: - Tmux Commands
 
     /// Run a tmux command for the active session via a background process.
-    /// Uses `tmux -t <session> <command>` to target the specific tmux
-    /// session the user is looking at, not whichever session was most
-    /// recently active on the remote host.
+    /// Injects `-t <session>:` into the subcommand so the command targets
+    /// the specific session the user is looking at. The `:` suffix means
+    /// "current window and pane in that session".
     private func sendTmuxCommand(_ command: String) {
         guard let session = appState.activeSession else { return }
         let host = appState.host(for: session.source.hostID) ?? .localhost
         let target = appState.sanitizedSession(session.name)
 
-        // Build the tmux CLI command targeting the active session
+        // Insert "-t <session>:" after the subcommand name. The command is
+        // like "resize-pane -U 4"; we need "resize-pane -t onyx: -U 4".
+        let targeted: String
+        if let spaceIdx = command.firstIndex(of: " ") {
+            let sub = command[..<spaceIdx]
+            let rest = command[spaceIdx...]
+            targeted = "\(sub) -t \(target):\(rest)"
+        } else {
+            targeted = "\(command) -t \(target):"
+        }
+
         let tmuxCmd: String
         switch session.source {
         case .docker(_, let container):
             let safe = appState.sanitizedContainer(container)
-            tmuxCmd = "docker exec \(safe) tmux -t \(target) \(command)"
+            tmuxCmd = "docker exec \(safe) tmux \(targeted)"
         default:
-            tmuxCmd = "tmux -t \(target) \(command)"
+            tmuxCmd = "tmux \(targeted)"
         }
 
         let (cmd, args) = appState.remoteCommand(tmuxCmd, host: host)

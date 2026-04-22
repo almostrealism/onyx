@@ -40,7 +40,7 @@ public class FileBrowserManager: ObservableObject {
     @Published public var recentFiles: [RecentFile] = []
     private let maxRecentFiles = 20
     /// Whether we were in search mode before opening a file
-    private var wasSearchActiveBeforeFile = false
+    public private(set) var wasSearchActiveBeforeFile = false
 
     /// Folders for the currently active host
     public var activeFolders: [SavedFolder] {
@@ -282,12 +282,17 @@ public class FileBrowserManager: ObservableObject {
         }
     }
 
-    /// Close file.
+    /// Close the currently viewed file. If the file was opened from search
+    /// results, restores the search-active state so the results reappear.
     public func closeFile() {
         fileContent = nil
         imageData = nil
         viewingFileName = nil
         isUnsupportedFile = false
+        if wasSearchActiveBeforeFile {
+            isSearchActive = true
+            wasSearchActiveBeforeFile = false
+        }
     }
 
     /// Open a file by full path (used by search results)

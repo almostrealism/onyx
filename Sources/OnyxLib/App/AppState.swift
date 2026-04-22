@@ -12,6 +12,7 @@ public extension Notification.Name {
     static let toggleMonitorInterval = Notification.Name("toggleMonitorInterval")
     static let toggleFileBrowser = Notification.Name("toggleFileBrowser")
     static let toggleFullFileBrowser = Notification.Name("toggleFullFileBrowser")
+    static let toggleFilePreview = Notification.Name("toggleFilePreview")
     static let cycleTmuxSession = Notification.Name("cycleTmuxSession")
     static let createTmuxSession = Notification.Name("createTmuxSession")
     static let toggleSessionManager = Notification.Name("toggleSessionManager")
@@ -166,6 +167,7 @@ public class AppState: ObservableObject {
     }
 
     @Published public var showFullFileBrowser = false
+    @Published public var showFilePreview = false
     @Published public var showURLBar = false
     @Published public var urlBarText: String = ""
     @Published public var startupStatus: String = "Initializing..."
@@ -1066,6 +1068,8 @@ public class AppState: ObservableObject {
             terminalTextContent = ""
         } else if showSessionManager {
             showSessionManager = false
+        } else if showFilePreview {
+            showFilePreview = false
         } else if showFullFileBrowser {
             showFullFileBrowser = false
         } else if showMonitor {

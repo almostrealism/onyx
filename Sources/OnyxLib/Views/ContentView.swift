@@ -196,6 +196,18 @@ public struct ContentView: View {
                         ))
                 }
 
+                // Full-screen file preview (Space when viewing a file)
+                if appState.showFilePreview, let content = appState.fileBrowserManager.fileContent {
+                    FilePreviewOverlay(
+                        fileName: appState.fileBrowserManager.viewingFileName ?? "file",
+                        content: content,
+                        accentColor: appState.accentColor,
+                        onClose: { appState.showFilePreview = false }
+                    )
+                    .transition(.opacity)
+                    .zIndex(60)
+                }
+
                 // Full-window file browser (Cmd+Shift+O)
                 if appState.showFullFileBrowser {
                     FullFileBrowserView(appState: appState)
@@ -573,6 +585,10 @@ private struct ContentViewPanelNotifications: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .toggleFullFileBrowser)) { _ in
                 guard isKeyWindow else { return }
                 handleToggleFileBrowser(full: true)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleFilePreview)) { _ in
+                guard isKeyWindow else { return }
+                appState.showFilePreview.toggle()
             }
     }
 }

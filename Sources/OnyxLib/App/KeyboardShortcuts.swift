@@ -187,6 +187,18 @@ public class ShortcutManager {
                 }
             }
 
+            // Space bar in file browser → toggle file preview overlay
+            // keyCode 49 = Space. Only fire when file browser is active and
+            // no text field has focus (search field is not focused).
+            let fileBrowserActive = (state?.showFullFileBrowser ?? false)
+                || (state?.activeRightPanel == .fileBrowser)
+            if event.keyCode == 49 && flags.isEmpty && fileBrowserActive
+                && state?.fileBrowserManager.viewingFileName != nil
+                && !hasRealTextInput {
+                NotificationCenter.default.post(name: .toggleFilePreview, object: nil)
+                return nil
+            }
+
             // Other single-key shortcuts: suppress when any text input is active
             if !hasAnyTextInput {
                 // Backtick/tilde key (keyCode 50) → toggle monitor overlay
