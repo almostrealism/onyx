@@ -310,6 +310,11 @@ struct MonitorView: View {
                                         values: cpuData,
                                         accentColor: Color(hex: "66CCFF")
                                     )
+                                } else {
+                                    CPUUnavailableCard(
+                                        message: monitor.cpuDiagnostic
+                                            ?? "CPU usage unavailable on this host."
+                                    )
                                 }
 
                                 let memData = monitor.showMemoryChart ? monitor.bucketedMemory() : []
@@ -572,6 +577,36 @@ struct GridChart: View {
         if pct > 90 { return Color(hex: "FF6B6B").opacity(0.9) }
         if pct > 70 { return Color(hex: "FFD06B").opacity(0.8) }
         return Color(hex: "66CCFF").opacity(0.7)
+    }
+}
+
+struct CPUUnavailableCard: View {
+    let message: String
+    var height: CGFloat = 100
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("CPU")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color(hex: "66CCFF"))
+                .tracking(2)
+
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(hex: "FFD06B").opacity(0.8))
+                Text(message)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.7))
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(height: height, alignment: .topLeading)
+            .background(Color.white.opacity(0.03))
+        }
     }
 }
 

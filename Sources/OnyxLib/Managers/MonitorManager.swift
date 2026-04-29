@@ -38,6 +38,10 @@ public class MonitorManager: ObservableObject {
     public var gpuEverSeen: Bool { activeHostData.gpuEverSeen }
     /// Last error.
     public var lastError: String? { activeHostData.lastError }
+    /// Diagnostic explaining why the CPU chart can't render. Set when parse
+    /// returned a sample but its cpuUsage was nil (i.e. the remote's top
+    /// output didn't match any recognized format). Cleared on next success.
+    public var cpuDiagnostic: String? { activeHostData.cpuParseFailureReason }
 
     private var timer: Timer?
     private let appState: AppState
@@ -64,6 +68,7 @@ public class MonitorManager: ObservableObject {
         var gpuEverSeen = false
         var consecutiveGpuMisses = 0
         var lastError: String?
+        var cpuParseFailureReason: String?
     }
 
     /// Create a new instance.
@@ -211,6 +216,7 @@ public class MonitorManager: ObservableObject {
                 }
 
                 if let sample = Self.parse(output: output) {
+                    let cpuDiag = sample.cpuUsage == nil ? Self.cpuDiagnostic(from: output) : nil
                     DispatchQueue.main.async {
                         guard let self = self else { return }
 
@@ -231,6 +237,7 @@ public class MonitorManager: ObservableObject {
                                 data.gpuEverSeen = false
                             }
                         }
+                        data.cpuParseFailureReason = cpuDiag
                         self.hostData[hostID] = data
                         self.objectWillChange.send()
                     }
@@ -287,6 +294,32 @@ public class MonitorManager: ObservableObject {
     }
 
     /// Parse.
+    /// Diagnose why CPU usage couldn't be extracted from `output`. Returns a
+    /// short, user-facing message describing the failure mode. Only meaningful
+    /// when called after a successful parse with `cpuUsage == nil`.
+    public static func cpuDiagnostic(from output: String) -> String {
+        let sections = output.components(separatedBy: "---")
+        var cpuRaw: String?
+        for i in stride(from: 0, to: sections.count, by: 1) {
+            let section = sections[i].trimmingCharacters(in: .whitespacesAndNewlines)
+            if section == "CPU", i + 1 < sections.count {
+                cpuRaw = sections[i + 1]
+                break
+            }
+        }
+        guard let cpu = cpuRaw else {
+            return "Stats output has no CPU section. The remote may be missing 'top', or its login shell didn't run the stats script."
+        }
+        let firstLine = cpu.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first(where: { !$0.isEmpty }) ?? ""
+        if firstLine.isEmpty {
+            return "CPU section was empty — 'top' produced no output."
+        }
+        let snippet = firstLine.count > 120 ? String(firstLine.prefix(120)) + "…" : firstLine
+        return "Unrecognized 'top' output. First line: \(snippet)"
+    }
+
     public static func parse(output: String) -> MonitorSample? {
         let sections = output.components(separatedBy: "---")
         var loadAvg1: Double?, loadAvg5: Double?, loadAvg15: Double?

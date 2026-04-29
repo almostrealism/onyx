@@ -160,3 +160,64 @@ final class MonitorManagerPerHostIsolationTests: XCTestCase {
         }
     }
 }
+
+// MARK: - CPU diagnostic tests
+//
+// When some remote hosts produce a `top` output our regex doesn't recognize,
+// parse() succeeds but cpuUsage is nil and the chart silently disappears.
+// cpuDiagnostic(from:) provides the message that gets shown in place of the
+// chart so the user can see WHY it isn't rendering.
+
+final class MonitorCPUDiagnosticTests: XCTestCase {
+
+    func testCpuDiagnostic_missingCpuSection() {
+        let output = """
+        UPTIME
+        ---
+         12:34:56 up 1 day, load average: 0.10, 0.20, 0.30
+        ---
+        MEM
+        ---
+        Mem:  16000  4000  12000
+        """
+        let msg = MonitorManager.cpuDiagnostic(from: output)
+        XCTAssertTrue(msg.contains("no CPU section"),
+                      "Expected 'no CPU section' message, got: \(msg)")
+    }
+
+    func testCpuDiagnostic_emptyCpuSection() {
+        let output = "CPU\n---\n\n   \n---\nGPU\n---\nN/A"
+        let msg = MonitorManager.cpuDiagnostic(from: output)
+        XCTAssertTrue(msg.contains("empty") || msg.contains("no output"),
+                      "Expected empty-section message, got: \(msg)")
+    }
+
+    func testCpuDiagnostic_unrecognizedTopFormat() {
+        // BusyBox-style top with an unfamiliar header line
+        let output = "CPU\n---\nMem: 12345K used, 67890K free, 0K shrd\nLoad average: 0.1 0.2 0.3\n---\nGPU\n---\nN/A"
+        let msg = MonitorManager.cpuDiagnostic(from: output)
+        XCTAssertTrue(msg.contains("Unrecognized"),
+                      "Expected 'Unrecognized' message, got: \(msg)")
+        XCTAssertTrue(msg.contains("Mem:"),
+                      "Expected first line snippet in message, got: \(msg)")
+    }
+
+    func testCpuDiagnostic_truncatesLongFirstLine() {
+        let longLine = String(repeating: "x", count: 300)
+        let output = "CPU\n---\n\(longLine)\n---\n"
+        let msg = MonitorManager.cpuDiagnostic(from: output)
+        XCTAssertTrue(msg.hasSuffix("…"),
+                      "Expected ellipsis on truncated line, got: \(msg)")
+        XCTAssertLessThan(msg.count, 200,
+                          "Diagnostic message should be capped, got \(msg.count) chars")
+    }
+
+    func testParse_unrecognizedTopProducesNilCpuUsage() {
+        // This is the actual silent-failure case: parse succeeds with a sample
+        // but cpuUsage is nil because no recognized line matched.
+        let output = "CPU\n---\nMem: 12345K used, 67890K free\nLoad: 0.1 0.2 0.3\n---\n"
+        let sample = MonitorManager.parse(output: output)
+        XCTAssertNotNil(sample, "parse should still return a sample on unrecognized CPU output")
+        XCTAssertNil(sample?.cpuUsage, "cpuUsage should be nil when no recognized format matches")
+    }
+}
