@@ -1413,7 +1413,12 @@ public class AppState: ObservableObject {
     /// Build the command + args to run a one-off stats collection
     public func statsCommand(host h: HostConfig? = nil) -> (String, [String]) {
         let host = h ?? activeHost ?? .localhost
+        // `set +vx` defensively disables verbose/xtrace if the remote
+        // login profile turned them on — without it, every script line
+        // gets echoed to stderr (which we merge into stdout) and pollutes
+        // the section we're parsing.
         let statsScript = """
+        set +vx 2>/dev/null; \
         echo "---UPTIME---"; uptime; \
         echo "---CPU---"; CPU_OUT=$(top -bn1 2>/dev/null | head -5); \
         if [ -n "$CPU_OUT" ]; then echo "$CPU_OUT"; else top -l1 -s0 2>/dev/null | head -10; fi; \

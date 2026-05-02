@@ -294,6 +294,35 @@ public class MonitorManager: ObservableObject {
     }
 
     /// Parse.
+    /// Scan the given lines for any recognized `top` CPU-summary format and
+    /// return the computed CPU usage % (100 - idle). Returns nil if none
+    /// match. Lifted out of `parse` so we can run it on a section's lines and
+    /// fall back to running it on the entire output when section parsing
+    /// gets contaminated (e.g. by `set -v` echoes from the remote profile).
+    public static func scanCpuUsage(in lines: [String]) -> Double? {
+        for line in lines {
+            // macOS: "CPU usage: 19.46% user, 7.6% sys, 73.47% idle"
+            if line.contains("CPU usage:") {
+                let idlePattern = #"(\d+\.?\d*)%\s*idle"#
+                if let regex = try? NSRegularExpression(pattern: idlePattern),
+                   let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+                   let r = Range(match.range(at: 1), in: line) {
+                    return 100.0 - (Double(line[r]) ?? 0)
+                }
+            }
+            // Linux: "%Cpu(s):  2.3 us, ... 96.7 id"
+            if line.contains("Cpu(s)") || line.contains("%Cpu") {
+                let idlePattern = #"(\d+\.?\d*)\s*%?\s*id"#
+                if let regex = try? NSRegularExpression(pattern: idlePattern),
+                   let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+                   let r = Range(match.range(at: 1), in: line) {
+                    return 100.0 - (Double(line[r]) ?? 0)
+                }
+            }
+        }
+        return nil
+    }
+
     /// Diagnose why CPU usage couldn't be extracted from `output`. Returns a
     /// short, user-facing message describing the failure mode. Only meaningful
     /// when called after a successful parse with `cpuUsage == nil`.
@@ -346,25 +375,8 @@ public class MonitorManager: ObservableObject {
             if section == "CPU", i + 1 < sections.count {
                 let cpuStr = sections[i + 1]
                 let lines = cpuStr.components(separatedBy: "\n")
+                if cpuUsage == nil { cpuUsage = scanCpuUsage(in: lines) }
                 for line in lines {
-                    // macOS: "CPU usage: 19.46% user, 7.6% sys, 73.47% idle"
-                    if line.contains("CPU usage:") {
-                        let idlePattern = #"(\d+\.?\d*)%\s*idle"#
-                        if let regex = try? NSRegularExpression(pattern: idlePattern),
-                           let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-                           let r = Range(match.range(at: 1), in: line) {
-                            cpuUsage = (100.0 - (Double(line[r]) ?? 0))
-                        }
-                    }
-                    // Linux: "%Cpu(s):  2.3 us, ... 96.7 id"
-                    if line.contains("Cpu(s)") || line.contains("%Cpu") {
-                        let idlePattern = #"(\d+\.?\d*)\s*%?\s*id"#
-                        if let regex = try? NSRegularExpression(pattern: idlePattern),
-                           let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-                           let r = Range(match.range(at: 1), in: line) {
-                            cpuUsage = (100.0 - (Double(line[r]) ?? 0))
-                        }
-                    }
                     // macOS top also outputs PhysMem line — grab memory from here
                     if memUsed == nil, let phys = parsePhysMem(line) {
                         memUsed = phys.0
@@ -413,6 +425,14 @@ public class MonitorManager: ObservableObject {
                     }
                 }
             }
+        }
+
+        // Fallback: if the CPU section was contaminated (e.g. by a remote
+        // shell echoing script source via `set -v`) and we didn't pick up
+        // a usage value, scan the entire output. The actual `top` line will
+        // still be in there somewhere even if it's not where we expected.
+        if cpuUsage == nil {
+            cpuUsage = scanCpuUsage(in: output.components(separatedBy: "\n"))
         }
 
         return MonitorSample(

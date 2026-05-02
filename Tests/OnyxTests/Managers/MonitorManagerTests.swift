@@ -212,6 +212,34 @@ final class MonitorCPUDiagnosticTests: XCTestCase {
                           "Diagnostic message should be capped, got \(msg.count) chars")
     }
 
+    func testParse_fallsBackToFullOutputWhenSectionContaminated() {
+        // Simulates a remote where `set -v` is on: the script source is
+        // echoed before each command, so the CPU section starts with junk.
+        // The real `top` line is still somewhere in the stream, so the
+        // full-output fallback should pick it up.
+        let output = """
+        ---UPTIME---
+         12:00:00 up 1 day, load average: 0.10, 0.20, 0.30
+        ---CPU---
+        echo "---CPU---"; CPU_OUT=$(top -bn1 ...); if [ -n "$CPU_OUT" ];
+        then echo "$CPU_OUT"; else top -l1 -s0 | head -10; fi;
+        top - 12:00:00 up 1 day, 0 users, load average: 0.1
+        Tasks: 100 total
+        %Cpu(s):  3.5 us,  1.2 sy,  0.0 ni, 95.3 id,  0.0 wa
+        ---MEM---
+        Mem: 16000 4000 12000
+        ---GPU---
+        N/A
+        """
+        let sample = MonitorManager.parse(output: output)
+        XCTAssertNotNil(sample)
+        XCTAssertNotNil(sample?.cpuUsage,
+                        "Expected fallback scan to find %Cpu(s) line in full output")
+        if let cpu = sample?.cpuUsage {
+            XCTAssertEqual(cpu, 100.0 - 95.3, accuracy: 0.01)
+        }
+    }
+
     func testParse_unrecognizedTopProducesNilCpuUsage() {
         // This is the actual silent-failure case: parse succeeds with a sample
         // but cpuUsage is nil because no recognized line matched.
