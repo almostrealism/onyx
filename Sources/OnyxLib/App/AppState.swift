@@ -1448,17 +1448,23 @@ public class AppState: ObservableObject {
             return (shell, ["-c", statsScript])
         }
 
-        // `-tt` forces a remote pseudo-TTY which makes the remote shell
-        // *interactive*. Per the bash manual, `set -n` is ignored by
-        // interactive shells — so even if the remote's login profile or
-        // BASH_ENV turns on noexec, our script will still execute. The
-        // only side effect is `\r\n` line endings (stripped in poll())
-        // and possibly an MOTD/banner before our markers (parser ignores
-        // anything outside `---FOO---` sections).
+        // `-tt` forces a remote pseudo-TTY. Combined with `bash -i` below
+        // it makes the inner shell *interactive*, which is the key:
+        // per the bash manual, `bash -c "..."` is non-interactive even
+        // with a TTY (the `-c` flag disqualifies it), but `bash -ic
+        // "..."` IS interactive. Interactive shells ignore `set -n`,
+        // and BASH_ENV is only sourced for non-interactive shells, so
+        // both common noexec triggers are defeated.
+        //
+        // `--norc` skips /etc/bash.bashrc and ~/.bashrc which is where
+        // hostile config (set -nv) often lives. Fallback to plain
+        // `sh -c` for hosts without bash. Side effect: `\r\n` line
+        // endings (stripped in poll()) and an MOTD/banner that our
+        // section-based parser ignores.
         var args = sshBaseArgs(for: host)
         args.append("-tt")
         args.append(sshUserHost(for: host))
-        args.append("sh -c '\(statsScript)'")
+        args.append("bash --norc -ic '\(statsScript)' 2>/dev/null || sh -c '\(statsScript)'")
         return ("/usr/bin/ssh", args)
     }
 

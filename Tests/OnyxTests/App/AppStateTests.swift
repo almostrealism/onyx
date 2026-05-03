@@ -198,25 +198,34 @@ final class AppStateTests: XCTestCase {
         let combined = args.joined(separator: " ")
         XCTAssertFalse(combined.contains("-lc"),
                        "stats command must not use login shell (-lc) for remote hosts; got: \(combined)")
-        XCTAssertFalse(combined.contains("-l "),
-                       "stats command must not pass -l to the remote shell; got: \(combined)")
-        XCTAssertTrue(combined.contains("sh -c "),
-                      "expected sh -c invocation, got: \(combined)")
     }
 
     func testStatsCommand_remote_forcesInteractiveTTY() {
-        // `-tt` forces the remote shell to be interactive so that
-        // profile-level `set -n` is ignored (interactive shells skip
-        // noexec). Without this flag, hosts that turn on noexec via a
-        // system bashrc / BASH_ENV / etc. silently echo the script
-        // instead of running it.
+        // `-tt` forces a remote pseudo-TTY (necessary so the inner
+        // bash -ic actually has stdin connected to a terminal).
         let state = AppState()
         var host = HostConfig.localhost
         host.id = UUID()
         host.ssh.host = "example.com"
         let (_, args) = state.statsCommand(host: host)
         XCTAssertTrue(args.contains("-tt"),
-                      "stats SSH must pass -tt to force interactive TTY (defeats remote set -n); got: \(args)")
+                      "stats SSH must pass -tt; got: \(args)")
+    }
+
+    func testStatsCommand_remote_usesInteractiveBashWithFallback() {
+        // The inner shell must be interactive (bash -ic) so set -n is
+        // ignored — `bash -c` alone is non-interactive per the manual,
+        // even with a TTY. Fallback to sh -c for hosts without bash.
+        let state = AppState()
+        var host = HostConfig.localhost
+        host.id = UUID()
+        host.ssh.host = "example.com"
+        let (_, args) = state.statsCommand(host: host)
+        let combined = args.joined(separator: " ")
+        XCTAssertTrue(combined.contains("bash --norc -ic"),
+                      "expected interactive bash invocation, got: \(combined)")
+        XCTAssertTrue(combined.contains("|| sh -c"),
+                      "expected sh -c fallback after bash, got: \(combined)")
     }
 
     func testStatsCommand_includesExplicitPath() {
