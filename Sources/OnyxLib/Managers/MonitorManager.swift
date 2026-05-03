@@ -299,25 +299,22 @@ public class MonitorManager: ObservableObject {
     /// match. Lifted out of `parse` so we can run it on a section's lines and
     /// fall back to running it on the entire output when section parsing
     /// gets contaminated (e.g. by `set -v` echoes from the remote profile).
+    ///
+    /// Handles all known variants in one permissive pattern:
+    ///   - macOS top -l1: "CPU usage: 19.46% user, 7.6% sys, 73.47% idle"
+    ///   - Linux top -bn1: "%Cpu(s):  2.3 us, ... 96.7 id"
+    ///   - Linux alt:      "Cpu(s):  3.5%us, ... 95.3%id"
+    ///   - BusyBox top:    "CPU: 3% usr  1% sys  0% nic  96% idle ..."
+    /// The line must mention "cpu" (case-insensitive) to filter false matches.
     public static func scanCpuUsage(in lines: [String]) -> Double? {
+        let idlePattern = #"(\d+\.?\d*)\s*%?\s*id(le)?\b"#
+        guard let regex = try? NSRegularExpression(pattern: idlePattern) else { return nil }
         for line in lines {
-            // macOS: "CPU usage: 19.46% user, 7.6% sys, 73.47% idle"
-            if line.contains("CPU usage:") {
-                let idlePattern = #"(\d+\.?\d*)%\s*idle"#
-                if let regex = try? NSRegularExpression(pattern: idlePattern),
-                   let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-                   let r = Range(match.range(at: 1), in: line) {
-                    return 100.0 - (Double(line[r]) ?? 0)
-                }
-            }
-            // Linux: "%Cpu(s):  2.3 us, ... 96.7 id"
-            if line.contains("Cpu(s)") || line.contains("%Cpu") {
-                let idlePattern = #"(\d+\.?\d*)\s*%?\s*id"#
-                if let regex = try? NSRegularExpression(pattern: idlePattern),
-                   let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-                   let r = Range(match.range(at: 1), in: line) {
-                    return 100.0 - (Double(line[r]) ?? 0)
-                }
+            guard line.lowercased().contains("cpu") else { continue }
+            if let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+               let r = Range(match.range(at: 1), in: line),
+               let idle = Double(line[r]) {
+                return 100.0 - idle
             }
         }
         return nil
@@ -326,27 +323,35 @@ public class MonitorManager: ObservableObject {
     /// Diagnose why CPU usage couldn't be extracted from `output`. Returns a
     /// short, user-facing message describing the failure mode. Only meaningful
     /// when called after a successful parse with `cpuUsage == nil`.
+    ///
+    /// Reports on the *last* CPU section seen — when a remote profile has
+    /// `set -v` enabled, the script source is echoed first and creates spurious
+    /// `---CPU---` markers, so the real top output (if any) lands in the last
+    /// section. When multiple sections exist, the count is included so the user
+    /// can spot the verbose-echo pattern.
     public static func cpuDiagnostic(from output: String) -> String {
         let sections = output.components(separatedBy: "---")
-        var cpuRaw: String?
+        var cpuSections: [String] = []
         for i in stride(from: 0, to: sections.count, by: 1) {
             let section = sections[i].trimmingCharacters(in: .whitespacesAndNewlines)
             if section == "CPU", i + 1 < sections.count {
-                cpuRaw = sections[i + 1]
-                break
+                cpuSections.append(sections[i + 1])
             }
         }
-        guard let cpu = cpuRaw else {
+        guard let last = cpuSections.last else {
             return "Stats output has no CPU section. The remote may be missing 'top', or its login shell didn't run the stats script."
         }
-        let firstLine = cpu.components(separatedBy: "\n")
+        let lines = last.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first(where: { !$0.isEmpty }) ?? ""
-        if firstLine.isEmpty {
+            .filter { !$0.isEmpty }
+        if lines.isEmpty {
             return "CPU section was empty — 'top' produced no output."
         }
-        let snippet = firstLine.count > 120 ? String(firstLine.prefix(120)) + "…" : firstLine
-        return "Unrecognized 'top' output. First line: \(snippet)"
+        let joined = lines.prefix(3).joined(separator: " | ")
+        let cap = 140
+        let snippet = joined.count > cap ? String(joined.prefix(cap)) + "…" : joined
+        let countNote = cpuSections.count > 1 ? " (\(cpuSections.count) sections seen)" : ""
+        return "Unrecognized 'top' output\(countNote). Sample: \(snippet)"
     }
 
     public static func parse(output: String) -> MonitorSample? {

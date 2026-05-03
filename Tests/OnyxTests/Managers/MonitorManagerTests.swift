@@ -193,23 +193,76 @@ final class MonitorCPUDiagnosticTests: XCTestCase {
     }
 
     func testCpuDiagnostic_unrecognizedTopFormat() {
-        // BusyBox-style top with an unfamiliar header line
         let output = "CPU\n---\nMem: 12345K used, 67890K free, 0K shrd\nLoad average: 0.1 0.2 0.3\n---\nGPU\n---\nN/A"
         let msg = MonitorManager.cpuDiagnostic(from: output)
         XCTAssertTrue(msg.contains("Unrecognized"),
                       "Expected 'Unrecognized' message, got: \(msg)")
         XCTAssertTrue(msg.contains("Mem:"),
-                      "Expected first line snippet in message, got: \(msg)")
+                      "Expected sample lines in message, got: \(msg)")
     }
 
-    func testCpuDiagnostic_truncatesLongFirstLine() {
+    func testCpuDiagnostic_truncatesLongLine() {
         let longLine = String(repeating: "x", count: 300)
         let output = "CPU\n---\n\(longLine)\n---\n"
         let msg = MonitorManager.cpuDiagnostic(from: output)
         XCTAssertTrue(msg.hasSuffix("…"),
-                      "Expected ellipsis on truncated line, got: \(msg)")
+                      "Expected ellipsis on truncated sample, got: \(msg)")
         XCTAssertLessThan(msg.count, 200,
                           "Diagnostic message should be capped, got \(msg.count) chars")
+    }
+
+    func testCpuDiagnostic_reportsLastSectionWhenMultipleExist() {
+        // Simulates verbose-mode echo: multiple `---CPU---` markers appear
+        // because the script source contains them and is also echoed. The
+        // diagnostic should show the LAST section's content (most likely
+        // real top output if any) and note the section count.
+        let output = """
+        ---CPU---
+        ; CPU_OUT=$(top -bn1); if [ -n "$CPU_OUT" ];
+        ---MEM---
+        ;
+        ---CPU---
+        REAL_LINE_FROM_TOP_OUTPUT
+        ---MEM---
+        Mem: 16000 4000 12000
+        """
+        let msg = MonitorManager.cpuDiagnostic(from: output)
+        XCTAssertTrue(msg.contains("REAL_LINE_FROM_TOP_OUTPUT"),
+                      "Expected last-section content, got: \(msg)")
+        XCTAssertTrue(msg.contains("2 sections"),
+                      "Expected section count note, got: \(msg)")
+    }
+
+    func testScanCpuUsage_busyboxFormat() {
+        let line = "CPU:   3% usr   1% sys   0% nic  96% idle   0% io   0% irq   0% sirq"
+        let usage = MonitorManager.scanCpuUsage(in: [line])
+        XCTAssertEqual(usage ?? -1, 100.0 - 96.0, accuracy: 0.01,
+                       "Expected busybox CPU line to parse, got: \(String(describing: usage))")
+    }
+
+    func testScanCpuUsage_macOSFormat() {
+        let line = "CPU usage: 19.46% user, 7.62% sys, 73.47% idle"
+        let usage = MonitorManager.scanCpuUsage(in: [line])
+        XCTAssertEqual(usage ?? -1, 100.0 - 73.47, accuracy: 0.01)
+    }
+
+    func testScanCpuUsage_linuxFormat() {
+        let line = "%Cpu(s):  3.5 us,  1.2 sy,  0.0 ni, 95.3 id,  0.0 wa"
+        let usage = MonitorManager.scanCpuUsage(in: [line])
+        XCTAssertEqual(usage ?? -1, 100.0 - 95.3, accuracy: 0.01)
+    }
+
+    func testScanCpuUsage_linuxAltFormat() {
+        // No space between % and id ("95.3%id")
+        let line = "Cpu(s):  3.5%us,  1.2%sy,  0.0%ni, 95.3%id,  0.0%wa"
+        let usage = MonitorManager.scanCpuUsage(in: [line])
+        XCTAssertEqual(usage ?? -1, 100.0 - 95.3, accuracy: 0.01)
+    }
+
+    func testScanCpuUsage_skipsLineWithoutCpuKeyword() {
+        // Line has digits and "idle" but no "cpu" — must not false-match.
+        let line = "Load: 95.3 idle minutes since boot"
+        XCTAssertNil(MonitorManager.scanCpuUsage(in: [line]))
     }
 
     func testParse_fallsBackToFullOutputWhenSectionContaminated() {
