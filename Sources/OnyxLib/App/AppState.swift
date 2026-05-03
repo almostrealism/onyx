@@ -1417,6 +1417,11 @@ public class AppState: ObservableObject {
         // login profile turned them on — without it, every script line
         // gets echoed to stderr (which we merge into stdout) and pollutes
         // the section we're parsing.
+        //
+        // The `---SCRIPT-OK---` marker at the end is an execution proof:
+        // if it's missing from the output, the script was printed but
+        // never actually ran on the remote (some hosts do this if the
+        // login shell has `set -n` or similar in its profile).
         let statsScript = """
         set +vx 2>/dev/null; \
         echo "---UPTIME---"; uptime; \
@@ -1426,7 +1431,8 @@ public class AppState: ObservableObject {
         if [ -n "$MEM_OUT" ]; then echo "$MEM_OUT"; else vm_stat 2>/dev/null; fi; \
         echo "---GPU---"; timeout 5 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null || \
         { GPU_PCT=$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o '"Device Utilization %"=[0-9]*' | head -1 | cut -d= -f2); \
-        [ -n "$GPU_PCT" ] && echo "AGX,$GPU_PCT" || echo "N/A"; }
+        [ -n "$GPU_PCT" ] && echo "AGX,$GPU_PCT" || echo "N/A"; }; \
+        echo "---SCRIPT-OK---"
         """
 
         if host.isLocal {

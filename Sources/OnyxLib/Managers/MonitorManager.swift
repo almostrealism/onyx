@@ -324,12 +324,17 @@ public class MonitorManager: ObservableObject {
     /// short, user-facing message describing the failure mode. Only meaningful
     /// when called after a successful parse with `cpuUsage == nil`.
     ///
-    /// Reports on the *last* CPU section seen — when a remote profile has
-    /// `set -v` enabled, the script source is echoed first and creates spurious
-    /// `---CPU---` markers, so the real top output (if any) lands in the last
-    /// section. When multiple sections exist, the count is included so the user
-    /// can spot the verbose-echo pattern.
+    /// First checks for the `---SCRIPT-OK---` execution proof — if missing,
+    /// the script never ran on the remote (most likely the login shell has a
+    /// `set -n` / dry-run mode enabled in its profile, or refuses to execute
+    /// our `-c` argument). Otherwise reports on the *last* CPU section seen
+    /// (when verbose mode is on, the script source's `---CPU---` is echoed
+    /// before the real one and the actual top output lands in the last
+    /// section).
     public static func cpuDiagnostic(from output: String) -> String {
+        if !output.contains("---SCRIPT-OK---") {
+            return "Stats script did not execute on the remote — only its source came back. The remote login shell is likely refusing to run `-c` commands (e.g. it has `set -n` or a similar dry-run mode in its profile)."
+        }
         let sections = output.components(separatedBy: "---")
         var cpuSections: [String] = []
         for i in stride(from: 0, to: sections.count, by: 1) {
@@ -339,7 +344,7 @@ public class MonitorManager: ObservableObject {
             }
         }
         guard let last = cpuSections.last else {
-            return "Stats output has no CPU section. The remote may be missing 'top', or its login shell didn't run the stats script."
+            return "Stats output has no CPU section. The remote may be missing 'top'."
         }
         let lines = last.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }

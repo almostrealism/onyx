@@ -170,6 +170,19 @@ final class MonitorManagerPerHostIsolationTests: XCTestCase {
 
 final class MonitorCPUDiagnosticTests: XCTestCase {
 
+    func testCpuDiagnostic_scriptDidNotExecute() {
+        // No ---SCRIPT-OK--- marker means the remote echoed the script
+        // source instead of running it. This is the most common failure
+        // we've observed in the wild.
+        let output = """
+        ---UPTIME---
+        ; uptime; echo "---CPU---"; CPU_OUT=$(top -bn1); ...; echo "---MEM---"; ...
+        """
+        let msg = MonitorManager.cpuDiagnostic(from: output)
+        XCTAssertTrue(msg.contains("did not execute"),
+                      "Expected script-didn't-run message, got: \(msg)")
+    }
+
     func testCpuDiagnostic_missingCpuSection() {
         let output = """
         UPTIME
@@ -179,6 +192,7 @@ final class MonitorCPUDiagnosticTests: XCTestCase {
         MEM
         ---
         Mem:  16000  4000  12000
+        ---SCRIPT-OK---
         """
         let msg = MonitorManager.cpuDiagnostic(from: output)
         XCTAssertTrue(msg.contains("no CPU section"),
@@ -186,14 +200,14 @@ final class MonitorCPUDiagnosticTests: XCTestCase {
     }
 
     func testCpuDiagnostic_emptyCpuSection() {
-        let output = "CPU\n---\n\n   \n---\nGPU\n---\nN/A"
+        let output = "CPU\n---\n\n   \n---\nGPU\n---\nN/A\n---SCRIPT-OK---"
         let msg = MonitorManager.cpuDiagnostic(from: output)
         XCTAssertTrue(msg.contains("empty") || msg.contains("no output"),
                       "Expected empty-section message, got: \(msg)")
     }
 
     func testCpuDiagnostic_unrecognizedTopFormat() {
-        let output = "CPU\n---\nMem: 12345K used, 67890K free, 0K shrd\nLoad average: 0.1 0.2 0.3\n---\nGPU\n---\nN/A"
+        let output = "CPU\n---\nMem: 12345K used, 67890K free, 0K shrd\nLoad average: 0.1 0.2 0.3\n---\nGPU\n---\nN/A\n---SCRIPT-OK---"
         let msg = MonitorManager.cpuDiagnostic(from: output)
         XCTAssertTrue(msg.contains("Unrecognized"),
                       "Expected 'Unrecognized' message, got: \(msg)")
@@ -203,7 +217,7 @@ final class MonitorCPUDiagnosticTests: XCTestCase {
 
     func testCpuDiagnostic_truncatesLongLine() {
         let longLine = String(repeating: "x", count: 300)
-        let output = "CPU\n---\n\(longLine)\n---\n"
+        let output = "CPU\n---\n\(longLine)\n---\n---SCRIPT-OK---"
         let msg = MonitorManager.cpuDiagnostic(from: output)
         XCTAssertTrue(msg.hasSuffix("…"),
                       "Expected ellipsis on truncated sample, got: \(msg)")
@@ -225,6 +239,7 @@ final class MonitorCPUDiagnosticTests: XCTestCase {
         REAL_LINE_FROM_TOP_OUTPUT
         ---MEM---
         Mem: 16000 4000 12000
+        ---SCRIPT-OK---
         """
         let msg = MonitorManager.cpuDiagnostic(from: output)
         XCTAssertTrue(msg.contains("REAL_LINE_FROM_TOP_OUTPUT"),
