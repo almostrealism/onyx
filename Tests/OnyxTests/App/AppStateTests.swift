@@ -183,65 +183,85 @@ final class AppStateTests: XCTestCase {
 
     // MARK: - statsCommand shape
 
-    func testStatsCommand_remote_doesNotUseLoginShell() {
-        // Sourcing the remote login profile triggers noexec on hosts that
-        // have `set -n` in their profile, causing the stats script to be
-        // printed but never executed. Make sure we never regress to `-l`.
+    func testStatsCommand_remote_passesScriptViaStdinNotCommand() {
+        // The whole point: don't pass a command argument to ssh. With
+        // a command, sshd runs `$SHELL -c <command>` which is non-
+        // interactive and triggers any set -n the remote has. Without
+        // a command, sshd runs the user's $SHELL interactively, which
+        // ignores set -n. We then drive it via stdin.
         let state = AppState()
         var host = HostConfig.localhost
         host.id = UUID()
         host.label = "remote-host"
         host.ssh.host = "example.com"
         host.ssh.user = "tester"
-        let (cmd, args) = state.statsCommand(host: host)
+        let (cmd, args, stdin) = state.statsCommand(host: host)
         XCTAssertEqual(cmd, "/usr/bin/ssh")
-        let combined = args.joined(separator: " ")
-        XCTAssertFalse(combined.contains("-lc"),
-                       "stats command must not use login shell (-lc) for remote hosts; got: \(combined)")
+        XCTAssertNotNil(stdin, "remote stats must pass the script via stdin, not as an ssh command argument")
+        let userHost = "tester@example.com"
+        // The args list should END with the user@host — no command after.
+        XCTAssertEqual(args.last, userHost,
+                       "ssh args must not contain a remote command after user@host; got: \(args)")
     }
 
     func testStatsCommand_remote_forcesInteractiveTTY() {
-        // `-tt` forces a remote pseudo-TTY (necessary so the inner
-        // bash -ic actually has stdin connected to a terminal).
+        // `-tt` forces a remote pseudo-TTY so the no-command session is
+        // unambiguously interactive. Interactive shells ignore set -n.
         let state = AppState()
         var host = HostConfig.localhost
         host.id = UUID()
         host.ssh.host = "example.com"
-        let (_, args) = state.statsCommand(host: host)
+        let (_, args, _) = state.statsCommand(host: host)
         XCTAssertTrue(args.contains("-tt"),
                       "stats SSH must pass -tt; got: \(args)")
     }
 
-    func testStatsCommand_remote_usesInteractiveBashWithFallback() {
-        // The inner shell must be interactive (bash -ic) so set -n is
-        // ignored — `bash -c` alone is non-interactive per the manual,
-        // even with a TTY. Fallback to sh -c for hosts without bash.
+    func testStatsCommand_remote_stdinDisablesEchoAndExits() {
+        // The stdin script must turn off TTY echo (so the script source
+        // doesn't pollute our output) and end with `exit` so the shell
+        // closes the session.
         let state = AppState()
         var host = HostConfig.localhost
         host.id = UUID()
         host.ssh.host = "example.com"
-        let (_, args) = state.statsCommand(host: host)
-        let combined = args.joined(separator: " ")
-        XCTAssertTrue(combined.contains("bash --norc -ic"),
-                      "expected interactive bash invocation, got: \(combined)")
-        XCTAssertTrue(combined.contains("|| sh -c"),
-                      "expected sh -c fallback after bash, got: \(combined)")
+        let (_, _, stdin) = state.statsCommand(host: host)
+        guard let script = stdin else {
+            XCTFail("expected stdin script for remote host")
+            return
+        }
+        XCTAssertTrue(script.contains("stty -echo"),
+                      "stdin script must suppress TTY echo")
+        XCTAssertTrue(script.contains("exit"),
+                      "stdin script must end the session with exit")
+        XCTAssertTrue(script.contains("---ONYX-OK-$((1+1))---"),
+                      "stdin script must include the execution-proof marker")
     }
 
     func testStatsCommand_includesExplicitPath() {
-        // We drop -l so the profile isn't sourced; that means we lose the
-        // user's PATH and have to add the standard tool locations
-        // explicitly. Verify the script does so.
+        // We don't go through the user's login profile, so PATH has to
+        // include standard tool locations explicitly.
         let state = AppState()
         var host = HostConfig.localhost
         host.id = UUID()
         host.ssh.host = "example.com"
-        let (_, args) = state.statsCommand(host: host)
-        let combined = args.joined(separator: " ")
-        XCTAssertTrue(combined.contains("/usr/bin"),
+        let (_, _, stdin) = state.statsCommand(host: host)
+        guard let script = stdin else {
+            XCTFail("expected stdin script for remote host")
+            return
+        }
+        XCTAssertTrue(script.contains("/usr/bin"),
                       "stats script should set an explicit PATH containing /usr/bin")
-        XCTAssertTrue(combined.contains("/opt/homebrew/bin"),
+        XCTAssertTrue(script.contains("/opt/homebrew/bin"),
                       "stats script should include Apple Silicon Homebrew path")
+    }
+
+    func testStatsCommand_local_doesNotUseStdin() {
+        // Local invocation has no noexec problem and uses -c directly.
+        let state = AppState()
+        let (_, args, stdin) = state.statsCommand(host: HostConfig.localhost)
+        XCTAssertNil(stdin, "local stats should not need stdin")
+        XCTAssertEqual(args.first, "-c",
+                       "local stats should pass script via -c; got: \(args)")
     }
 }
 

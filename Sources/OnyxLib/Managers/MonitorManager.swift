@@ -164,7 +164,7 @@ public class MonitorManager: ObservableObject {
 
     private func poll() {
         let hostID = appState.activeHost?.id ?? HostConfig.localhostID
-        let (cmd, args) = appState.statsCommand()
+        let (cmd, args, stdinScript) = appState.statsCommand()
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let process = Process()
             let pipe = Pipe()
@@ -173,8 +173,22 @@ public class MonitorManager: ObservableObject {
             process.standardOutput = pipe
             process.standardError = pipe
 
+            // For remote hosts the stats script is fed via stdin to an
+            // interactive ssh shell (see AppState.statsCommand).
+            let inputPipe: Pipe? = stdinScript.map { _ in Pipe() }
+            if let inputPipe = inputPipe {
+                process.standardInput = inputPipe
+            }
+
             do {
                 try process.run()
+
+                if let inputPipe = inputPipe,
+                   let scriptText = stdinScript,
+                   let data = scriptText.data(using: .utf8) {
+                    inputPipe.fileHandleForWriting.write(data)
+                    try? inputPipe.fileHandleForWriting.close()
+                }
 
                 let killTimer = DispatchSource.makeTimerSource(queue: .global())
                 killTimer.schedule(deadline: .now() + 10)

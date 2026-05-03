@@ -1410,8 +1410,11 @@ public class AppState: ObservableObject {
         return ("/usr/bin/ssh", args)
     }
 
-    /// Build the command + args to run a one-off stats collection
-    public func statsCommand(host h: HostConfig? = nil) -> (String, [String]) {
+    /// Build the command + args to run a one-off stats collection.
+    /// When `stdin` is non-nil the caller must feed it to the spawned
+    /// process's standard input. We use this for remote hosts to drive
+    /// an interactive SSH shell — see the comment on the SSH branch.
+    public func statsCommand(host h: HostConfig? = nil) -> (cmd: String, args: [String], stdin: String?) {
         let host = h ?? activeHost ?? .localhost
         // `set +vx` defensively disables verbose/xtrace if the remote
         // login profile turned them on — without it, every script line
@@ -1445,27 +1448,32 @@ public class AppState: ObservableObject {
 
         if host.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-            return (shell, ["-c", statsScript])
+            return (shell, ["-c", statsScript], nil)
         }
 
-        // `-tt` forces a remote pseudo-TTY. Combined with `bash -i` below
-        // it makes the inner shell *interactive*, which is the key:
-        // per the bash manual, `bash -c "..."` is non-interactive even
-        // with a TTY (the `-c` flag disqualifies it), but `bash -ic
-        // "..."` IS interactive. Interactive shells ignore `set -n`,
-        // and BASH_ENV is only sourced for non-interactive shells, so
-        // both common noexec triggers are defeated.
+        // To bypass remote noexec mode, we don't pass a command to ssh.
+        // `ssh -tt user@host` (no command) tells sshd to start the
+        // user's `$SHELL` *interactively* — no `-c`, so bash's rule
+        // about `-c` disqualifying interactive doesn't apply, and the
+        // shell is unambiguously interactive. Interactive shells ignore
+        // `set -n` and don't source `BASH_ENV`, so both common noexec
+        // triggers are defeated regardless of how the remote profile
+        // turned them on.
         //
-        // `--norc` skips /etc/bash.bashrc and ~/.bashrc which is where
-        // hostile config (set -nv) often lives. Fallback to plain
-        // `sh -c` for hosts without bash. Side effect: `\r\n` line
-        // endings (stripped in poll()) and an MOTD/banner that our
-        // section-based parser ignores.
+        // We drive the shell by piping the script to its stdin. `stty
+        // -echo` suppresses the input echo from the pseudo-TTY so we
+        // don't get the script source mixed into our output. Trailing
+        // `exit` closes the session.
         var args = sshBaseArgs(for: host)
         args.append("-tt")
         args.append(sshUserHost(for: host))
-        args.append("bash --norc -ic '\(statsScript)' 2>/dev/null || sh -c '\(statsScript)'")
-        return ("/usr/bin/ssh", args)
+        let stdinScript = """
+        stty -echo 2>/dev/null
+        \(statsScript)
+        exit
+
+        """
+        return ("/usr/bin/ssh", args, stdinScript)
     }
 
     /// Build a shell command that generates a key (if needed) and runs ssh-copy-id
