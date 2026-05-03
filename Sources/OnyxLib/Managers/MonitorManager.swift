@@ -324,15 +324,16 @@ public class MonitorManager: ObservableObject {
     /// short, user-facing message describing the failure mode. Only meaningful
     /// when called after a successful parse with `cpuUsage == nil`.
     ///
-    /// First checks for the `---SCRIPT-OK---` execution proof — if missing,
-    /// the script never ran on the remote (most likely the login shell has a
-    /// `set -n` / dry-run mode enabled in its profile, or refuses to execute
-    /// our `-c` argument). Otherwise reports on the *last* CPU section seen
-    /// (when verbose mode is on, the script source's `---CPU---` is echoed
-    /// before the real one and the actual top output lands in the last
-    /// section).
+    /// First checks for the `---ONYX-OK-2---` execution proof — `$((1+1))`
+    /// only evaluates to `2` if the shell actually ran the line. A shell
+    /// that's merely printing input (e.g. profile-level `set -nv`) leaves
+    /// the literal `$((1+1))` in place. If the executed marker is missing,
+    /// the script never ran on the remote. Otherwise reports on the *last*
+    /// CPU section seen (when verbose mode is on, the script source's
+    /// `---CPU---` is echoed before the real one and the actual top output
+    /// lands in the last section).
     public static func cpuDiagnostic(from output: String) -> String {
-        if !output.contains("---SCRIPT-OK---") {
+        if !output.contains("---ONYX-OK-2---") {
             return "Stats script did not execute on the remote — only its source came back. The remote login shell is likely refusing to run `-c` commands (e.g. it has `set -n` or a similar dry-run mode in its profile)."
         }
         let sections = output.components(separatedBy: "---")

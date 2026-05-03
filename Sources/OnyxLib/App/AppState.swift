@@ -1418,10 +1418,12 @@ public class AppState: ObservableObject {
         // gets echoed to stderr (which we merge into stdout) and pollutes
         // the section we're parsing.
         //
-        // The `---SCRIPT-OK---` marker at the end is an execution proof:
-        // if it's missing from the output, the script was printed but
-        // never actually ran on the remote (some hosts do this if the
-        // login shell has `set -n` or similar in its profile).
+        // The `---ONYX-OK-2---` end marker is an execution proof: the
+        // shell only emits "2" when it actually evaluates `$((1+1))`. If
+        // the script is merely printed (e.g. a profile-level `set -nv`
+        // makes the shell echo input but skip execution), the literal
+        // "$((1+1))" comes through instead and we know the script never
+        // ran.
         let statsScript = """
         set +vx 2>/dev/null; \
         echo "---UPTIME---"; uptime; \
@@ -1432,7 +1434,7 @@ public class AppState: ObservableObject {
         echo "---GPU---"; timeout 5 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null || \
         { GPU_PCT=$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o '"Device Utilization %"=[0-9]*' | head -1 | cut -d= -f2); \
         [ -n "$GPU_PCT" ] && echo "AGX,$GPU_PCT" || echo "N/A"; }; \
-        echo "---SCRIPT-OK---"
+        echo "---ONYX-OK-$((1+1))---"
         """
 
         if host.isLocal {
