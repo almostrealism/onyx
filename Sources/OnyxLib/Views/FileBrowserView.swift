@@ -1207,7 +1207,6 @@ struct FilePreviewOverlay: View {
     }
 
     private var attributedContent: AttributedString {
-        let ext = (fileName as NSString).pathExtension.lowercased()
         return SyntaxHighlighter.highlight(content, fileName: fileName)
     }
 }
