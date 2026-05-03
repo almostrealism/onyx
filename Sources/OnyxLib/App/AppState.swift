@@ -1448,11 +1448,15 @@ public class AppState: ObservableObject {
             return (shell, ["-c", statsScript])
         }
 
-        // Use `sh -c` (no `-l`) so we don't source the remote login
-        // profile. Profiles that set `set -n` / `set -nv` would put the
-        // shell in noexec mode and the script would only be printed,
-        // never run.
+        // `-tt` forces a remote pseudo-TTY which makes the remote shell
+        // *interactive*. Per the bash manual, `set -n` is ignored by
+        // interactive shells — so even if the remote's login profile or
+        // BASH_ENV turns on noexec, our script will still execute. The
+        // only side effect is `\r\n` line endings (stripped in poll())
+        // and possibly an MOTD/banner before our markers (parser ignores
+        // anything outside `---FOO---` sections).
         var args = sshBaseArgs(for: host)
+        args.append("-tt")
         args.append(sshUserHost(for: host))
         args.append("sh -c '\(statsScript)'")
         return ("/usr/bin/ssh", args)

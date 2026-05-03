@@ -204,6 +204,21 @@ final class AppStateTests: XCTestCase {
                       "expected sh -c invocation, got: \(combined)")
     }
 
+    func testStatsCommand_remote_forcesInteractiveTTY() {
+        // `-tt` forces the remote shell to be interactive so that
+        // profile-level `set -n` is ignored (interactive shells skip
+        // noexec). Without this flag, hosts that turn on noexec via a
+        // system bashrc / BASH_ENV / etc. silently echo the script
+        // instead of running it.
+        let state = AppState()
+        var host = HostConfig.localhost
+        host.id = UUID()
+        host.ssh.host = "example.com"
+        let (_, args) = state.statsCommand(host: host)
+        XCTAssertTrue(args.contains("-tt"),
+                      "stats SSH must pass -tt to force interactive TTY (defeats remote set -n); got: \(args)")
+    }
+
     func testStatsCommand_includesExplicitPath() {
         // We drop -l so the profile isn't sourced; that means we lose the
         // user's PATH and have to add the standard tool locations

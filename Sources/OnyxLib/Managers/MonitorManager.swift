@@ -187,7 +187,12 @@ public class MonitorManager: ObservableObject {
                 killTimer.cancel()
 
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
+                // Stats SSH uses `-tt` (forces interactive TTY to bypass
+                // remote `set -n`) which makes line endings `\r\n`. Drop
+                // the `\r`s so section delimiters like `---CPU---\n` and
+                // line-by-line scanning work the same as for non-TTY hosts.
+                let output = (String(data: data, encoding: .utf8) ?? "")
+                    .replacingOccurrences(of: "\r", with: "")
 
                 DispatchQueue.main.async { self?.pollCount += 1 }
 
