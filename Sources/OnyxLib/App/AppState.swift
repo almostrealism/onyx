@@ -1424,8 +1424,14 @@ public class AppState: ObservableObject {
         // makes the shell echo input but skip execution), the literal
         // "$((1+1))" comes through instead and we know the script never
         // ran.
+        //
+        // We append standard tool locations to PATH explicitly because
+        // we deliberately avoid `-l` (login shell) below — sourcing the
+        // remote profile is exactly what triggers the noexec failure on
+        // some hosts.
         let statsScript = """
         set +vx 2>/dev/null; \
+        PATH="${PATH:-}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"; \
         echo "---UPTIME---"; uptime; \
         echo "---CPU---"; CPU_OUT=$(top -bn1 2>/dev/null | head -5); \
         if [ -n "$CPU_OUT" ]; then echo "$CPU_OUT"; else top -l1 -s0 2>/dev/null | head -10; fi; \
@@ -1439,12 +1445,16 @@ public class AppState: ObservableObject {
 
         if host.isLocal {
             let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-            return (shell, ["-lc", statsScript])
+            return (shell, ["-c", statsScript])
         }
 
+        // Use `sh -c` (no `-l`) so we don't source the remote login
+        // profile. Profiles that set `set -n` / `set -nv` would put the
+        // shell in noexec mode and the script would only be printed,
+        // never run.
         var args = sshBaseArgs(for: host)
         args.append(sshUserHost(for: host))
-        args.append("exec $SHELL -lc '\(statsScript)'")
+        args.append("sh -c '\(statsScript)'")
         return ("/usr/bin/ssh", args)
     }
 

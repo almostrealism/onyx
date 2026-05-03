@@ -180,6 +180,45 @@ final class AppStateTests: XCTestCase {
         XCTAssertFalse(state.showSettings)
         XCTAssertEqual(state.activeRightPanel, .notes) // not dismissed yet
     }
+
+    // MARK: - statsCommand shape
+
+    func testStatsCommand_remote_doesNotUseLoginShell() {
+        // Sourcing the remote login profile triggers noexec on hosts that
+        // have `set -n` in their profile, causing the stats script to be
+        // printed but never executed. Make sure we never regress to `-l`.
+        let state = AppState()
+        var host = HostConfig.localhost
+        host.id = UUID()
+        host.label = "remote-host"
+        host.ssh.host = "example.com"
+        host.ssh.user = "tester"
+        let (cmd, args) = state.statsCommand(host: host)
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        let combined = args.joined(separator: " ")
+        XCTAssertFalse(combined.contains("-lc"),
+                       "stats command must not use login shell (-lc) for remote hosts; got: \(combined)")
+        XCTAssertFalse(combined.contains("-l "),
+                       "stats command must not pass -l to the remote shell; got: \(combined)")
+        XCTAssertTrue(combined.contains("sh -c "),
+                      "expected sh -c invocation, got: \(combined)")
+    }
+
+    func testStatsCommand_includesExplicitPath() {
+        // We drop -l so the profile isn't sourced; that means we lose the
+        // user's PATH and have to add the standard tool locations
+        // explicitly. Verify the script does so.
+        let state = AppState()
+        var host = HostConfig.localhost
+        host.id = UUID()
+        host.ssh.host = "example.com"
+        let (_, args) = state.statsCommand(host: host)
+        let combined = args.joined(separator: " ")
+        XCTAssertTrue(combined.contains("/usr/bin"),
+                      "stats script should set an explicit PATH containing /usr/bin")
+        XCTAssertTrue(combined.contains("/opt/homebrew/bin"),
+                      "stats script should include Apple Silicon Homebrew path")
+    }
 }
 
 // MARK: - RightPanel State Tests
