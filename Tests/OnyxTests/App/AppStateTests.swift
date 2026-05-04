@@ -263,6 +263,87 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(args.first, "-c",
                        "local stats should pass script via -c; got: \(args)")
     }
+
+    // MARK: - generic remoteScript shape (CLAUDE.md "Remote command execution")
+
+    func testRemoteScript_remote_passesScriptViaStdinNotCommand() {
+        // The whole point of remoteScript: don't pass a command argument
+        // to ssh, drive an interactive shell via stdin. Any data-reading
+        // SSH caller must use this pattern.
+        let state = AppState()
+        var host = HostConfig.localhost
+        host.id = UUID()
+        host.ssh.host = "example.com"
+        host.ssh.user = "tester"
+        let (cmd, args, stdin) = state.remoteScript("git status --porcelain", host: host)
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        XCTAssertNotNil(stdin, "remoteScript must pass the script via stdin for remote hosts")
+        XCTAssertEqual(args.last, "tester@example.com",
+                       "ssh args must end at user@host — no command argument after; got: \(args)")
+        XCTAssertTrue(args.contains("-tt"),
+                      "remoteScript must force pseudo-TTY so the remote shell is interactive")
+    }
+
+    func testRemoteScript_remote_stdinContainsWrappedScript() {
+        // The stdin must include the safety wrapping (PATH, set +vx,
+        // execution marker) PLUS the caller's actual script body.
+        let state = AppState()
+        var host = HostConfig.localhost
+        host.id = UUID()
+        host.ssh.host = "example.com"
+        let (_, _, stdin) = state.remoteScript("uptime", host: host)
+        guard let script = stdin else {
+            XCTFail("expected stdin")
+            return
+        }
+        XCTAssertTrue(script.contains("uptime"),
+                      "stdin must include caller's body verbatim")
+        XCTAssertTrue(script.contains("set +vx"),
+                      "stdin must include verbose-mode defense")
+        XCTAssertTrue(script.contains("$((1+1))"),
+                      "stdin must include unevaluated execution marker")
+        XCTAssertTrue(script.contains("stty -echo"),
+                      "stdin must disable TTY echo to keep our output clean")
+        XCTAssertTrue(script.contains("exit"),
+                      "stdin must end the session with exit")
+    }
+
+    func testRemoteScript_local_usesShellMinusC() {
+        let state = AppState()
+        let (_, args, stdin) = state.remoteScript("uptime", host: HostConfig.localhost)
+        XCTAssertNil(stdin, "local invocation should not need stdin")
+        XCTAssertEqual(args.first, "-c",
+                       "local invocation should pass wrapped script via -c; got: \(args)")
+    }
+
+    // MARK: - sshCommand / dockerTmuxCommand shape (interactive — should stay safe)
+
+    func testSshCommand_remote_allocatesTTY() {
+        // Interactive sessions are safe by virtue of being interactive
+        // (set -n is ignored in interactive shells). Lock the -t shape
+        // so a future refactor doesn't accidentally drop it.
+        let state = AppState()
+        var host = HostConfig.localhost
+        host.id = UUID()
+        host.ssh.host = "example.com"
+        host.ssh.user = "tester"
+        host.ssh.tmuxSession = "onyx"
+        let (cmd, args) = state.sshCommand(host: host, sessionName: "onyx")
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        XCTAssertTrue(args.contains("-t"),
+                      "sshCommand must allocate a TTY for the interactive tmux session; got: \(args)")
+    }
+
+    func testDockerTmuxCommand_remote_allocatesTTY() {
+        let state = AppState()
+        var host = HostConfig.localhost
+        host.id = UUID()
+        host.ssh.host = "example.com"
+        let (cmd, args) = state.dockerTmuxCommand(host: host, container: "myapp", sessionName: "work")
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        XCTAssertTrue(args.contains("-t"),
+                      "dockerTmuxCommand must allocate a TTY; got: \(args)")
+    }
 }
 
 // MARK: - RightPanel State Tests

@@ -73,11 +73,54 @@ Managers depend on Stores, Services, and Models — not on Views or other Manage
 - Running SPM executables on macOS requires `NSApplication.shared.setActivationPolicy(.regular)` for proper GUI behavior.
 - `NSVisualEffectView` must NOT be injected into SwiftUI's contentView via AppDelegate — use `NSViewRepresentable` instead.
 - Background ZStack layers need `.allowsHitTesting(false)` to pass events through.
-- SSH direct commands don't source login profiles; wrap with `exec $SHELL -lc '...'` for PATH.
 - WKWebView state must NOT be read from `@Published` properties during SwiftUI `updateNSView` — it causes re-entry loops. Use KVO observations instead (`BrowserManager` pattern).
 - SSH ControlMaster paths must live in a directory without spaces — `~/.onyx/` not `~/Library/Application Support/`.
 - Broken pipe recovery: mark the mux stale (`markMuxStale(hostID)`) and clean up in `sshBaseArgs` before next use.
 - Topology-based session enumeration never wipes the session list on a single failed `docker ps` — it uses a grace period via `NetworkTopologyStore`.
+
+## Remote command execution
+
+**Before writing any new SSH-driven feature, read this section.** Hostile remote shells are real, and the lesson is hard-won.
+
+### The trap
+
+The naive pattern `ssh user@host "<command>"` invokes `$SHELL -c "<command>"` on the remote. If the remote login shell has `set -n` (noexec) turned on — via system bashrc, `BASH_ENV`, or an exotic `$SHELL` — **the command never runs**. The script source is echoed back via `set -v` (verbose) and our parser silently sees no real output. Every variant fails the same way: `sh -c`, `bash --norc -ic`, even `ssh -tt … bash -ic`. The outer shell is in noexec before our argument can run anything inside it.
+
+### The fix
+
+For any data-reading SSH command, **don't pass a command argument to ssh**. `ssh -tt user@host` (no command) starts the remote `$SHELL` *interactively* — bash's "interactive disqualified by `-c`" rule doesn't apply, the shell ignores `set -n`, and `BASH_ENV` is only sourced for non-interactive shells. Drive the shell by piping the script via stdin.
+
+This pattern is encapsulated in `Services/RemoteScript.swift` and `AppState.remoteScript(_:host:)`. Use them.
+
+```swift
+// Good — RemoteScript-based, noexec-safe:
+let (cmd, args, stdin) = appState.remoteScript("git status --porcelain")
+guard let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin) else {
+    // execution failed (noexec or connection error) — keep stale data
+    return
+}
+// `output` is already cleaned: \r stripped, execution marker removed
+
+// Bad — vulnerable to noexec hosts:
+let (cmd, args) = appState.remoteCommand("git status --porcelain")
+let output = FileBrowserManager.runProcess(cmd: cmd, args: args)  // empty/garbage on broken hosts
+```
+
+### When `remoteCommand` is still OK
+
+`remoteCommand` (the legacy `$SHELL -lc` pattern) is acceptable for **fire-and-forget side effects** where graceful failure on broken hosts is fine: hook setup (mkdir/chmod), MCP port cleanup. New uses should justify why noexec failure is harmless.
+
+### Interactive sessions are inherently safe
+
+`sshCommand`, `dockerTmuxCommand`, `dockerLogsCommand`, `dockerTopCommand` all open interactive remote sessions (tmux, docker exec -it, streaming `docker logs -f`). The remote shell IS interactive, so `set -n` is ignored. These don't need `remoteScript` and shouldn't be migrated — TTY allocation `-t` is enough.
+
+### Detecting noexec failure
+
+`RemoteScript.executionVerified(in: output)` checks for `---ONYX-OK-2---`. The marker uses `$((1+1))` — only an actually-evaluating shell emits the literal `2`; a noexec shell echoes the unevaluated form. `RemoteScript.nonExecutionDiagnostic` is the canonical user-facing message.
+
+### Tests
+
+`Tests/OnyxTests/App/AppStateTests.swift` locks the shape of every SSH command builder. If you add a new one, add a regression test there: vulnerable patterns should fail at test time, not on a user's broken remote a year later.
 
 ## Feedback
 

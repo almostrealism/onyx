@@ -333,3 +333,122 @@ final class MonitorCPUDiagnosticTests: XCTestCase {
         XCTAssertNil(sample?.cpuUsage, "cpuUsage should be nil when no recognized format matches")
     }
 }
+
+// MARK: - Parser resilience to noisy SSH output
+//
+// `ssh -tt` adds CR-LF endings, banners, and shell-prompt artifacts.
+// These tests pin down that the parser still extracts CPU/mem/etc.
+// when the real top output is buried in noise — the kinds of contamination
+// we observed during the long debug session that motivated RemoteScript.
+
+final class MonitorParserResilienceTests: XCTestCase {
+
+    func testParse_extractsCpuFromOutputWithMOTDBanner() {
+        // Many remote hosts print an MOTD before our markers. The parser
+        // must ignore everything outside the section delimiters.
+        let output = """
+        ============================================
+         Welcome to host42 — last login: yesterday
+         Unauthorized access prohibited
+        ============================================
+
+        ---UPTIME---
+         12:34:56 up 1 day, load average: 0.10, 0.20, 0.30
+        ---CPU---
+        %Cpu(s):  3.5 us,  1.2 sy,  0.0 ni, 95.3 id,  0.0 wa
+        ---MEM---
+        Mem: 16000 4000 12000
+        ---GPU---
+        N/A
+        """
+        let sample = MonitorManager.parse(output: output)
+        XCTAssertEqual(sample?.cpuUsage ?? -1, 100.0 - 95.3, accuracy: 0.01,
+                       "MOTD banner before markers should not break parsing")
+        XCTAssertEqual(sample?.loadAvg1 ?? -1, 0.10, accuracy: 0.001,
+                       "load average should still parse with banner present")
+    }
+
+    func testParse_extractsCpuWhenScriptSourceContaminatesSection() {
+        // Verbose-mode echo prepends the script source to each section.
+        // The parser falls back to scanning the entire output, so the
+        // real top line is found even when section[0] is junk.
+        let output = """
+        ---UPTIME---
+        ; uptime; echo "---CPU---"; CPU_OUT=$(top -bn1)...
+         12:00:00 up 1 day, load average: 0.10, 0.20, 0.30
+        ---CPU---
+        ; CPU_OUT=$(top -bn1)...; if [ -n "$CPU_OUT" ];...
+        %Cpu(s):  2.0 us,  1.0 sy,  0.0 ni, 97.0 id,  0.0 wa
+        ---MEM---
+        Mem: 8000 2000 6000
+        ---GPU---
+        N/A
+        """
+        let sample = MonitorManager.parse(output: output)
+        XCTAssertEqual(sample?.cpuUsage ?? -1, 100.0 - 97.0, accuracy: 0.01,
+                       "real %Cpu line should still be found when script source pollutes the section")
+    }
+
+    func testParse_handlesShellPromptInOutput() {
+        // If `stty -echo` fails or isn't honored, prompts may appear.
+        // They shouldn't break section parsing.
+        let output = """
+        $ ---UPTIME---
+         12:00:00 up 5 days, load average: 1.00, 1.50, 2.00
+        $ ---CPU---
+        %Cpu(s):  10.0 us,  5.0 sy,  0.0 ni, 85.0 id
+        $ ---MEM---
+        Mem: 16000 8000 8000
+        $ ---GPU---
+        N/A
+        """
+        let sample = MonitorManager.parse(output: output)
+        XCTAssertEqual(sample?.cpuUsage ?? -1, 100.0 - 85.0, accuracy: 0.01,
+                       "shell prompts before markers should not break parsing")
+    }
+
+    func testRemoteScript_cleanedOutputIsParseableAfterTTYStrip() {
+        // End-to-end: an output with CR-LF endings (as ssh -tt produces)
+        // gets cleaned by RemoteScript and parsed correctly.
+        let raw = "---UPTIME---\r\n 12:00:00 up 1 day, load average: 0.5, 0.5, 0.5\r\n---CPU---\r\n%Cpu(s):  3.0 us, 1.0 sy, 0.0 ni, 96.0 id\r\n---MEM---\r\nMem: 16000 4000 12000\r\n---GPU---\r\nN/A\r\n---ONYX-OK-2---\r\n"
+        let cleaned = RemoteScript.cleanedOutput(raw)
+        XCTAssertFalse(cleaned.contains("\r"), "cleaned output should have no CR")
+        let sample = MonitorManager.parse(output: cleaned)
+        XCTAssertEqual(sample?.cpuUsage ?? -1, 100.0 - 96.0, accuracy: 0.01,
+                       "parser should work on cleaned ssh -tt output")
+    }
+
+    func testCpuDiagnostic_recognizesNoexecBeforeUnrecognizedFormat() {
+        // The "did not execute" branch must come BEFORE the "unrecognized
+        // format" branch. Otherwise we'd say "look at the top output we
+        // can't parse" when there is no top output, only echoed source.
+        let output = """
+        set +vx 2>/dev/null
+        PATH=...
+        echo "---UPTIME---"; uptime; echo "---CPU---"; ...
+        echo "---ONYX-OK-$((1+1))---"
+        """
+        let msg = MonitorManager.cpuDiagnostic(from: output)
+        XCTAssertTrue(msg.contains("did not execute"),
+                      "noexec must be diagnosed first; got: \(msg)")
+    }
+
+    func testCpuDiagnostic_unrecognizedFormatOnlyWhenScriptActuallyRan() {
+        // If the marker IS present, the script ran; any failure to extract
+        // CPU is a parse-format issue, not a noexec issue.
+        let output = """
+        ---UPTIME---
+        12:00:00 up
+        ---CPU---
+        SomeWeirdHeader: 12345 with no recognized fields
+        ---MEM---
+        ---GPU---
+        ---ONYX-OK-2---
+        """
+        let msg = MonitorManager.cpuDiagnostic(from: output)
+        XCTAssertFalse(msg.contains("did not execute"),
+                       "should not claim noexec when marker is present; got: \(msg)")
+        XCTAssertTrue(msg.contains("Unrecognized") || msg.contains("empty") || msg.contains("no output"),
+                      "should report unrecognized/empty top output; got: \(msg)")
+    }
+}
