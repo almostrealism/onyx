@@ -358,6 +358,9 @@ final class CodableRoundTripTests: XCTestCase {
         XCTAssertEqual(config.windowOpacity, 0.82, accuracy: 0.001)
         XCTAssertEqual(config.accentHex, "66CCFF")
         XCTAssertEqual(config.windowTitle, "Onyx")
+        // Debug aids must default off — they're noisy in normal use.
+        XCTAssertFalse(config.showFocusOutline,
+                       "focus outline should default off; it's a debug aid")
     }
 
     func testSSHConfigDecodesFullJSON() throws {

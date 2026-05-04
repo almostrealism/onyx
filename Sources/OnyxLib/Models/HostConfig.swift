@@ -89,6 +89,11 @@ public struct AppearanceConfig: Codable {
     /// approve/deny a tool call from the Onyx UI. Off by default — when off,
     /// Claude's normal in-terminal permission prompt is used.
     public var claudeHooksGatePermissions: Bool = false
+    /// When true, draws a 2px orange outline around whichever component
+    /// currently holds keyboard focus (terminal / right panel / overlay).
+    /// Useful when debugging focus-routing issues; off by default because
+    /// it's visually noisy in normal use.
+    public var showFocusOutline: Bool = false
 
     /// Effective terminal font size.
     public var effectiveTerminalFontSize: Double {

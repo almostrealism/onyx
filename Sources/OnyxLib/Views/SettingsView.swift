@@ -230,6 +230,29 @@ struct SettingsView: View {
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
 
+                                // Debug: focus outline visualization
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("DEBUG")
+                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .tracking(2)
+
+                                    Toggle(isOn: Binding(
+                                        get: { appState.appearance.showFocusOutline },
+                                        set: { appState.appearance.showFocusOutline = $0 }
+                                    )) {
+                                        Text("Show keyboard focus outline")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.8))
+                                    }
+                                    .toggleStyle(.switch)
+
+                                    Text("Draws an orange outline around whichever component currently holds keyboard focus (terminal, right panel, overlay). Useful when investigating focus-routing issues; leave off otherwise.")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(.gray.opacity(0.4))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+
                                 // Reminders list picker
                                 if remindersManager.accessGranted {
                                     VStack(alignment: .leading, spacing: 4) {

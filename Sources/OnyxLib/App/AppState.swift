@@ -171,8 +171,13 @@ public class AppState: ObservableObject {
     @Published public var showURLBar = false
     @Published public var urlBarText: String = ""
     @Published public var startupStatus: String = "Initializing..."
-    /// Show focus outline.
-    public var showFocusOutline = true
+    /// Whether to draw the orange focus outline around the active
+    /// component. Off by default (it's noisy); flip on in Settings →
+    /// Debug when investigating focus-routing issues.
+    public var showFocusOutline: Bool {
+        get { appearance.showFocusOutline }
+        set { appearance.showFocusOutline = newValue }
+    }
 
     /// Tracks which component should logically have keyboard focus.
     /// Updated explicitly when overlays open/close and when the user clicks.
