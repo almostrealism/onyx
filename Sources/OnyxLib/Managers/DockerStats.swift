@@ -115,7 +115,7 @@ public class DockerStatsManager: ObservableObject {
         docker stats --no-stream --format "STAT|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}" 2>/dev/null; \
         docker ps --format "PS|{{.Names}}|{{.Status}}" 2>/dev/null
         """
-        let (cmd, args) = appState.remoteCommand(script)
+        let (cmd, args, stdinScript) = appState.remoteScript(script)
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let process = Process()
@@ -125,8 +125,22 @@ public class DockerStatsManager: ObservableObject {
             process.standardOutput = pipe
             process.standardError = FileHandle.nullDevice
 
+            // Remote hosts: feed the wrapped script via stdin to defeat
+            // any noexec mode in the remote login profile.
+            let inputPipe: Pipe? = stdinScript.map { _ in Pipe() }
+            if let inputPipe = inputPipe {
+                process.standardInput = inputPipe
+            }
+
             do {
                 try process.run()
+
+                if let inputPipe = inputPipe,
+                   let scriptText = stdinScript,
+                   let data = scriptText.data(using: .utf8) {
+                    inputPipe.fileHandleForWriting.write(data)
+                    try? inputPipe.fileHandleForWriting.close()
+                }
 
                 let killTimer = DispatchSource.makeTimerSource(queue: .global())
                 killTimer.schedule(deadline: .now() + 10)
@@ -137,7 +151,16 @@ public class DockerStatsManager: ObservableObject {
                 killTimer.cancel()
 
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
+                let raw = String(data: data, encoding: .utf8) ?? ""
+                // If the script never executed (remote noexec), mark
+                // unavailable and bail. The existing parser would also
+                // produce empty results, but failing explicitly here
+                // keeps the cause visible if we later surface it in UI.
+                guard RemoteScript.executionVerified(in: raw) else {
+                    DispatchQueue.main.async { self?.isAvailable = false }
+                    return
+                }
+                let output = RemoteScript.cleanedOutput(raw)
 
                 let (cores, parsed) = Self.parse(output: output)
 

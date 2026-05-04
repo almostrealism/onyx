@@ -593,12 +593,24 @@ public class FileBrowserManager: ObservableObject {
         let timedOut: Bool
     }
 
-    static func runProcess(cmd: String, args: [String]) -> String? {
-        let result = runProcessWithStatus(cmd: cmd, args: args)
+    static func runProcess(cmd: String, args: [String], stdin: String? = nil) -> String? {
+        let result = runProcessWithStatus(cmd: cmd, args: args, stdin: stdin)
         return result.output
     }
 
-    static func runProcessWithStatus(cmd: String, args: [String], timeout: TimeInterval = 10) -> ProcessResult {
+    /// Run a (cmd, args, stdin?) triple produced by `AppState.remoteScript`,
+    /// verify the script actually executed on the remote, and return the
+    /// cleaned output (CR stripped, marker removed). Returns nil if the
+    /// remote shell didn't run the script (noexec) — caller can treat that
+    /// as a failure indistinguishable from a connection error, which is
+    /// the right call: the stale data on screen is more useful than empty.
+    static func runRemoteScript(cmd: String, args: [String], stdin: String?, timeout: TimeInterval = 10) -> String? {
+        let result = runProcessWithStatus(cmd: cmd, args: args, stdin: stdin, timeout: timeout)
+        guard let output = result.output, RemoteScript.executionVerified(in: output) else { return nil }
+        return RemoteScript.cleanedOutput(output)
+    }
+
+    static func runProcessWithStatus(cmd: String, args: [String], stdin: String? = nil, timeout: TimeInterval = 10) -> ProcessResult {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: cmd)
@@ -606,8 +618,20 @@ public class FileBrowserManager: ObservableObject {
         process.standardOutput = pipe
         process.standardError = pipe
 
+        let inputPipe: Pipe? = stdin.map { _ in Pipe() }
+        if let inputPipe = inputPipe {
+            process.standardInput = inputPipe
+        }
+
         do {
             try process.run()
+
+            if let inputPipe = inputPipe,
+               let scriptText = stdin,
+               let data = scriptText.data(using: .utf8) {
+                inputPipe.fileHandleForWriting.write(data)
+                try? inputPipe.fileHandleForWriting.close()
+            }
 
             // Track whether OUR timer killed the process so callers can
             // distinguish a timeout from a remote-side error of the same code.
@@ -706,13 +730,14 @@ public class FileBrowserManager: ObservableObject {
         searchResults.clear()
 
         let escaped = escapeForShell(basePath)
-        // Use find with -iname for case-insensitive name matching, limit output
-        // Avoid single quotes since remoteCommand wraps in single quotes for SSH
+        // Use find with -iname for case-insensitive name matching, limit output.
+        // Single-quote-safe: remoteScript wraps the script and feeds it via
+        // stdin to an interactive ssh shell, no command-line escaping needed.
         let safeQuery = query
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let script = "find \(escaped) -maxdepth 10 -name \".*\" -prune -o -iname \"*\(safeQuery)*\" -print 2>/dev/null | head -\(searchResults.maxResults)"
-        let (cmd, args) = appState.remoteCommand(script)
+        let (cmd, args, stdinScript) = appState.remoteScript(script)
 
         let process = Process()
         let pipe = Pipe()
@@ -720,6 +745,11 @@ public class FileBrowserManager: ObservableObject {
         process.arguments = args
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
+
+        let inputPipe: Pipe? = stdinScript.map { _ in Pipe() }
+        if let inputPipe = inputPipe {
+            process.standardInput = inputPipe
+        }
 
         let baseForStripping = basePath.hasSuffix("/") ? basePath : basePath + "/"
 
@@ -732,10 +762,15 @@ public class FileBrowserManager: ObservableObject {
             }
 
             if let text = String(data: data, encoding: .utf8) {
-                let lines = text.components(separatedBy: "\n")
+                // Strip CR from ssh -tt CR-LF endings so split + trim work
+                // identically across local and remote.
+                let lines = text.replacingOccurrences(of: "\r", with: "")
+                    .components(separatedBy: "\n")
                 for line in lines {
                     let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { continue }
+                    // Drop the execution marker — it isn't a search result.
+                    if trimmed == RemoteScript.executionMarker { continue }
 
                     // Strip base path prefix to get relative path
                     let relative: String
@@ -766,6 +801,12 @@ public class FileBrowserManager: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
                 try process.run()
+                if let inputPipe = inputPipe,
+                   let scriptText = stdinScript,
+                   let data = scriptText.data(using: .utf8) {
+                    inputPipe.fileHandleForWriting.write(data)
+                    try? inputPipe.fileHandleForWriting.close()
+                }
                 process.waitUntilExit()
             } catch {
                 // ignore

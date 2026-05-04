@@ -10,7 +10,7 @@
 // Invariants:
 //   - currentRepoPath reflects the path of the most recent checkAndLoad call
 //   - isGitRepo and repoStatus are cleared when checkAndLoad finds no repo
-//   - All commands are issued via AppState.remoteCommand against the
+//   - All commands are issued via AppState.remoteScript against the
 //     currently active host
 //
 // See: ADR-004 (per-host isolation)
@@ -68,10 +68,10 @@ public class GitManager: ObservableObject {
         git -C \(escaped) rev-parse --show-toplevel 2>/dev/null
         """
 
-        let (cmd, args) = appState.remoteCommand(script)
+        let (cmd, args, stdin) = appState.remoteScript(script)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = FileBrowserManager.runProcess(cmd: cmd, args: args)
+            let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoading = false
@@ -114,10 +114,10 @@ public class GitManager: ObservableObject {
             script += " -- \(escapedFile)"
         }
 
-        let (cmd, args) = appState.remoteCommand(script)
+        let (cmd, args, stdin) = appState.remoteScript(script)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = FileBrowserManager.runProcess(cmd: cmd, args: args)
+            let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoadingLog = false
@@ -143,10 +143,10 @@ public class GitManager: ObservableObject {
         git -C \(escaped) diff-tree -p --stat \(hash) 2>/dev/null
         """
 
-        let (cmd, args) = appState.remoteCommand(script)
+        let (cmd, args, stdin) = appState.remoteScript(script)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = FileBrowserManager.runProcess(cmd: cmd, args: args)
+            let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoadingCommit = false
@@ -181,10 +181,10 @@ public class GitManager: ObservableObject {
             script = "git -C \(escaped) diff -- '\(filePath)' 2>/dev/null"
         }
 
-        let (cmd, args) = appState.remoteCommand(script)
+        let (cmd, args, stdin) = appState.remoteScript(script)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = FileBrowserManager.runProcess(cmd: cmd, args: args)
+            let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoadingDiff = false
@@ -208,10 +208,10 @@ public class GitManager: ObservableObject {
         git -C \(escaped) diff 2>/dev/null
         """
 
-        let (cmd, args) = appState.remoteCommand(script)
+        let (cmd, args, stdin) = appState.remoteScript(script)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = FileBrowserManager.runProcess(cmd: cmd, args: args)
+            let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoadingDiff = false
