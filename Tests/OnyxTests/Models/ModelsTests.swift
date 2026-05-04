@@ -363,6 +363,112 @@ final class CodableRoundTripTests: XCTestCase {
                        "focus outline should default off; it's a debug aid")
     }
 
+    // MARK: - AppearanceConfig forward-compatibility regression tests
+    //
+    // A previous version of this struct used Swift's synthesized Codable,
+    // which throws on missing keys. Adding ANY new field caused every
+    // existing user config on disk to fail decode; AppearanceStore.load
+    // silently swallowed the error and the next save wiped the file with
+    // defaults. The custom init(from:) in HostConfig.swift fixes this by
+    // using `decodeIfPresent ?? default` for every field, but only stays
+    // correct as long as future fields are threaded through it. These
+    // tests are the tripwire.
+
+    /// A future field added without updating CodingKeys / init(from:)
+    /// would either throw on missing keys or silently drop on roundtrip.
+    /// Either way, this minimal-JSON decode catches the original bug class.
+    func testAppearanceConfig_decodesEmptyJSON_neverThrows() {
+        let data = "{}".data(using: .utf8)!
+        XCTAssertNoThrow(try JSONDecoder().decode(AppearanceConfig.self, from: data),
+                         "AppearanceConfig must decode {} without throwing — otherwise adding a new field wipes every user's settings on next save")
+    }
+
+    /// Simulates a real pre-existing user config that was written before
+    /// some new field was added. The user's customizations must survive,
+    /// and the new field must take its declared default.
+    func testAppearanceConfig_decodesPartialJSON_preservesPresentFieldsAndDefaultsRest() throws {
+        let json = """
+        {
+          "fontSize": 14,
+          "accentHex": "FF6B6B",
+          "windowTitle": "MyOnyx",
+          "windowOpacity": 0.9,
+          "use12HourClock": true
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let config = try JSONDecoder().decode(AppearanceConfig.self, from: data)
+        // Present fields preserved
+        XCTAssertEqual(config.fontSize, 14)
+        XCTAssertEqual(config.accentHex, "FF6B6B")
+        XCTAssertEqual(config.windowTitle, "MyOnyx")
+        XCTAssertEqual(config.windowOpacity, 0.9, accuracy: 0.001)
+        XCTAssertTrue(config.use12HourClock)
+        // Missing fields default
+        XCTAssertEqual(config.terminalFontName, "SF Mono")
+        XCTAssertEqual(config.uiFontSize, 12)
+        XCTAssertFalse(config.claudeHooksGatePermissions)
+        XCTAssertFalse(config.showFocusOutline)
+        XCTAssertEqual(config.remindersLists, [])
+    }
+
+    /// Catches a field forgotten in CodingKeys: encoding then decoding
+    /// every persisted property must round-trip its value. If a future
+    /// dev adds a stored field but doesn't add it to the custom init's
+    /// CodingKeys, the field won't be encoded and this assertion fails.
+    func testAppearanceConfig_roundtripsAllStoredFields() throws {
+        var config = AppearanceConfig()
+        config.fontSize = 17
+        config.terminalFontSize = 19
+        config.terminalFontName = "Menlo"
+        config.uiFontSize = 14
+        config.windowOpacity = 0.5
+        config.accentHex = "C06BFF"
+        config.windowAccents = [0: "AAAAAA", 1: "BBBBBB"]
+        config.windowTitle = "Roundtrip"
+        config.remindersLists = ["Today", "Work"]
+        config.lastSessionByWindow = [0: "abc", 1: "def"]
+        config.extraTimezones = ["UTC", "America/New_York"]
+        config.use12HourClock = true
+        config.claudeHooksGatePermissions = true
+        config.showFocusOutline = true
+
+        let data = try JSONEncoder().encode(config)
+        let d = try JSONDecoder().decode(AppearanceConfig.self, from: data)
+
+        XCTAssertEqual(d.fontSize, 17)
+        XCTAssertEqual(d.terminalFontSize, 19)
+        XCTAssertEqual(d.terminalFontName, "Menlo")
+        XCTAssertEqual(d.uiFontSize, 14)
+        XCTAssertEqual(d.windowOpacity, 0.5, accuracy: 0.001)
+        XCTAssertEqual(d.accentHex, "C06BFF")
+        XCTAssertEqual(d.windowAccents, [0: "AAAAAA", 1: "BBBBBB"])
+        XCTAssertEqual(d.windowTitle, "Roundtrip")
+        XCTAssertEqual(d.remindersLists, ["Today", "Work"])
+        XCTAssertEqual(d.lastSessionByWindow, [0: "abc", 1: "def"])
+        XCTAssertEqual(d.extraTimezones, ["UTC", "America/New_York"])
+        XCTAssertTrue(d.use12HourClock)
+        XCTAssertTrue(d.claudeHooksGatePermissions)
+        XCTAssertTrue(d.showFocusOutline)
+    }
+
+    /// Tripwire: if you add a stored property to AppearanceConfig, this
+    /// fails until you bump the count. The failure message tells you
+    /// what else needs updating. Heavy-handed by design — the cost of
+    /// missing one of those steps is wiping every user's settings.
+    func testAppearanceConfig_storedPropertyCount_isLocked() {
+        let count = Mirror(reflecting: AppearanceConfig()).children.count
+        XCTAssertEqual(count, 15, """
+            AppearanceConfig has \(count) stored properties but the test
+            expects 15. If you ADDED a field, you must also:
+              1. Add it to `CodingKeys` in HostConfig.swift
+              2. Add a `decodeIfPresent(...) ?? <default>` line in `init(from:)`
+              3. Add a non-default mutation to testAppearanceConfig_roundtripsAllStoredFields
+              4. Bump the expected count in this test
+            Skipping any of these wipes every user's settings on the next save.
+            """)
+    }
+
     func testSSHConfigDecodesFullJSON() throws {
         let json = #"{"host":"server.io","user":"bob","port":22,"tmuxSession":"onyx","identityFile":""}"#
         let data = json.data(using: .utf8)!

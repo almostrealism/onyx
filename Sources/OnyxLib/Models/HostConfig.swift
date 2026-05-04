@@ -128,4 +128,37 @@ public struct AppearanceConfig: Codable {
             remindersList = nil
         }
     }
+
+    // Forward-compatible decode: every field is decoded with a default
+    // fallback so adding a new field never makes existing user configs
+    // fail to decode (and silently get wiped by AppearanceStore.load).
+    // **If you add a field above, add a matching decodeIfPresent line
+    // here.** A test in Tests/OnyxTests/Models/ModelsTests.swift verifies
+    // a stripped-down JSON still decodes to defaults for missing keys.
+    private enum CodingKeys: String, CodingKey {
+        case fontSize, terminalFontSize, terminalFontName, uiFontSize
+        case windowOpacity, accentHex, windowAccents, windowTitle
+        case remindersList, remindersLists, lastSessionByWindow
+        case extraTimezones, use12HourClock
+        case claudeHooksGatePermissions, showFocusOutline
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.fontSize                   = try c.decodeIfPresent(Double.self,         forKey: .fontSize)                   ?? 13
+        self.terminalFontSize           = try c.decodeIfPresent(Double.self,         forKey: .terminalFontSize)
+        self.terminalFontName           = try c.decodeIfPresent(String.self,         forKey: .terminalFontName)           ?? "SF Mono"
+        self.uiFontSize                 = try c.decodeIfPresent(Double.self,         forKey: .uiFontSize)                 ?? 12
+        self.windowOpacity              = try c.decodeIfPresent(Double.self,         forKey: .windowOpacity)              ?? 0.82
+        self.accentHex                  = try c.decodeIfPresent(String.self,         forKey: .accentHex)                  ?? "66CCFF"
+        self.windowAccents              = try c.decodeIfPresent([Int: String].self,  forKey: .windowAccents)              ?? [:]
+        self.windowTitle                = try c.decodeIfPresent(String.self,         forKey: .windowTitle)                ?? "Onyx"
+        self.remindersList              = try c.decodeIfPresent(String.self,         forKey: .remindersList)
+        self.remindersLists             = try c.decodeIfPresent([String].self,       forKey: .remindersLists)             ?? []
+        self.lastSessionByWindow        = try c.decodeIfPresent([Int: String].self,  forKey: .lastSessionByWindow)        ?? [:]
+        self.extraTimezones             = try c.decodeIfPresent([String].self,       forKey: .extraTimezones)             ?? []
+        self.use12HourClock             = try c.decodeIfPresent(Bool.self,           forKey: .use12HourClock)             ?? false
+        self.claudeHooksGatePermissions = try c.decodeIfPresent(Bool.self,           forKey: .claudeHooksGatePermissions) ?? false
+        self.showFocusOutline           = try c.decodeIfPresent(Bool.self,           forKey: .showFocusOutline)           ?? false
+    }
 }
