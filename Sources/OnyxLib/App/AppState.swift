@@ -1252,7 +1252,15 @@ public class AppState: ObservableObject {
     /// Uses export so it works before compound commands (while/if/for) in all shells.
     let extraPath = "PATH=$PATH:/opt/homebrew/bin:/usr/local/bin:/snap/bin"
 
-    /// Run a shell command on a host and return (executable, args)
+    /// Run a shell command on a host and return (executable, args).
+    ///
+    /// **Use only for fire-and-forget side-effect commands** (e.g.
+    /// hook-setup mkdir/chmod, port cleanup). For ANY data-reading
+    /// SSH command — anything whose output you parse — use
+    /// `remoteScript(_:host:)` instead. This variant uses `$SHELL -lc`
+    /// which fails silently on remotes that have `set -n` in their
+    /// login profile (the script source comes back instead of running).
+    /// See CLAUDE.md "Remote command execution".
     public func remoteCommand(_ script: String, host: HostConfig? = nil) -> (String, [String]) {
         let h = host ?? activeHost ?? .localhost
         if h.isLocal {
@@ -1264,6 +1272,44 @@ public class AppState: ObservableObject {
         args.append(sshUserHost(for: h))
         args.append("exec $SHELL -lc 'export \(extraPath); \(script)'")
         return ("/usr/bin/ssh", args)
+    }
+
+    /// Run a shell script on a host, returning (cmd, args, stdin?).
+    ///
+    /// The script is wrapped by `RemoteScript.wrap` (PATH setup, defensive
+    /// `set +vx`, and an execution-proof marker so callers can detect
+    /// noexec hosts). For local hosts the wrapped script goes through
+    /// `$SHELL -c`. For remote hosts the script is fed via stdin to an
+    /// interactive ssh session (`ssh -tt` with no command argument), which
+    /// bypasses every common noexec trap on hostile remotes.
+    ///
+    /// **The caller MUST feed `stdin` to the spawned process when non-nil**
+    /// (always non-nil for remote hosts). After execution, run the
+    /// captured output through `RemoteScript.cleanedOutput` before parsing
+    /// and check `RemoteScript.executionVerified` to detect noexec.
+    ///
+    /// Use this for any read-data SSH command. For interactive sessions
+    /// (tmux, docker exec -it) use `sshCommand` / `dockerTmuxCommand`
+    /// directly — those are safe by virtue of being interactive.
+    public func remoteScript(_ script: String, host: HostConfig? = nil) -> (cmd: String, args: [String], stdin: String?) {
+        let h = host ?? activeHost ?? .localhost
+        let wrapped = RemoteScript.wrap(script)
+
+        if h.isLocal {
+            let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+            return (shell, ["-c", wrapped], nil)
+        }
+
+        var args = sshBaseArgs(for: h)
+        args.append("-tt")
+        args.append(sshUserHost(for: h))
+        let stdinScript = """
+        stty -echo 2>/dev/null
+        \(wrapped)
+        exit
+
+        """
+        return ("/usr/bin/ssh", args, stdinScript)
     }
 
     /// Sanitize a session name for safe shell interpolation
@@ -1416,25 +1462,7 @@ public class AppState: ObservableObject {
     /// an interactive SSH shell — see the comment on the SSH branch.
     public func statsCommand(host h: HostConfig? = nil) -> (cmd: String, args: [String], stdin: String?) {
         let host = h ?? activeHost ?? .localhost
-        // `set +vx` defensively disables verbose/xtrace if the remote
-        // login profile turned them on — without it, every script line
-        // gets echoed to stderr (which we merge into stdout) and pollutes
-        // the section we're parsing.
-        //
-        // The `---ONYX-OK-2---` end marker is an execution proof: the
-        // shell only emits "2" when it actually evaluates `$((1+1))`. If
-        // the script is merely printed (e.g. a profile-level `set -nv`
-        // makes the shell echo input but skip execution), the literal
-        // "$((1+1))" comes through instead and we know the script never
-        // ran.
-        //
-        // We append standard tool locations to PATH explicitly because
-        // we deliberately avoid `-l` (login shell) below — sourcing the
-        // remote profile is exactly what triggers the noexec failure on
-        // some hosts.
         let statsScript = """
-        set +vx 2>/dev/null; \
-        PATH="${PATH:-}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"; \
         echo "---UPTIME---"; uptime; \
         echo "---CPU---"; CPU_OUT=$(top -bn1 2>/dev/null | head -5); \
         if [ -n "$CPU_OUT" ]; then echo "$CPU_OUT"; else top -l1 -s0 2>/dev/null | head -10; fi; \
@@ -1442,38 +1470,9 @@ public class AppState: ObservableObject {
         if [ -n "$MEM_OUT" ]; then echo "$MEM_OUT"; else vm_stat 2>/dev/null; fi; \
         echo "---GPU---"; timeout 5 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null || \
         { GPU_PCT=$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o '"Device Utilization %"=[0-9]*' | head -1 | cut -d= -f2); \
-        [ -n "$GPU_PCT" ] && echo "AGX,$GPU_PCT" || echo "N/A"; }; \
-        echo "---ONYX-OK-$((1+1))---"
+        [ -n "$GPU_PCT" ] && echo "AGX,$GPU_PCT" || echo "N/A"; }
         """
-
-        if host.isLocal {
-            let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-            return (shell, ["-c", statsScript], nil)
-        }
-
-        // To bypass remote noexec mode, we don't pass a command to ssh.
-        // `ssh -tt user@host` (no command) tells sshd to start the
-        // user's `$SHELL` *interactively* — no `-c`, so bash's rule
-        // about `-c` disqualifying interactive doesn't apply, and the
-        // shell is unambiguously interactive. Interactive shells ignore
-        // `set -n` and don't source `BASH_ENV`, so both common noexec
-        // triggers are defeated regardless of how the remote profile
-        // turned them on.
-        //
-        // We drive the shell by piping the script to its stdin. `stty
-        // -echo` suppresses the input echo from the pseudo-TTY so we
-        // don't get the script source mixed into our output. Trailing
-        // `exit` closes the session.
-        var args = sshBaseArgs(for: host)
-        args.append("-tt")
-        args.append(sshUserHost(for: host))
-        let stdinScript = """
-        stty -echo 2>/dev/null
-        \(statsScript)
-        exit
-
-        """
-        return ("/usr/bin/ssh", args, stdinScript)
+        return remoteScript(statsScript, host: host)
     }
 
     /// Build a shell command that generates a key (if needed) and runs ssh-copy-id

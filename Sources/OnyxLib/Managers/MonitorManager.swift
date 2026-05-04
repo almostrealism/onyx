@@ -201,10 +201,10 @@ public class MonitorManager: ObservableObject {
                 killTimer.cancel()
 
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                // Stats SSH uses `-tt` (forces interactive TTY to bypass
-                // remote `set -n`) which makes line endings `\r\n`. Drop
-                // the `\r`s so section delimiters like `---CPU---\n` and
-                // line-by-line scanning work the same as for non-TTY hosts.
+                // Normalize \r\n → \n (ssh -tt yields CR-LF) before parsing.
+                // We keep the execution marker visible in `output` so the
+                // diagnostic check below can see it; only the
+                // section-by-section parser sees the cleaned form.
                 let output = (String(data: data, encoding: .utf8) ?? "")
                     .replacingOccurrences(of: "\r", with: "")
 
@@ -343,17 +343,16 @@ public class MonitorManager: ObservableObject {
     /// short, user-facing message describing the failure mode. Only meaningful
     /// when called after a successful parse with `cpuUsage == nil`.
     ///
-    /// First checks for the `---ONYX-OK-2---` execution proof — `$((1+1))`
-    /// only evaluates to `2` if the shell actually ran the line. A shell
-    /// that's merely printing input (e.g. profile-level `set -nv`) leaves
-    /// the literal `$((1+1))` in place. If the executed marker is missing,
-    /// the script never ran on the remote. Otherwise reports on the *last*
+    /// First checks `RemoteScript.executionVerified` — the marker only
+    /// appears if the shell actually ran the script. A printing-only shell
+    /// (set -nv) leaves the unevaluated form in place. If unverified, the
+    /// script never ran on the remote. Otherwise reports on the *last*
     /// CPU section seen (when verbose mode is on, the script source's
     /// `---CPU---` is echoed before the real one and the actual top output
     /// lands in the last section).
     public static func cpuDiagnostic(from output: String) -> String {
-        if !output.contains("---ONYX-OK-2---") {
-            return "Stats script did not execute on the remote — only its source came back. The remote login shell is likely refusing to run `-c` commands (e.g. it has `set -n` or a similar dry-run mode in its profile)."
+        if !RemoteScript.executionVerified(in: output) {
+            return RemoteScript.nonExecutionDiagnostic
         }
         let sections = output.components(separatedBy: "---")
         var cpuSections: [String] = []
