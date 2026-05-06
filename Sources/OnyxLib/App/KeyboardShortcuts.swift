@@ -182,6 +182,9 @@ public class ShortcutManager {
                 case 35: // P → toggle 12/24hr clock
                     NotificationCenter.default.post(name: .toggleClockFormat, object: nil)
                     return nil
+                case 1: // S → toggle simple monitor layout
+                    NotificationCenter.default.post(name: .toggleSimpleMonitor, object: nil)
+                    return nil
                 default:
                     break
                 }

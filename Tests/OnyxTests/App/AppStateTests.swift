@@ -344,6 +344,27 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(args.contains("-t"),
                       "dockerTmuxCommand must allocate a TTY; got: \(args)")
     }
+
+    // MARK: - Monitor view modes
+
+    func testShowSimpleMonitor_defaultsOff() {
+        // Simple mode is opt-in per session via the `s` key; never the
+        // default — first-time users should see the full diagnostic view.
+        let state = AppState()
+        XCTAssertFalse(state.showSimpleMonitor)
+    }
+
+    func testShowSimpleMonitor_independentOfShowMonitor() {
+        // The simple-mode flag persists across show/hide cycles of the
+        // monitor itself, so closing and reopening the monitor with
+        // Escape doesn't reset the user's preferred layout.
+        let state = AppState()
+        state.showMonitor = true
+        state.showSimpleMonitor = true
+        state.showMonitor = false
+        XCTAssertTrue(state.showSimpleMonitor,
+                      "simple-mode should not reset when monitor is hidden")
+    }
 }
 
 // MARK: - RightPanel State Tests

@@ -24,6 +24,7 @@ public extension Notification.Name {
     static let toggleMemoryChart = Notification.Name("toggleMemoryChart")
     static let toggleAllContainers = Notification.Name("toggleAllContainers")
     static let toggleClockFormat = Notification.Name("toggleClockFormat")
+    static let toggleSimpleMonitor = Notification.Name("toggleSimpleMonitor")
     static let focusURLBar = Notification.Name("focusURLBar")
     static let tmuxResizeUp = Notification.Name("tmuxResizeUp")
     static let tmuxResizeDown = Notification.Name("tmuxResizeDown")
@@ -123,6 +124,11 @@ public class AppState: ObservableObject {
     @Published public var showSettings = false
     @Published public var showCommandPalette = false
     @Published public var showMonitor = false
+    /// When true, the monitor renders the "simple" layout: same headline
+    /// row, but giant CPU/MEM/GPU charts below, a compact strip of the
+    /// top-CPU containers along the bottom, and a small weekly Timing
+    /// tile in the bottom-right. Toggle with `s` while monitor is open.
+    @Published public var showSimpleMonitor = false
     @Published public var reconnectingHostID: UUID?
     /// Is reconnecting.
     public var isReconnecting: Bool {

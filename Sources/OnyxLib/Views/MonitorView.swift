@@ -272,7 +272,7 @@ struct MonitorView: View {
                         Text(monitor.useShortInterval ? "5s intervals" : "1m intervals")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.4))
-                        Text("(T interval · M memory · C containers · P 12/24hr)")
+                        Text("(T interval · M memory · C containers · P 12/24hr · S simple)")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.25))
                     }
@@ -284,6 +284,15 @@ struct MonitorView: View {
                             .padding(.horizontal, 40)
                     }
 
+                    if appState.showSimpleMonitor {
+                        SimpleMonitorBody(
+                            monitor: monitor,
+                            dockerStats: dockerStats,
+                            timing: appState.timing,
+                            accentColor: appState.accentColor
+                        )
+                        .padding(.horizontal, 40)
+                    } else {
                     // Main region: vertical split. Left ~65% holds timing,
                     // CPU/MEM/GPU charts, then reminders directly underneath.
                     // Right ~35% holds containers then connections.
@@ -347,6 +356,7 @@ struct MonitorView: View {
                         }
                     }
                     .padding(.horizontal, 40)
+                    } // end else (detailed view)
                 } else if let error = monitor.lastError {
                     VStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle")
@@ -607,6 +617,171 @@ struct CPUUnavailableCard: View {
             .frame(height: height, alignment: .topLeading)
             .background(Color.white.opacity(0.03))
         }
+    }
+}
+
+// MARK: - Simple Monitor view
+//
+// "S" toggles a stripped-down layout: same headline at top, then giant
+// CPU + MEM + GPU charts, a compact strip of the top-CPU containers,
+// and a small weekly Timing tile in the bottom-right. Designed for
+// at-a-glance ambient monitoring rather than the full diagnostic
+// dashboard.
+
+struct SimpleMonitorBody: View {
+    @ObservedObject var monitor: MonitorManager
+    @ObservedObject var dockerStats: DockerStatsManager
+    @ObservedObject var timing: TimingManager
+    let accentColor: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            // Reserve a fixed strip for containers + timing tile, give
+            // the rest to the charts. CPU gets the lion's share; MEM
+            // and GPU split the bottom portion of the chart area.
+            let bottomStripHeight: CGFloat = 56
+            let chartArea = max(0, geo.size.height - bottomStripHeight - 16)
+            let cpuHeight = chartArea * 0.55
+            let subHeight = max(40, chartArea * 0.42)
+
+            VStack(alignment: .leading, spacing: 8) {
+                // CPU chart — giant.
+                let cpuData = monitor.bucketedCPU()
+                if !cpuData.isEmpty {
+                    GridChart(title: "CPU", values: cpuData,
+                              accentColor: Color(hex: "66CCFF"),
+                              height: cpuHeight)
+                } else {
+                    CPUUnavailableCard(
+                        message: monitor.cpuDiagnostic
+                            ?? "CPU usage unavailable on this host.",
+                        height: cpuHeight
+                    )
+                }
+
+                // MEM and GPU side by side. Render whichever are
+                // available; if neither, the row is just empty space.
+                let memData = monitor.showMemoryChart ? monitor.bucketedMemory() : []
+                let gpuData = monitor.bucketedGPU()
+                let hasMem = !memData.isEmpty && monitor.showMemoryChart
+                let hasGpu = !gpuData.isEmpty
+                if hasMem || hasGpu {
+                    HStack(spacing: 12) {
+                        if hasMem {
+                            GridChart(title: "MEMORY", values: memData,
+                                      accentColor: Color(hex: "FFD06B"),
+                                      height: subHeight)
+                                .frame(maxWidth: .infinity)
+                        }
+                        if hasGpu {
+                            GridChart(title: "GPU", values: gpuData,
+                                      accentColor: Color(hex: "C06BFF"),
+                                      height: subHeight)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                // Bottom strip: top-CPU containers on the left,
+                // weekly Timing tile on the right.
+                HStack(alignment: .center, spacing: 12) {
+                    SimpleContainersStrip(dockerStats: dockerStats)
+                    Spacer(minLength: 12)
+                    if timing.isConfigured {
+                        WeeklyTimingTile(timing: timing, accentColor: accentColor)
+                    }
+                }
+                .frame(height: bottomStripHeight)
+            }
+        }
+    }
+}
+
+/// Up to 3 containers with the highest current CPU%, rendered as a
+/// compact horizontal strip. Empty (zero-height) when docker isn't
+/// available so the timing tile sits flush against the leading edge.
+struct SimpleContainersStrip: View {
+    @ObservedObject var dockerStats: DockerStatsManager
+
+    var body: some View {
+        if dockerStats.isAvailable {
+            let top = dockerStats.visibleContainers
+                .sorted { DockerStatsManager.parseCPUPct($0.cpu) > DockerStatsManager.parseCPUPct($1.cpu) }
+                .prefix(3)
+            HStack(spacing: 10) {
+                ForEach(Array(top), id: \.id) { c in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color(hex: "66CCFF").opacity(0.6))
+                            .frame(width: 6, height: 6)
+                        Text(c.name)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.8))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(c.cpu)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.6))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.white.opacity(0.04))
+                    .cornerRadius(4)
+                }
+            }
+        } else {
+            EmptyView()
+        }
+    }
+}
+
+/// Weekly hours + per-day average for the currently-filtered Timing
+/// project. Renders only when timing is configured AND the current
+/// week has any data.
+struct WeeklyTimingTile: View {
+    @ObservedObject var timing: TimingManager
+    let accentColor: Color
+
+    var body: some View {
+        let total = timing.totalWeekHours
+        let daysWithData = timing.dailyHours.filter { $0.hours > 0 }.count
+        let perDay = daysWithData > 0 ? total / Double(daysWithData) : 0
+
+        if total > 0 {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(formatHours(total))
+                    .font(.system(size: 18, weight: .light, design: .monospaced))
+                    .foregroundColor(accentColor)
+                HStack(spacing: 4) {
+                    Text(formatHours(perDay))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.7))
+                    Text("/day")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.4))
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.white.opacity(0.04))
+            .cornerRadius(4)
+        }
+    }
+
+    private func formatHours(_ h: Double) -> String {
+        // 8.0 → "8h"; 8.5 → "8.5h"; 0.25 → "15m"
+        if h < 1 {
+            let mins = Int(round(h * 60))
+            return "\(mins)m"
+        }
+        // Drop trailing .0
+        let rounded = (h * 10).rounded() / 10
+        if rounded == rounded.rounded(.down) {
+            return "\(Int(rounded))h"
+        }
+        return String(format: "%.1fh", rounded)
     }
 }
 

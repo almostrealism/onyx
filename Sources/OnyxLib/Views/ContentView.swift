@@ -516,6 +516,10 @@ private struct ContentViewNotifications: ViewModifier {
                 appState.showMonitor.toggle()
                 updateWindowTitle()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleSimpleMonitor)) { _ in
+                guard isKeyWindow, appState.showMonitor else { return }
+                appState.showSimpleMonitor.toggle()
+            }
             .modifier(ContentViewPanelNotifications(appState: appState, hostWindow: hostWindow))
             .modifier(ContentViewOverlayNotifications(appState: appState, hostWindow: hostWindow))
             .modifier(ContentViewSessionNotifications(appState: appState, hostWindow: hostWindow))
