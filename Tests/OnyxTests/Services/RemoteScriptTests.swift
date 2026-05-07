@@ -92,6 +92,30 @@ final class RemoteScriptTests: XCTestCase {
         XCTAssertEqual(once, twice)
     }
 
+    func testCleanedOutput_truncatesShellNoiseAfterMarker() {
+        // ssh -tt prints a trailing shell prompt and `exit` echo after
+        // our `exit` command. Callers that read the last section
+        // (extractSection with end:nil — git toplevel, commit diff)
+        // would otherwise pick up that noise. cleanedOutput must drop
+        // everything from the marker onwards, not just the marker line.
+        let raw = """
+        useful output
+        ---GIT_TOPLEVEL---
+        /repo/path
+        ---ONYX-OK-2---
+        user@host:~$ exit
+        logout
+        Connection to host closed.
+        """
+        let cleaned = RemoteScript.cleanedOutput(raw)
+        XCTAssertFalse(cleaned.contains("user@host"),
+                       "trailing prompt noise must be cut: \(cleaned)")
+        XCTAssertFalse(cleaned.contains("Connection to host"),
+                       "trailing connection-close message must be cut: \(cleaned)")
+        XCTAssertTrue(cleaned.contains("/repo/path"),
+                      "real script output before the marker must be preserved")
+    }
+
     // MARK: - diagnostic message
 
     func testNonExecutionDiagnostic_isUserActionable() {

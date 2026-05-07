@@ -56,12 +56,14 @@ public enum RemoteScript {
         "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
     /// Wrap `script` with the safety prelude (PATH setup, defensive
-    /// `set +vx` to suppress verbose mode if a profile turned it on)
-    /// and the execution-proof marker. The result is what gets fed to
-    /// the remote shell.
+    /// `set +vx`, prompt suppression so an interactive remote shell
+    /// doesn't pollute output with `user@host:~$ ` lines between every
+    /// command) and the execution-proof marker. The result is what
+    /// gets fed to the remote shell.
     public static func wrap(_ script: String) -> String {
         return """
         set +vx 2>/dev/null
+        PS1=''; PS2=''; PROMPT_COMMAND=''
         PATH="${PATH:-}:\(standardPath)"
         \(script)
         echo "\(executionMarkerEcho)"
@@ -77,12 +79,17 @@ public enum RemoteScript {
 
     /// Normalize and clean output before parsing:
     ///  - Strip `\r` (ssh -tt produces `\r\n` line endings).
-    ///  - Remove the trailing execution marker line so callers don't
-    ///    have to filter it themselves.
+    ///  - **Truncate at the execution marker.** Anything from the marker
+    ///    onwards (trailing shell prompt, echo of `exit`, etc.) is shell
+    ///    session noise, not script output. Cutting it lets callers use
+    ///    `extractSection(..., end: nil)` to read the trailing field
+    ///    (toplevel, diff, etc.) without picking up prompt junk.
     public static func cleanedOutput(_ output: String) -> String {
-        return output
-            .replacingOccurrences(of: "\r", with: "")
-            .replacingOccurrences(of: executionMarker, with: "")
+        let stripped = output.replacingOccurrences(of: "\r", with: "")
+        if let range = stripped.range(of: executionMarker) {
+            return String(stripped[..<range.lowerBound])
+        }
+        return stripped
     }
 
     /// User-facing message for output that came back without the

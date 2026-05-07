@@ -273,9 +273,16 @@ public class GitManager: ObservableObject {
             return
         }
 
-        // Only show git landing at repo root
-        let toplevel = extractSection(output, start: "---GIT_TOPLEVEL---", end: nil)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Only show git landing at repo root.
+        // `---GIT_TOPLEVEL---` is the last marker, so extractSection with
+        // end:nil grabs everything to EOF. On `ssh -tt` that tail can
+        // contain the closing prompt and `exit` echo — we want only the
+        // first non-empty line, which is the actual toplevel path.
+        let toplevelTail = extractSection(output, start: "---GIT_TOPLEVEL---", end: nil)
+        let toplevel = toplevelTail
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty }) ?? ""
         let normalizedPath = currentPath.hasSuffix("/") ? String(currentPath.dropLast()) : currentPath
         if !toplevel.isEmpty && toplevel != normalizedPath {
             isGitRepo = false

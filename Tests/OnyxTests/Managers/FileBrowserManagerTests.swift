@@ -443,3 +443,56 @@ class SearchCommandTests: XCTestCase {
         XCTAssertEqual(sources.children[1].children.count, 2)
     }
 }
+
+// MARK: - Remote search noise filtering
+//
+// `ssh -tt` runs the remote shell interactively; before our `stty -echo`
+// takes effect the first script line is echoed back, and depending on
+// the host there can be MOTD/banner/prompt lines mixed into the stream.
+// The previous search code accepted any non-empty line as a result and
+// the panel filled with garbage. The fix drops anything that doesn't
+// look like an absolute path. These tests pin that filter.
+
+final class RemoteSearchOutputFilterTests: XCTestCase {
+
+    /// Mirrors the per-line filter inside startSearch's readabilityHandler.
+    /// Kept as a free function here so the test pins the behavior at the
+    /// boundary that matters (line-classification) without spinning up
+    /// a real Process.
+    private func keepAsResult(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard trimmed != "---ONYX-OK-2---" else { return false }
+        guard trimmed.hasPrefix("/") else { return false }
+        return true
+    }
+
+    func testFilter_rejectsShellPromptLines() {
+        XCTAssertFalse(keepAsResult("user@host:~$ "))
+        XCTAssertFalse(keepAsResult("[user@host onyx]$ stty -echo 2>/dev/null"))
+        XCTAssertFalse(keepAsResult("$ "))
+        XCTAssertFalse(keepAsResult("# "))
+    }
+
+    func testFilter_rejectsMOTDAndBanners() {
+        XCTAssertFalse(keepAsResult("Welcome to Ubuntu 22.04 LTS (GNU/Linux 5.15.0)"))
+        XCTAssertFalse(keepAsResult("Last login: Wed Apr 28 12:34:56 2026"))
+        XCTAssertFalse(keepAsResult("============================================"))
+    }
+
+    func testFilter_rejectsExecutionMarker() {
+        XCTAssertFalse(keepAsResult("---ONYX-OK-2---"))
+    }
+
+    func testFilter_rejectsEmptyAndWhitespaceLines() {
+        XCTAssertFalse(keepAsResult(""))
+        XCTAssertFalse(keepAsResult("   "))
+        XCTAssertFalse(keepAsResult("\t"))
+    }
+
+    func testFilter_acceptsAbsolutePaths() {
+        XCTAssertTrue(keepAsResult("/Users/me/project/file.swift"))
+        XCTAssertTrue(keepAsResult("/var/log/system.log"))
+        XCTAssertTrue(keepAsResult("/usr/bin/find"))
+    }
+}

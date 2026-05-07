@@ -771,6 +771,12 @@ public class FileBrowserManager: ObservableObject {
                     guard !trimmed.isEmpty else { continue }
                     // Drop the execution marker — it isn't a search result.
                     if trimmed == RemoteScript.executionMarker { continue }
+                    // Find emits absolute paths; ignore anything that
+                    // doesn't look like one. With ssh -tt the stream
+                    // contains MOTD/banner/prompt noise mixed with real
+                    // results, and accepting non-path lines fills the
+                    // results panel with garbage.
+                    guard trimmed.hasPrefix("/") else { continue }
 
                     // Strip base path prefix to get relative path
                     let relative: String
