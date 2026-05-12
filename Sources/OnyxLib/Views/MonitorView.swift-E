@@ -316,10 +316,10 @@ struct MonitorView: View {
                     // Interval label
                     HStack(spacing: 4) {
                         Text(monitor.useShortInterval ? "5s intervals" : "1m intervals")
-                            .monitorFont(size: 10)
+                            .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.4))
                         Text("(T interval · M memory · C containers · P 12/24hr · S simple)")
-                            .monitorFont(size: 10)
+                            .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.25))
                     }
 
@@ -406,15 +406,15 @@ struct MonitorView: View {
                 } else if let error = monitor.lastError {
                     VStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle")
-                            .monitorFont(size: 20, design: .default)
+                            .font(.system(size: 20))
                             .foregroundColor(Color(hex: "FF6B6B"))
                         Text(error)
-                            .monitorFont(size: 12)
+                            .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 400)
                         Text("Retrying every 5s... (attempt \(monitor.pollCount))")
-                            .monitorFont(size: 10)
+                            .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.4))
                     }
                 } else {
@@ -423,7 +423,7 @@ struct MonitorView: View {
                             .scaleEffect(0.7)
                             .colorScheme(.dark)
                         Text("Fetching stats from \(appState.activeHost?.label ?? "host")...")
-                            .monitorFont(size: 12)
+                            .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.5))
                     }
                 }
@@ -453,9 +453,6 @@ struct MonitorView: View {
         .onDisappear {
             dockerStats.stopPolling()
         }
-        // Scale every `.monitorFont(...)` in this view tree by the user's
-        // UI font size preference. Default (uiFontSize == 12) → 1.0.
-        .environment(\.monitorFontScale, appState.appearance.uiFontSize / 12.0)
     }
 }
 
@@ -485,7 +482,7 @@ struct TimeDisplay: View {
                     .foregroundColor(accentColor.opacity(0.6))
 
                 Text(utcString)
-                    .monitorFont(size: 10)
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.35))
             }
         }
@@ -534,7 +531,7 @@ struct ExtraClockView: View {
                 .foregroundColor(.white.opacity(0.7))
 
             Text(label)
-                .monitorFont(size: 9)
+                .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(accentColor.opacity(0.4))
         }
         .onReceive(timer) { _ in
@@ -652,10 +649,10 @@ struct CPUUnavailableCard: View {
 
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle")
-                    .monitorFont(size: 11, design: .default)
+                    .font(.system(size: 11))
                     .foregroundColor(Color(hex: "FFD06B").opacity(0.8))
                 Text(message)
-                    .monitorFont(size: 11)
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.7))
                     .lineLimit(4)
                     .fixedSize(horizontal: false, vertical: true)
@@ -766,12 +763,12 @@ struct SimpleContainersStrip: View {
                             .fill(Color(hex: "66CCFF").opacity(0.6))
                             .frame(width: 6, height: 6)
                         Text(c.name)
-                            .monitorFont(size: 11)
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.white.opacity(0.8))
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Text(c.cpu)
-                            .monitorFont(size: 11)
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.6))
                     }
                     .padding(.horizontal, 8)
@@ -805,10 +802,10 @@ struct WeeklyTimingTile: View {
                     .foregroundColor(accentColor)
                 HStack(spacing: 4) {
                     Text(formatHours(perDay))
-                        .monitorFont(size: 10)
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.7))
                     Text("/day")
-                        .monitorFont(size: 10)
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.4))
                 }
             }
@@ -852,14 +849,14 @@ struct DockerStatsSection: View {
                 let totalCount = dockerStats.containers.count
                 if totalCount > 0 {
                     Text(visCount == totalCount ? "\(totalCount)" : "\(visCount)/\(totalCount)")
-                        .monitorFont(size: 10)
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.4))
                 }
             }
 
             if dockerStats.containers.isEmpty {
                 Text("No containers running")
-                    .monitorFont(size: 11)
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.3))
             } else {
                 // Header
@@ -902,7 +899,7 @@ struct DockerStatsSection: View {
                         Text(container.pids)
                             .frame(width: 35, alignment: .trailing)
                     }
-                    .monitorFont(size: 11)
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(0.7))
                     .padding(.vertical, 2)
                     .padding(.horizontal, 6)
@@ -924,7 +921,7 @@ struct DockerStatsSection: View {
                 let hiddenCount = dockerStats.hiddenIdleCount
                 if hiddenCount > 0 {
                     Text("\(hiddenCount) container\(hiddenCount == 1 ? "" : "s") with <1% CPU (C to show)")
-                        .monitorFont(size: 9)
+                        .font(.system(size: 9, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.3))
                         .padding(.top, 4)
                 }
@@ -1046,7 +1043,7 @@ struct TimingChartSection: View {
                     HStack(spacing: 3) {
                         ForEach(timing.dailyHours) { day in
                             Text(day.dayLabel)
-                                .monitorFont(size: 8)
+                                .font(.system(size: 8, design: .monospaced))
                                 .foregroundColor(.gray.opacity(0.4))
                                 .frame(maxWidth: .infinity)
                         }
@@ -1069,7 +1066,7 @@ struct TimingChartSection: View {
                                 .fill(Color(hex: proj.color))
                                 .frame(width: 5, height: 5)
                             Text("\(proj.title)")
-                                .monitorFont(size: 9)
+                                .font(.system(size: 9, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.6))
                                 .lineLimit(1)
                             Text(String(format: "%.0fh", proj.hours))
@@ -1089,15 +1086,15 @@ struct TimingChartSection: View {
                             .monitorFont(size: 18, weight: .medium)
                             .foregroundColor(.white.opacity(0.9))
                         Text("hrs")
-                            .monitorFont(size: 10)
+                            .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.5))
                     }
                     HStack(spacing: 3) {
                         Text(String(format: "%.1f hrs/wk", timing.avgHoursPerWeekLast4))
-                            .monitorFont(size: 9)
+                            .font(.system(size: 9, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.5))
                         Text("(4w avg)")
-                            .monitorFont(size: 8)
+                            .font(.system(size: 8, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.35))
                     }
                 }
@@ -1108,15 +1105,15 @@ struct TimingChartSection: View {
                             .monitorFont(size: 18, weight: .medium)
                             .foregroundColor(.white.opacity(0.9))
                         Text("hrs/day")
-                            .monitorFont(size: 10)
+                            .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.5))
                     }
                     HStack(spacing: 3) {
                         Text(String(format: "%.1f hrs/day", timing.avgHoursPerDayLast30))
-                            .monitorFont(size: 9)
+                            .font(.system(size: 9, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.5))
                         Text("(30d avg)")
-                            .monitorFont(size: 8)
+                            .font(.system(size: 8, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.35))
                     }
                 }
@@ -1126,7 +1123,7 @@ struct TimingChartSection: View {
 
             if let error = timing.lastError {
                 Text(error)
-                    .monitorFont(size: 9)
+                    .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(Color(hex: "FF6B6B").opacity(0.6))
                     .lineLimit(1)
             }
@@ -1236,7 +1233,7 @@ struct TimingHeatmapGrid: View {
             // Legend directly under the grid, same width
             HStack(spacing: 3) {
                 Text("26W")
-                    .monitorFont(size: 7)
+                    .font(.system(size: 7, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.35))
                 HStack(spacing: 0) {
                     ForEach(0..<24, id: \.self) { i in
@@ -1246,7 +1243,7 @@ struct TimingHeatmapGrid: View {
                     }
                 }
                 Text("40h")
-                    .monitorFont(size: 7)
+                    .font(.system(size: 7, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.35))
             }
         }
@@ -1288,7 +1285,7 @@ struct ConnectionPoolSection: View {
                 let total = conns.count
                 if total > 0 {
                     Text("\(running)/\(total)")
-                        .monitorFont(size: 10)
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.4))
                 }
             }
@@ -1296,7 +1293,7 @@ struct ConnectionPoolSection: View {
             let conns = allConnections
             if conns.isEmpty {
                 Text("No connections")
-                    .monitorFont(size: 11)
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.3))
             } else {
                 // Header
@@ -1340,7 +1337,7 @@ struct ConnectionPoolSection: View {
                             .frame(width: 85, alignment: .trailing)
                             .foregroundColor(Color(hex: conn.statusColor).opacity(0.8))
                     }
-                    .monitorFont(size: 11)
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(conn.connectionStatus.isTransient ? 0.5 : 0.7))
                 }
 
@@ -1374,7 +1371,7 @@ struct ConnectionPoolSection: View {
                                 .frame(width: 85, alignment: .trailing)
                                 .foregroundColor(Color(hex: alive ? "6BFF8E" : "FF6B6B").opacity(0.8))
                         }
-                        .monitorFont(size: 11)
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.white.opacity(0.7))
                     }
                 }
@@ -1423,7 +1420,7 @@ struct ClaudeSessionsSection: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: "brain")
-                    .monitorFont(size: 10, design: .default)
+                    .font(.system(size: 10))
                     .foregroundColor(Color(hex: "C06BFF"))
                 Text("CLAUDE SESSIONS")
                     .monitorFont(size: 10, weight: .medium)
@@ -1433,7 +1430,7 @@ struct ClaudeSessionsSection: View {
                 Spacer()
 
                 Text("\(manager.activeSessions.count)")
-                    .monitorFont(size: 10)
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.4))
             }
 
@@ -1441,7 +1438,7 @@ struct ClaudeSessionsSection: View {
             ForEach(manager.pendingPermissions) { request in
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.shield")
-                        .monitorFont(size: 12, design: .default)
+                        .font(.system(size: 12))
                         .foregroundColor(Color(hex: "FFD06B"))
 
                     VStack(alignment: .leading, spacing: 2) {
@@ -1449,7 +1446,7 @@ struct ClaudeSessionsSection: View {
                             .monitorFont(size: 11, weight: .medium)
                             .foregroundColor(.white.opacity(0.9))
                         Text(request.summary)
-                            .monitorFont(size: 10)
+                            .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.white.opacity(0.5))
                             .lineLimit(1)
                     }
@@ -1491,7 +1488,7 @@ struct ClaudeSessionsSection: View {
                         .frame(width: 6, height: 6)
 
                     Text(shortSessionId(session.id))
-                        .monitorFont(size: 10)
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(Color(hex: "C06BFF").opacity(0.7))
                         .frame(width: 50, alignment: .leading)
 
@@ -1502,29 +1499,29 @@ struct ClaudeSessionsSection: View {
                             .foregroundColor(.white.opacity(0.8))
                         if let input = session.toolInput, !input.isEmpty {
                             Text(input)
-                                .monitorFont(size: 10)
+                                .font(.system(size: 10, design: .monospaced))
                                 .foregroundColor(.gray.opacity(0.5))
                                 .lineLimit(1)
                         }
                     case .waitingPermission:
                         Text("waiting for permission")
-                            .monitorFont(size: 11)
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(Color(hex: "FFD06B"))
                             .modifier(PulseModifier())
                     case .idle:
                         Text("idle")
-                            .monitorFont(size: 11)
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.4))
                     case .stopped:
                         Text("stopped")
-                            .monitorFont(size: 11)
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.3))
                     }
 
                     Spacer()
 
                     Text(relativeTime(session.lastSeen))
-                        .monitorFont(size: 9)
+                        .font(.system(size: 9, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.3))
                 }
             }
@@ -1570,21 +1567,21 @@ struct RemindersSection: View {
                 let total = reminders.totalCount
                 if total > 0 {
                     Text("\(total)")
-                        .monitorFont(size: 10)
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.4))
                 }
             }
 
             if !reminders.accessGranted {
                 Text("Reminders access not granted")
-                    .monitorFont(size: 11)
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.4))
             } else if reminders.isMultiList {
                 // Grouped display: 2-column grid layout
                 let nonEmpty = reminders.groupedReminders.filter { !$0.reminders.isEmpty }
                 if nonEmpty.isEmpty {
                     Text(reminders.emptyMessage)
-                        .monitorFont(size: 11)
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.3))
                 } else {
                     HStack(alignment: .top, spacing: 12) {
@@ -1607,7 +1604,7 @@ struct RemindersSection: View {
                 }
             } else if reminders.reminders.isEmpty {
                 Text(reminders.emptyMessage)
-                    .monitorFont(size: 11)
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.3))
             } else {
                 // Single list or Today: flat display
@@ -1617,7 +1614,7 @@ struct RemindersSection: View {
                 }
                 if reminders.reminders.count > 14 {
                     Text("+\(reminders.reminders.count - 14) more")
-                        .monitorFont(size: 10)
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.3))
                 }
             }
@@ -1651,7 +1648,7 @@ private struct ReminderListColumn: View {
             }
             if group.reminders.count > 14 {
                 Text("+\(group.reminders.count - 14) more")
-                    .monitorFont(size: 10)
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.3))
             }
         }
@@ -1667,13 +1664,13 @@ private struct ReminderRow: View {
         HStack(spacing: 8) {
             Button(action: { manager.toggleComplete(reminder) }) {
                 Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .monitorFont(size: 12, design: .default)
+                    .font(.system(size: 12))
                     .foregroundColor(reminder.isCompleted ? appState.accentColor : .gray.opacity(0.4))
             }
             .buttonStyle(.plain)
 
             Text(reminder.title ?? "Untitled")
-                .monitorFont(size: 12)
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(reminder.isCompleted ? .gray.opacity(0.3) : .white.opacity(0.8))
                 .strikethrough(reminder.isCompleted)
                 .lineLimit(1)
@@ -1683,7 +1680,7 @@ private struct ReminderRow: View {
             if let due = reminder.dueDateComponents, let hour = due.hour, let minute = due.minute {
                 let isOverdue = isReminderOverdue(due)
                 Text(String(format: "%d:%02d", hour, minute))
-                    .monitorFont(size: 10)
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(isOverdue && !reminder.isCompleted ? Color(hex: "FF6B6B") : .gray.opacity(0.4))
             }
         }
