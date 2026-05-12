@@ -8,6 +8,14 @@ struct SettingsView: View {
     @StateObject private var remindersManager = RemindersManager()
     @State private var editingHostID: UUID?
 
+    // Numeric font-size inputs are staged in local @State so the
+    // TextField text is never rewritten *while* the user is typing.
+    // The model is updated (and clamped) only on Save — so deleting a
+    // digit en route to a new value doesn't snap to the minimum
+    // mid-edit. Initialized on appear and reset on save.
+    @State private var terminalFontSizeText: String = ""
+    @State private var uiFontSizeText: String = ""
+
     enum Field: Hashable {
         case host, user, port, tmux, identity, label, fontSize, opacity, windowTitle
     }
@@ -96,11 +104,11 @@ struct SettingsView: View {
                                 }
 
                                 HStack(spacing: 12) {
-                                    OnyxTextField(label: "Terminal font size", text: terminalFontSizeBinding, placeholder: "13")
+                                    OnyxTextField(label: "Terminal font size", text: $terminalFontSizeText, placeholder: "13")
                                         .focused($focusedField, equals: .fontSize)
                                         .frame(width: 130)
 
-                                    OnyxTextField(label: "UI font size", text: uiFontSizeBinding, placeholder: "12")
+                                    OnyxTextField(label: "UI font size", text: $uiFontSizeText, placeholder: "12")
                                         .frame(width: 130)
                                 }
 
@@ -420,20 +428,23 @@ struct SettingsView: View {
             )
             .shadow(color: .black.opacity(0.5), radius: 30)
         }
+        .onAppear { loadFontSizeText() }
     }
 
-    private var terminalFontSizeBinding: Binding<String> {
-        Binding(
-            get: { String(Int(appState.appearance.effectiveTerminalFontSize)) },
-            set: { appState.appearance.terminalFontSize = Double(Int($0) ?? 13) }
-        )
+    /// Seed local font-size text from the model. Called on view appear so
+    /// re-opening Settings shows the current saved values.
+    fileprivate func loadFontSizeText() {
+        terminalFontSizeText = String(Int(appState.appearance.effectiveTerminalFontSize))
+        uiFontSizeText = String(Int(appState.appearance.uiFontSize))
     }
 
-    private var uiFontSizeBinding: Binding<String> {
-        Binding(
-            get: { String(Int(appState.appearance.uiFontSize)) },
-            set: { appState.appearance.uiFontSize = max(8, Double(Int($0) ?? 12)) }
-        )
+    /// Parse a font-size text field, clamping to a sensible range. Returns
+    /// nil if the input doesn't parse — caller keeps the existing value.
+    /// Range is [8, 64]: 8 matches the prior minimum; 64 is a high cap so a
+    /// fat-finger on `144` doesn't blow up the UI.
+    static func parsedFontSize(_ text: String) -> Double? {
+        guard let n = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+        return Double(min(64, max(8, n)))
     }
 
     /// Monospaced fonts that are actually installed on this system
@@ -450,6 +461,15 @@ struct SettingsView: View {
     }
 
     private func save() {
+        // Commit staged font-size text now (clamped). Empty/garbage input
+        // silently keeps the existing value rather than fighting the user
+        // mid-edit.
+        if let size = Self.parsedFontSize(terminalFontSizeText) {
+            appState.appearance.terminalFontSize = size
+        }
+        if let size = Self.parsedFontSize(uiFontSizeText) {
+            appState.appearance.uiFontSize = size
+        }
         appState.saveHosts()
         appState.saveAppearance()
         appState.showSettings = false
