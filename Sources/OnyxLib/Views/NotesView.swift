@@ -87,7 +87,7 @@ struct NotesView: View {
             // Editor
             if let noteID = manager.selectedNoteID,
                let index = manager.notes.firstIndex(where: { $0.id == noteID }) {
-                NoteEditorView(note: $manager.notes[index], onSave: {
+                NoteEditorView(manager: manager, note: $manager.notes[index], onSave: {
                     manager.saveNote(manager.notes[index])
                 })
             } else {
@@ -145,18 +145,78 @@ struct NoteRow: View {
 }
 
 struct NoteEditorView: View {
+    @ObservedObject var manager: NotesManager
     @Binding var note: Note
     let onSave: () -> Void
 
+    // Staged title text — typing doesn't fight the user. Commit on
+    // Enter or focus loss (see commitTitle). Re-seeded from the model
+    // when the selected note switches.
+    @State private var titleText: String = ""
+    @State private var titleError: String?
+    @FocusState private var titleFocused: Bool
+
     var body: some View {
-        TextEditor(text: $note.content)
-            .font(.system(.body, design: .monospaced))
-            .foregroundColor(.white.opacity(0.9))
-            .scrollContentBackground(.hidden)
-            .background(Color.clear)
-            .padding(12)
-            .onChange(of: note.content) { _, _ in
-                onSave()
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                TextField("Untitled", text: $titleText)
+                    .focused($titleFocused)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.9))
+                    .onSubmit { commitTitle() }
+                    .onChange(of: titleFocused) { _, isFocused in
+                        if !isFocused { commitTitle() }
+                    }
+                if let titleError = titleError {
+                    Text(titleError)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+
+            Divider().background(Color.white.opacity(0.08))
+
+            TextEditor(text: $note.content)
+                .font(.system(.body, design: .monospaced))
+                .foregroundColor(.white.opacity(0.9))
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
+                .padding(12)
+                .onChange(of: note.content) { _, _ in
+                    onSave()
+                }
+        }
+        .onAppear { titleText = note.title }
+        .onChange(of: note.id) { _, _ in
+            // Selected note switched — seed the field with the new
+            // note's title and clear any prior error.
+            titleText = note.title
+            titleError = nil
+        }
+    }
+
+    private func commitTitle() {
+        switch manager.renameNote(note, to: titleText) {
+        case .renamed:
+            titleError = nil
+            // The model now points at the renamed note; selectedNoteID
+            // and titleText converge on the next render via note.id
+            // observation.
+        case .unchanged:
+            // Empty or same as before — reset display to the current
+            // title so the field shows what's actually on disk.
+            titleText = note.title
+            titleError = nil
+        case .conflict:
+            titleText = note.title
+            titleError = "A note with that name already exists."
+        case .failed:
+            titleText = note.title
+            titleError = "Couldn't rename — check filesystem permissions."
+        }
     }
 }

@@ -94,14 +94,77 @@ public class NotesManager: ObservableObject {
         loadNotes()
     }
 
-    /// Rename note.
-    public func renameNote(_ note: Note, to newTitle: String) {
-        let oldURL = directory.appendingPathComponent(note.id)
+    /// Result of an attempt to rename a note.
+    public enum RenameResult: Equatable {
+        /// File renamed; `newID` is the new filename and also the
+        /// note's new identity in `notes`.
+        case renamed(newID: String)
+        /// Input sanitized to empty, or unchanged from the current
+        /// title. No FS action taken.
+        case unchanged
+        /// A different note already uses that filename. Caller should
+        /// surface this to the user; nothing on disk was changed.
+        case conflict
+        /// A filesystem error prevented the rename.
+        case failed
+    }
+
+    /// Rename note. Sanitizes the input, strips any `.md`/`.txt` the user
+    /// may have typed, refuses to silently overwrite an existing file, and
+    /// reports the outcome. Selected-note tracking is updated only if the
+    /// renamed note was the selected one.
+    @discardableResult
+    public func renameNote(_ note: Note, to newTitle: String) -> RenameResult {
+        let sanitized = Self.sanitizedTitle(newTitle)
+        let base = Self.strippingNoteExtension(sanitized)
+        guard !base.isEmpty else { return .unchanged }
+
         let ext = (note.id as NSString).pathExtension
-        let newFilename = "\(newTitle).\(ext)"
+        let extPart = ext.isEmpty ? "md" : ext
+        let newFilename = "\(base).\(extPart)"
+        if newFilename == note.id { return .unchanged }
+
+        let fm = FileManager.default
+        let oldURL = directory.appendingPathComponent(note.id)
         let newURL = directory.appendingPathComponent(newFilename)
-        try? FileManager.default.moveItem(at: oldURL, to: newURL)
+        if fm.fileExists(atPath: newURL.path) { return .conflict }
+
+        do {
+            try fm.moveItem(at: oldURL, to: newURL)
+        } catch {
+            return .failed
+        }
         loadNotes()
-        selectedNoteID = newFilename
+        if selectedNoteID == note.id {
+            selectedNoteID = newFilename
+        }
+        return .renamed(newID: newFilename)
+    }
+
+    /// Make a user-typed title safe for use as a filename:
+    ///   - replace path separators and null bytes with `-`
+    ///   - collapse internal whitespace runs to a single space
+    ///   - strip leading dots so we don't accidentally create hidden files
+    ///   - trim leading/trailing whitespace
+    public static func sanitizedTitle(_ raw: String) -> String {
+        let unsafe = CharacterSet(charactersIn: "/:\\\0")
+        var result = raw.components(separatedBy: unsafe).joined(separator: "-")
+        while result.contains("  ") {
+            result = result.replacingOccurrences(of: "  ", with: " ")
+        }
+        while result.hasPrefix(".") {
+            result = String(result.dropFirst())
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// If the user typed a `.md`/`.txt` extension in their title, strip it
+    /// so we don't end up with `my-notes.md.md`.
+    public static func strippingNoteExtension(_ s: String) -> String {
+        let ext = (s as NSString).pathExtension.lowercased()
+        if ext == "md" || ext == "txt" {
+            return (s as NSString).deletingPathExtension
+        }
+        return s
     }
 }
