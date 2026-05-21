@@ -759,31 +759,74 @@ struct SimpleContainersStrip: View {
             let top = dockerStats.visibleContainers
                 .sorted { DockerStatsManager.parseCPUPct($0.cpu) > DockerStatsManager.parseCPUPct($1.cpu) }
                 .prefix(3)
+            // Match the full list: bar saturates at total-cores × 100% so
+            // a single hot container on a many-core box is correctly dim.
+            let maxPct = CGFloat(max(1, dockerStats.cpuCores)) * 100.0
             HStack(spacing: 10) {
                 ForEach(Array(top), id: \.id) { c in
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color(hex: "66CCFF").opacity(0.6))
-                            .frame(width: 6, height: 6)
-                        Text(c.name)
-                            .monitorFont(size: 11)
-                            .foregroundColor(.white.opacity(0.8))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Text(c.cpu)
-                            .monitorFont(size: 11)
-                            .foregroundColor(.gray.opacity(0.6))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.04))
-                    .cornerRadius(4)
+                    SimpleContainerPill(
+                        name: c.name,
+                        cpuText: c.cpu,
+                        cpuPct: CGFloat(DockerStatsManager.parseCPUPct(c.cpu)),
+                        maxPct: maxPct
+                    )
                 }
             }
         } else {
             EmptyView()
         }
     }
+}
+
+/// One pill in the simple-mode containers strip. Renders the same
+/// proportional CPU bar + color ramp as the full DockerStatsSection row,
+/// just compacted into a chip-sized container.
+private struct SimpleContainerPill: View {
+    let name: String
+    let cpuText: String
+    let cpuPct: CGFloat
+    let maxPct: CGFloat
+
+    var body: some View {
+        let color = monitorCPUBarColor(cpuPct, maxPct: maxPct)
+        HStack(spacing: 6) {
+            Text(name)
+                .monitorFont(size: 11)
+                .foregroundColor(.white.opacity(0.85))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text(cpuText)
+                .monitorFont(size: 11)
+                .foregroundColor(.white.opacity(0.7))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Color.white.opacity(0.04)
+                    let fraction = min(cpuPct / maxPct, 1.0)
+                    Rectangle()
+                        .fill(color.opacity(0.22))
+                        .frame(width: geo.size.width * fraction)
+                }
+            }
+        )
+        .cornerRadius(4)
+    }
+}
+
+/// Color ramp for container CPU bars, shared between DockerStatsSection
+/// (the full list) and SimpleContainersStrip (the simple-mode strip) so
+/// both views use the same visual language: blue at low CPU, yellow in
+/// the middle, red when a container is dominating the box. Thresholds
+/// are fractions of `maxPct` (total cores × 100%), matching how the
+/// full list interprets saturation.
+fileprivate func monitorCPUBarColor(_ pct: CGFloat, maxPct: CGFloat) -> Color {
+    let fraction = pct / max(1, maxPct)
+    if fraction > 0.8 { return Color(hex: "FF6B6B") }
+    if fraction > 0.4 { return Color(hex: "FFD06B") }
+    return Color(hex: "66CCFF")
 }
 
 /// Weekly hours + per-day average for the currently-filtered Timing
@@ -938,12 +981,10 @@ struct DockerStatsSection: View {
         return CGFloat(Double(cleaned) ?? 0)
     }
 
-    /// Color ramp for CPU bar: low=blue, mid=yellow, high=red (relative to max)
+    /// Color ramp for CPU bar: forwards to the file-level helper so the
+    /// simple-mode strip and the full list stay in lockstep.
     private func cpuBarColor(_ pct: CGFloat, maxPct: CGFloat) -> Color {
-        let fraction = pct / maxPct
-        if fraction > 0.8 { return Color(hex: "FF6B6B") }
-        if fraction > 0.4 { return Color(hex: "FFD06B") }
-        return Color(hex: "66CCFF")
+        monitorCPUBarColor(pct, maxPct: maxPct)
     }
 
     /// Confidence dot color: green >= 0.7, yellow >= 0.3, red < 0.3
