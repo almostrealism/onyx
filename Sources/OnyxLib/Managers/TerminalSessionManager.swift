@@ -350,10 +350,18 @@ class OnyxTerminalView: NSView {
         guard terminalView != nil else { return }
         // Only restore if nothing else should have focus
         guard appState.focusedComponent == .terminal else { return }
-        // Use async here because this is called from a notification, and we need
-        // the overlay dismissal to finish before we grab focus
-        DispatchQueue.main.async {
-            self.doRestoreFocus()
+        // Schedule multiple attempts. The monitor overlay has a 0.2s
+        // fade-out animation; a single attempt right after the toggle
+        // can race the animation's final layout pass and lose first
+        // responder even when makeFirstResponder reports success. The
+        // 0/0.1/0.3s sequence covers immediate, mid-animation, and
+        // post-animation states without being expensive.
+        DispatchQueue.main.async { self.doRestoreFocus() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.doRestoreFocus()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.doRestoreFocus()
         }
     }
 
@@ -370,24 +378,16 @@ class OnyxTerminalView: NSView {
         doRestoreFocus()
     }
 
-    /// Actually make the terminal view first responder, with a retry
+    /// Actually make the terminal view first responder. Idempotent: if
+    /// the view is already first responder, this is a no-op. Called
+    /// from `restoreFocus` (which schedules several attempts) and
+    /// `restoreFocusIfNeeded`.
     private func doRestoreFocus() {
         guard let tv = terminalView else { return }
         guard appState.focusedComponent == .terminal else { return }
         guard let window = tv.window, window.isKeyWindow else { return }
-
-        if window.firstResponder !== tv {
-            let success = window.makeFirstResponder(tv)
-            if !success {
-                // Retry after a brief delay — view might not be ready yet
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                    guard let self = self, let tv = self.terminalView else { return }
-                    guard self.appState.focusedComponent == .terminal else { return }
-                    guard let window = tv.window, window.isKeyWindow else { return }
-                    window.makeFirstResponder(tv)
-                }
-            }
-        }
+        guard window.firstResponder !== tv else { return }
+        window.makeFirstResponder(tv)
     }
 
     // MARK: - Pool Management

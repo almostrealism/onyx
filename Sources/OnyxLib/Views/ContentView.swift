@@ -535,6 +535,13 @@ private struct ContentViewNotifications: ViewModifier {
             .onChange(of: appState.showSessionManager) { _, _ in
                 appState.recalculateFocus()
             }
+            // Monitor toggles via keyboard shortcut, Escape, or command
+            // palette all funnel through showMonitor, so observing it
+            // here is the single source of truth for routing focus back
+            // to the terminal after the overlay closes.
+            .onChange(of: appState.showMonitor) { _, _ in
+                appState.recalculateFocus()
+            }
             .onChange(of: appState.appearance.windowTitle) { _, _ in updateWindowTitle() }
             .onChange(of: appState.activeSession?.id) { _, _ in updateWindowTitle() }
     }
