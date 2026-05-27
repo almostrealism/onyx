@@ -110,6 +110,12 @@ public class ShortcutManager {
                 return nil
             }
 
+            // Cmd+; → set / edit status note on active session
+            if flags == .command && chars == ";" {
+                NotificationCenter.default.post(name: .editSessionNote, object: nil)
+                return nil
+            }
+
             // Cmd+Ctrl+Arrow → resize tmux pane by 4 cells
             if flags.contains([.command, .control]) {
                 switch event.keyCode {
@@ -156,6 +162,7 @@ public class ShortcutManager {
                 || (state?.showCommandPalette ?? false)
                 || (state?.showSessionManager ?? false)
                 || (state?.showWindowRename ?? false)
+                || (state?.showSessionNoteEditor ?? false)
 
             // For non-monitor shortcuts, also suppress when a right panel
             // with an editor is open (notes, file browser text fields).

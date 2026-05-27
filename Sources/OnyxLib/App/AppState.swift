@@ -25,6 +25,7 @@ public extension Notification.Name {
     static let toggleAllContainers = Notification.Name("toggleAllContainers")
     static let toggleClockFormat = Notification.Name("toggleClockFormat")
     static let toggleSimpleMonitor = Notification.Name("toggleSimpleMonitor")
+    static let editSessionNote = Notification.Name("editSessionNote")
     static let focusURLBar = Notification.Name("focusURLBar")
     static let tmuxResizeUp = Notification.Name("tmuxResizeUp")
     static let tmuxResizeDown = Notification.Name("tmuxResizeDown")
@@ -129,6 +130,9 @@ public class AppState: ObservableObject {
     /// top-CPU containers along the bottom, and a small weekly Timing
     /// tile in the bottom-right. Toggle with `s` while monitor is open.
     @Published public var showSimpleMonitor = false
+    /// When true, show the small text-field overlay for editing the
+    /// note attached to the active session. Toggled by Cmd+;.
+    @Published public var showSessionNoteEditor = false
     @Published public var reconnectingHostID: UUID?
     /// Is reconnecting.
     public var isReconnecting: Bool {
@@ -653,6 +657,10 @@ public class AppState: ObservableObject {
         appSupportDir.appendingPathComponent("favorites.json")
     }
 
+    private var sessionNotesURL: URL {
+        appSupportDir.appendingPathComponent("session-notes.json")
+    }
+
     private var sessionsURL: URL {
         appSupportDir.appendingPathComponent("sessions.json")
     }
@@ -1027,6 +1035,7 @@ public class AppState: ObservableObject {
 
     private func loadFavorites() {
         FavoritesStore.shared.configure(url: favoritesURL)
+        SessionNotesStore.shared.configure(url: sessionNotesURL)
     }
 
     private func loadTopology() {
@@ -1067,7 +1076,9 @@ public class AppState: ObservableObject {
 
     /// Dismiss top overlay.
     public func dismissTopOverlay() {
-        if showCommandPalette {
+        if showSessionNoteEditor {
+            showSessionNoteEditor = false
+        } else if showCommandPalette {
             showCommandPalette = false
         } else if showWindowRename {
             showWindowRename = false

@@ -234,6 +234,12 @@ public struct ContentView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 }
 
+                // Session note editor (Cmd+;)
+                if appState.showSessionNoteEditor {
+                    SessionNoteEditor(appState: appState)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                }
+
                 // Command palette
                 if appState.showCommandPalette {
                     CommandPaletteView(appState: appState)
@@ -519,6 +525,10 @@ private struct ContentViewNotifications: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .toggleSimpleMonitor)) { _ in
                 guard isKeyWindow, appState.showMonitor else { return }
                 appState.showSimpleMonitor.toggle()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .editSessionNote)) { _ in
+                guard isKeyWindow, appState.activeSession != nil else { return }
+                appState.showSessionNoteEditor = true
             }
             .modifier(ContentViewPanelNotifications(appState: appState, hostWindow: hostWindow))
             .modifier(ContentViewOverlayNotifications(appState: appState, hostWindow: hostWindow))

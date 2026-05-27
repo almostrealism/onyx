@@ -349,6 +349,7 @@ struct MonitorView: View {
                                 if appState.timing.isConfigured {
                                     TimingChartSection(timing: appState.timing, accentColor: appState.accentColor)
                                 }
+                                SessionNotesSection(appState: appState)
                                 RemindersSection(appState: appState)
                             }
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -1591,6 +1592,83 @@ struct ClaudeSessionsSection: View {
         if elapsed < 60 { return "\(elapsed)s" }
         if elapsed < 3600 { return "\(elapsed / 60)m" }
         return "\(elapsed / 3600)h"
+    }
+}
+
+/// Lists the user-supplied status notes attached to currently-existing
+/// sessions, sorted by recency. Hides itself entirely when there are
+/// no notes so the monitor doesn't carry a dead heading.
+struct SessionNotesSection: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject private var store = SessionNotesStore.shared
+
+    var body: some View {
+        let entries = store.activeNotes(in: appState.allSessions)
+        if !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("SESSION NOTES")
+                        .monitorFont(size: 10, weight: .medium)
+                        .foregroundColor(appState.accentColor)
+                        .tracking(2)
+                    Spacer()
+                    Text("⌘; to add")
+                        .monitorFont(size: 9)
+                        .foregroundColor(.gray.opacity(0.3))
+                }
+                ForEach(entries, id: \.session.id) { entry in
+                    SessionNoteRow(
+                        session: entry.session,
+                        note: entry.note,
+                        isActive: appState.activeSession?.id == entry.session.id,
+                        accentColor: appState.accentColor,
+                        onTap: { appState.activeSession = entry.session }
+                    )
+                }
+            }
+        }
+    }
+}
+
+private struct SessionNoteRow: View {
+    let session: TmuxSession
+    let note: SessionNote
+    let isActive: Bool
+    let accentColor: Color
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(alignment: .top, spacing: 8) {
+                Circle()
+                    .fill(isActive ? accentColor : Color.gray.opacity(0.4))
+                    .frame(width: 5, height: 5)
+                    .padding(.top, 6)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(note.text)
+                        .monitorFont(size: 12)
+                        .foregroundColor(.white.opacity(0.85))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 6) {
+                        Text(session.displayLabel)
+                            .monitorFont(size: 10)
+                            .foregroundColor(accentColor.opacity(0.7))
+                        Text(note.updated, style: .relative)
+                            .monitorFont(size: 9)
+                            .foregroundColor(.gray.opacity(0.4))
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isActive ? Color.white.opacity(0.04) : Color.clear)
+            .cornerRadius(3)
+        }
+        .buttonStyle(.plain)
     }
 }
 
