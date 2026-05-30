@@ -36,12 +36,11 @@ final class CPUStreamReader {
     private var lastWasIdle = false
 
     init() {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask).first!
-        url = appSupport
-            .appendingPathComponent("Onyx")
-            .appendingPathComponent("cpu-stream.json")
+        // /Users/Shared is reachable from the legacyScreenSaver sandbox;
+        // ~/Library/Application Support is not. The Onyx app writes the
+        // same path from AppState.cpuStreamURL — see CLAUDE.md / the
+        // screensaver plan doc for context.
+        url = URL(fileURLWithPath: "/Users/Shared/Onyx/cpu-stream.json")
     }
 
     func start() {

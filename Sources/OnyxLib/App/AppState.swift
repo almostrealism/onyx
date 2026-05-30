@@ -661,10 +661,13 @@ public class AppState: ObservableObject {
         appSupportDir.appendingPathComponent("session-notes.json")
     }
 
-    /// Path the screensaver reads. Written by CPUStreamStore on every
-    /// MonitorManager/CPUFleetPoller sample tick. See OnyxScreenSaver/.
+    /// Path the screensaver reads. Lives under /Users/Shared/ rather than
+    /// ~/Library/Application Support/ because legacyScreenSaver is sandboxed
+    /// and can't read paths inside the user's Library. /Users/Shared is
+    /// world-readable on every Mac and accessible regardless of sandbox.
+    /// See OnyxScreenSaver/.
     private var cpuStreamURL: URL {
-        appSupportDir.appendingPathComponent("cpu-stream.json")
+        URL(fileURLWithPath: "/Users/Shared/Onyx/cpu-stream.json")
     }
 
     private var sessionsURL: URL {

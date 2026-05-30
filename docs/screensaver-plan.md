@@ -30,14 +30,19 @@ acceptance criteria.
 ## IPC — the shared stream file
 
 Onyx (app) and the screensaver bundle are separate processes. They communicate
-via a single JSON file in the Onyx Application Support directory:
+via a single JSON file at:
 
 ```
-~/Library/Application Support/Onyx/cpu-stream.json
+/Users/Shared/Onyx/cpu-stream.json
 ```
 
-The screensaver also writes a sentinel to the same directory so we can detect
-whether anyone is reading (optional, for future "pause polling when idle").
+**Why /Users/Shared and not ~/Library/Application Support?** The macOS
+`legacyScreenSaver` host process is sandboxed and cannot read paths inside
+the user's Library, even for files the user owns. `/Users/Shared` is
+world-readable on every Mac and reachable from the screensaver sandbox.
+Symptom of getting this wrong: the file is written fresh by Onyx, but the
+screensaver only ever shows the mock (alpha/beta/gamma) fallback because
+its `try? Data(contentsOf:)` silently fails with a sandbox denial.
 
 ### File format
 
