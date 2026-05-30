@@ -29,14 +29,22 @@ final class HostTotem {
     let hostID: String
     let rootNode = SCNNode()
 
+    /// Per-frame motion state — drift velocity and current position.
+    /// SculptureScene owns the integration; HostTotem just holds the value.
+    var motion: MotionState
+
     // MARK: - Private
 
     private let stackNode = SCNNode()
     private var baseColor: NSColor
 
-    init(hostID: String, color: NSColor) {
+    init(hostID: String, color: NSColor, seed: Int = 0) {
         self.hostID = hostID
         self.baseColor = color
+        self.motion = MotionState(
+            position: SCNVector3(0, 0, 0),
+            velocity: Motion.randomInitialVelocity(seed: seed)
+        )
         rootNode.addChildNode(stackNode)
 
         // Slow rotation around the vertical axis. Lives on stackNode so the

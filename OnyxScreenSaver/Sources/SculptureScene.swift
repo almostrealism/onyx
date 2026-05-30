@@ -9,12 +9,14 @@ import SceneKit
 /// 2. Synthetic "mock" data when no live file is present or it's gone stale.
 ///    Keeps the System Settings preview lively even on a fresh install where
 ///    Onyx hasn't run yet.
-final class SculptureScene {
+final class SculptureScene: NSObject, SCNSceneRendererDelegate {
 
     let scene = SCNScene()
     let cameraNode = SCNNode()
 
     private var totems: [String: HostTotem] = [:]
+    private var insertionCounter = 0
+    private var lastRenderTime: TimeInterval = 0
 
     private let reader = CPUStreamReader()
     private var liveDataActive = false
@@ -25,6 +27,7 @@ final class SculptureScene {
     private var mockTimer: Timer?
 
     init(isPreview: Bool) {
+        super.init()
         scene.background.contents = NSColor.black
         setupCamera(isPreview: isPreview)
         setupLights()
@@ -75,8 +78,9 @@ final class SculptureScene {
     // MARK: - Update / layout
 
     /// Sync the totem set to match `hosts`. Adds new totems, removes gone
-    /// ones, lays out the survivors side-by-side, then pushes per-host
-    /// samples into their totem.
+    /// ones, pushes per-host samples into each totem. Positions are
+    /// motion-driven (see `renderer(_:updateAtTime:)`); we only seed the
+    /// starting position for newly-added totems.
     func update(hosts: [HostStream]) {
         let incomingIDs = Set(hosts.map { $0.hostID })
         let existingIDs = Set(totems.keys)
@@ -88,20 +92,55 @@ final class SculptureScene {
 
         for stream in hosts where totems[stream.hostID] == nil {
             let color = NSColor.fromOnyxHex(stream.color) ?? defaultColor(for: stream.hostID)
-            let totem = HostTotem(hostID: stream.hostID, color: color)
+            let totem = HostTotem(hostID: stream.hostID, color: color,
+                                  seed: insertionCounter)
+            insertionCounter += 1
+            // Spawn at a stable offset around origin so newcomers don't pop
+            // in on top of existing totems — the motion engine then takes
+            // them wherever they want to drift.
+            totem.motion.position = spawnPosition(for: insertionCounter)
+            totem.rootNode.position = totem.motion.position
             totems[stream.hostID] = totem
             scene.rootNode.addChildNode(totem.rootNode)
         }
 
-        // Simple horizontal layout for now. Phase 5's motion code will take
-        // over and these become starting positions instead.
-        let spacing: Float = 14
-        let totalWidth = Float(max(hosts.count - 1, 0)) * spacing
-        for (i, stream) in hosts.enumerated() {
-            guard let totem = totems[stream.hostID] else { continue }
-            let x = Float(i) * spacing - totalWidth / 2
-            totem.rootNode.position = SCNVector3(x, 0, 0)
-            totem.update(samples: stream.samples)
+        for stream in hosts {
+            totems[stream.hostID]?.update(samples: stream.samples)
+        }
+    }
+
+    /// Initial position around the origin, spread on a circle so the first
+    /// few totems aren't stacked.
+    private func spawnPosition(for index: Int) -> SCNVector3 {
+        let angle = Float(index) * (2 * .pi / 5)
+        let radius: Float = 7
+        return SCNVector3(radius * cos(angle), 0, radius * sin(angle))
+    }
+
+    // MARK: - SCNSceneRendererDelegate
+
+    /// SceneKit calls this once per frame. We compute dt, advance motion
+    /// state for every totem, then write the resulting positions back onto
+    /// their nodes.
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        let dt: Float
+        if lastRenderTime > 0 {
+            dt = Float(time - lastRenderTime)
+        } else {
+            dt = 1.0 / 60.0  // first frame — pretend 60fps
+        }
+        lastRenderTime = time
+        guard !totems.isEmpty else { return }
+
+        // Collect → advance → write back. The Motion engine doesn't know
+        // about SceneKit nodes; we hand it raw position/velocity pairs.
+        let ids = totems.keys.sorted()  // stable order for reproducible math
+        var states = ids.map { totems[$0]!.motion }
+        Motion.advance(&states, dt: dt)
+        for (i, id) in ids.enumerated() {
+            guard let totem = totems[id] else { continue }
+            totem.motion = states[i]
+            totem.rootNode.position = states[i].position
         }
     }
 

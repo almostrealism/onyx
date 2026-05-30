@@ -43,6 +43,9 @@ public final class OnyxScreenSaverView: ScreenSaverView {
         let scene = SculptureScene(isPreview: isPreview)
         sceneView.scene = scene.scene
         sceneView.pointOfView = scene.cameraNode
+        // SCNView holds the delegate weakly — we keep a strong ref via
+        // `sculpture` so its motion-update callback keeps firing.
+        sceneView.delegate = scene
         sculpture = scene
     }
 
