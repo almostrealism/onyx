@@ -52,6 +52,14 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
     // MARK: - Data source coordination
 
     private func handleLiveUpdate(hosts: [HostStream]) {
+        // Onyx is running but has zero hosts configured (fresh install,
+        // or every host removed). Treat as idle so the user still sees
+        // *something* — the mock visualization is more interesting than
+        // an empty scene.
+        if hosts.isEmpty {
+            handleIdle()
+            return
+        }
         // First fresh sample from the live stream — kill the mock driver,
         // clear any mock totems, and start rendering real data.
         if !liveDataActive {
@@ -106,6 +114,7 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
 
         for stream in hosts {
             totems[stream.hostID]?.update(samples: stream.samples)
+            totems[stream.hostID]?.setLabel(stream.label)
         }
     }
 
@@ -158,8 +167,18 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         camera.zNear = 0.1
         camera.zFar = 500
         camera.fieldOfView = isPreview ? 65 : 55
+        // Subtle depth-of-field — keeps the foreground crisp but blurs the
+        // back of the scene slightly, makes the 3D space feel deeper without
+        // ever looking out of focus.
+        camera.wantsDepthOfField = true
+        camera.focusDistance = 55
+        camera.fStop = 8
         cameraNode.camera = camera
-        cameraNode.position = SCNVector3(0, 0, 55)
+        // Pulled back a touch and tilted slightly down: a 3/4 view reads as
+        // more dimensional than dead-on, and a 6° downward tilt makes the
+        // tops of the totems just visible without distorting the silhouette.
+        cameraNode.position = SCNVector3(0, 4, 58)
+        cameraNode.eulerAngles = SCNVector3(-Float.pi / 30, 0, 0)
         scene.rootNode.addChildNode(cameraNode)
     }
 

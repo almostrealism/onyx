@@ -36,7 +36,9 @@ final class HostTotem {
     // MARK: - Private
 
     private let stackNode = SCNNode()
+    private let labelNode = SCNNode()
     private var baseColor: NSColor
+    private var lastLabel: String?
 
     init(hostID: String, color: NSColor, seed: Int = 0) {
         self.hostID = hostID
@@ -46,6 +48,7 @@ final class HostTotem {
             velocity: Motion.randomInitialVelocity(seed: seed)
         )
         rootNode.addChildNode(stackNode)
+        rootNode.addChildNode(labelNode)
 
         // Slow rotation around the vertical axis. Lives on stackNode so the
         // (eventually drifting) rootNode position transform composes cleanly.
@@ -55,6 +58,40 @@ final class HostTotem {
         spin.duration = 45
         spin.repeatCount = .infinity
         stackNode.addAnimation(spin, forKey: "spin")
+    }
+
+    /// Update the host's visible label. Rebuilds the SCNText geometry only
+    /// when the string actually changes — text mesh rebuild is the priciest
+    /// operation in the totem.
+    func setLabel(_ label: String) {
+        guard label != lastLabel else { return }
+        lastLabel = label
+        labelNode.childNodes.forEach { $0.removeFromParentNode() }
+
+        let text = SCNText(string: label, extrusionDepth: 0)
+        text.font = NSFont.monospacedSystemFont(ofSize: 4, weight: .medium)
+        text.flatness = 0.4
+        let mat = SCNMaterial()
+        mat.diffuse.contents = NSColor.white.withAlphaComponent(0.78)
+        mat.lightingModel = .constant  // ignore scene lighting; pure white
+        mat.isDoubleSided = true
+        text.materials = [mat]
+
+        let textNode = SCNNode(geometry: text)
+        // Center the text on its own origin so it billboards cleanly.
+        let (minB, maxB) = text.boundingBox
+        textNode.pivot = SCNMatrix4MakeTranslation(
+            (minB.x + maxB.x) / 2,
+            (minB.y + maxB.y) / 2,
+            (minB.z + maxB.z) / 2
+        )
+        // Float above the topmost ring of the totem.
+        textNode.position = SCNVector3(0,
+                                       Float(HostTotem.maxRings) * Float(HostTotem.ringSpacing) / 2 + 2.5,
+                                       0)
+        // Always face the camera regardless of totem rotation/drift.
+        textNode.constraints = [SCNBillboardConstraint()]
+        labelNode.addChildNode(textNode)
     }
 
     /// Rebuild the totem from a samples buffer. Cheap enough at totem scale
