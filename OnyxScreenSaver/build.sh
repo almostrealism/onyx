@@ -8,9 +8,15 @@
 # the main app is untouched.
 #
 # Usage:
-#   ./OnyxScreenSaver/build.sh           # build + install (debug)
-#   ./OnyxScreenSaver/build.sh release   # build + install (release/-O)
-#   ./OnyxScreenSaver/build.sh --no-install   # build only, leave in .build
+#   ./OnyxScreenSaver/build.sh                       # build + install (debug)
+#   ./OnyxScreenSaver/build.sh release               # build + install (release/-O)
+#   ./OnyxScreenSaver/build.sh --no-install          # build only, leave in .build
+#   ./OnyxScreenSaver/build.sh --install-to <path>   # custom Screen Savers dir
+#   ./OnyxScreenSaver/build.sh --stage /tmp/saver    # stage to a world-readable
+#                                                    # path (no install). Useful
+#                                                    # when the build runs under
+#                                                    # a different user than the
+#                                                    # one logged in to the GUI.
 #
 # After install, open System Settings → Screen Saver and pick "Onyx".
 # (You may need to restart System Settings if it was already open.)
@@ -28,11 +34,16 @@ INSTALL_DIR="$HOME/Library/Screen Savers"
 
 MODE="debug"
 DO_INSTALL=1
-for arg in "$@"; do
-    case "$arg" in
-        release) MODE="release" ;;
-        --no-install) DO_INSTALL=0 ;;
-        *) echo "warning: unknown arg '$arg'" >&2 ;;
+STAGE_DIR=""
+while (( "$#" )); do
+    case "$1" in
+        release) MODE="release"; shift ;;
+        --no-install) DO_INSTALL=0; shift ;;
+        --install-to)
+            INSTALL_DIR="$2"; shift 2 ;;
+        --stage)
+            STAGE_DIR="$2"; DO_INSTALL=0; shift 2 ;;
+        *) echo "warning: unknown arg '$1'" >&2; shift ;;
     esac
 done
 
@@ -71,13 +82,27 @@ codesign --force --sign - --timestamp=none "$BUNDLE_DIR" || {
 
 echo "Built: $BUNDLE_DIR"
 
-if [[ "$DO_INSTALL" == "1" ]]; then
-    mkdir -p "$INSTALL_DIR"
-    DEST="$INSTALL_DIR/$BUNDLE_NAME"
-    rm -rf "$DEST"
-    cp -R "$BUNDLE_DIR" "$DEST"
-    # dSYM is debug-only; not needed in the installed bundle.
-    rm -rf "$DEST/Contents/MacOS/$BINARY_NAME.dSYM"
+# Helper: copy bundle to a destination directory, stripping debug-only dSYM.
+install_bundle() {
+    local dest_dir="$1"
+    mkdir -p "$dest_dir"
+    local dest="$dest_dir/$BUNDLE_NAME"
+    rm -rf "$dest"
+    cp -R "$BUNDLE_DIR" "$dest"
+    rm -rf "$dest/Contents/MacOS/$BINARY_NAME.dSYM"
+    chmod -R a+rX "$dest"
+    echo "$dest"
+}
+
+if [[ -n "$STAGE_DIR" ]]; then
+    DEST="$( install_bundle "$STAGE_DIR" )"
+    echo "Staged: $DEST"
+    echo
+    echo "To install for the current GUI user, run (as that user):"
+    echo "    cp -R '$DEST' \"\$HOME/Library/Screen Savers/\""
+    echo "Then open System Settings → Screen Saver and select 'Onyx'."
+elif [[ "$DO_INSTALL" == "1" ]]; then
+    DEST="$( install_bundle "$INSTALL_DIR" )"
     echo "Installed: $DEST"
     echo
     echo "Open System Settings → Screen Saver and select 'Onyx'."
