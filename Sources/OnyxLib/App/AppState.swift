@@ -661,6 +661,12 @@ public class AppState: ObservableObject {
         appSupportDir.appendingPathComponent("session-notes.json")
     }
 
+    /// Path the screensaver reads. Written by CPUStreamStore on every
+    /// MonitorManager/CPUFleetPoller sample tick. See OnyxScreenSaver/.
+    private var cpuStreamURL: URL {
+        appSupportDir.appendingPathComponent("cpu-stream.json")
+    }
+
     private var sessionsURL: URL {
         appSupportDir.appendingPathComponent("sessions.json")
     }
@@ -1036,6 +1042,13 @@ public class AppState: ObservableObject {
     private func loadFavorites() {
         FavoritesStore.shared.configure(url: favoritesURL)
         SessionNotesStore.shared.configure(url: sessionNotesURL)
+        // Wire up the screensaver pipeline. Both calls are no-ops under
+        // XCTest so unit tests don't write to the user's real cpu-stream.json
+        // or kick off real SSH fan-out polling.
+        if NSClassFromString("XCTest") == nil {
+            CPUStreamStore.shared.configure(url: cpuStreamURL)
+            CPUFleetPoller.shared.start(appState: self)
+        }
     }
 
     private func loadTopology() {
