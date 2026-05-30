@@ -29,7 +29,7 @@ echo "  Building Onyx screensaver ($MODE)..."
 echo ""
 
 if [[ "$MODE" == "release" ]]; then
-    "$SCRIPT_DIR/OnyxScreenSaver/build.sh" release "${EXTRA_ARGS[@]}"
+    "$SCRIPT_DIR/OnyxScreenSaver/build.sh" release ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 else
-    "$SCRIPT_DIR/OnyxScreenSaver/build.sh" "${EXTRA_ARGS[@]}"
+    "$SCRIPT_DIR/OnyxScreenSaver/build.sh" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 fi
