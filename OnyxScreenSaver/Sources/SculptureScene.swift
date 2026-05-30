@@ -4,9 +4,11 @@ import SceneKit
 /// Owns the SceneKit scene for the screensaver. Manages a set of `HostTotem`s
 /// keyed by host ID, synced from a `[HostStream]` snapshot.
 ///
-/// Phase 2 wires the renderer up to a synthetic mock-data driver so we can
-/// verify the visuals before standing up the file-based IPC. Phase 4 will
-/// swap the mock driver for `CPUStreamReader`.
+/// Data source priority:
+/// 1. Live data from `CPUStreamReader` (the Onyx app's cpu-stream.json).
+/// 2. Synthetic "mock" data when no live file is present or it's gone stale.
+///    Keeps the System Settings preview lively even on a fresh install where
+///    Onyx hasn't run yet.
 final class SculptureScene {
 
     let scene = SCNScene()
@@ -14,7 +16,10 @@ final class SculptureScene {
 
     private var totems: [String: HostTotem] = [:]
 
-    // Mock driver state (phase 2 only).
+    private let reader = CPUStreamReader()
+    private var liveDataActive = false
+
+    // Mock driver state — used when live data isn't available.
     private var mockBuffers: [String: [CPUSample]] = [:]
     private var mockStartTime: TimeInterval = 0
     private var mockTimer: Timer?
@@ -23,14 +28,51 @@ final class SculptureScene {
         scene.background.contents = NSColor.black
         setupCamera(isPreview: isPreview)
         setupLights()
+
+        // Live reader runs everywhere — the System Settings preview also
+        // benefits if Onyx is running and broadcasting real data.
+        reader.onUpdate = { [weak self] hosts in self?.handleLiveUpdate(hosts: hosts) }
+        reader.onIdle = { [weak self] in self?.handleIdle() }
+        reader.start()
+
+        // Mock driver starts immediately so we have something on screen
+        // during the first 500ms before the reader has fired its first tick.
+        // It pauses the moment live data arrives.
         startMockDriver()
     }
 
     deinit {
         mockTimer?.invalidate()
+        reader.stop()
     }
 
-    // MARK: - Public API
+    // MARK: - Data source coordination
+
+    private func handleLiveUpdate(hosts: [HostStream]) {
+        // First fresh sample from the live stream — kill the mock driver,
+        // clear any mock totems, and start rendering real data.
+        if !liveDataActive {
+            liveDataActive = true
+            stopMockDriver()
+            removeAllTotems()
+        }
+        update(hosts: hosts)
+    }
+
+    private func handleIdle() {
+        // Live stream went away (Onyx quit, file stale). Fall back to mock
+        // so the user still has something pretty to look at instead of
+        // staring at a black screen.
+        if liveDataActive {
+            liveDataActive = false
+            removeAllTotems()
+        }
+        if mockTimer == nil {
+            startMockDriver()
+        }
+    }
+
+    // MARK: - Update / layout
 
     /// Sync the totem set to match `hosts`. Adds new totems, removes gone
     /// ones, lays out the survivors side-by-side, then pushes per-host
@@ -51,8 +93,8 @@ final class SculptureScene {
             scene.rootNode.addChildNode(totem.rootNode)
         }
 
-        // Simple horizontal layout for phase 2. Phase 5's motion code will
-        // take over and these become starting positions instead.
+        // Simple horizontal layout for now. Phase 5's motion code will take
+        // over and these become starting positions instead.
         let spacing: Float = 14
         let totalWidth = Float(max(hosts.count - 1, 0)) * spacing
         for (i, stream) in hosts.enumerated() {
@@ -63,13 +105,19 @@ final class SculptureScene {
         }
     }
 
+    private func removeAllTotems() {
+        for (_, totem) in totems {
+            totem.rootNode.removeFromParentNode()
+        }
+        totems.removeAll()
+    }
+
     // MARK: - Scene setup
 
     private func setupCamera(isPreview: Bool) {
         let camera = SCNCamera()
         camera.zNear = 0.1
         camera.zFar = 500
-        // Wider FOV so 3+ totems fit comfortably even in the preview window.
         camera.fieldOfView = isPreview ? 65 : 55
         cameraNode.camera = camera
         cameraNode.position = SCNVector3(0, 0, 55)
@@ -106,35 +154,37 @@ final class SculptureScene {
         scene.rootNode.addChildNode(cool)
     }
 
-    // MARK: - Mock data driver (phase 2 only)
+    // MARK: - Mock data driver (idle fallback)
 
-    /// Generates synthetic CPU history for three hosts so we can verify the
-    /// renderer end-to-end before standing up file IPC.
-    ///
-    /// Each mock host uses a different sine period and phase offset so the
-    /// rings scroll at different rates and the visual scan-cycle never lines
-    /// up — keeps the screensaver from looking like a synchronized chart.
+    /// Synthetic three-host CPU history. Used when no live stream is
+    /// available — e.g. System Settings preview without Onyx running, or
+    /// the rare gap where Onyx has been quit and the file has gone stale.
     private static let mockHosts: [(id: String, label: String, color: String, phase: Double, period: Double)] = [
-        ("mock-1", "alpha", "#FF8800", 0.0, 7.0),
+        ("mock-1", "alpha", "#FF8C42", 0.0, 7.0),
         ("mock-2", "beta",  "#22DDFF", 2.5, 11.0),
         ("mock-3", "gamma", "#88FF66", 4.0, 5.0),
     ]
 
     private func startMockDriver() {
         mockStartTime = Date().timeIntervalSince1970
+        mockBuffers.removeAll()
 
-        // Seed: pre-roll a full history so the totems start fully formed
-        // instead of growing up from nothing while the user is watching.
+        // Pre-roll so the totems start fully formed.
         for k in stride(from: HostTotem.maxRings - 1, through: 0, by: -1) {
             advanceMock(secondsAgo: Double(k) * 0.4)
         }
 
-        // Live tick: new sample every 0.4s so motion is clearly visible.
         let timer = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in
             self?.advanceMock(secondsAgo: 0)
         }
         RunLoop.main.add(timer, forMode: .common)
         mockTimer = timer
+    }
+
+    private func stopMockDriver() {
+        mockTimer?.invalidate()
+        mockTimer = nil
+        mockBuffers.removeAll()
     }
 
     private func advanceMock(secondsAgo: Double) {
