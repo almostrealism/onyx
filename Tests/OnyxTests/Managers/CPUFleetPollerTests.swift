@@ -33,4 +33,59 @@ final class CPUFleetPollerTests: XCTestCase {
         let h = HostConfig.localhost
         XCTAssertEqual(CPUFleetPoller.color(for: h), "#FF8C42")
     }
+
+    // MARK: - container activity filter
+
+    /// Containers that have never crossed the 1% threshold should be
+    /// excluded immediately — same as DockerStatsManager's behavior in
+    /// the in-app monitor.
+    func test_filterByActivity_excludesNeverActiveContainers() {
+        let poller = CPUFleetPoller.shared
+        poller.resetActivityForTesting()
+        let result = poller.filterByActivity(
+            [ContainerStream(name: "sidecar", cpu: 0.2),
+             ContainerStream(name: "cron",    cpu: 0.0)],
+            hostID: "host-1"
+        )
+        XCTAssertTrue(result.isEmpty,
+                      "Containers that haven't crossed 1% should be excluded; got \(result.map(\.name))")
+    }
+
+    /// Containers above 1% are always included; once seen, they stay
+    /// included briefly even if their CPU dips back below the threshold.
+    func test_filterByActivity_keepsRecentlyActiveContainers() {
+        let poller = CPUFleetPoller.shared
+        poller.resetActivityForTesting()
+
+        // First pass: container is busy, should appear.
+        let pass1 = poller.filterByActivity(
+            [ContainerStream(name: "web", cpu: 5.0)],
+            hostID: "host-1"
+        )
+        XCTAssertEqual(pass1.map(\.name), ["web"])
+
+        // Second pass moments later: container went quiet but should
+        // still be in the list (activity window hasn't elapsed).
+        let pass2 = poller.filterByActivity(
+            [ContainerStream(name: "web", cpu: 0.05)],
+            hostID: "host-1"
+        )
+        XCTAssertEqual(pass2.map(\.name), ["web"],
+                       "container should remain visible while inside the activity window")
+    }
+
+    func test_filterByActivity_hostsAreIndependent() {
+        // Two hosts running the same container name shouldn't pollute
+        // each other's activity record.
+        let poller = CPUFleetPoller.shared
+        poller.resetActivityForTesting()
+        _ = poller.filterByActivity(
+            [ContainerStream(name: "redis", cpu: 7.5)], hostID: "host-A"
+        )
+        let other = poller.filterByActivity(
+            [ContainerStream(name: "redis", cpu: 0.0)], hostID: "host-B"
+        )
+        XCTAssertTrue(other.isEmpty,
+                      "host B's redis has never been active — must not inherit host A's activity")
+    }
 }

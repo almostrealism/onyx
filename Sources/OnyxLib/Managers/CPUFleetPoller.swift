@@ -37,12 +37,28 @@ public final class CPUFleetPoller {
     /// so a single hung host can't push the next round.
     public static let perHostTimeout: TimeInterval = 8
 
+    /// How long a container stays "visible" after its last >=1% CPU
+    /// sample. Matches DockerStatsManager.visibilityWindow so the
+    /// screensaver and the in-app monitor agree on which containers are
+    /// considered idle.
+    public static let containerActivityWindow: TimeInterval = 300
+
+    /// Activity threshold for "this container is doing something" —
+    /// matches DockerStatsManager's >=1% rule.
+    public static let containerActivityThreshold: Double = 1.0
+
     public static let shared = CPUFleetPoller()
 
     private weak var appState: AppState?
     private var timer: Timer?
     private let queue = DispatchQueue(label: "com.onyx.cpu-fleet-poller",
                                       qos: .utility, attributes: .concurrent)
+
+    /// `hostID:containerName` → last time CPU >= 1%. Guarded by `stateLock`
+    /// because pollOne can fire concurrently for multiple hosts on the
+    /// shared `queue`. Pruned to bound memory.
+    private var lastContainerActivity: [String: Date] = [:]
+    private let stateLock = NSLock()
 
     private init() {}
 
@@ -176,11 +192,16 @@ public final class CPUFleetPoller {
             // Containers (docker stats) come from the same SSH output.
             // Hosts without docker emit an empty section — we just
             // publish nil so the screensaver knows "no moons" rather
-            // than "no docker survey yet".
+            // than "no docker survey yet". Containers that have been
+            // consistently idle (< 1% CPU) for the full activity
+            // window are filtered out so the saver isn't cluttered
+            // with dozens of dim moons for sidecars and crons.
             let containers = Self.parseContainers(in: output)
+            let active = self.filterByActivity(containers,
+                                               hostID: host.id.uuidString)
             CPUStreamStore.shared.setContainers(
                 hostID: host.id.uuidString,
-                containers: containers.isEmpty ? nil : containers
+                containers: active.isEmpty ? nil : active
             )
         } catch {
             // Process couldn't start — fail quietly. The screensaver's idle
@@ -209,6 +230,43 @@ public final class CPUFleetPoller {
         "FF6B6B", // coral
         "B388FF"  // violet
     ]
+
+    /// Filter the latest container list against the rolling activity
+    /// record: drop any container that hasn't crossed the activity
+    /// threshold within the activity window. Stamps a new "last active"
+    /// time whenever a container hits the threshold, then prunes stale
+    /// entries to bound memory.
+    func filterByActivity(_ containers: [ContainerStream],
+                          hostID: String) -> [ContainerStream] {
+        let now = Date()
+        stateLock.lock()
+        defer { stateLock.unlock() }
+
+        var result: [ContainerStream] = []
+        for c in containers {
+            let key = "\(hostID):\(c.name)"
+            if c.cpu >= Self.containerActivityThreshold {
+                lastContainerActivity[key] = now
+                result.append(c)
+            } else if let last = lastContainerActivity[key],
+                      now.timeIntervalSince(last) < Self.containerActivityWindow {
+                result.append(c)
+            }
+        }
+
+        // Prune anything older than 2× the visibility window so the
+        // dict can't grow unboundedly across a long session.
+        let cutoff = now.addingTimeInterval(-Self.containerActivityWindow * 2)
+        lastContainerActivity = lastContainerActivity.filter { $0.value > cutoff }
+        return result
+    }
+
+    /// Test hook — clear the activity record so unit tests start clean.
+    func resetActivityForTesting() {
+        stateLock.lock()
+        lastContainerActivity.removeAll()
+        stateLock.unlock()
+    }
 
     /// Extract the `---DOCKER---` section from a stats output and parse
     /// the `name|cpu%` lines into ContainerStream values. Uses

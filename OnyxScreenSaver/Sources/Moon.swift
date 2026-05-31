@@ -18,8 +18,10 @@ import SceneKit
 final class Moon {
 
     /// Visual size — fixed across containers. Color is the dynamic
-    /// channel; container name and CPU are the per-moon signal.
-    static let moonRadius: CGFloat = 0.22
+    /// channel; container name and CPU are the per-moon signal. Sized
+    /// to clearly read as a separate visual element from the GPU
+    /// Saturn ring's much smaller blocks.
+    static let moonRadius: CGFloat = 0.35
 
     let containerName: String
     let rootNode = SCNNode()
@@ -72,10 +74,17 @@ final class Moon {
         // > 2u from the totem center even at e=0.4.
         semiMajor = 3.5 + r0 * 2.5
         eccentricity = 0.05 + r1 * 0.35
-        // Inclination: -55° to +55°. Some moons swing through near-polar
-        // orbits, others stay close to the totem's equator.
-        inclination = (r2 - 0.5) * (Float.pi * 1.1)
-        ascendingNode = r3 * 2 * .pi
+        // Inclination is locked at π/2: every orbital plane contains the
+        // totem's vertical axis (a "polar" orbit). This makes moons read
+        // as distinct from the horizontal GPU Saturn ring — they always
+        // sweep top-to-bottom rather than going around the equator like
+        // the Saturn blocks do. Variety comes from ascendingNode, which
+        // rotates each orbital plane around the vertical axis so
+        // different containers orbit on different meridians.
+        inclination = .pi / 2
+        // We still keep r2 in the hash mix — it influences `ascendingNode`
+        // below — so the seed entropy isn't wasted.
+        ascendingNode = (r3 + r2 * 0.5).truncatingRemainder(dividingBy: 1) * 2 * .pi
         // Period: 10–24s. Slow enough to read without feeling sluggish.
         period = 10 + r4 * 14
         phaseOffset = r5 * 2 * .pi
