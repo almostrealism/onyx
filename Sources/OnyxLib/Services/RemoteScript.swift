@@ -79,6 +79,13 @@ public enum RemoteScript {
 
     /// Normalize and clean output before parsing:
     ///  - Strip `\r` (ssh -tt produces `\r\n` line endings).
+    ///  - **Strip the TTY-echo source prefix.** When `ssh -tt` allocates
+    ///    a remote PTY, the kernel TTY discipline echoes our stdin (the
+    ///    wrapped script) back to us *before* `stty -echo` can take
+    ///    effect — there's no way to disable echo retroactively. The
+    ///    echoed source lands at the front of the output, including
+    ///    literal `---SECTION---` markers and other parser bait. See
+    ///    `stripSourceEcho(_:)` for the boundary heuristic.
     ///  - **Truncate at the execution marker.** Anything from the marker
     ///    onwards (trailing shell prompt, echo of `exit`, etc.) is shell
     ///    session noise, not script output. Cutting it lets callers use
@@ -86,10 +93,39 @@ public enum RemoteScript {
     ///    (toplevel, diff, etc.) without picking up prompt junk.
     public static func cleanedOutput(_ output: String) -> String {
         let stripped = output.replacingOccurrences(of: "\r", with: "")
+        let truncated: String
         if let range = stripped.range(of: executionMarker) {
-            return String(stripped[..<range.lowerBound])
+            truncated = String(stripped[..<range.lowerBound])
+        } else {
+            truncated = stripped
         }
-        return stripped
+        return stripSourceEcho(truncated)
+    }
+
+    /// Drop the leading TTY-echo of our wrapped script source.
+    ///
+    /// The wrap appends `echo "---ONYX-OK-$((1+1))---"` as its final line.
+    /// When the TTY echoes the script back to us, that line appears with
+    /// the literal text `$((1+1))` (unevaluated arithmetic). The runtime
+    /// echo evaluates the arithmetic and emits `---ONYX-OK-2---` instead.
+    ///
+    /// So: the LAST line containing the literal `$((1+1))` is the bottom
+    /// of the source-echo block. Everything before and including it is
+    /// noise; everything after is real runtime output. (A trailing
+    /// `exit` line from `AppState.remoteScript` may still appear in
+    /// the remaining output, but it's a single tokenizable line that no
+    /// parser matches — harmless.)
+    ///
+    /// If no `$((1+1))` line is present, the TTY didn't echo our source
+    /// back at all (echo really was off, or the shell ate it). The
+    /// output is returned unchanged.
+    public static func stripSourceEcho(_ output: String) -> String {
+        let lines = output.components(separatedBy: "\n")
+        guard let lastEchoIdx = lines.lastIndex(where: { $0.contains("$((1+1))") }) else {
+            return output
+        }
+        let tail = lines[(lastEchoIdx + 1)...]
+        return tail.joined(separator: "\n")
     }
 
     /// User-facing message for output that came back without the

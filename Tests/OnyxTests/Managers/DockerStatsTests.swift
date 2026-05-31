@@ -262,4 +262,100 @@ final class DockerUptimeTests: XCTestCase {
         XCTAssertEqual(stats[0].name, "nginx")
         XCTAssertEqual(stats[0].uptime, "")
     }
+
+    // MARK: - container-name validator
+
+    func test_isValidContainerName_acceptsRealNames() {
+        XCTAssertTrue(DockerStatsManager.isValidContainerName("nginx"))
+        XCTAssertTrue(DockerStatsManager.isValidContainerName("my-app"))
+        XCTAssertTrue(DockerStatsManager.isValidContainerName("my_app"))
+        XCTAssertTrue(DockerStatsManager.isValidContainerName("app.v2"))
+        XCTAssertTrue(DockerStatsManager.isValidContainerName("a1b2"))
+        XCTAssertTrue(DockerStatsManager.isValidContainerName("9"),
+                      "docker permits names starting with a digit")
+    }
+
+    func test_isValidContainerName_rejectsScriptSourceFragments() {
+        // These are the exact shapes script-source pollution takes after
+        // the TTY echoes our docker-stats invocation back and the line
+        // is sliced by the parser's `|` split.
+        XCTAssertFalse(DockerStatsManager.isValidContainerName(
+            "docker stats --no-stream --format \"STAT"))
+        XCTAssertFalse(DockerStatsManager.isValidContainerName("{{.Name}}"))
+        XCTAssertFalse(DockerStatsManager.isValidContainerName("PS1=''"))
+        XCTAssertFalse(DockerStatsManager.isValidContainerName("sysctl -n"))
+        XCTAssertFalse(DockerStatsManager.isValidContainerName("hw.ncpu 2>/dev/null"))
+        XCTAssertFalse(DockerStatsManager.isValidContainerName(""))
+        XCTAssertFalse(DockerStatsManager.isValidContainerName("   "))
+    }
+
+    // MARK: - end-to-end: cleanedOutput → parse against polluted output
+
+    func test_parse_rejectsScriptSourceMasqueradingAsRow() {
+        // Build a polluted output where the TTY echoed our docker-stats
+        // script back, then docker actually ran and emitted real rows.
+        // The script-source line happens to have 6+ pipes (because the
+        // format string has them), so without name validation it would
+        // appear as a row with name="docker stats --no-stream …".
+        let script = #"""
+        echo CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1); docker stats --no-stream --format "STAT|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}" 2>/dev/null; docker ps --format "PS|{{.Names}}|{{.Status}}" 2>/dev/null
+        """#
+        let runtime = """
+        CORES=8
+        STAT|nginx|0.05%|12.34MiB / 7.656GiB|1.2kB / 0B|0B / 0B|5
+        PS|nginx|Up 2 hours
+        """
+        let raw = PollutedOutputFixture.fullEchoThenRuntime(script: script, runtime: runtime)
+        let cleaned = RemoteScript.cleanedOutput(raw)
+        let (cores, parsed) = DockerStatsManager.parse(output: cleaned)
+
+        XCTAssertEqual(cores, 8)
+        XCTAssertEqual(parsed.count, 1,
+                       "exactly one real container row should be produced; got: \(parsed.map(\.name))")
+        XCTAssertEqual(parsed[0].name, "nginx")
+        XCTAssertEqual(parsed[0].uptime, "2h")
+        XCTAssertEqual(parsed[0].cpu, "0.05%")
+    }
+
+    func test_parse_recoversWhenSourceEchoBoundaryIsMissing() {
+        // Pathological case: source echo present but `$((1+1))` boundary
+        // never appears (e.g. shell stripped it). cleanedOutput can't help;
+        // the parser itself has to reject the source-echo row via the
+        // container-name validator.
+        let output = """
+        echo CORES=$(nproc) ; docker stats --no-stream --format "STAT|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}" 2>/dev/null
+        CORES=4
+        STAT|nginx|0.05%|12.34MiB / 7.656GiB|1.2kB / 0B|0B / 0B|5
+        """
+        let (cores, parsed) = DockerStatsManager.parse(output: output)
+        XCTAssertEqual(cores, 4)
+        XCTAssertEqual(parsed.count, 1,
+                       "name validation alone must protect us when stripSourceEcho misses; got: \(parsed.map(\.name))")
+        XCTAssertEqual(parsed[0].name, "nginx")
+    }
+
+    func test_parse_rejectsTtyWrappedScriptFragments() {
+        // Some hostile remotes have narrow PTY widths (e.g. 80 cols) that
+        // chop our script source into multiple lines. A chunk that happens
+        // to contain 6 pipes would slip through the count check, but its
+        // name field will always have non-name characters.
+        let output = """
+        --format "STAT|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockI
+        O}}|{{.PIDs}}" 2>/dev/null; docker ps
+        STAT|web|1.00%|10MiB / 1GiB|0B / 0B|0B / 0B|3
+        """
+        let (_, parsed) = DockerStatsManager.parse(output: output)
+        let names = parsed.map(\.name)
+        XCTAssertEqual(names, ["web"],
+                       "only the genuine container row should survive; got: \(names)")
+    }
+
+    func test_parse_handlesContainerNameWithEveryAllowedChar() {
+        // A real container with a hyphenated, dot-suffixed name should still
+        // parse. Make sure our validator isn't too restrictive.
+        let output = "STAT|my-app.v2_canary|0.01%|1MiB / 1GiB|0B / 0B|0B / 0B|1"
+        let (_, parsed) = DockerStatsManager.parse(output: output)
+        XCTAssertEqual(parsed.count, 1)
+        XCTAssertEqual(parsed[0].name, "my-app.v2_canary")
+    }
 }

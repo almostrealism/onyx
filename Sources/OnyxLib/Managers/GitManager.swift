@@ -265,7 +265,9 @@ public class GitManager: ObservableObject {
 
     // MARK: - Parsing
 
-    private func parseOutput(_ output: String, currentPath: String) {
+    /// Internal for tests — exercises the full marker-extraction flow on
+    /// captured remote output without requiring a real SSH round-trip.
+    func parseOutput(_ output: String, currentPath: String) {
         // Check if git rev-parse succeeded (first line should be "true")
         guard output.contains("---GIT_BRANCH---") else {
             isGitRepo = false
@@ -317,8 +319,19 @@ public class GitManager: ObservableObject {
         )
     }
 
-    private func extractSection(_ output: String, start: String, end: String?) -> String {
-        guard let startRange = output.range(of: start) else { return "" }
+    /// Internal for tests — locked down by spec, not visibility.
+    func extractSection(_ output: String, start: String, end: String?) -> String {
+        // Find the LAST occurrence of `start` rather than the first. The
+        // script source contains literal `echo "---GIT_BRANCH---"` etc.
+        // lines, and the remote TTY echoes that source back before
+        // `stty -echo` can take effect. So every marker appears at least
+        // twice in the raw output: once as source echo, once as the actual
+        // runtime emission. The runtime one is always the later
+        // occurrence. (RemoteScript.cleanedOutput tries to strip the
+        // source-echo prefix via the `$((1+1))` boundary, but on hosts
+        // where the prefix gets fragmented or the boundary line isn't
+        // echoed cleanly, last-occurrence parsing is our backstop.)
+        guard let startRange = output.range(of: start, options: .backwards) else { return "" }
         let after = output[startRange.upperBound...]
         if let end = end, let endRange = after.range(of: end) {
             return String(after[..<endRange.lowerBound])

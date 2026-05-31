@@ -452,3 +452,97 @@ final class MonitorParserResilienceTests: XCTestCase {
                       "should report unrecognized/empty top output; got: \(msg)")
     }
 }
+
+/// Tests for the parser's behavior under realistic remote-output pollution:
+/// the TTY echoes our wrapped script back, the runtime output follows. The
+/// parser must not bind to the source-echo `---CPU---` (which is just the
+/// literal `echo "---CPU---"` in our own script).
+final class MonitorParserPollutionTests: XCTestCase {
+
+    /// A representative real-world stats output for a Linux box. Used by
+    /// the pollution tests below so we only have one place to update if
+    /// the script's output format ever changes.
+    private static let realRuntime = """
+    ---UPTIME---
+     14:23:45 up 7 days, 4:12, 2 users, load average: 0.42, 0.31, 0.28
+    ---CPU---
+    %Cpu(s):  3.2 us,  1.0 sy,  0.0 ni, 95.6 id,  0.1 wa,  0.0 hi,  0.1 si,  0.0 st
+    ---MEM---
+                  total        used        free      shared  buff/cache   available
+    Mem:          16000        4321        1234         100       10445       11234
+    Swap:             0           0           0
+    ---GPU---
+    50,30,65,NVIDIA GeForce RTX 3090
+    """
+
+    func testParse_pollutedByFullSourceEcho_extractsRuntimeCPU() {
+        // The most common bug shape: the TTY echoes our wrapped script
+        // back, then docker actually runs. Without cleanedOutput's source-
+        // echo strip AND last-section-wins, the parser would lock onto
+        // the gibberish between source's `---CPU---` echo and source's
+        // `---MEM---` echo (which is just more script source).
+        let script = #"""
+        echo "---UPTIME---"; uptime; \
+        echo "---CPU---"; top -bn1 | head -5; \
+        echo "---MEM---"; free -m; \
+        echo "---GPU---"; nvidia-smi
+        """#
+        let raw = PollutedOutputFixture.fullEchoThenRuntime(
+            script: script, runtime: Self.realRuntime)
+        let cleaned = RemoteScript.cleanedOutput(raw)
+        let sample = MonitorManager.parse(output: cleaned)
+
+        XCTAssertNotNil(sample)
+        XCTAssertEqual(sample?.cpuUsage ?? -1, 100 - 95.6, accuracy: 0.01,
+                       "should extract runtime CPU (100 - idle), not source-echo garbage")
+        XCTAssertEqual(sample?.memTotal, 16000)
+        XCTAssertEqual(sample?.memUsed, 4321)
+        XCTAssertEqual(sample?.gpuUsage, 50)
+        XCTAssertEqual(sample?.gpuTemp, 65)
+    }
+
+    func testParse_pollutedByWrappedSourceEcho_stillExtractsRuntime() {
+        // Hostile remote with narrow PTY (80 cols) — the TTY wraps each
+        // script line at column 80 before echoing. The `$((1+1))` boundary
+        // line still gets wrapped intact (it's short), so cleanedOutput's
+        // strip still finds it.
+        let script = #"""
+        echo "---UPTIME---"; uptime; echo "---CPU---"; top -bn1 | head -5; echo "---MEM---"; free -m; echo "---GPU---"; nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader
+        """#
+        let raw = PollutedOutputFixture.wrappedEchoThenRuntime(
+            script: script, runtime: Self.realRuntime, column: 80)
+        let cleaned = RemoteScript.cleanedOutput(raw)
+        let sample = MonitorManager.parse(output: cleaned)
+
+        XCTAssertEqual(sample?.cpuUsage ?? -1, 100 - 95.6, accuracy: 0.01)
+        XCTAssertEqual(sample?.memTotal, 16000)
+    }
+
+    func testParse_lastSectionWins_evenWithoutCleanedOutput() {
+        // Defense in depth: if stripSourceEcho ever fails to find its
+        // boundary, the parser itself must still pick the correct section.
+        // Here we hand parse() the *uncleaned* output — both source-echo
+        // sections AND runtime sections are present. The runtime CPU
+        // section must win because it's later in the iteration.
+        let raw = """
+        echo "---CPU---"; top -bn1 | head -5
+        ---CPU---
+        Not the real top output — script source bleed
+        ---MEM---
+        ; free -m
+        ---UPTIME---
+         14:23:45 up 7 days, load average: 0.42, 0.31, 0.28
+        ---CPU---
+        %Cpu(s):  3.2 us,  1.0 sy,  0.0 ni, 95.6 id,  0.1 wa
+        ---MEM---
+        Mem:          16000        4321        1234
+        ---GPU---
+        N/A
+        """
+        let sample = MonitorManager.parse(output: raw)
+        XCTAssertEqual(sample?.cpuUsage ?? -1, 100 - 95.6, accuracy: 0.01,
+                       "the LAST ---CPU--- section is the runtime one — must win over earlier source-echo section")
+        XCTAssertEqual(sample?.memTotal, 16000,
+                       "the LAST ---MEM--- section is the runtime one — must win")
+    }
+}

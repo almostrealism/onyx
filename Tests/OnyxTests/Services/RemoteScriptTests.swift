@@ -116,6 +116,83 @@ final class RemoteScriptTests: XCTestCase {
                       "real script output before the marker must be preserved")
     }
 
+    // MARK: - stripSourceEcho
+
+    func testStripSourceEcho_dropsLeadingScriptEchoBlock() {
+        // Realistic case: ssh -tt remoted us our own script back before
+        // stty -echo could take effect. The runtime body comes after the
+        // last `$((1+1))` line — everything up to and including that line
+        // is parser bait.
+        let raw = """
+        set +vx 2>/dev/null
+        PS1=''; PS2=''; PROMPT_COMMAND=''
+        PATH="${PATH:-}:/usr/bin"
+        echo "---UPTIME---"; uptime
+        echo "---CPU---"; top -bn1 | head -5
+        echo "---ONYX-OK-$((1+1))---"
+        ---UPTIME---
+         14:23:45 up 7 days, load average: 0.42, 0.31, 0.28
+        ---CPU---
+        %Cpu(s):  3.2 us,  1.0 sy,  0.0 ni, 95.6 id
+        """
+        let cleaned = RemoteScript.stripSourceEcho(raw)
+        XCTAssertFalse(cleaned.contains("echo \"---UPTIME---\""),
+                       "source-echo line must be cut: \(cleaned)")
+        XCTAssertFalse(cleaned.contains("PS1=''"),
+                       "PS1 setup line is source echo, must be cut")
+        XCTAssertTrue(cleaned.contains("---UPTIME---"),
+                      "runtime marker (no `echo` prefix) must survive")
+        XCTAssertTrue(cleaned.contains("14:23:45 up 7 days"),
+                      "actual uptime data must survive")
+    }
+
+    func testStripSourceEcho_returnsInputWhenEchoWasSuppressed() {
+        // If stty -echo did its job and the source never echoed, we won't
+        // see `$((1+1))` in the output. The function must be a no-op then.
+        let clean = """
+        ---UPTIME---
+         14:23:45 up 7 days, load average: 0.42, 0.31, 0.28
+        ---CPU---
+        %Cpu(s):  3.2 us
+        """
+        XCTAssertEqual(RemoteScript.stripSourceEcho(clean), clean)
+    }
+
+    func testStripSourceEcho_handlesMultipleEchoBlocks() {
+        // If for some reason the source echoed twice (rare but possible
+        // on flaky remotes), we want to cut everything up to the LAST
+        // `$((1+1))` so the parser only sees the genuine runtime output.
+        let raw = """
+        echo "first"; echo "---ONYX-OK-$((1+1))---"
+        garbage that shouldn't be parsed
+        echo "second"; echo "---ONYX-OK-$((1+1))---"
+        ---CPU---
+        real data
+        """
+        let cleaned = RemoteScript.stripSourceEcho(raw)
+        XCTAssertFalse(cleaned.contains("garbage"),
+                       "anything between echo blocks must also be cut: \(cleaned)")
+        XCTAssertTrue(cleaned.contains("real data"))
+    }
+
+    func testCleanedOutput_stripsSourceEchoBeforeTruncating() {
+        // The combined wrap that callers actually use: ssh -tt produces
+        // source echo, runtime output, then the marker. cleanedOutput
+        // should remove BOTH the leading source-echo block AND the
+        // trailing marker, leaving only runtime content.
+        let raw = PollutedOutputFixture.fullEchoThenRuntime(
+            script: "uptime",
+            runtime: "14:23:45 up 7 days, load average: 0.4, 0.3, 0.2"
+        )
+        let cleaned = RemoteScript.cleanedOutput(raw)
+        XCTAssertFalse(cleaned.contains("PS1=''"),
+                       "source echo must be stripped: \(cleaned)")
+        XCTAssertFalse(cleaned.contains("---ONYX-OK"),
+                       "marker must be stripped: \(cleaned)")
+        XCTAssertTrue(cleaned.contains("14:23:45 up 7 days"),
+                      "real runtime must survive")
+    }
+
     // MARK: - diagnostic message
 
     func testNonExecutionDiagnostic_isUserActionable() {

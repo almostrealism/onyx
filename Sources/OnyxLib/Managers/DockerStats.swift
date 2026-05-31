@@ -200,6 +200,20 @@ public class DockerStatsManager: ObservableObject {
         Double(s.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "%", with: "")) ?? 0
     }
 
+    /// Docker container names per their grammar:
+    ///   `[a-zA-Z0-9][a-zA-Z0-9_.-]*`
+    /// We use this to reject "rows" that are actually fragments of our
+    /// own script source echoed back through a hostile TTY. Anything with
+    /// whitespace, quotes, braces, `=`, `;`, `$`, etc. fails — those are
+    /// reliable tells that the line is shell source, not docker output.
+    static func isValidContainerName(_ s: String) -> Bool {
+        guard let first = s.first else { return false }
+        guard first.isLetter || first.isNumber else { return false }
+        return s.allSatisfy { ch in
+            ch.isLetter || ch.isNumber || ch == "_" || ch == "." || ch == "-"
+        }
+    }
+
     /// Parse.
     public static func parse(output: String) -> (cores: Int, containers: [DockerContainerStats]) {
         var cores = 1
@@ -214,13 +228,17 @@ public class DockerStatsManager: ObservableObject {
                 continue
             }
             let parts = line.components(separatedBy: "|")
-            if parts.first == "PS", parts.count >= 3 {
+            if parts.first == "PS", parts.count >= 3, isValidContainerName(parts[1]) {
                 uptimeByName[parts[1]] = compactUptime(from: parts[2])
-            } else if parts.first == "STAT", parts.count >= 7 {
+            } else if parts.first == "STAT", parts.count >= 7, isValidContainerName(parts[1]) {
                 statRows.append((parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]))
-            } else if parts.count >= 6 {
+            } else if parts.count >= 6, isValidContainerName(parts[0]) {
                 // Backwards-compat: lines without the STAT/PS tag (older
-                // format used in tests and for fallback)
+                // format used in tests and for fallback). The container-name
+                // check kills script-source pollution — a fragment like
+                // `docker stats --no-stream --format "STAT|{{.Name}}|…"`
+                // splits into 6+ parts but parts[0] contains whitespace and
+                // quotes, so it fails the validator.
                 statRows.append((parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]))
             }
         }

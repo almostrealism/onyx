@@ -401,13 +401,21 @@ public class MonitorManager: ObservableObject {
                 }
             }
 
+            // For each "---X---" section, last occurrence wins. Source-echo
+            // of the script always introduces a *literal* `---CPU---` marker
+            // before the runtime one fires (the script has `echo "---CPU---"`),
+            // so a first-match strategy would lock us onto the gibberish
+            // between the literal marker and the runtime one. Overwriting on
+            // each match means the runtime section — which is always
+            // chronologically later — wins.
+
             if section == "CPU", i + 1 < sections.count {
                 let cpuStr = sections[i + 1]
                 let lines = cpuStr.components(separatedBy: "\n")
-                if cpuUsage == nil { cpuUsage = scanCpuUsage(in: lines) }
+                if let parsed = scanCpuUsage(in: lines) { cpuUsage = parsed }
                 for line in lines {
                     // macOS top also outputs PhysMem line — grab memory from here
-                    if memUsed == nil, let phys = parsePhysMem(line) {
+                    if let phys = parsePhysMem(line) {
                         memUsed = phys.0
                         memTotal = phys.1
                     }
@@ -427,7 +435,7 @@ public class MonitorManager: ObservableObject {
                         }
                     }
                     // macOS: "PhysMem: 127G used ..."
-                    if memUsed == nil, let phys = parsePhysMem(line) {
+                    if let phys = parsePhysMem(line) {
                         memUsed = phys.0
                         memTotal = phys.1
                     }
