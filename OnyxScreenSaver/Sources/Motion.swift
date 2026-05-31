@@ -41,8 +41,10 @@ struct MotionState {
 enum Motion {
 
     /// Outer bound — softly pushed back toward origin if a totem strays
-    /// beyond this radius. Keeps the action centered in frame.
-    static let boundsRadius: Float = 30
+    /// beyond this radius. Sized to comfortably contain the project-ball
+    /// shell (radius up to 24) plus the totem spawn shell (radius up to
+    /// 32) with some breathing room beyond.
+    static let boundsRadius: Float = 36
 
     /// Pairwise gravitational constant. Tuned so a pair of average-mass
     /// totems at typical separation accelerates visibly but not violently.

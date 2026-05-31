@@ -215,33 +215,42 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
     }
 
     /// Spread the per-project balls around origin on a random shell so
-    /// the gravity field has multiple poles. We track placed positions
-    /// in `balls` and reject candidates that are too close to any
-    /// existing ball — within a session the balls stay where they were
-    /// placed, but new ones don't pile on top of survivors.
+    /// the gravity field has multiple poles, with generous separation
+    /// between them. Per-project balls are visually smaller than busy
+    /// totems (radius ∝ project-hours, and most projects don't run 35h),
+    /// so tight clustering leaves no visual breathing room — totems
+    /// just weave through a dense knot. Spreading them across most of
+    /// the visible region gives the eye real empty space between wells.
     private func nextProjectBallPosition() -> SCNVector3 {
-        // Closer-in than the totem spawn range (16-26) so totems feel
-        // multiple wells without the balls cluttering the camera frame.
-        for _ in 0..<24 {
+        // Try with the generous minimum separation first.
+        if let p = tryPlaceBall(radiusRange: 16...24, minSeparation: 16) { return p }
+        // Tight week with many projects — relax separation a bit.
+        if let p = tryPlaceBall(radiusRange: 14...26, minSeparation: 12) { return p }
+        // Absolute fallback — accept anything in the wider band so we
+        // don't pile on top of existing balls at origin.
+        if let p = tryPlaceBall(radiusRange: 12...28, minSeparation: 8) { return p }
+        // Truly desperate (many balls or pathological randomness).
+        let theta = Float.random(in: 0...(2 * .pi))
+        return SCNVector3(18 * cos(theta), 0, 18 * sin(theta))
+    }
+
+    private func tryPlaceBall(radiusRange: ClosedRange<Float>,
+                              minSeparation: Float) -> SCNVector3? {
+        for _ in 0..<40 {
             let theta = Float.random(in: 0...(2 * .pi))
-            let phi = Float.random(in: -(.pi / 4)...(.pi / 4))
-            let radius = Float.random(in: 9...15)
+            let phi = Float.random(in: -(.pi / 3.5)...(.pi / 3.5))
+            let radius = Float.random(in: radiusRange)
             let candidate = SCNVector3(
                 radius * cos(phi) * cos(theta),
                 radius * sin(phi),
                 radius * cos(phi) * sin(theta)
             )
-            // Require ≥ 8 units between ball centers so wells stay
-            // visually distinct and totems can thread between them.
             let tooClose = balls.values.contains { existing in
-                Motion.length(Motion.sub(existing.motion.position, candidate)) < 8
+                Motion.length(Motion.sub(existing.motion.position, candidate)) < minSeparation
             }
             if !tooClose { return candidate }
         }
-        // Fallback: accept anything if 24 tries didn't find separation
-        // (many projects — rare). Still better than placing at origin.
-        let theta = Float.random(in: 0...(2 * .pi))
-        return SCNVector3(12 * cos(theta), 0, 12 * sin(theta))
+        return nil
     }
 
     /// Initial position on a random point of a shell around origin —
@@ -252,7 +261,10 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
     private func spawnPosition(for index: Int) -> SCNVector3 {
         let theta = Float.random(in: 0...(2 * .pi))          // azimuth
         let phi = Float.random(in: -(.pi / 3.5)...(.pi / 3)) // elevation, biased slightly up
-        let radius = Float.random(in: 16...26)
+        // Spawn outside the project-ball shell (16-24) so totems start
+        // beyond the gravity cluster and fall inward, rather than
+        // appearing already-collided.
+        let radius = Float.random(in: 24...32)
         return SCNVector3(
             radius * cos(phi) * cos(theta),
             radius * sin(phi),
