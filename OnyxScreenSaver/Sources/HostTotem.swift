@@ -41,8 +41,17 @@ final class HostTotem {
 
     private let stackNode = SCNNode()
     private let labelNode = SCNNode()
+    /// Saturn-style outer ring of GPU activity blocks. Sibling of stackNode
+    /// so it shares the slow vertical spin — the GPU history rotates with
+    /// the CPU stack rather than reading as a separate fixed disc.
+    private let saturnNode = SCNNode()
     private var baseColor: NSColor
     private var lastLabel: String?
+
+    /// Saturn ring's radius — outside the widest cube ring (max ~1.15 at
+    /// arcSpacing=0.3 and 24 cubes) with breathing room so it doesn't
+    /// merge into the silhouette.
+    private static let saturnRadius: CGFloat = 1.9
 
     init(hostID: String, color: NSColor, seed: Int = 0) {
         self.hostID = hostID
@@ -60,9 +69,11 @@ final class HostTotem {
         )
         rootNode.addChildNode(stackNode)
         rootNode.addChildNode(labelNode)
+        stackNode.addChildNode(saturnNode)
 
         // Slow rotation around the vertical axis. Lives on stackNode so the
-        // (eventually drifting) rootNode position transform composes cleanly.
+        // (eventually drifting) rootNode position transform composes cleanly,
+        // and so the Saturn ring spins together with the cube stack.
         let spin = CABasicAnimation(keyPath: "rotation")
         spin.fromValue = NSValue(scnVector4: SCNVector4(0, 1, 0, 0))
         spin.toValue = NSValue(scnVector4: SCNVector4(0, 1, 0, Float.pi * 2))
@@ -123,13 +134,21 @@ final class HostTotem {
         // tick without any explicit notification.
         motion.mass = Self.computeMass(from: samples)
 
-        stackNode.childNodes.forEach { $0.removeFromParentNode() }
+        // Rebuild stack — but preserve saturnNode (and its blocks) since
+        // it lives on stackNode as a sibling of the ring nodes. We'll
+        // rebuild its contents separately below.
+        stackNode.childNodes.forEach { node in
+            if node !== self.saturnNode { node.removeFromParentNode() }
+        }
 
         // Take the most recent maxRings samples. Index 0 in `recent` is the
         // oldest visible sample, last is newest — we render newest-on-top.
         let recent = Array(samples.suffix(Self.maxRings))
         let n = recent.count
-        guard n > 0 else { return }
+        guard n > 0 else {
+            rebuildSaturnRing(samples: [])
+            return
+        }
 
         // Center the stack vertically around y=0 so the camera frames it
         // without needing per-totem offset math.
@@ -142,10 +161,13 @@ final class HostTotem {
             let ageFraction = Double(n - 1 - i) / Double(max(Self.maxRings - 1, 1))
             let yOffset = yBase + CGFloat(i) * Self.ringSpacing
             let ringNode = makeRing(cubeCount: cubeCount,
+                                    cpu: sample.cpu,
                                     yOffset: yOffset,
                                     ageFraction: ageFraction)
             stackNode.addChildNode(ringNode)
         }
+
+        rebuildSaturnRing(samples: recent)
     }
 
     // MARK: - Internals
@@ -182,7 +204,8 @@ final class HostTotem {
         return bucket * 4
     }
 
-    private func makeRing(cubeCount: Int, yOffset: CGFloat, ageFraction: Double) -> SCNNode {
+    private func makeRing(cubeCount: Int, cpu: Double,
+                          yOffset: CGFloat, ageFraction: Double) -> SCNNode {
         let ringNode = SCNNode()
         ringNode.position = SCNVector3(0, Float(yOffset), 0)
 
@@ -196,7 +219,7 @@ final class HostTotem {
             let x = radius * CGFloat(cos(angle))
             let z = radius * CGFloat(sin(angle))
 
-            let cube = SCNNode(geometry: makeCubeGeometry(ageFraction: ageFraction))
+            let cube = SCNNode(geometry: makeCubeGeometry(cpu: cpu, ageFraction: ageFraction))
             cube.position = SCNVector3(Float(x), 0, Float(z))
             // Orient cube so its face points outward — looks tidier than
             // axis-aligned cubes whose corners poke randomly toward the camera.
@@ -207,7 +230,11 @@ final class HostTotem {
         return ringNode
     }
 
-    private func makeCubeGeometry(ageFraction: Double) -> SCNGeometry {
+    /// Cube color is now driven by the CPU level (blue → yellow → red
+    /// ramp matching the main-app monitor bars). Per-host identity is
+    /// carried by a subtle baseColor emission tint so each totem still
+    /// has a distinct cast in low-light areas, plus the floating label.
+    private func makeCubeGeometry(cpu: Double, ageFraction: Double) -> SCNGeometry {
         let box = SCNBox(width: Self.cubeSize,
                          height: Self.cubeSize,
                          length: Self.cubeSize,
@@ -215,14 +242,16 @@ final class HostTotem {
         let material = SCNMaterial()
         material.lightingModel = .physicallyBased
 
-        // Tint fades from full saturation (newest) down to ~0.45 (oldest).
-        // For a PBR metallic material, the diffuse color tints the *reflected*
-        // light rather than acting as the surface color — this is what gives
-        // metals like brass or copper their characteristic hue.
-        let brightness = 1.0 - 0.55 * ageFraction
-        material.diffuse.contents = baseColor.withBrightnessMultiplied(by: CGFloat(brightness))
+        // Diffuse: blue/yellow/red by CPU level, dimmed by age.
+        let levelColor = Self.levelColor(forPct: cpu)
+        let brightness = 1.0 - 0.45 * ageFraction
+        material.diffuse.contents = levelColor.withBrightnessMultiplied(by: CGFloat(brightness))
+        // Emission: per-host tint, very dim. Visible mostly in the shaded
+        // sides of cubes — gives each machine a faint signature color
+        // without overwhelming the CPU-level reading.
+        material.emission.contents = baseColor.withBrightnessMultiplied(by: 0.12)
 
-        // High metalness + low roughness = polished colored metal. Older
+        // High metalness + low roughness = polished colored surface. Older
         // rings (deeper in the stack) get progressively rougher, so they
         // catch less environment light. Reads as "the past was duller".
         material.metalness.contents = NSNumber(value: 0.85)
@@ -231,5 +260,73 @@ final class HostTotem {
 
         box.materials = [material]
         return box
+    }
+
+    // MARK: - Color ramp
+
+    /// Blue / yellow / red ramp matching `monitorCPUBarColor` in the main
+    /// app. Discrete bands (not interpolated) so the visual language is
+    /// the same as the in-app monitor bars at a glance.
+    ///   <= 40%  → blue
+    ///   <= 80%  → yellow
+    ///   >  80%  → red
+    static func levelColor(forPct pct: Double) -> NSColor {
+        let v = max(0, min(100, pct))
+        if v > 80 { return NSColor(srgbRed: 1.00, green: 0.42, blue: 0.42, alpha: 1) }
+        if v > 40 { return NSColor(srgbRed: 1.00, green: 0.82, blue: 0.42, alpha: 1) }
+        return NSColor(srgbRed: 0.40, green: 0.80, blue: 1.00, alpha: 1)
+    }
+
+    // MARK: - Saturn GPU ring
+
+    /// Build the outer Saturn-style ring showing recent GPU activity.
+    /// Each non-zero GPU sample becomes a small angular block; empty
+    /// samples are simply omitted so the ring's fill pattern reads as
+    /// "when did the GPU run?". Hides itself if the host has no GPU
+    /// data at all (all samples nil/zero).
+    private func rebuildSaturnRing(samples: [CPUSample]) {
+        saturnNode.childNodes.forEach { $0.removeFromParentNode() }
+
+        let recent = Array(samples.suffix(Self.maxRings))
+        guard !recent.isEmpty else { return }
+        // If no samples carry a meaningful GPU reading, skip the ring
+        // entirely — a host without a GPU should not grow a halo.
+        let hasGPU = recent.contains { ($0.gpu ?? 0) > 0.5 }
+        guard hasGPU else { return }
+
+        let blockW = Self.cubeSize * 0.9   // radial thickness
+        let blockH = Self.cubeSize * 1.4   // taller than CPU cubes — distinguishable
+        let blockL = Self.cubeSize * 0.9   // tangent span
+        let radius = Self.saturnRadius
+
+        for (i, sample) in recent.enumerated() {
+            guard let gpu = sample.gpu, gpu > 0.5 else { continue }
+            // Newest sample at angle 0 (front of totem); older samples
+            // sweep counter-clockwise around. Same direction as the
+            // totem's spin so the freshest sample is briefly in front.
+            let angle = 2 * Double.pi * Double(recent.count - 1 - i)
+                        / Double(Self.maxRings)
+            let x = radius * CGFloat(cos(angle))
+            let z = radius * CGFloat(sin(angle))
+
+            let box = SCNBox(width: blockW, height: blockH, length: blockL,
+                             chamferRadius: blockW * 0.18)
+            let mat = SCNMaterial()
+            mat.lightingModel = .physicallyBased
+            let tint = Self.levelColor(forPct: gpu)
+            mat.diffuse.contents = tint
+            // Brighter emission than CPU cubes so the GPU ring reads as
+            // its own visual layer rather than blending into the totem.
+            mat.emission.contents = tint.withBrightnessMultiplied(by: 0.35)
+            mat.metalness.contents = NSNumber(value: 0.6)
+            mat.roughness.contents = NSNumber(value: 0.25)
+            box.materials = [mat]
+
+            let node = SCNNode(geometry: box)
+            node.position = SCNVector3(Float(x), 0, Float(z))
+            // Rotate so blockL is tangent to the ring (block "faces" outward).
+            node.eulerAngles = SCNVector3(0, Float(-angle), 0)
+            saturnNode.addChildNode(node)
+        }
     }
 }

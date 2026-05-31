@@ -169,6 +169,7 @@ public final class CPUFleetPoller {
                 label: Self.label(for: host),
                 color: Self.color(for: host),
                 cpu: cpu,
+                gpu: sample.gpuUsage,
                 timestamp: timestamp
             )
         } catch {

@@ -26,15 +26,20 @@
 import Foundation
 
 /// One CPU sample at a point in time. Mirrors the screensaver's `CPUSample`.
+/// `gpu` is optional — null means "no GPU on this host". The screensaver
+/// uses it to render the outer "Saturn ring" of GPU activity history.
 public struct CPUStreamSample: Codable, Equatable {
     /// Unix timestamp in seconds.
     public let t: TimeInterval
     /// CPU usage 0..100.
     public let cpu: Double
+    /// GPU utilization 0..100, or nil if the host has no GPU sensor.
+    public let gpu: Double?
 
-    public init(t: TimeInterval, cpu: Double) {
+    public init(t: TimeInterval, cpu: Double, gpu: Double? = nil) {
         self.t = t
         self.cpu = cpu
+        self.gpu = gpu
     }
 }
 
@@ -152,8 +157,9 @@ public final class CPUStreamStore {
                              label: String,
                              color: String,
                              cpu: Double,
+                             gpu: Double? = nil,
                              timestamp: TimeInterval) {
-        let sample = CPUStreamSample(t: timestamp, cpu: cpu)
+        let sample = CPUStreamSample(t: timestamp, cpu: cpu, gpu: gpu)
         lock.lock()
         var stream = buffers[hostID] ?? HostCPUStream(hostID: hostID, label: label,
                                                      color: color, samples: [])

@@ -2,13 +2,25 @@ import AppKit
 import Foundation
 
 /// One CPU sample at a point in time. The wire format the Onyx app writes
-/// (phase 3) and the screensaver reads (phase 4). Phase 2 builds these
-/// in-memory from a mock generator so we can wire the renderer up first.
+/// and the screensaver reads. `gpu` is nullable so older publishers (and
+/// hosts without a GPU sensor) still decode.
 struct CPUSample: Codable {
-    /// Unix timestamp in seconds. Source-of-truth for ordering.
     let t: TimeInterval
-    /// CPU usage 0..100. Values outside the range are clamped at render time.
     let cpu: Double
+    let gpu: Double?
+
+    enum CodingKeys: String, CodingKey { case t, cpu, gpu }
+
+    init(t: TimeInterval, cpu: Double, gpu: Double? = nil) {
+        self.t = t; self.cpu = cpu; self.gpu = gpu
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.t = try c.decode(TimeInterval.self, forKey: .t)
+        self.cpu = try c.decode(Double.self, forKey: .cpu)
+        self.gpu = try c.decodeIfPresent(Double.self, forKey: .gpu)
+    }
 }
 
 /// One host's CPU history. `samples` is ordered oldest-first; newest goes on
