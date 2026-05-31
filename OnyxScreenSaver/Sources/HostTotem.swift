@@ -63,21 +63,30 @@ final class HostTotem {
     /// Update the host's visible label. Rebuilds the SCNText geometry only
     /// when the string actually changes — text mesh rebuild is the priciest
     /// operation in the totem.
+    ///
+    /// SCNText's font point-size doesn't map cleanly to scene units —
+    /// `ofSize: 12` produces text that's several scene units tall. We keep
+    /// the font at a size that renders cleanly (good glyph tessellation at
+    /// flatness=0.4) and use the node's `scale` to control how big it
+    /// actually appears in the scene.
     func setLabel(_ label: String) {
         guard label != lastLabel else { return }
         lastLabel = label
         labelNode.childNodes.forEach { $0.removeFromParentNode() }
 
         let text = SCNText(string: label, extrusionDepth: 0)
-        text.font = NSFont.monospacedSystemFont(ofSize: 4, weight: .medium)
+        text.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
         text.flatness = 0.4
         let mat = SCNMaterial()
-        mat.diffuse.contents = NSColor.white.withAlphaComponent(0.78)
+        mat.diffuse.contents = NSColor.white.withAlphaComponent(0.6)
         mat.lightingModel = .constant  // ignore scene lighting; pure white
         mat.isDoubleSided = true
         text.materials = [mat]
 
         let textNode = SCNNode(geometry: text)
+        // Tiny — visible without dominating the totem. Tweak this single
+        // constant rather than the font size if you want bigger/smaller.
+        textNode.scale = SCNVector3(0.06, 0.06, 0.06)
         // Center the text on its own origin so it billboards cleanly.
         let (minB, maxB) = text.boundingBox
         textNode.pivot = SCNMatrix4MakeTranslation(
@@ -87,7 +96,7 @@ final class HostTotem {
         )
         // Float above the topmost ring of the totem.
         textNode.position = SCNVector3(0,
-                                       Float(HostTotem.maxRings) * Float(HostTotem.ringSpacing) / 2 + 2.5,
+                                       Float(HostTotem.maxRings) * Float(HostTotem.ringSpacing) / 2 + 1.5,
                                        0)
         // Always face the camera regardless of totem rotation/drift.
         textNode.constraints = [SCNBillboardConstraint()]

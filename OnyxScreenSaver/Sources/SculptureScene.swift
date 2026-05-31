@@ -119,10 +119,10 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
     }
 
     /// Initial position around the origin, spread on a circle so the first
-    /// few totems aren't stacked.
+    /// few totems start well-separated rather than clumped near origin.
     private func spawnPosition(for index: Int) -> SCNVector3 {
         let angle = Float(index) * (2 * .pi / 5)
-        let radius: Float = 7
+        let radius: Float = 14
         return SCNVector3(radius * cos(angle), 0, radius * sin(angle))
     }
 

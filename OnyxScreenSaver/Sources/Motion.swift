@@ -34,15 +34,16 @@ enum Motion {
 
     /// Top speed (units/sec). Capped so a chain of repulsion events can't
     /// snowball into something that looks frantic.
-    static let maxSpeed: Float = 3.5
+    static let maxSpeed: Float = 5.5
 
-    /// Pseudo-random initial velocity. Tiny magnitude — the visual reads as
-    /// "drifting", not "moving".
+    /// Pseudo-random initial velocity. Reads as "drifting purposefully",
+    /// not "creeping" — but still slow enough that you can sit and watch
+    /// without motion fatigue.
     static func randomInitialVelocity(seed: Int) -> SCNVector3 {
         // Deterministic-ish: spread hosts evenly around the unit circle
         // using their seed (== host index), then jitter by a fixed pattern.
         let angle = Float(seed) * 1.6180339 * .pi  // golden-angle spacing
-        let speed: Float = 0.4
+        let speed: Float = 1.1
         return SCNVector3(speed * cos(angle),
                           speed * 0.6 * sin(angle * 0.7),
                           speed * sin(angle))
