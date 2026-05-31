@@ -19,7 +19,7 @@ final class HostTotem {
 
     static let cubeSize: CGFloat = 0.5
     static let ringSpacing: CGFloat = 0.6
-    static let maxRings = 40
+    static let maxRings = 27
     /// Arc length we aim to keep between adjacent cubes in a ring. The radius
     /// is derived from this so dense rings widen instead of overlapping.
     static let arcSpacing: CGFloat = 0.6
@@ -43,9 +43,13 @@ final class HostTotem {
     init(hostID: String, color: NSColor, seed: Int = 0) {
         self.hostID = hostID
         self.baseColor = color
+        // Position is zero here; SculptureScene overwrites it with a spawn
+        // position right after construction, and `initialVelocity` derives
+        // a tangent vector from that real position.
         self.motion = MotionState(
             position: SCNVector3(0, 0, 0),
-            velocity: Motion.randomInitialVelocity(seed: seed)
+            velocity: SCNVector3(0, 0, 0),
+            mass: 1.0
         )
         rootNode.addChildNode(stackNode)
         rootNode.addChildNode(labelNode)
@@ -107,6 +111,11 @@ final class HostTotem {
     /// layout/spacing rules are still settling. We may pool later if we ever
     /// see real cost.
     func update(samples: [CPUSample]) {
+        // Recompute mass from recent CPU activity. The Motion engine reads
+        // this every frame, so it picks up new values on the next render
+        // tick without any explicit notification.
+        motion.mass = Self.computeMass(from: samples)
+
         stackNode.childNodes.forEach { $0.removeFromParentNode() }
 
         // Take the most recent maxRings samples. Index 0 in `recent` is the
@@ -133,6 +142,17 @@ final class HostTotem {
     }
 
     // MARK: - Internals
+
+    /// Mass derived from recent CPU activity. Idle host = mass 1.0; pegged
+    /// host = mass 6.0. Linear so the gravity behavior reads predictably
+    /// ("twice as busy → twice the mass"). Averaged over the most recent
+    /// samples so a single spike doesn't yank the whole scene around.
+    static func computeMass(from samples: [CPUSample]) -> Float {
+        let recent = samples.suffix(10)
+        guard !recent.isEmpty else { return 1.0 }
+        let avg = recent.map { max(0, min(100, $0.cpu)) }.reduce(0, +) / Double(recent.count)
+        return Float(1.0 + 5.0 * (avg / 100.0))
+    }
 
     /// Quantize CPU% into one of six buckets so every ring has 4-fold rotational
     /// symmetry. 0% still draws a 4-cube ring — a totally idle host should

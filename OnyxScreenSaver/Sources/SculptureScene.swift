@@ -105,9 +105,13 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
                                   seed: insertionCounter)
             insertionCounter += 1
             // Spawn at a stable offset around origin so newcomers don't pop
-            // in on top of existing totems — the motion engine then takes
-            // them wherever they want to drift.
-            totem.motion.position = spawnPosition(for: insertionCounter)
+            // in on top of existing totems. Initial velocity is tangential
+            // to that offset so the totem starts on an orbit-friendly arc
+            // rather than barreling toward center.
+            let spawn = spawnPosition(for: insertionCounter)
+            totem.motion.position = spawn
+            totem.motion.velocity = Motion.initialVelocity(
+                position: spawn, seed: insertionCounter)
             totem.rootNode.position = totem.motion.position
             totems[stream.hostID] = totem
             scene.rootNode.addChildNode(totem.rootNode)
@@ -194,65 +198,79 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
     /// to model an actual room.
     private func setupEnvironment() {
         scene.lightingEnvironment.contents = Self.proceduralEnvironment()
-        // Intensity 1.0 is "as bright as the source"; bump slightly to give
-        // the highlights some pop without over-blowing the cube faces.
-        scene.lightingEnvironment.intensity = 1.3
+        // Bumped to 2.5 — the procedural environment is in SDR range
+        // (NSImage can't hold values > 1.0 per channel), so the intensity
+        // multiplier is how we "fake HDR" for visible specular pop.
+        scene.lightingEnvironment.intensity = 2.5
     }
 
+    /// Synthesize the equirectangular environment image at runtime so we
+    /// don't ship an HDRI. Gradient backdrop + a few sharp bright bands
+    /// running horizontally; on a low-roughness metallic totem, the
+    /// bands appear as crisp reflected streaks that move across the cube
+    /// faces as the totem rotates — clearly readable as "reflection",
+    /// which the smooth gradient on its own wasn't.
     private static func proceduralEnvironment() -> NSImage {
-        // Equirectangular HDRIs are 2:1. 512×256 is enough for the soft
-        // gradient we're producing — high frequencies would be wasted on
-        // glossy-but-not-mirror surfaces.
-        let size = NSSize(width: 512, height: 256)
+        let size = NSSize(width: 1024, height: 512)
         let img = NSImage(size: size)
         img.lockFocus()
         defer { img.unlockFocus() }
 
-        let ceiling = NSColor(calibratedHue: 0.09, saturation: 0.45,
-                              brightness: 0.95, alpha: 1.0)
-        let horizon = NSColor(calibratedHue: 0.58, saturation: 0.15,
+        // 1) Three-stop vertical gradient: warm top → neutral horizon → cool floor.
+        let ceiling = NSColor(calibratedHue: 0.09, saturation: 0.40,
                               brightness: 0.55, alpha: 1.0)
-        let floor   = NSColor(calibratedHue: 0.62, saturation: 0.30,
-                              brightness: 0.12, alpha: 1.0)
-
-        let gradient = NSGradient(colorsAndLocations:
+        let horizon = NSColor(calibratedHue: 0.58, saturation: 0.20,
+                              brightness: 0.25, alpha: 1.0)
+        let floor   = NSColor(calibratedHue: 0.62, saturation: 0.35,
+                              brightness: 0.05, alpha: 1.0)
+        NSGradient(colorsAndLocations:
             (ceiling, 0.0),
             (horizon, 0.55),
             (floor,   1.0)
-        )
-        // Draw top-to-bottom (270° in NSGradient's coord system).
-        gradient?.draw(in: NSRect(origin: .zero, size: size), angle: -90)
+        )?.draw(in: NSRect(origin: .zero, size: size), angle: -90)
+
+        // 2) Sharp bright bands near the top — read as overhead light strips.
+        //    Equirectangular convention: y=size.height is the top of the
+        //    sphere (zenith), y=0 is the bottom. We place bands close to
+        //    the top so they appear "overhead" in the scene.
+        NSColor.white.setFill()
+        let bands: [(yFrac: CGFloat, heightFrac: CGFloat, alpha: CGFloat)] = [
+            (0.88, 0.012, 1.00),  // brightest, thinnest — primary highlight
+            (0.78, 0.008, 0.70),  // secondary
+            (0.66, 0.006, 0.45),  // tertiary, fading toward horizon
+        ]
+        for band in bands {
+            NSColor(white: 1.0, alpha: band.alpha).setFill()
+            let rect = NSRect(x: 0,
+                              y: size.height * band.yFrac,
+                              width: size.width,
+                              height: size.height * band.heightFrac)
+            rect.fill()
+        }
+
+        // 3) A subtle warm tint over the band region so the reflections
+        //    pick up some color rather than pure white.
+        NSColor(calibratedHue: 0.10, saturation: 0.55,
+                brightness: 0.6, alpha: 0.25).setFill()
+        NSRect(x: 0, y: size.height * 0.62,
+               width: size.width, height: size.height * 0.32).fill()
+
         return img
     }
 
     private func setupLights() {
-        let ambient = SCNNode()
-        ambient.light = SCNLight()
-        ambient.light?.type = .ambient
-        ambient.light?.intensity = 250
-        ambient.light?.color = NSColor(white: 1, alpha: 1)
-        scene.rootNode.addChildNode(ambient)
-
-        // Two directional lights, one warm and one cool, at opposing angles.
-        // Reads better than a single key light on a rotating object — the
-        // back-lit side never goes fully black.
-        let warm = SCNNode()
-        warm.light = SCNLight()
-        warm.light?.type = .directional
-        warm.light?.intensity = 700
-        warm.light?.color = NSColor(calibratedHue: 0.08, saturation: 0.25,
-                                    brightness: 1.0, alpha: 1.0)
-        warm.eulerAngles = SCNVector3(-Float.pi / 4, Float.pi / 4, 0)
-        scene.rootNode.addChildNode(warm)
-
-        let cool = SCNNode()
-        cool.light = SCNLight()
-        cool.light?.type = .directional
-        cool.light?.intensity = 350
-        cool.light?.color = NSColor(calibratedHue: 0.58, saturation: 0.3,
-                                    brightness: 1.0, alpha: 1.0)
-        cool.eulerAngles = SCNVector3(-Float.pi / 6, -Float.pi * 0.6, 0)
-        scene.rootNode.addChildNode(cool)
+        // With IBL doing most of the work for the metallic cubes, we add
+        // only a single subtle directional key — enough to bias shading so
+        // the silhouettes don't read as flat. Ambient is intentionally
+        // off; the env map's lower hemisphere fills that role.
+        let key = SCNNode()
+        key.light = SCNLight()
+        key.light?.type = .directional
+        key.light?.intensity = 250
+        key.light?.color = NSColor(calibratedHue: 0.09, saturation: 0.25,
+                                   brightness: 1.0, alpha: 1.0)
+        key.eulerAngles = SCNVector3(-Float.pi / 4, Float.pi / 4, 0)
+        scene.rootNode.addChildNode(key)
     }
 
     // MARK: - Mock data driver (idle fallback)
