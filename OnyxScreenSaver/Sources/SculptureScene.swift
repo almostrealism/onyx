@@ -41,8 +41,10 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
 
         // Live reader runs everywhere — the System Settings preview also
         // benefits if Onyx is running and broadcasting real data.
-        reader.onUpdate = { [weak self] hosts, weeklyHours in
-            self?.handleLiveUpdate(hosts: hosts, weeklyHours: weeklyHours)
+        reader.onUpdate = { [weak self] hosts, weeklyHours, weeklyProjects in
+            self?.handleLiveUpdate(hosts: hosts,
+                                   weeklyHours: weeklyHours,
+                                   weeklyProjects: weeklyProjects)
         }
         reader.onIdle = { [weak self] in self?.handleIdle() }
         reader.start()
@@ -60,11 +62,14 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
 
     // MARK: - Data source coordination
 
-    private func handleLiveUpdate(hosts: [HostStream], weeklyHours: Double?) {
+    private func handleLiveUpdate(hosts: [HostStream],
+                                   weeklyHours: Double?,
+                                   weeklyProjects: [ProjectShare]?) {
         // The Timing ball is independent of host data — update it
         // unconditionally so it grows/shrinks with hours worked even
         // during gaps in CPU samples.
         originBall.setHours(weeklyHours)
+        originBall.setProjects(weeklyProjects)
 
         // Onyx is running but has zero hosts configured (fresh install,
         // or every host removed). Treat as idle so the user still sees
@@ -89,6 +94,7 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         // so the user still has something pretty to look at instead of
         // staring at a black screen.
         originBall.setHours(nil)
+        originBall.setProjects(nil)
         if liveDataActive {
             liveDataActive = false
             removeAllTotems()

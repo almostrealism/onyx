@@ -61,9 +61,10 @@ enum Motion {
     /// elastic restitution produces a near-zero bounce — and the next
     /// frame's gravity yanks it right back into the well. The kick
     /// guarantees a meaningful separation velocity on every ball contact.
-    /// Totem-vs-totem collisions use restitution alone; they were
-    /// already lively enough without it.
-    static let bounceKickSpeed: Float = 18
+    /// 26 (was 18) sends the struck totem far enough that gravity has
+    /// time to slow it before it falls back, breaking the "bounce-fall-
+    /// bounce" cycle where everything restaged collisions immediately.
+    static let bounceKickSpeed: Float = 26
 
     /// Per-frame velocity damping. With elastic impulses adding energy
     /// per collision AND a bonus kick on every contact, we damp very

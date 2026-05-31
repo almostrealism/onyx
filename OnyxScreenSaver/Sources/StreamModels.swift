@@ -23,23 +23,36 @@ struct HostStream: Codable, Identifiable {
     var id: String { hostID }
 }
 
+/// Per-project hours, color-coded. The screensaver blends these colors
+/// (weighted by hours) to tint the central ball — a week dominated by
+/// one project shows that project's color; a balanced week shows a mix.
+struct ProjectShare: Codable {
+    let title: String
+    let color: String   // hex without "#"
+    let hours: Double
+}
+
 /// The shape of the JSON file Onyx publishes.
 ///
-/// `weeklyHours` is optional so the screensaver still decodes correctly
-/// when running against an older Onyx that didn't publish the field.
+/// Trailing fields are optional so the screensaver decodes cleanly when
+/// running against an older Onyx that didn't publish them.
 struct CPUStreamFile: Codable {
     let updatedAt: TimeInterval
     let hosts: [HostStream]
     let weeklyHours: Double?
+    let weeklyProjects: [ProjectShare]?
 
     enum CodingKeys: String, CodingKey {
-        case updatedAt, hosts, weeklyHours
+        case updatedAt, hosts, weeklyHours, weeklyProjects
     }
 
-    init(updatedAt: TimeInterval, hosts: [HostStream], weeklyHours: Double? = nil) {
+    init(updatedAt: TimeInterval, hosts: [HostStream],
+         weeklyHours: Double? = nil,
+         weeklyProjects: [ProjectShare]? = nil) {
         self.updatedAt = updatedAt
         self.hosts = hosts
         self.weeklyHours = weeklyHours
+        self.weeklyProjects = weeklyProjects
     }
 
     init(from decoder: Decoder) throws {
@@ -47,6 +60,8 @@ struct CPUStreamFile: Codable {
         self.updatedAt = try c.decode(TimeInterval.self, forKey: .updatedAt)
         self.hosts = try c.decode([HostStream].self, forKey: .hosts)
         self.weeklyHours = try c.decodeIfPresent(Double.self, forKey: .weeklyHours)
+        self.weeklyProjects = try c.decodeIfPresent([ProjectShare].self,
+                                                    forKey: .weeklyProjects)
     }
 }
 

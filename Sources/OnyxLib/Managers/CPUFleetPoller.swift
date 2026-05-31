@@ -105,14 +105,18 @@ public final class CPUFleetPoller {
         }
 
         // Hours worked this week (via Timing.app). Pushed alongside CPU so
-        // the screensaver can size its central gravity ball. Read on main
-        // (where the timer fires) — totalWeekHours is @Published and we're
-        // already on the right queue.
+        // the screensaver can size + color its central gravity ball.
+        // Read on main (where the timer fires) — these are @Published.
         if appState.timing.isConfigured {
             let hours = appState.timing.totalWeekHours
             CPUStreamStore.shared.setWeeklyHours(hours > 0 ? hours : nil)
+            let projects = appState.timing.projectTotals.map {
+                WeeklyProjectShare(title: $0.title, color: $0.color, hours: $0.hours)
+            }
+            CPUStreamStore.shared.setWeeklyProjects(projects)
         } else {
             CPUStreamStore.shared.setWeeklyHours(nil)
+            CPUStreamStore.shared.setWeeklyProjects(nil)
         }
     }
 

@@ -54,21 +54,38 @@ public struct HostCPUStream: Codable, Equatable {
     }
 }
 
+/// One Timing.app project's contribution to the current week. The
+/// screensaver blends these colors (weighted by hours) to tint the
+/// central ball. `color` is a 6-char hex string without `#`, matching
+/// what TimingManager publishes.
+public struct WeeklyProjectShare: Codable, Equatable {
+    public let title: String
+    public let color: String
+    public let hours: Double
+
+    public init(title: String, color: String, hours: Double) {
+        self.title = title; self.color = color; self.hours = hours
+    }
+}
+
 /// Top-level shape of cpu-stream.json.
 ///
-/// `weeklyHours` is optional — older publishers won't include it, and the
-/// screensaver decodes it via decodeIfPresent so a missing field is fine
-/// (it simply means "no central ball in the saver").
+/// `weeklyHours` and `weeklyProjects` are optional — older publishers
+/// won't include them, and the screensaver decodes via decodeIfPresent
+/// so a missing field is fine.
 public struct CPUStreamFile: Codable, Equatable {
     public let updatedAt: TimeInterval
     public let hosts: [HostCPUStream]
     public let weeklyHours: Double?
+    public let weeklyProjects: [WeeklyProjectShare]?
 
     public init(updatedAt: TimeInterval, hosts: [HostCPUStream],
-                weeklyHours: Double? = nil) {
+                weeklyHours: Double? = nil,
+                weeklyProjects: [WeeklyProjectShare]? = nil) {
         self.updatedAt = updatedAt
         self.hosts = hosts
         self.weeklyHours = weeklyHours
+        self.weeklyProjects = weeklyProjects
     }
 }
 
@@ -90,6 +107,7 @@ public final class CPUStreamStore {
     private var url: URL?
     private var buffers: [String: HostCPUStream] = [:]
     private var weeklyHoursValue: Double?
+    private var weeklyProjectsValue: [WeeklyProjectShare]?
     private let lock = NSLock()
     private let writerQueue = DispatchQueue(label: "com.onyx.cpu-stream-writer")
     private var pendingWriteWorkItem: DispatchWorkItem?
@@ -163,6 +181,16 @@ public final class CPUStreamStore {
         scheduleWrite()
     }
 
+    /// Update the per-project hours breakdown for the current week. Used
+    /// by the screensaver to tint the central ball by the blended project
+    /// palette. Pass nil or an empty array to clear the tint.
+    public func setWeeklyProjects(_ projects: [WeeklyProjectShare]?) {
+        lock.lock()
+        weeklyProjectsValue = (projects?.isEmpty ?? true) ? nil : projects
+        lock.unlock()
+        scheduleWrite()
+    }
+
     /// Drop a host from the stream — used when the user removes a host config
     /// so the screensaver stops drawing its totem on the next read.
     public func removeHost(_ hostID: String) {
@@ -215,7 +243,8 @@ public final class CPUStreamStore {
         let payload = CPUStreamFile(
             updatedAt: now,
             hosts: Array(buffers.values).sorted { $0.hostID < $1.hostID },
-            weeklyHours: weeklyHoursValue
+            weeklyHours: weeklyHoursValue,
+            weeklyProjects: weeklyProjectsValue
         )
         lock.unlock()
 
