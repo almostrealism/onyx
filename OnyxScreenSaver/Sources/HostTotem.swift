@@ -172,26 +172,44 @@ final class HostTotem {
 
     // MARK: - Internals
 
-    /// Mass derived from recent CPU activity. Idle host = mass 1.0;
-    /// pegged host = mass ~51. **Cubic** scaling so a doubling of CPU
-    /// produces a near-8× mass change at the high end — that's what
-    /// makes collision behavior meaningfully different between a busy
-    /// host and an idle one. Linear scaling (the previous formula) had
-    /// a 6× range across the entire CPU spectrum, which wasn't enough
-    /// to read at a glance.
+    /// Mass derived from recent CPU + GPU activity. Both contributions
+    /// are cubic in their average over the most recent ~10 samples, so
+    /// a small steady load reads light while sustained busy work reads
+    /// very heavy. GPU coefficient is 3× the CPU coefficient — a fully
+    /// utilized GPU is a serious gravitational presence, much more so
+    /// than a busy CPU alone. Hosts with no GPU sensor get only the CPU
+    /// contribution; their average isn't diluted by implicit zeros.
     ///
-    /// Reference points:
-    ///   ·  0% →  1
-    ///   · 25% →  1.8
-    ///   · 50% →  7.3
-    ///   · 75% → 22.1
-    ///   ·100% → 51.0
+    /// Reference points (CPU%, GPU%):
+    ///   ·   0,   0  →   1
+    ///   ·  50, nil  →  10
+    ///   · 100, nil  →  76
+    ///   ·  50,  50  →  38
+    ///   · 100, 100  → 301
     static func computeMass(from samples: [CPUSample]) -> Float {
         let recent = samples.suffix(10)
         guard !recent.isEmpty else { return 1.0 }
-        let avg = recent.map { max(0, min(100, $0.cpu)) }.reduce(0, +) / Double(recent.count)
-        let normalized = avg / 100.0
-        return Float(1.0 + 50.0 * pow(normalized, 3))
+
+        // CPU contribution — always present.
+        let cpuAvg = recent.map { max(0, min(100, $0.cpu)) }.reduce(0, +)
+                     / Double(recent.count)
+        let cpuTerm = 75.0 * pow(cpuAvg / 100.0, 3)
+
+        // GPU contribution — only if at least one sample has a GPU reading.
+        // We average just the non-nil values so a partial-GPU history
+        // doesn't get diluted by samples taken before the host even
+        // exposed a GPU sensor.
+        let gpuValues = recent.compactMap { $0.gpu }
+            .map { max(0, min(100, $0)) }
+        let gpuTerm: Double
+        if gpuValues.isEmpty {
+            gpuTerm = 0
+        } else {
+            let gpuAvg = gpuValues.reduce(0, +) / Double(gpuValues.count)
+            gpuTerm = 225.0 * pow(gpuAvg / 100.0, 3)
+        }
+
+        return Float(1.0 + cpuTerm + gpuTerm)
     }
 
     /// Quantize CPU% into one of six buckets so every ring has 4-fold rotational
