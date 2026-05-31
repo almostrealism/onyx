@@ -84,9 +84,8 @@ final class HostTotem {
         text.materials = [mat]
 
         let textNode = SCNNode(geometry: text)
-        // Tiny — visible without dominating the totem. Tweak this single
-        // constant rather than the font size if you want bigger/smaller.
-        textNode.scale = SCNVector3(0.02, 0.02, 0.02)
+        // Tweak this single constant if you want bigger/smaller labels.
+        textNode.scale = SCNVector3(0.08, 0.08, 0.08)
         // Center the text on its own origin so it billboards cleanly.
         let (minB, maxB) = text.boundingBox
         textNode.pivot = SCNMatrix4MakeTranslation(
@@ -174,13 +173,24 @@ final class HostTotem {
         let box = SCNBox(width: Self.cubeSize,
                          height: Self.cubeSize,
                          length: Self.cubeSize,
-                         chamferRadius: Self.cubeSize * 0.08)
+                         chamferRadius: Self.cubeSize * 0.14)
         let material = SCNMaterial()
-        // Fade from full saturation (newest) down to ~0.4 (oldest).
-        let brightness = 1.0 - 0.6 * ageFraction
+        material.lightingModel = .physicallyBased
+
+        // Tint fades from full saturation (newest) down to ~0.45 (oldest).
+        // For a PBR metallic material, the diffuse color tints the *reflected*
+        // light rather than acting as the surface color — this is what gives
+        // metals like brass or copper their characteristic hue.
+        let brightness = 1.0 - 0.55 * ageFraction
         material.diffuse.contents = baseColor.withBrightnessMultiplied(by: CGFloat(brightness))
-        material.specular.contents = NSColor.white
-        material.lightingModel = .blinn
+
+        // High metalness + low roughness = polished colored metal. Older
+        // rings (deeper in the stack) get progressively rougher, so they
+        // catch less environment light. Reads as "the past was duller".
+        material.metalness.contents = NSNumber(value: 0.85)
+        material.roughness.contents = NSNumber(value: 0.18 + 0.35 * ageFraction)
+        material.isDoubleSided = false
+
         box.materials = [material]
         return box
     }

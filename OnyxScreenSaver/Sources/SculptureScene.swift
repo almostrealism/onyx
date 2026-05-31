@@ -29,6 +29,7 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
     init(isPreview: Bool) {
         super.init()
         scene.background.contents = NSColor.black
+        setupEnvironment()
         setupCamera(isPreview: isPreview)
         setupLights()
 
@@ -180,6 +181,48 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         cameraNode.position = SCNVector3(0, 4, 58)
         cameraNode.eulerAngles = SCNVector3(-Float.pi / 30, 0, 0)
         scene.rootNode.addChildNode(cameraNode)
+    }
+
+    /// Image-based lighting for the PBR materials. The metallic cubes have
+    /// nothing to reflect unless we give SceneKit an environment map — the
+    /// usual choice is an HDRI, but we don't want to ship asset files for
+    /// a single screensaver. So we synthesize an equirectangular 2:1 image
+    /// at runtime: a vertical gradient from a warm overhead "ceiling" tone
+    /// through neutral mid-gray "horizon" to a dim, slightly-cool "floor".
+    /// Polished metals reflecting this gradient pick up the soft warm-on-top
+    /// shading that reads as "indoor studio lighting" without anyone having
+    /// to model an actual room.
+    private func setupEnvironment() {
+        scene.lightingEnvironment.contents = Self.proceduralEnvironment()
+        // Intensity 1.0 is "as bright as the source"; bump slightly to give
+        // the highlights some pop without over-blowing the cube faces.
+        scene.lightingEnvironment.intensity = 1.3
+    }
+
+    private static func proceduralEnvironment() -> NSImage {
+        // Equirectangular HDRIs are 2:1. 512×256 is enough for the soft
+        // gradient we're producing — high frequencies would be wasted on
+        // glossy-but-not-mirror surfaces.
+        let size = NSSize(width: 512, height: 256)
+        let img = NSImage(size: size)
+        img.lockFocus()
+        defer { img.unlockFocus() }
+
+        let ceiling = NSColor(calibratedHue: 0.09, saturation: 0.45,
+                              brightness: 0.95, alpha: 1.0)
+        let horizon = NSColor(calibratedHue: 0.58, saturation: 0.15,
+                              brightness: 0.55, alpha: 1.0)
+        let floor   = NSColor(calibratedHue: 0.62, saturation: 0.30,
+                              brightness: 0.12, alpha: 1.0)
+
+        let gradient = NSGradient(colorsAndLocations:
+            (ceiling, 0.0),
+            (horizon, 0.55),
+            (floor,   1.0)
+        )
+        // Draw top-to-bottom (270° in NSGradient's coord system).
+        gradient?.draw(in: NSRect(origin: .zero, size: size), angle: -90)
+        return img
     }
 
     private func setupLights() {
