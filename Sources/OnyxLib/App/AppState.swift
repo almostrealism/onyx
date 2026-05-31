@@ -1500,6 +1500,10 @@ public class AppState: ObservableObject {
     /// an interactive SSH shell — see the comment on the SSH branch.
     public func statsCommand(host h: HostConfig? = nil) -> (cmd: String, args: [String], stdin: String?) {
         let host = h ?? activeHost ?? .localhost
+        // The DOCKER section was added for the screensaver's per-container
+        // moon ring. MonitorManager.parse silently ignores unknown
+        // sections, so this change is invisible to the existing monitor
+        // overlay; only CPUFleetPoller reads the docker output.
         let statsScript = """
         echo "---UPTIME---"; uptime; \
         echo "---CPU---"; CPU_OUT=$(top -bn1 2>/dev/null | head -5); \
@@ -1508,7 +1512,8 @@ public class AppState: ObservableObject {
         if [ -n "$MEM_OUT" ]; then echo "$MEM_OUT"; else vm_stat 2>/dev/null; fi; \
         echo "---GPU---"; timeout 5 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null || \
         { GPU_PCT=$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o '"Device Utilization %"=[0-9]*' | head -1 | cut -d= -f2); \
-        [ -n "$GPU_PCT" ] && echo "AGX,$GPU_PCT" || echo "N/A"; }
+        [ -n "$GPU_PCT" ] && echo "AGX,$GPU_PCT" || echo "N/A"; }; \
+        echo "---DOCKER---"; docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}" 2>/dev/null || true
         """
         return remoteScript(statsScript, host: host)
     }

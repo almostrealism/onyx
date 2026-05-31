@@ -45,6 +45,13 @@ final class HostTotem {
     /// so it shares the slow vertical spin — the GPU history rotates with
     /// the CPU stack rather than reading as a separate fixed disc.
     private let saturnNode = SCNNode()
+    /// Container moons orbit on this node, which is on rootNode (NOT
+    /// stackNode) so the orbital motion is independent of the totem's
+    /// own spin animation.
+    private let moonsNode = SCNNode()
+    /// Map of container name → orbiting moon. Synced from the publisher's
+    /// `containers` field on every snapshot.
+    private var moons: [String: Moon] = [:]
     private var baseColor: NSColor
     private var lastLabel: String?
 
@@ -69,6 +76,7 @@ final class HostTotem {
         )
         rootNode.addChildNode(stackNode)
         rootNode.addChildNode(labelNode)
+        rootNode.addChildNode(moonsNode)
         stackNode.addChildNode(saturnNode)
 
         // Slow rotation around the vertical axis. Lives on stackNode so the
@@ -278,6 +286,37 @@ final class HostTotem {
 
         box.materials = [material]
         return box
+    }
+
+    // MARK: - Container moons
+
+    /// Reconcile the moons against the current container list. Adds new
+    /// moons (with deterministic orbits derived from the container name
+    /// hashed with this host's seed), removes ones whose containers
+    /// have vanished, and updates color on the survivors.
+    func syncContainers(_ containers: [ContainerInfo]) {
+        let incoming = Set(containers.map(\.name))
+        let existing = Set(moons.keys)
+
+        for gone in existing.subtracting(incoming) {
+            moons[gone]?.rootNode.removeFromParentNode()
+            moons.removeValue(forKey: gone)
+        }
+
+        for c in containers {
+            if moons[c.name] == nil {
+                let moon = Moon(containerName: c.name, hostSeed: hostID.hashValue)
+                moons[c.name] = moon
+                moonsNode.addChildNode(moon.rootNode)
+            }
+            moons[c.name]?.setCPU(c.cpu)
+        }
+    }
+
+    /// Advance every moon's orbital position. Called from SculptureScene
+    /// once per render frame.
+    func updateMoonPositions(time: TimeInterval) {
+        for moon in moons.values { moon.updatePosition(time: time) }
     }
 
     // MARK: - Color ramp

@@ -172,6 +172,16 @@ public final class CPUFleetPoller {
                 gpu: sample.gpuUsage,
                 timestamp: timestamp
             )
+
+            // Containers (docker stats) come from the same SSH output.
+            // Hosts without docker emit an empty section — we just
+            // publish nil so the screensaver knows "no moons" rather
+            // than "no docker survey yet".
+            let containers = Self.parseContainers(in: output)
+            CPUStreamStore.shared.setContainers(
+                hostID: host.id.uuidString,
+                containers: containers.isEmpty ? nil : containers
+            )
         } catch {
             // Process couldn't start — fail quietly. The screensaver's idle
             // state covers gaps where we get nothing back.
@@ -199,6 +209,38 @@ public final class CPUFleetPoller {
         "FF6B6B", // coral
         "B388FF"  // violet
     ]
+
+    /// Extract the `---DOCKER---` section from a stats output and parse
+    /// the `name|cpu%` lines into ContainerStream values. Uses
+    /// last-occurrence semantics (same as MonitorManager.parse) for
+    /// resilience to TTY-echoed script source. Container names are
+    /// validated to reject script fragments.
+    static func parseContainers(in output: String) -> [ContainerStream] {
+        let cleaned = RemoteScript.cleanedOutput(output)
+        let sections = cleaned.components(separatedBy: "---")
+        var dockerBody = ""
+        for i in stride(from: 0, to: sections.count, by: 1) {
+            let name = sections[i].trimmingCharacters(in: .whitespacesAndNewlines)
+            if name == "DOCKER", i + 1 < sections.count {
+                dockerBody = sections[i + 1]  // last occurrence wins
+            }
+        }
+        var result: [ContainerStream] = []
+        for raw in dockerBody.components(separatedBy: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            let parts = line.components(separatedBy: "|")
+            guard parts.count >= 2 else { continue }
+            let name = parts[0].trimmingCharacters(in: .whitespaces)
+            guard DockerStatsManager.isValidContainerName(name) else { continue }
+            let cpuStr = parts[1]
+                .replacingOccurrences(of: "%", with: "")
+                .trimmingCharacters(in: .whitespaces)
+            guard let cpu = Double(cpuStr) else { continue }
+            result.append(ContainerStream(name: name, cpu: cpu))
+        }
+        return result
+    }
 
     static func color(for host: HostConfig) -> String {
         let bytes = withUnsafeBytes(of: host.id.uuid) { Array($0) }

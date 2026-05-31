@@ -160,6 +160,7 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         for stream in hosts {
             totems[stream.hostID]?.update(samples: stream.samples)
             totems[stream.hostID]?.setLabel(stream.label)
+            totems[stream.hostID]?.syncContainers(stream.containers ?? [])
         }
     }
 
@@ -302,6 +303,11 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
             guard let totem = totems[id] else { continue }
             totem.motion = states[i]
             totem.rootNode.position = states[i].position
+            // Container moons orbit on a kinematic path — independent
+            // of the gravity sim, just driven by wall-clock time.
+            // Moons are children of rootNode so they inherit the
+            // totem's world position automatically.
+            totem.updateMoonPositions(time: time)
         }
         // Anchored balls don't actually move, but read-back keeps the
         // MotionState in sync in case the engine ever stops anchoring them.

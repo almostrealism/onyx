@@ -23,16 +23,46 @@ struct CPUSample: Codable {
     }
 }
 
-/// One host's CPU history. `samples` is ordered oldest-first; newest goes on
-/// top of the totem.
+/// One container running on a host. The screensaver renders these as
+/// orbiting "moons" around the host's totem.
+struct ContainerInfo: Codable {
+    let name: String
+    /// CPU usage 0..100 from docker stats.
+    let cpu: Double
+}
+
+/// One host's CPU history + container list. `samples` is ordered
+/// oldest-first; newest goes on top of the totem. `containers` is nil
+/// when the host has no docker.
 struct HostStream: Codable, Identifiable {
     let hostID: String
     let label: String
     /// Hex color string like "#FF8800". Drives the totem's tint.
     let color: String
     let samples: [CPUSample]
+    let containers: [ContainerInfo]?
 
     var id: String { hostID }
+
+    enum CodingKeys: String, CodingKey {
+        case hostID, label, color, samples, containers
+    }
+
+    init(hostID: String, label: String, color: String,
+         samples: [CPUSample], containers: [ContainerInfo]? = nil) {
+        self.hostID = hostID; self.label = label; self.color = color
+        self.samples = samples; self.containers = containers
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.hostID = try c.decode(String.self, forKey: .hostID)
+        self.label = try c.decode(String.self, forKey: .label)
+        self.color = try c.decode(String.self, forKey: .color)
+        self.samples = try c.decode([CPUSample].self, forKey: .samples)
+        self.containers = try c.decodeIfPresent([ContainerInfo].self,
+                                                forKey: .containers)
+    }
 }
 
 /// Per-project hours, color-coded. The screensaver blends these colors

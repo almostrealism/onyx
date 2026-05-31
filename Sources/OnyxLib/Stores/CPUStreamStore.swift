@@ -43,19 +43,39 @@ public struct CPUStreamSample: Codable, Equatable {
     }
 }
 
-/// One host's stream of recent CPU samples. Encodes to the same shape the
-/// screensaver expects.
+/// One container running on a host, with its current CPU%. Used by the
+/// screensaver to render orbiting "moons" around the host's totem.
+public struct ContainerStream: Codable, Equatable {
+    public let name: String
+    /// CPU usage 0..100 (the docker stats `--format {{.CPUPerc}}` reading).
+    public let cpu: Double
+
+    public init(name: String, cpu: Double) {
+        self.name = name
+        self.cpu = cpu
+    }
+}
+
+/// One host's stream of recent CPU samples + its currently-running
+/// containers. Encodes to the same shape the screensaver expects.
 public struct HostCPUStream: Codable, Equatable {
     public let hostID: String
     public let label: String
     public let color: String
     public var samples: [CPUStreamSample]
+    /// Currently-running docker containers on this host, if any. Nil
+    /// when the host has no docker (or we couldn't reach it); empty
+    /// array when docker is present but no containers are up.
+    public var containers: [ContainerStream]?
 
-    public init(hostID: String, label: String, color: String, samples: [CPUStreamSample]) {
+    public init(hostID: String, label: String, color: String,
+                samples: [CPUStreamSample],
+                containers: [ContainerStream]? = nil) {
         self.hostID = hostID
         self.label = label
         self.color = color
         self.samples = samples
+        self.containers = containers
     }
 }
 
@@ -161,17 +181,37 @@ public final class CPUStreamStore {
                              timestamp: TimeInterval) {
         let sample = CPUStreamSample(t: timestamp, cpu: cpu, gpu: gpu)
         lock.lock()
-        var stream = buffers[hostID] ?? HostCPUStream(hostID: hostID, label: label,
-                                                     color: color, samples: [])
+        let existing = buffers[hostID]
         // Label / color may evolve (renamed host, theme change) — keep the
         // latest from the caller rather than freezing at first sight.
-        stream = HostCPUStream(hostID: hostID, label: label, color: color,
-                               samples: stream.samples + [sample])
+        // Containers come from a separate poll path and are preserved
+        // across sample appends.
+        var stream = HostCPUStream(hostID: hostID, label: label, color: color,
+                                   samples: (existing?.samples ?? []) + [sample],
+                                   containers: existing?.containers)
         let cap = Self.maxSamplesPerHost
         if stream.samples.count > cap {
             stream.samples.removeFirst(stream.samples.count - cap)
         }
         buffers[hostID] = stream
+        lock.unlock()
+        scheduleWrite()
+    }
+
+    /// Update the docker container list for a host. Idempotent — repeated
+    /// calls with the same data produce one file rewrite (debounced).
+    /// Nil clears the field (no docker on this host).
+    public func setContainers(hostID: String, containers: [ContainerStream]?) {
+        lock.lock()
+        if var stream = buffers[hostID] {
+            stream.containers = containers
+            buffers[hostID] = stream
+        }
+        // If the host doesn't have a buffer yet, the next appendSample
+        // creates one and inherits these containers via the existing
+        // lookup path — but only if we stash them somewhere. For now,
+        // skip: the fleet poller always appends a CPU sample before
+        // calling setContainers, so the buffer is guaranteed to exist.
         lock.unlock()
         scheduleWrite()
     }
