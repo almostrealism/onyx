@@ -17,12 +17,16 @@ final class HostTotem {
 
     // MARK: - Tuning constants
 
-    static let cubeSize: CGFloat = 0.5
-    static let ringSpacing: CGFloat = 0.6
+    // Geometric scale halved (was 0.5 / 0.6 / 0.6) so totems read as dense
+    // little towers instead of huge sparse cube stacks. Mass is unchanged
+    // — the same CPU activity now packs into 1/8 the volume, which is the
+    // "denser" feel the user asked for.
+    static let cubeSize: CGFloat = 0.25
+    static let ringSpacing: CGFloat = 0.3
     static let maxRings = 27
     /// Arc length we aim to keep between adjacent cubes in a ring. The radius
     /// is derived from this so dense rings widen instead of overlapping.
-    static let arcSpacing: CGFloat = 0.6
+    static let arcSpacing: CGFloat = 0.3
 
     // MARK: - Public
 
@@ -46,13 +50,13 @@ final class HostTotem {
         // Position is zero here; SculptureScene overwrites it with a spawn
         // position right after construction, and `initialVelocity` derives
         // a tangent vector from that real position.
-        // Radius 3.5 covers the widest (24-cube) ring's outer bound plus
-        // a generous visual buffer — totems never visually overlap.
+        // Collision radius is the widest possible ring's outer bound plus
+        // a small visual buffer — sized to halved geometric scale.
         self.motion = MotionState(
             position: SCNVector3(0, 0, 0),
             velocity: SCNVector3(0, 0, 0),
             mass: 1.0,
-            radius: 3.5
+            radius: 1.75
         )
         rootNode.addChildNode(stackNode)
         rootNode.addChildNode(labelNode)
