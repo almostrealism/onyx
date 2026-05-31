@@ -27,14 +27,23 @@ enum Motion {
     /// enough that it doesn't look like a hard bounce.
     static let repulsionStrength: Float = 14
 
-    /// Per-frame velocity damping. Without this, repulsion impulses
-    /// accumulate and totems eventually fling themselves out of frame.
-    /// 0.985^60 ≈ 0.4 in one second of drift — slow bleed, not freeze.
-    static let damping: Float = 0.985
+    /// Per-frame velocity damping. Tuned to bleed repulsion spikes without
+    /// halting steady drift. 0.998^60 ≈ 0.89 over one second — totems still
+    /// move at almost their original speed after several seconds of drift,
+    /// while `maxSpeed` keeps the cap on accumulation. The earlier value
+    /// (0.985) was too aggressive: after ~5s totems were creeping along at
+    /// 10% of their starting velocity.
+    static let damping: Float = 0.998
+
+    /// Below this speed, we re-inject a tiny impulse in the totem's
+    /// current direction to keep it drifting. Prevents the edge case where
+    /// repulsion forces happen to cancel a totem's velocity to ~0 and it
+    /// just sits there.
+    static let minSpeed: Float = 0.8
 
     /// Top speed (units/sec). Capped so a chain of repulsion events can't
     /// snowball into something that looks frantic.
-    static let maxSpeed: Float = 5.5
+    static let maxSpeed: Float = 6.0
 
     /// Pseudo-random initial velocity. Reads as "drifting purposefully",
     /// not "creeping" — but still slow enough that you can sit and watch
@@ -85,11 +94,23 @@ enum Motion {
             }
         }
 
-        // 3) Integrate, damp, cap.
+        // 3) Damp, enforce minimum cruise speed, cap, integrate.
         for i in 0..<states.count {
             states[i].velocity = scale(states[i].velocity, by: damping)
             let speed = length(states[i].velocity)
-            if speed > maxSpeed {
+            if speed < minSpeed {
+                // Below cruise: nudge in the current direction, or in a
+                // deterministic direction derived from the index if velocity
+                // is essentially zero. Keeps the system "alive" indefinitely.
+                if speed > 0.0001 {
+                    states[i].velocity = scale(states[i].velocity, by: minSpeed / speed)
+                } else {
+                    let angle = Float(i) * 1.6180339 * .pi
+                    states[i].velocity = SCNVector3(minSpeed * cos(angle),
+                                                    0,
+                                                    minSpeed * sin(angle))
+                }
+            } else if speed > maxSpeed {
                 states[i].velocity = scale(states[i].velocity, by: maxSpeed / speed)
             }
             states[i].position = add(states[i].position,

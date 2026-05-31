@@ -86,7 +86,7 @@ final class HostTotem {
         let textNode = SCNNode(geometry: text)
         // Tiny — visible without dominating the totem. Tweak this single
         // constant rather than the font size if you want bigger/smaller.
-        textNode.scale = SCNVector3(0.06, 0.06, 0.06)
+        textNode.scale = SCNVector3(0.02, 0.02, 0.02)
         // Center the text on its own origin so it billboards cleanly.
         let (minB, maxB) = text.boundingBox
         textNode.pivot = SCNMatrix4MakeTranslation(

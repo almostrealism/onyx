@@ -122,7 +122,7 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
     /// few totems start well-separated rather than clumped near origin.
     private func spawnPosition(for index: Int) -> SCNVector3 {
         let angle = Float(index) * (2 * .pi / 5)
-        let radius: Float = 14
+        let radius: Float = 20
         return SCNVector3(radius * cos(angle), 0, radius * sin(angle))
     }
 
