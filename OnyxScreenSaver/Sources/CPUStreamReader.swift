@@ -57,11 +57,17 @@ final class CPUStreamReader {
         timer = nil
     }
 
+    /// One-shot guard so we only log the "first time we ever saw / failed
+    /// to see" the file. Continuous tick-by-tick logging would flood
+    /// Console.app at 2 messages per second.
+    private var loggedFirstResult = false
+
     // MARK: - Tick
 
     private func tick() {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let mtime = attrs[.modificationDate] as? Date else {
+            logFirstResult("stat failed for \(url.path) — file missing or sandbox blocks read")
             emitIdleIfNeeded()
             return
         }
@@ -70,22 +76,37 @@ final class CPUStreamReader {
         if let last = lastMtime, last == mtime.timeIntervalSince1970 { return }
         lastMtime = mtime.timeIntervalSince1970
 
-        guard let data = try? Data(contentsOf: url),
-              let file = try? JSONDecoder().decode(CPUStreamFile.self, from: data) else {
-            // File exists but decode failed — likely caught mid-write despite
-            // the publisher's atomic-rename. Wait for the next tick.
+        do {
+            let data = try Data(contentsOf: url)
+            let file = try JSONDecoder().decode(CPUStreamFile.self, from: data)
+
+            let age = Date().timeIntervalSince1970 - file.updatedAt
+            if age > Self.staleThreshold {
+                logFirstResult("file stale by \(Int(age))s — Onyx not writing? updatedAt=\(file.updatedAt)")
+                emitIdleIfNeeded()
+                return
+            }
+
+            logFirstResult("LIVE — \(file.hosts.count) host(s), age=\(String(format: "%.1f", age))s")
+            lastWasIdle = false
+            DispatchQueue.main.async { [weak self] in
+                self?.onUpdate?(file.hosts)
+            }
+        } catch {
+            // File exists but decode failed — could be caught mid-write
+            // despite atomic-rename, OR sandbox-denied read returning empty.
+            logFirstResult("read/decode failed: \(error)")
             return
         }
+    }
 
-        let age = Date().timeIntervalSince1970 - file.updatedAt
-        if age > Self.staleThreshold {
-            emitIdleIfNeeded()
-            return
-        }
-
-        lastWasIdle = false
-        DispatchQueue.main.async { [weak self] in
-            self?.onUpdate?(file.hosts)
+    /// NSLog through to Console.app's unified log. Filter for "OnyxSaver"
+    /// in Console.app to see only our messages. The first tick result is
+    /// logged unconditionally; later messages only fire when state changes.
+    private func logFirstResult(_ msg: String) {
+        if !loggedFirstResult {
+            loggedFirstResult = true
+            NSLog("[OnyxSaver] first tick: \(msg)")
         }
     }
 
