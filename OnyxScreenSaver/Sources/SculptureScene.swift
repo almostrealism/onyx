@@ -137,12 +137,20 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// Initial position around the origin, spread on a circle so the first
-    /// few totems start well-separated rather than clumped near origin.
+    /// Initial position on a random point of a shell around origin —
+    /// distinct every launch so the screensaver never opens with the
+    /// same staging twice. We sample on a partial hemisphere (not full
+    /// sphere) so totems don't spawn directly behind the camera, then
+    /// jitter the radius too.
     private func spawnPosition(for index: Int) -> SCNVector3 {
-        let angle = Float(index) * (2 * .pi / 5)
-        let radius: Float = 20
-        return SCNVector3(radius * cos(angle), 0, radius * sin(angle))
+        let theta = Float.random(in: 0...(2 * .pi))          // azimuth
+        let phi = Float.random(in: -(.pi / 3.5)...(.pi / 3)) // elevation, biased slightly up
+        let radius = Float.random(in: 16...26)
+        return SCNVector3(
+            radius * cos(phi) * cos(theta),
+            radius * sin(phi),
+            radius * cos(phi) * sin(theta)
+        )
     }
 
     // MARK: - SCNSceneRendererDelegate

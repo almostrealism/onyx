@@ -1,8 +1,8 @@
 import SceneKit
 
-/// Per-object motion state. Mass + radius + position + velocity.
-/// `radius` is used for collision detection. `mass` controls how much
-/// each force changes the velocity (a = F / m).
+/// Per-object motion state. Mass + radius + position + velocity, plus an
+/// `isAnchor` flag for objects that should never move regardless of what
+/// force is applied to them (the central Timing ball).
 struct MotionState {
     var position: SCNVector3
     var velocity: SCNVector3
@@ -12,6 +12,12 @@ struct MotionState {
     /// Collision radius. Two objects are in contact when their center
     /// distance is less than `r_i + r_j`.
     var radius: Float = 3.5
+    /// When true, the integrator skips writing velocity/position changes
+    /// to this body — gravity, collisions, and the bounds spring all
+    /// silently no-op on it. The body still affects others (its mass
+    /// shows up in gravity and collision math for the other body). Used
+    /// to pin the Timing ball at origin regardless of forces.
+    var isAnchor: Bool = false
 }
 
 /// Pure-math motion engine. Each frame:
@@ -48,15 +54,16 @@ enum Motion {
     /// Combined with damping + maxSpeed cap, long-run energy stays bounded.
     static let restitution: Float = 2.5
 
-    /// **Bonus kick** added on every contact regardless of approach state.
-    /// Distributed so the lighter body gets most of it (light-vs-heavy
-    /// collisions fling the light one away dramatically). Without this,
-    /// a totem dragged into a gravity well by attraction has approximately
-    /// zero normal velocity on contact, so even a super-elastic restitution
-    /// produces a near-zero bounce — and the next frame's gravity yanks
-    /// it right back. The bonus kick guarantees a meaningful separation
-    /// velocity on every collision.
-    static let bounceKickSpeed: Float = 14
+    /// **Bonus kick** added on contact *with an anchor* (i.e. the Timing
+    /// ball) — does NOT fire on totem-vs-totem contacts. Without this,
+    /// a totem dragged into the ball's gravity well by attraction has
+    /// approximately zero normal velocity on impact, so even a super-
+    /// elastic restitution produces a near-zero bounce — and the next
+    /// frame's gravity yanks it right back into the well. The kick
+    /// guarantees a meaningful separation velocity on every ball contact.
+    /// Totem-vs-totem collisions use restitution alone; they were
+    /// already lively enough without it.
+    static let bounceKickSpeed: Float = 18
 
     /// Per-frame velocity damping. With elastic impulses adding energy
     /// per collision AND a bonus kick on every contact, we damp very
@@ -105,19 +112,20 @@ enum Motion {
                 // small constant. The previous floor (3) let the 1/r² term
                 // blow up between the contact surface and that floor —
                 // meaning a totem touching the ball felt ~10× the gravity
-                // it would have felt at the surface. That's what made
-                // bounces lose to gravity at close range. Clamping at the
-                // contact distance means gravity at the surface is the same
-                // as gravity any closer; the bounce wins the close-range
-                // fight cleanly.
+                // it would have felt at the surface. Clamping at contact
+                // makes the bounce-vs-gravity fight winnable at close range.
                 let effDist = max(dist, contactDist)
                 let fGrav = gravityG * mi * mj / (effDist * effDist)
-                states[i].velocity = add(states[i].velocity,
-                                         scale(unit, by:  fGrav * dt / mi))
-                states[j].velocity = add(states[j].velocity,
-                                         scale(unit, by: -fGrav * dt / mj))
+                if !states[i].isAnchor {
+                    states[i].velocity = add(states[i].velocity,
+                                             scale(unit, by:  fGrav * dt / mi))
+                }
+                if !states[j].isAnchor {
+                    states[j].velocity = add(states[j].velocity,
+                                             scale(unit, by: -fGrav * dt / mj))
+                }
 
-                // --- Contact response: elastic impulse + bonus kick ---
+                // --- Contact response: elastic impulse + optional kick ---
                 if dist < contactDist {
                     let relVel = sub(states[j].velocity, states[i].velocity)
                     let vRelN = dot(relVel, unit)  // negative when approaching
@@ -128,44 +136,60 @@ enum Motion {
                     if vRelN < 0 {
                         let mu = (mi * mj) / totalMass
                         let jMag = -(1 + restitution) * vRelN * mu
-                        states[j].velocity = add(states[j].velocity,
-                                                 scale(unit, by:  jMag / mj))
-                        states[i].velocity = sub(states[i].velocity,
-                                                 scale(unit, by:  jMag / mi))
+                        if !states[j].isAnchor {
+                            states[j].velocity = add(states[j].velocity,
+                                                     scale(unit, by:  jMag / mj))
+                        }
+                        if !states[i].isAnchor {
+                            states[i].velocity = sub(states[i].velocity,
+                                                     scale(unit, by:  jMag / mi))
+                        }
                     }
 
-                    // Bonus kick — fires on every contact regardless of
-                    // current velocity. Splits the kick by mass so the
-                    // lighter body gets most of it (a totem hitting the
-                    // ball gets nearly the full kick; the ball barely
-                    // notices). This is what guarantees a real separation
-                    // velocity even when gravity dragged a slow totem in.
-                    states[i].velocity = sub(states[i].velocity,
-                                             scale(unit, by: bounceKickSpeed * mj / totalMass))
-                    states[j].velocity = add(states[j].velocity,
-                                             scale(unit, by: bounceKickSpeed * mi / totalMass))
+                    // Bonus kick — only applied when ONE of the bodies is
+                    // an anchor (i.e. the central ball). The point of the
+                    // kick is to break gravity-well captures; totem-vs-
+                    // totem collisions already have plenty of energy from
+                    // restitution alone. Applying the kick there would
+                    // make totems fly around absurdly.
+                    if states[i].isAnchor || states[j].isAnchor {
+                        if !states[j].isAnchor {
+                            states[j].velocity = add(states[j].velocity,
+                                                     scale(unit, by: bounceKickSpeed * mi / totalMass))
+                        }
+                        if !states[i].isAnchor {
+                            states[i].velocity = sub(states[i].velocity,
+                                                     scale(unit, by: bounceKickSpeed * mj / totalMass))
+                        }
+                    }
 
                     // --- Penetration resolution with overshoot ---
-                    // Push apart by penetration + a small slop, so the next
-                    // frame definitely starts with a gap (not just touching).
-                    // Without the slop, gravity reels them back into
-                    // contact on the very next frame → jitter.
+                    // Push apart by penetration + slop so the next frame
+                    // starts with a real gap (not just touching). Anchors
+                    // don't move — the full correction goes to the other body.
                     let penetration = (contactDist - dist) + 0.4
-                    let shiftI = penetration * (mj / totalMass)
-                    let shiftJ = penetration * (mi / totalMass)
-                    states[i].position = sub(states[i].position,
-                                             scale(unit, by: shiftI))
-                    states[j].position = add(states[j].position,
-                                             scale(unit, by: shiftJ))
+                    if states[i].isAnchor && !states[j].isAnchor {
+                        states[j].position = add(states[j].position,
+                                                 scale(unit, by: penetration))
+                    } else if states[j].isAnchor && !states[i].isAnchor {
+                        states[i].position = sub(states[i].position,
+                                                 scale(unit, by: penetration))
+                    } else if !states[i].isAnchor && !states[j].isAnchor {
+                        let shiftI = penetration * (mj / totalMass)
+                        let shiftJ = penetration * (mi / totalMass)
+                        states[i].position = sub(states[i].position,
+                                                 scale(unit, by: shiftI))
+                        states[j].position = add(states[j].position,
+                                                 scale(unit, by: shiftJ))
+                    }
                 }
             }
         }
 
         // 2) Soft sphere containment. Outside the bounds, accelerate
         //    toward origin proportionally to how far out we've drifted.
-        //    Divided by mass so light totems get pulled back faster than
-        //    a massive central ball that wandered slightly off-center.
-        for i in 0..<states.count {
+        //    Anchors are exempt — they don't drift.
+        for i in 0..<states.count where !states[i].isAnchor {
             let p = states[i].position
             let r = length(p)
             if r > boundsRadius {
@@ -177,8 +201,10 @@ enum Motion {
             }
         }
 
-        // 3) Damp, cap, integrate.
-        for i in 0..<states.count {
+        // 3) Damp, cap, integrate. Anchors skip integration entirely —
+        //    their position and velocity stay at whatever they were
+        //    initialized to (origin, zero).
+        for i in 0..<states.count where !states[i].isAnchor {
             states[i].velocity = scale(states[i].velocity, by: damping)
             let speed = length(states[i].velocity)
             if speed > maxSpeed {

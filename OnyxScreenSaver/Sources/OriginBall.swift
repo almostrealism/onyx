@@ -33,13 +33,12 @@ final class OriginBall {
     static let calibrationRadius: Float = 7
 
     /// At calibration hours, the ball's mass is this many "totem masses".
-    /// A typical totem is mass 1-6; at calibrationMass = 200 the ball
-    /// dominates gravity by 30×-200× — still a clear well, but tuned so
-    /// the bounce energy budget (Motion.maxSpeed × restitution + kick)
-    /// is enough for a struck totem to actually escape, not just jitter
-    /// in place. The original 857 made escape velocity around 93 u/s,
-    /// far above any reasonable speed cap.
-    static let calibrationMass: Float = 200
+    /// Now that the ball is anchored (Motion.MotionState.isAnchor = true),
+    /// mass affects only gravity — collisions don't move the ball
+    /// regardless of value. So we can bump this higher to dominate the
+    /// gravity field even against the heaviest cubic-scaled totems
+    /// (mass ~50 at 100% CPU).
+    static let calibrationMass: Float = 600
 
     private let sphere: SCNSphere
 
@@ -78,13 +77,17 @@ final class OriginBall {
         spin.repeatCount = .infinity
         node.addAnimation(spin, forKey: "spin")
 
-        // Start at origin, stationary, with placeholder mass/radius
-        // (overwritten by setHours before first render).
+        // Start at origin, stationary, anchored. The isAnchor flag tells
+        // the motion engine "never move this body" — gravity and collisions
+        // still compute correctly because they read the ball's mass for
+        // the *other* body's response, but no force ever writes back to
+        // the ball's own velocity/position.
         motion = MotionState(
             position: SCNVector3(0, 0, 0),
             velocity: SCNVector3(0, 0, 0),
             mass: 0.1,
-            radius: 0.5
+            radius: 0.5,
+            isAnchor: true
         )
     }
 

@@ -146,15 +146,26 @@ final class HostTotem {
 
     // MARK: - Internals
 
-    /// Mass derived from recent CPU activity. Idle host = mass 1.0; pegged
-    /// host = mass 6.0. Linear so the gravity behavior reads predictably
-    /// ("twice as busy → twice the mass"). Averaged over the most recent
-    /// samples so a single spike doesn't yank the whole scene around.
+    /// Mass derived from recent CPU activity. Idle host = mass 1.0;
+    /// pegged host = mass ~51. **Cubic** scaling so a doubling of CPU
+    /// produces a near-8× mass change at the high end — that's what
+    /// makes collision behavior meaningfully different between a busy
+    /// host and an idle one. Linear scaling (the previous formula) had
+    /// a 6× range across the entire CPU spectrum, which wasn't enough
+    /// to read at a glance.
+    ///
+    /// Reference points:
+    ///   ·  0% →  1
+    ///   · 25% →  1.8
+    ///   · 50% →  7.3
+    ///   · 75% → 22.1
+    ///   ·100% → 51.0
     static func computeMass(from samples: [CPUSample]) -> Float {
         let recent = samples.suffix(10)
         guard !recent.isEmpty else { return 1.0 }
         let avg = recent.map { max(0, min(100, $0.cpu)) }.reduce(0, +) / Double(recent.count)
-        return Float(1.0 + 5.0 * (avg / 100.0))
+        let normalized = avg / 100.0
+        return Float(1.0 + 50.0 * pow(normalized, 3))
     }
 
     /// Quantize CPU% into one of six buckets so every ring has 4-fold rotational
