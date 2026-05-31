@@ -33,3 +33,13 @@ if [[ "$MODE" == "release" ]]; then
 else
     "$SCRIPT_DIR/OnyxScreenSaver/build.sh" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 fi
+
+# Boot legacyScreenSaver out of memory so the next activation re-dlopens
+# the fresh bundle. Without this, repeated installs pick up the on-disk
+# file but keep running the old code from the previous load. Harmless if
+# the process isn't running.
+killall legacyScreenSaver-arm64 2>/dev/null || true
+killall legacyScreenSaver 2>/dev/null || true
+killall ScreenSaverEngine 2>/dev/null || true
+echo ""
+echo "  Killed any running screensaver engine. Next activation will load fresh."
