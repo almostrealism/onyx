@@ -9,13 +9,36 @@ import SceneKit
 /// 2. Synthetic "mock" data when no live file is present or it's gone stale.
 ///    Keeps the System Settings preview lively even on a fresh install where
 ///    Onyx hasn't run yet.
+/// How the Timing.app data is visualized as gravitational bodies.
+///
+/// - `.perProject` (default): one ball per project, each colored by that
+///   project's Timing color, each sized/massed by its individual hours,
+///   spread out around origin in random positions. The result is a
+///   multi-pole gravity field — totems get pulled by different wells,
+///   never settle into a single boring orbit.
+/// - `.unified` (legacy fallback): one ball at origin, color blended
+///   from all projects weighted by hours, sized/massed by total hours.
+///   Preserved as a fallback in case the per-project dynamics turn out
+///   to misbehave in some edge case.
+enum BallMode {
+    case perProject
+    case unified
+}
+
 final class SculptureScene: NSObject, SCNSceneRendererDelegate {
+
+    /// Flip to `.unified` to restore the previous single-blended-ball
+    /// behavior. Kept as a compile-time switch so the alternative
+    /// configuration remains immediately runnable without code reverts.
+    static let ballMode: BallMode = .perProject
 
     let scene = SCNScene()
     let cameraNode = SCNNode()
 
     private var totems: [String: HostTotem] = [:]
-    private let originBall = OriginBall()
+    /// Project-key → ball. In unified mode the key is the sentinel
+    /// `"_unified"`; in per-project mode it's the project title.
+    private var balls: [String: OriginBall] = [:]
     private var insertionCounter = 0
     private var lastRenderTime: TimeInterval = 0
 
@@ -34,10 +57,9 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         setupCamera(isPreview: isPreview)
         setupLights()
 
-        // The origin ball sits at center; hidden until the publisher
-        // sends a positive weeklyHours value.
-        scene.rootNode.addChildNode(originBall.rootNode)
-        originBall.setHours(nil)
+        // Balls (one in unified mode, N in per-project mode) get created
+        // by syncBalls when a stream snapshot arrives. Until then, no
+        // balls in the scene — the totems fly freely.
 
         // Live reader runs everywhere — the System Settings preview also
         // benefits if Onyx is running and broadcasting real data.
@@ -65,11 +87,10 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
     private func handleLiveUpdate(hosts: [HostStream],
                                    weeklyHours: Double?,
                                    weeklyProjects: [ProjectShare]?) {
-        // The Timing ball is independent of host data — update it
-        // unconditionally so it grows/shrinks with hours worked even
-        // during gaps in CPU samples.
-        originBall.setHours(weeklyHours)
-        originBall.setProjects(weeklyProjects)
+        // Timing balls are independent of host data — sync them every
+        // update so they appear/grow/shrink as hours change, even during
+        // gaps in CPU samples.
+        syncBalls(weeklyHours: weeklyHours, weeklyProjects: weeklyProjects)
 
         // Onyx is running but has zero hosts configured (fresh install,
         // or every host removed). Treat as idle so the user still sees
@@ -93,8 +114,7 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         // Live stream went away (Onyx quit, file stale). Fall back to mock
         // so the user still has something pretty to look at instead of
         // staring at a black screen.
-        originBall.setHours(nil)
-        originBall.setProjects(nil)
+        syncBalls(weeklyHours: nil, weeklyProjects: nil)
         if liveDataActive {
             liveDataActive = false
             removeAllTotems()
@@ -143,6 +163,87 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         }
     }
 
+    // MARK: - Ball management
+
+    /// Reconcile the `balls` dict against the latest stream snapshot.
+    /// In `.perProject` mode this adds one ball per project (at a stable-
+    /// for-the-session random position), removes balls for projects that
+    /// vanished, and updates size/tint/mass for the survivors. In
+    /// `.unified` mode it just maintains a single ball at origin.
+    private func syncBalls(weeklyHours: Double?, weeklyProjects: [ProjectShare]?) {
+        switch Self.ballMode {
+        case .unified:
+            // Strip any per-project balls that might exist from a mode
+            // flip (shouldn't happen at runtime, but be defensive).
+            for (key, ball) in balls where key != "_unified" {
+                ball.rootNode.removeFromParentNode()
+                balls.removeValue(forKey: key)
+            }
+            let ball = balls["_unified"] ?? {
+                let b = OriginBall(position: SCNVector3(0, 0, 0))
+                balls["_unified"] = b
+                scene.rootNode.addChildNode(b.rootNode)
+                return b
+            }()
+            ball.setHours(weeklyHours)
+            ball.setProjects(weeklyProjects)
+
+        case .perProject:
+            let projects = weeklyProjects ?? []
+            let incomingKeys = Set(projects.map(\.title))
+
+            // Drop the unified-mode sentinel and any project balls that
+            // disappeared since the last snapshot.
+            for (key, ball) in balls where key == "_unified" || !incomingKeys.contains(key) {
+                ball.rootNode.removeFromParentNode()
+                balls.removeValue(forKey: key)
+            }
+
+            for project in projects {
+                let ball = balls[project.title] ?? {
+                    let b = OriginBall(position: nextProjectBallPosition())
+                    balls[project.title] = b
+                    scene.rootNode.addChildNode(b.rootNode)
+                    return b
+                }()
+                ball.setHours(project.hours > 0.1 ? project.hours : nil)
+                if let tint = NSColor.fromOnyxHex(project.color) {
+                    ball.setTint(tint)
+                }
+            }
+        }
+    }
+
+    /// Spread the per-project balls around origin on a random shell so
+    /// the gravity field has multiple poles. We track placed positions
+    /// in `balls` and reject candidates that are too close to any
+    /// existing ball — within a session the balls stay where they were
+    /// placed, but new ones don't pile on top of survivors.
+    private func nextProjectBallPosition() -> SCNVector3 {
+        // Closer-in than the totem spawn range (16-26) so totems feel
+        // multiple wells without the balls cluttering the camera frame.
+        for _ in 0..<24 {
+            let theta = Float.random(in: 0...(2 * .pi))
+            let phi = Float.random(in: -(.pi / 4)...(.pi / 4))
+            let radius = Float.random(in: 9...15)
+            let candidate = SCNVector3(
+                radius * cos(phi) * cos(theta),
+                radius * sin(phi),
+                radius * cos(phi) * sin(theta)
+            )
+            // Require ≥ 8 units between ball centers so wells stay
+            // visually distinct and totems can thread between them.
+            let tooClose = balls.values.contains { existing in
+                Motion.length(Motion.sub(existing.motion.position, candidate)) < 8
+            }
+            if !tooClose { return candidate }
+        }
+        // Fallback: accept anything if 24 tries didn't find separation
+        // (many projects — rare). Still better than placing at origin.
+        let theta = Float.random(in: 0...(2 * .pi))
+        return SCNVector3(12 * cos(theta), 0, 12 * sin(theta))
+    }
+
     /// Initial position on a random point of a shell around origin —
     /// distinct every launch so the screensaver never opens with the
     /// same staging twice. We sample on a partial hemisphere (not full
@@ -176,23 +277,24 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
 
         // Collect → advance → write back. The Motion engine doesn't know
         // about SceneKit nodes; we hand it raw position/velocity pairs.
-        // The origin ball joins the array as the last element so totems
-        // collide and exchange gravity with it like any other body.
-        let ids = totems.keys.sorted()  // stable order for reproducible math
-        var states = ids.map { totems[$0]!.motion }
-        let ballIncluded = !originBall.rootNode.isHidden
-        if ballIncluded { states.append(originBall.motion) }
+        // Every visible ball joins the array so totems exchange gravity
+        // and collisions with each well like any other body.
+        let totemIDs = totems.keys.sorted()  // stable order for reproducible math
+        var states = totemIDs.map { totems[$0]!.motion }
+        let activeBalls = balls.values.filter { !$0.rootNode.isHidden }
+        for ball in activeBalls { states.append(ball.motion) }
 
         Motion.advance(&states, dt: dt)
 
-        for (i, id) in ids.enumerated() {
+        for (i, id) in totemIDs.enumerated() {
             guard let totem = totems[id] else { continue }
             totem.motion = states[i]
             totem.rootNode.position = states[i].position
         }
-        if ballIncluded {
-            originBall.motion = states[ids.count]
-            originBall.rootNode.position = originBall.motion.position
+        // Anchored balls don't actually move, but read-back keeps the
+        // MotionState in sync in case the engine ever stops anchoring them.
+        for (i, ball) in activeBalls.enumerated() {
+            ball.motion = states[totemIDs.count + i]
         }
     }
 

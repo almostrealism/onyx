@@ -50,7 +50,7 @@ final class OriginBall {
                                              brightness: 1.0,
                                              alpha: 1.0)
 
-    init() {
+    init(position: SCNVector3 = SCNVector3(0, 0, 0)) {
         sphere = SCNSphere(radius: 0.5)
         sphere.segmentCount = 48  // smooth-enough silhouette
 
@@ -80,18 +80,19 @@ final class OriginBall {
         spin.repeatCount = .infinity
         node.addAnimation(spin, forKey: "spin")
 
-        // Start at origin, stationary, anchored. The isAnchor flag tells
-        // the motion engine "never move this body" — gravity and collisions
-        // still compute correctly because they read the ball's mass for
-        // the *other* body's response, but no force ever writes back to
-        // the ball's own velocity/position.
+        // Anchored at the caller-supplied position. The isAnchor flag
+        // tells the motion engine "never move this body" — gravity and
+        // collisions still compute correctly because they read the
+        // ball's mass for the *other* body's response, but no force ever
+        // writes back to the ball's own velocity/position.
         motion = MotionState(
-            position: SCNVector3(0, 0, 0),
+            position: position,
             velocity: SCNVector3(0, 0, 0),
             mass: 0.1,
             radius: 0.5,
             isAnchor: true
         )
+        rootNode.position = position
     }
 
     /// Update size + mass from the latest "hours worked this week" figure.
@@ -121,10 +122,17 @@ final class OriginBall {
         motion.mass = mass
     }
 
-    /// Set the ball's tint from the per-project hours breakdown. We blend
-    /// the projects' hex colors weighted by their hours, then re-saturate
-    /// the result so a mix of distinct colors doesn't muddy into gray.
-    /// Nil or empty input falls back to the default warm tint.
+    /// Set the ball's tint directly. Used by per-project ball mode where
+    /// each ball gets its own project's color verbatim — no blending.
+    func setTint(_ color: NSColor) {
+        material.diffuse.contents = color
+        material.emission.contents = Self.emissionFor(color)
+    }
+
+    /// Set the ball's tint from the per-project hours breakdown. Used
+    /// only by `BallMode.unified` (the legacy single-ball-at-origin path).
+    /// Blends the projects' hex colors weighted by hours, then
+    /// re-saturates to avoid muddy gray from a mix of distinct hues.
     func setProjects(_ projects: [ProjectShare]?) {
         let tint: NSColor
         if let projects = projects, !projects.isEmpty {
@@ -132,8 +140,7 @@ final class OriginBall {
         } else {
             tint = Self.defaultTint
         }
-        material.diffuse.contents = tint
-        material.emission.contents = Self.emissionFor(tint)
+        setTint(tint)
     }
 
     /// Weighted RGB blend of the projects' colors, then a saturation/
