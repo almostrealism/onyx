@@ -33,9 +33,13 @@ final class OriginBall {
     static let calibrationRadius: Float = 7
 
     /// At calibration hours, the ball's mass is this many "totem masses".
-    /// A typical totem is mass 1-6; calibrationMass = 857 means the ball
-    /// dominates pairwise gravity by 100×-800×.
-    static let calibrationMass: Float = 857
+    /// A typical totem is mass 1-6; at calibrationMass = 200 the ball
+    /// dominates gravity by 30×-200× — still a clear well, but tuned so
+    /// the bounce energy budget (Motion.maxSpeed × restitution + kick)
+    /// is enough for a struck totem to actually escape, not just jitter
+    /// in place. The original 857 made escape velocity around 93 u/s,
+    /// far above any reasonable speed cap.
+    static let calibrationMass: Float = 200
 
     private let sphere: SCNSphere
 

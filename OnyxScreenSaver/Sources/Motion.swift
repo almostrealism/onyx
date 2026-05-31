@@ -42,25 +42,32 @@ enum Motion {
     /// totems at typical separation accelerates visibly but not violently.
     static let gravityG: Float = 35
 
-    /// Distance floor for the gravity 1/r² term. Without it the force
-    /// blows up as objects approach; clamping means short-range collision
-    /// dominates close-in.
-    static let gravityMinDist: Float = 3
+    /// Coefficient of restitution. 1.0 = perfect elastic; we go well above
+    /// that because the system is intentionally non-physical — real
+    /// metallic cubes wouldn't bounce off each other; we want them to.
+    /// Combined with damping + maxSpeed cap, long-run energy stays bounded.
+    static let restitution: Float = 2.5
 
-    /// Coefficient of restitution for collisions. 1.0 = perfectly elastic
-    /// (no energy lost). >1 = super-elastic (the pair gains energy from
-    /// each bounce). We want the system to look LIVELY, so we go above 1
-    /// — combined with damping, the long-run energy stays bounded.
-    static let restitution: Float = 1.4
+    /// **Bonus kick** added on every contact regardless of approach state.
+    /// Distributed so the lighter body gets most of it (light-vs-heavy
+    /// collisions fling the light one away dramatically). Without this,
+    /// a totem dragged into a gravity well by attraction has approximately
+    /// zero normal velocity on contact, so even a super-elastic restitution
+    /// produces a near-zero bounce — and the next frame's gravity yanks
+    /// it right back. The bonus kick guarantees a meaningful separation
+    /// velocity on every collision.
+    static let bounceKickSpeed: Float = 14
 
     /// Per-frame velocity damping. With elastic impulses adding energy
-    /// per collision, we damp slightly more than before to keep the
-    /// long-run velocity from blowing up. 0.995^60 ≈ 0.74 — still gentle.
-    static let damping: Float = 0.995
+    /// per collision AND a bonus kick on every contact, we damp very
+    /// lightly. 0.999^60 ≈ 0.94 over one second — almost no bleed.
+    static let damping: Float = 0.999
 
-    /// Top speed (units/sec). Caps any one object's velocity so a sequence
-    /// of bounces can't snowball into something that reads as frantic.
-    static let maxSpeed: Float = 9.0
+    /// Top speed (units/sec). Raised to allow a bounce off the central
+    /// ball to actually outrun the ball's gravity. With the old cap of 9,
+    /// the ball's gravity at the contact surface pulled at >10 u/s per
+    /// frame, so no bounce could ever escape — totems just jittered.
+    static let maxSpeed: Float = 26
 
     /// Initial velocity: mostly tangent to the spawn position, so totems
     /// start on orbital-ish arcs rather than barreling straight in.
@@ -94,38 +101,56 @@ enum Motion {
                 let contactDist = ri + rj
 
                 // --- Gravity (attractive, divided by mass = F/m) ---
-                let effDist = max(dist, gravityMinDist)
+                // Clamp effective distance at the contact distance, NOT a
+                // small constant. The previous floor (3) let the 1/r² term
+                // blow up between the contact surface and that floor —
+                // meaning a totem touching the ball felt ~10× the gravity
+                // it would have felt at the surface. That's what made
+                // bounces lose to gravity at close range. Clamping at the
+                // contact distance means gravity at the surface is the same
+                // as gravity any closer; the bounce wins the close-range
+                // fight cleanly.
+                let effDist = max(dist, contactDist)
                 let fGrav = gravityG * mi * mj / (effDist * effDist)
                 states[i].velocity = add(states[i].velocity,
                                          scale(unit, by:  fGrav * dt / mi))
                 states[j].velocity = add(states[j].velocity,
                                          scale(unit, by: -fGrav * dt / mj))
 
-                // --- Elastic collision (only on approach) ---
+                // --- Contact response: elastic impulse + bonus kick ---
                 if dist < contactDist {
                     let relVel = sub(states[j].velocity, states[i].velocity)
                     let vRelN = dot(relVel, unit)  // negative when approaching
+                    let totalMass = mi + mj
+
+                    // Standard elastic impulse — only fires on approach so
+                    // we don't reverse a velocity that's already separating.
                     if vRelN < 0 {
-                        // J = -(1 + e) * v_rel·n / (1/m_i + 1/m_j)
-                        // Equivalent compact form: μ = m_i·m_j / (m_i + m_j)
-                        let mu = (mi * mj) / (mi + mj)
+                        let mu = (mi * mj) / totalMass
                         let jMag = -(1 + restitution) * vRelN * mu
-                        // Δv_j = +J*n / m_j, Δv_i = -J*n / m_i. Lighter
-                        // mass → larger velocity change → dramatic bounce.
                         states[j].velocity = add(states[j].velocity,
                                                  scale(unit, by:  jMag / mj))
                         states[i].velocity = sub(states[i].velocity,
                                                  scale(unit, by:  jMag / mi))
                     }
 
-                    // --- Penetration resolution (positional) ---
-                    // Even with the right impulse, in one dt a fast pair
-                    // can pass through the contact distance. Push them
-                    // apart along the normal so the next frame starts
-                    // from a separating configuration. Mass-weighted so
-                    // the lighter object moves more.
-                    let penetration = contactDist - dist
-                    let totalMass = mi + mj
+                    // Bonus kick — fires on every contact regardless of
+                    // current velocity. Splits the kick by mass so the
+                    // lighter body gets most of it (a totem hitting the
+                    // ball gets nearly the full kick; the ball barely
+                    // notices). This is what guarantees a real separation
+                    // velocity even when gravity dragged a slow totem in.
+                    states[i].velocity = sub(states[i].velocity,
+                                             scale(unit, by: bounceKickSpeed * mj / totalMass))
+                    states[j].velocity = add(states[j].velocity,
+                                             scale(unit, by: bounceKickSpeed * mi / totalMass))
+
+                    // --- Penetration resolution with overshoot ---
+                    // Push apart by penetration + a small slop, so the next
+                    // frame definitely starts with a gap (not just touching).
+                    // Without the slop, gravity reels them back into
+                    // contact on the very next frame → jitter.
+                    let penetration = (contactDist - dist) + 0.4
                     let shiftI = penetration * (mj / totalMass)
                     let shiftJ = penetration * (mi / totalMass)
                     states[i].position = sub(states[i].position,
