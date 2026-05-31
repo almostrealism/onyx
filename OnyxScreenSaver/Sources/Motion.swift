@@ -56,17 +56,21 @@ enum Motion {
     /// Combined with damping + maxSpeed cap, long-run energy stays bounded.
     static let restitution: Float = 2.5
 
-    /// **Bonus kick** added on contact *with an anchor* (i.e. the Timing
+    /// **Bonus kick** added on contact *with an anchor* (i.e. a Timing
     /// ball) — does NOT fire on totem-vs-totem contacts. Without this,
-    /// a totem dragged into the ball's gravity well by attraction has
+    /// a totem dragged into a ball's gravity well by attraction has
     /// approximately zero normal velocity on impact, so even a super-
     /// elastic restitution produces a near-zero bounce — and the next
     /// frame's gravity yanks it right back into the well. The kick
     /// guarantees a meaningful separation velocity on every ball contact.
-    /// 26 (was 18) sends the struck totem far enough that gravity has
-    /// time to slow it before it falls back, breaking the "bounce-fall-
-    /// bounce" cycle where everything restaged collisions immediately.
-    static let bounceKickSpeed: Float = 26
+    ///
+    /// 26 was tuned for the previous single-ball-at-origin layout where
+    /// the well was one heavy 35h+ anchor. Splitting Timing into per-
+    /// project balls (each typically much smaller) means the wells are
+    /// weaker individually and don't need as much kick to escape.
+    /// Halved to 13 — strong enough to separate cleanly on contact
+    /// without making collisions feel rubber-bandy.
+    static let bounceKickSpeed: Float = 13
 
     /// Per-frame velocity damping. With elastic impulses adding energy
     /// per collision AND a bonus kick on every contact, we damp very
