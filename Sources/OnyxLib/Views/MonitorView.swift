@@ -796,9 +796,12 @@ private struct SimpleContainerPill: View {
                 .foregroundColor(.white.opacity(0.85))
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Text(cpuText)
+            Text(monitorCompactCPU(cpuText))
                 .monitorFont(size: 11)
                 .foregroundColor(.white.opacity(0.7))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .minimumScaleFactor(0.7)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
@@ -939,12 +942,24 @@ struct DockerStatsSection: View {
                         Text(container.uptime)
                             .frame(width: 38, alignment: .trailing)
                             .foregroundColor(.white.opacity(0.5))
-                        Text(container.cpu)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .minimumScaleFactor(0.75)
+                        Text(monitorCompactCPU(container.cpu))
                             .frame(width: 55, alignment: .trailing)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .minimumScaleFactor(0.7)
                         Text(shortMem(container.memUsage))
                             .frame(width: 80, alignment: .trailing)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .minimumScaleFactor(0.7)
                         Text(container.pids)
                             .frame(width: 35, alignment: .trailing)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .minimumScaleFactor(0.75)
                     }
                     .monitorFont(size: 11)
                     .foregroundColor(.white.opacity(0.7))
@@ -995,21 +1010,51 @@ struct DockerStatsSection: View {
         return Color(hex: "FF6B6B")
     }
 
-    /// Shorten "123.4MiB / 7.656GiB" → "123M / 7.7G"
-    private func shortMem(_ s: String) -> String {
-        let parts = s.components(separatedBy: " / ")
-        return parts.map { part in
-            let t = part.trimmingCharacters(in: .whitespaces)
-            if t.hasSuffix("GiB") {
-                if let v = Double(t.dropLast(3)) { return String(format: "%.1fG", v) }
-            } else if t.hasSuffix("MiB") {
-                if let v = Double(t.dropLast(3)) { return String(format: "%.0fM", v) }
-            } else if t.hasSuffix("KiB") {
-                if let v = Double(t.dropLast(3)) { return String(format: "%.0fK", v) }
-            }
-            return t
-        }.joined(separator: "/")
+    /// Shorten "12.34MiB / 7.656GiB" → "12M/7.7G".
+    /// Forwards to the file-level `monitorShortMem` so the simple-mode
+    /// strip and full list share one set of formatting rules.
+    private func shortMem(_ s: String) -> String { monitorShortMem(s) }
+}
+
+/// Adaptive CPU formatting — fewer decimal places as the magnitude grows,
+/// so we use the column width sensibly instead of burning four chars on
+/// trailing zeros at high CPU. `7.66%` over `123.45%` is the same number
+/// of characters; the eye-readable digits are what matters.
+func monitorCompactCPU(_ s: String) -> String {
+    let cleaned = s.trimmingCharacters(in: .whitespaces)
+        .replacingOccurrences(of: "%", with: "")
+    guard let v = Double(cleaned) else { return s }
+    if v >= 1000 { return String(format: "%.0f%%", v) }   // e.g. "1024%"
+    if v >= 100  { return String(format: "%.0f%%", v) }   // e.g. "150%"
+    if v >= 10   { return String(format: "%.1f%%", v) }   // e.g. "12.3%"
+    return String(format: "%.2f%%", v)                    // e.g. "0.05%"
+}
+
+/// Adaptive memory formatting. Goal: every result is ≤ 4 chars + unit
+/// letter, so a worst-case "9999M/9999G" fits the 80px column without
+/// wrap or truncation. Bigger numbers drop more decimals.
+func monitorShortMem(_ s: String) -> String {
+    let parts = s.components(separatedBy: " / ")
+    return parts.map(monitorCompactSize).joined(separator: "/")
+}
+
+func monitorCompactSize(_ part: String) -> String {
+    let t = part.trimmingCharacters(in: .whitespaces)
+    let suffixes: [(String, String)] = [
+        ("GiB", "G"), ("MiB", "M"), ("KiB", "K"),
+        ("GB",  "G"), ("MB",  "M"), ("KB",  "K"),
+        ("B",   "B"),
+    ]
+    for (input, unit) in suffixes where t.hasSuffix(input) {
+        let numStr = t.dropLast(input.count).trimmingCharacters(in: .whitespaces)
+        guard let v = Double(numStr) else { return t }
+        if v >= 1000 { return String(format: "%.0f%@", v / 1024, "T") }
+        if v >= 100  { return String(format: "%.0f%@", v, unit) }    // "888G"
+        if v >= 10   { return String(format: "%.1f%@", v, unit) }    // "12.3G"
+        if v >= 1    { return String(format: "%.1f%@", v, unit) }    // "1.2G"
+        return String(format: "%.2f%@", v, unit)                     // "0.12G"
     }
+    return t
 }
 
 // MARK: - Timing.app Chart
