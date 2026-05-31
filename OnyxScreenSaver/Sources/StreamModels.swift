@@ -23,11 +23,31 @@ struct HostStream: Codable, Identifiable {
     var id: String { hostID }
 }
 
-/// The shape of the JSON file Onyx publishes at
-/// ~/Library/Application Support/Onyx/cpu-stream.json.
+/// The shape of the JSON file Onyx publishes.
+///
+/// `weeklyHours` is optional so the screensaver still decodes correctly
+/// when running against an older Onyx that didn't publish the field.
 struct CPUStreamFile: Codable {
     let updatedAt: TimeInterval
     let hosts: [HostStream]
+    let weeklyHours: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case updatedAt, hosts, weeklyHours
+    }
+
+    init(updatedAt: TimeInterval, hosts: [HostStream], weeklyHours: Double? = nil) {
+        self.updatedAt = updatedAt
+        self.hosts = hosts
+        self.weeklyHours = weeklyHours
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.updatedAt = try c.decode(TimeInterval.self, forKey: .updatedAt)
+        self.hosts = try c.decode([HostStream].self, forKey: .hosts)
+        self.weeklyHours = try c.decodeIfPresent(Double.self, forKey: .weeklyHours)
+    }
 }
 
 // MARK: - NSColor helpers

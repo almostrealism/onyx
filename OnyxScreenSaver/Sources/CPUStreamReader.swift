@@ -12,7 +12,9 @@ final class CPUStreamReader {
 
     /// Called on the main queue whenever a new snapshot is read.
     /// `hosts` will be empty if the file decoded cleanly but had no hosts yet.
-    var onUpdate: (([HostStream]) -> Void)?
+    /// `weeklyHours` is nil when the publisher hasn't sent a value (older
+    /// builds) or when Timing.app isn't configured.
+    var onUpdate: ((_ hosts: [HostStream], _ weeklyHours: Double?) -> Void)?
 
     /// Called on the main queue when the file is missing or its `updatedAt`
     /// is older than `staleThreshold`. The screensaver renders its idle
@@ -87,10 +89,10 @@ final class CPUStreamReader {
                 return
             }
 
-            logFirstResult("LIVE — \(file.hosts.count) host(s), age=\(String(format: "%.1f", age))s")
+            logFirstResult("LIVE — \(file.hosts.count) host(s), age=\(String(format: "%.1f", age))s, weeklyHours=\(file.weeklyHours.map { String(format: "%.1f", $0) } ?? "nil")")
             lastWasIdle = false
             DispatchQueue.main.async { [weak self] in
-                self?.onUpdate?(file.hosts)
+                self?.onUpdate?(file.hosts, file.weeklyHours)
             }
         } catch {
             // File exists but decode failed — could be caught mid-write

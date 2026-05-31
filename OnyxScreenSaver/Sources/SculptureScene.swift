@@ -15,6 +15,7 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
     let cameraNode = SCNNode()
 
     private var totems: [String: HostTotem] = [:]
+    private let originBall = OriginBall()
     private var insertionCounter = 0
     private var lastRenderTime: TimeInterval = 0
 
@@ -33,9 +34,16 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         setupCamera(isPreview: isPreview)
         setupLights()
 
+        // The origin ball sits at center; hidden until the publisher
+        // sends a positive weeklyHours value.
+        scene.rootNode.addChildNode(originBall.rootNode)
+        originBall.setHours(nil)
+
         // Live reader runs everywhere — the System Settings preview also
         // benefits if Onyx is running and broadcasting real data.
-        reader.onUpdate = { [weak self] hosts in self?.handleLiveUpdate(hosts: hosts) }
+        reader.onUpdate = { [weak self] hosts, weeklyHours in
+            self?.handleLiveUpdate(hosts: hosts, weeklyHours: weeklyHours)
+        }
         reader.onIdle = { [weak self] in self?.handleIdle() }
         reader.start()
 
@@ -52,7 +60,12 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
 
     // MARK: - Data source coordination
 
-    private func handleLiveUpdate(hosts: [HostStream]) {
+    private func handleLiveUpdate(hosts: [HostStream], weeklyHours: Double?) {
+        // The Timing ball is independent of host data — update it
+        // unconditionally so it grows/shrinks with hours worked even
+        // during gaps in CPU samples.
+        originBall.setHours(weeklyHours)
+
         // Onyx is running but has zero hosts configured (fresh install,
         // or every host removed). Treat as idle so the user still sees
         // *something* — the mock visualization is more interesting than
@@ -75,6 +88,7 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         // Live stream went away (Onyx quit, file stale). Fall back to mock
         // so the user still has something pretty to look at instead of
         // staring at a black screen.
+        originBall.setHours(nil)
         if liveDataActive {
             liveDataActive = false
             removeAllTotems()
@@ -148,13 +162,23 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
 
         // Collect → advance → write back. The Motion engine doesn't know
         // about SceneKit nodes; we hand it raw position/velocity pairs.
+        // The origin ball joins the array as the last element so totems
+        // collide and exchange gravity with it like any other body.
         let ids = totems.keys.sorted()  // stable order for reproducible math
         var states = ids.map { totems[$0]!.motion }
+        let ballIncluded = !originBall.rootNode.isHidden
+        if ballIncluded { states.append(originBall.motion) }
+
         Motion.advance(&states, dt: dt)
+
         for (i, id) in ids.enumerated() {
             guard let totem = totems[id] else { continue }
             totem.motion = states[i]
             totem.rootNode.position = states[i].position
+        }
+        if ballIncluded {
+            originBall.motion = states[ids.count]
+            originBall.rootNode.position = originBall.motion.position
         }
     }
 

@@ -55,9 +55,21 @@ public struct HostCPUStream: Codable, Equatable {
 }
 
 /// Top-level shape of cpu-stream.json.
+///
+/// `weeklyHours` is optional — older publishers won't include it, and the
+/// screensaver decodes it via decodeIfPresent so a missing field is fine
+/// (it simply means "no central ball in the saver").
 public struct CPUStreamFile: Codable, Equatable {
     public let updatedAt: TimeInterval
     public let hosts: [HostCPUStream]
+    public let weeklyHours: Double?
+
+    public init(updatedAt: TimeInterval, hosts: [HostCPUStream],
+                weeklyHours: Double? = nil) {
+        self.updatedAt = updatedAt
+        self.hosts = hosts
+        self.weeklyHours = weeklyHours
+    }
 }
 
 /// Shared store + publisher for the screensaver's CPU stream file.
@@ -77,6 +89,7 @@ public final class CPUStreamStore {
 
     private var url: URL?
     private var buffers: [String: HostCPUStream] = [:]
+    private var weeklyHoursValue: Double?
     private let lock = NSLock()
     private let writerQueue = DispatchQueue(label: "com.onyx.cpu-stream-writer")
     private var pendingWriteWorkItem: DispatchWorkItem?
@@ -139,6 +152,17 @@ public final class CPUStreamStore {
         scheduleWrite()
     }
 
+    /// Update the "hours worked this week" figure shown to the screensaver.
+    /// Pass nil to clear it (e.g. Timing.app isn't configured). Anything
+    /// less than ~0.1 is treated as nil downstream so a fresh-Monday
+    /// zero-hour reading doesn't spawn a degenerate point-mass ball.
+    public func setWeeklyHours(_ hours: Double?) {
+        lock.lock()
+        weeklyHoursValue = hours
+        lock.unlock()
+        scheduleWrite()
+    }
+
     /// Drop a host from the stream — used when the user removes a host config
     /// so the screensaver stops drawing its totem on the next read.
     public func removeHost(_ hostID: String) {
@@ -190,7 +214,8 @@ public final class CPUStreamStore {
         let now = clockOverride?() ?? Date().timeIntervalSince1970
         let payload = CPUStreamFile(
             updatedAt: now,
-            hosts: Array(buffers.values).sorted { $0.hostID < $1.hostID }
+            hosts: Array(buffers.values).sorted { $0.hostID < $1.hostID },
+            weeklyHours: weeklyHoursValue
         )
         lock.unlock()
 

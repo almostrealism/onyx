@@ -103,6 +103,17 @@ public final class CPUFleetPoller {
                 self?.pollOne(host: host, appState: appState, timestamp: timestamp)
             }
         }
+
+        // Hours worked this week (via Timing.app). Pushed alongside CPU so
+        // the screensaver can size its central gravity ball. Read on main
+        // (where the timer fires) — totalWeekHours is @Published and we're
+        // already on the right queue.
+        if appState.timing.isConfigured {
+            let hours = appState.timing.totalWeekHours
+            CPUStreamStore.shared.setWeeklyHours(hours > 0 ? hours : nil)
+        } else {
+            CPUStreamStore.shared.setWeeklyHours(nil)
+        }
     }
 
     private func pollOne(host: HostConfig, appState: AppState, timestamp: TimeInterval) {

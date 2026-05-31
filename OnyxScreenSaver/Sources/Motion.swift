@@ -1,71 +1,72 @@
 import SceneKit
 
-/// Per-totem motion state. Position + velocity + mass. Mutated by
-/// `Motion.advance` once per render frame.
+/// Per-object motion state. Mass + radius + position + velocity.
+/// `radius` is used for collision detection. `mass` controls how much
+/// each force changes the velocity (a = F / m).
 struct MotionState {
     var position: SCNVector3
     var velocity: SCNVector3
-    /// Mass derived from CPU activity — busier hosts are heavier.
-    /// Updated by SculptureScene whenever new samples arrive.
+    /// Mass derived from activity. Heavier objects feel less of each
+    /// impulse and pull harder on others gravitationally.
     var mass: Float = 1.0
+    /// Collision radius. Two objects are in contact when their center
+    /// distance is less than `r_i + r_j`.
+    var radius: Float = 3.5
 }
 
-/// Pure-math motion engine: mass-weighted Newtonian gravity + short-range
-/// repulsion + soft sphere containment. Doesn't know about SceneKit nodes,
-/// only positions / velocities / masses — SculptureScene calls into it once
-/// per frame and pushes the resulting positions back onto totem nodes.
+/// Pure-math motion engine. Each frame:
 ///
-/// Behavior the math is meant to produce:
-/// - Heavy totems (high CPU) feel less of each impulse → they tend to sit
-///   still and form a center-of-mass anchor.
-/// - Light totems (idle CPU) accelerate easily and end up orbiting or
-///   getting flung around by the heavier ones.
-/// - Pairwise gravitational attraction pulls everything together over
-///   distance; short-range repulsion stops them from passing through each
-///   other. The static equilibrium would be everyone touching, but the
-///   ongoing tangential velocity and CPU-driven mass changes keep the
-///   system stirring.
+/// 1. **Long-range gravity** — every pair attracts via `G·m₁·m₂/r²`, divided
+///    by mass so heavy objects are sluggish. Heavy hosts (or the Timing
+///    ball) become anchor points; light hosts orbit them.
+/// 2. **Short-range elastic collision** — when two objects' surfaces meet
+///    (center distance < sum of radii) AND they're approaching, apply a
+///    one-shot impulse derived from the standard elastic-collision
+///    formula. A super-elastic coefficient of restitution (>1) makes the
+///    bounce energetic — light objects ricochet dramatically off heavy
+///    ones because the impulse divides by mass.
+/// 3. **Penetration resolution** — even with the impulse, fast bodies can
+///    overlap in a single dt. We push them back apart along the contact
+///    normal, weighted by mass (lighter object moves more).
+/// 4. **Bounds containment** — soft spring back to origin past the bounds
+///    radius, so totems can't escape the camera frustum.
+/// 5. **Damp, cap, integrate** — small velocity bleed, a hard top-speed
+///    cap, then position += velocity * dt.
 enum Motion {
 
     /// Outer bound — softly pushed back toward origin if a totem strays
     /// beyond this radius. Keeps the action centered in frame.
     static let boundsRadius: Float = 30
 
-    /// Pairwise gravitational constant. Real Newtonian gravity is G·m₁·m₂/r²
-    /// — this G is tuned so a pair of average-mass totems at typical
-    /// separation produces visible (but not violent) acceleration.
+    /// Pairwise gravitational constant. Tuned so a pair of average-mass
+    /// totems at typical separation accelerates visibly but not violently.
     static let gravityG: Float = 35
 
     /// Distance floor for the gravity 1/r² term. Without it the force
-    /// blows up as totems approach; clamping at ~3 units means short-range
-    /// repulsion dominates close-in.
+    /// blows up as objects approach; clamping means short-range collision
+    /// dominates close-in.
     static let gravityMinDist: Float = 3
 
-    /// If two totems get closer than this, they push each other apart.
-    /// Sized larger than the widest totem so they never visually touch.
-    static let repulsionRadius: Float = 9
+    /// Coefficient of restitution for collisions. 1.0 = perfectly elastic
+    /// (no energy lost). >1 = super-elastic (the pair gains energy from
+    /// each bounce). We want the system to look LIVELY, so we go above 1
+    /// — combined with damping, the long-run energy stays bounded.
+    static let restitution: Float = 1.4
 
-    /// Repulsion strength. Tuned to overpower gravity at contact range so
-    /// totems can't crash into each other no matter what masses they have.
-    static let repulsionStrength: Float = 60
+    /// Per-frame velocity damping. With elastic impulses adding energy
+    /// per collision, we damp slightly more than before to keep the
+    /// long-run velocity from blowing up. 0.995^60 ≈ 0.74 — still gentle.
+    static let damping: Float = 0.995
 
-    /// Per-frame velocity damping. With mass-weighted gravity providing
-    /// continuous force, we can damp lightly and still avoid runaway.
-    static let damping: Float = 0.997
-
-    /// Top speed (units/sec). Caps any one totem's velocity so a sequence
-    /// of gravity impulses can't snowball into something that looks frantic.
-    static let maxSpeed: Float = 7.0
+    /// Top speed (units/sec). Caps any one object's velocity so a sequence
+    /// of bounces can't snowball into something that reads as frantic.
+    static let maxSpeed: Float = 9.0
 
     /// Initial velocity: mostly tangent to the spawn position, so totems
-    /// start in orbit-friendly motion rather than radially-inward
-    /// (which would cause an immediate central collision).
+    /// start on orbital-ish arcs rather than barreling straight in.
     static func initialVelocity(position: SCNVector3, seed: Int) -> SCNVector3 {
         let theta = atan2(Float(position.z), Float(position.x))
-        // Tangent direction in the XZ plane: rotate position 90° around Y.
         let tangentSpeed: Float = 2.0
-        // Small Y-jitter via golden-angle so totems don't all move in one
-        // plane. Deterministic per seed.
         let yJitter = sin(Float(seed) * 1.6180339) * 0.5
         return SCNVector3(-tangentSpeed * sin(theta),
                           yJitter,
@@ -77,9 +78,9 @@ enum Motion {
         let dt = min(dt, 1.0 / 15.0)  // clamp huge dt (e.g. tab-out resume)
         guard !states.isEmpty else { return }
 
-        // 1) Pairwise forces: gravity (attractive, long range) + repulsion
-        //    (strong, short range). Both are converted to per-totem velocity
-        //    deltas using a = F / m so heavier totems accelerate less.
+        // 1) Pairwise gravity (long-range, continuous) and elastic
+        //    collision (short-range, impulsive). Doing them in the same
+        //    pass means we can reuse the per-pair distance/normal compute.
         for i in 0..<states.count {
             for j in (i + 1)..<states.count {
                 let delta = sub(states[j].position, states[i].position)
@@ -88,35 +89,57 @@ enum Motion {
                 let unit = scale(delta, by: 1.0 / dist)
                 let mi = states[i].mass
                 let mj = states[j].mass
+                let ri = states[i].radius
+                let rj = states[j].radius
+                let contactDist = ri + rj
 
-                // Newtonian gravity (attractive). Floor the distance term
-                // so the close-range behavior is dominated by repulsion.
+                // --- Gravity (attractive, divided by mass = F/m) ---
                 let effDist = max(dist, gravityMinDist)
                 let fGrav = gravityG * mi * mj / (effDist * effDist)
-                // a = F/m → impulse_i is along +unit toward j, impulse_j is opposite.
                 states[i].velocity = add(states[i].velocity,
                                          scale(unit, by:  fGrav * dt / mi))
                 states[j].velocity = add(states[j].velocity,
                                          scale(unit, by: -fGrav * dt / mj))
 
-                // Short-range repulsion: ramps up quadratically as totems
-                // approach contact. Mass-divided like gravity, so light
-                // totems bounce off heavy ones more dramatically than the
-                // reverse.
-                if dist < repulsionRadius {
-                    let overlap = repulsionRadius - dist
-                    let fRep = repulsionStrength * (overlap / repulsionRadius) * (overlap / repulsionRadius)
-                    states[i].velocity = sub(states[i].velocity,
-                                             scale(unit, by: fRep * dt / mi))
-                    states[j].velocity = add(states[j].velocity,
-                                             scale(unit, by: fRep * dt / mj))
+                // --- Elastic collision (only on approach) ---
+                if dist < contactDist {
+                    let relVel = sub(states[j].velocity, states[i].velocity)
+                    let vRelN = dot(relVel, unit)  // negative when approaching
+                    if vRelN < 0 {
+                        // J = -(1 + e) * v_rel·n / (1/m_i + 1/m_j)
+                        // Equivalent compact form: μ = m_i·m_j / (m_i + m_j)
+                        let mu = (mi * mj) / (mi + mj)
+                        let jMag = -(1 + restitution) * vRelN * mu
+                        // Δv_j = +J*n / m_j, Δv_i = -J*n / m_i. Lighter
+                        // mass → larger velocity change → dramatic bounce.
+                        states[j].velocity = add(states[j].velocity,
+                                                 scale(unit, by:  jMag / mj))
+                        states[i].velocity = sub(states[i].velocity,
+                                                 scale(unit, by:  jMag / mi))
+                    }
+
+                    // --- Penetration resolution (positional) ---
+                    // Even with the right impulse, in one dt a fast pair
+                    // can pass through the contact distance. Push them
+                    // apart along the normal so the next frame starts
+                    // from a separating configuration. Mass-weighted so
+                    // the lighter object moves more.
+                    let penetration = contactDist - dist
+                    let totalMass = mi + mj
+                    let shiftI = penetration * (mj / totalMass)
+                    let shiftJ = penetration * (mi / totalMass)
+                    states[i].position = sub(states[i].position,
+                                             scale(unit, by: shiftI))
+                    states[j].position = add(states[j].position,
+                                             scale(unit, by: shiftJ))
                 }
             }
         }
 
         // 2) Soft sphere containment. Outside the bounds, accelerate
         //    toward origin proportionally to how far out we've drifted.
-        //    Mass-divided so heavy totems still respond.
+        //    Divided by mass so light totems get pulled back faster than
+        //    a massive central ball that wandered slightly off-center.
         for i in 0..<states.count {
             let p = states[i].position
             let r = length(p)
@@ -129,9 +152,7 @@ enum Motion {
             }
         }
 
-        // 3) Damp, cap, integrate. No minimum-speed floor — gravity from
-        //    the other totems is always pulling on every totem (light ones
-        //    move; heavy ones happily sit still, as desired).
+        // 3) Damp, cap, integrate.
         for i in 0..<states.count {
             states[i].velocity = scale(states[i].velocity, by: damping)
             let speed = length(states[i].velocity)
@@ -167,5 +188,11 @@ enum Motion {
     static func length(_ v: SCNVector3) -> Float {
         let x = Float(v.x), y = Float(v.y), z = Float(v.z)
         return sqrt(x * x + y * y + z * z)
+    }
+
+    static func dot(_ a: SCNVector3, _ b: SCNVector3) -> Float {
+        let ax = Float(a.x), ay = Float(a.y), az = Float(a.z)
+        let bx = Float(b.x), by = Float(b.y), bz = Float(b.z)
+        return ax * bx + ay * by + az * bz
     }
 }

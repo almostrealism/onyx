@@ -46,10 +46,13 @@ final class HostTotem {
         // Position is zero here; SculptureScene overwrites it with a spawn
         // position right after construction, and `initialVelocity` derives
         // a tangent vector from that real position.
+        // Radius 3.5 covers the widest (24-cube) ring's outer bound plus
+        // a generous visual buffer — totems never visually overlap.
         self.motion = MotionState(
             position: SCNVector3(0, 0, 0),
             velocity: SCNVector3(0, 0, 0),
-            mass: 1.0
+            mass: 1.0,
+            radius: 3.5
         )
         rootNode.addChildNode(stackNode)
         rootNode.addChildNode(labelNode)
