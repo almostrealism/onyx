@@ -1051,6 +1051,10 @@ public class AppState: ObservableObject {
         if NSClassFromString("XCTest") == nil {
             CPUStreamStore.shared.configure(url: cpuStreamURL)
             CPUFleetPoller.shared.start(appState: self)
+            // Start polling configured GitHub repos for open PRs. The
+            // manager guards itself against an empty config and is a
+            // no-op under XCTest.
+            PullRequestManager.shared.startPolling()
         }
     }
 

@@ -388,6 +388,8 @@ struct SettingsView: View {
                                     }
                                 }
                         }
+
+                        GitHubSettingsSection()
                     }
                 }
                 .frame(maxHeight: 500)
@@ -712,6 +714,87 @@ private struct TimezoneField: View {
         // Remove trailing empty entries
         while appState.appearance.extraTimezones.last?.isEmpty == true {
             appState.appearance.extraTimezones.removeLast()
+        }
+    }
+}
+
+/// GitHub PR watch settings — token + repo URLs. Styled to match the
+/// Timing.app block above.
+private struct GitHubSettingsSection: View {
+    @ObservedObject private var config = GitHubConfigStore.shared
+    @State private var reposText: String = ""
+    @State private var hasInitializedText = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("GITHUB")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                .tracking(2)
+
+            HStack(spacing: 8) {
+                SecureField("Personal access token (classic — scope: repo)",
+                            text: Binding(
+                                get: { config.token },
+                                set: { config.token = $0 }
+                            ))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.8))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.white.opacity(0.06))
+                    .cornerRadius(3)
+
+                if !config.token.isEmpty {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(hex: "6BFF8E"))
+                }
+            }
+
+            Text("Get token at github.com/settings/tokens (classic)")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.3))
+
+            Text("REPOS — one per line, e.g. owner/repo")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.5))
+                .tracking(1)
+                .padding(.top, 6)
+
+            TextEditor(text: $reposText)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(3)
+                .frame(minHeight: 70, maxHeight: 110)
+                .onAppear {
+                    if !hasInitializedText {
+                        reposText = config.repoURLs.joined(separator: "\n")
+                        hasInitializedText = true
+                    }
+                }
+                .onChange(of: reposText) { newValue in
+                    let lines = newValue
+                        .split(whereSeparator: \.isNewline)
+                        .map { String($0).trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                    if lines != config.repoURLs {
+                        config.repoURLs = lines
+                        // Kick a fresh poll so the section repopulates
+                        // immediately rather than waiting for the next tick.
+                        PullRequestManager.shared.refresh()
+                    }
+                }
+
+            if !config.parsedRepos.isEmpty {
+                Text("Watching \(config.parsedRepos.count) repo\(config.parsedRepos.count == 1 ? "" : "s")")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+            }
         }
     }
 }

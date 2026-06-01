@@ -349,7 +349,16 @@ struct MonitorView: View {
                                 if appState.timing.isConfigured {
                                     TimingChartSection(timing: appState.timing, accentColor: appState.accentColor)
                                 }
-                                SessionNotesSection(appState: appState)
+                                // Session notes + open PRs share a row.
+                                // Both fill their half; either can be empty
+                                // (no notes / GitHub unconfigured) without
+                                // crowding the other.
+                                HStack(alignment: .top, spacing: 16) {
+                                    SessionNotesSection(appState: appState)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                                    PullRequestsSection(appState: appState)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                                }
                                 RemindersSection(appState: appState)
                             }
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -1714,6 +1723,131 @@ private struct SessionNoteRow: View {
             .cornerRadius(3)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Side-by-side companion to SessionNotesSection in the monitor overlay.
+/// Reads from `PullRequestManager.shared` (polled in the background); the
+/// section quietly omits itself when GitHub isn't configured so the
+/// layout doesn't reserve empty real estate.
+struct PullRequestsSection: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject private var manager = PullRequestManager.shared
+    @ObservedObject private var config = GitHubConfigStore.shared
+
+    var body: some View {
+        if config.isConfigured {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("OPEN PRs")
+                        .monitorFont(size: 10, weight: .medium)
+                        .foregroundColor(appState.accentColor)
+                        .tracking(2)
+                    Spacer()
+                    if !manager.pullRequests.isEmpty {
+                        Text("\(manager.pullRequests.count)")
+                            .monitorFont(size: 10)
+                            .foregroundColor(.gray.opacity(0.4))
+                    }
+                }
+                if let error = manager.lastError, manager.pullRequests.isEmpty {
+                    Text(error)
+                        .monitorFont(size: 10)
+                        .foregroundColor(.red.opacity(0.6))
+                        .lineLimit(2)
+                } else if manager.pullRequests.isEmpty {
+                    Text(manager.isLoading ? "Loading…" : "No open PRs")
+                        .monitorFont(size: 11)
+                        .foregroundColor(.gray.opacity(0.4))
+                } else {
+                    ForEach(manager.pullRequests) { pr in
+                        PullRequestRow(pr: pr, accentColor: appState.accentColor)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PullRequestRow: View {
+    let pr: PullRequest
+    let accentColor: Color
+
+    var body: some View {
+        Button(action: openPR) {
+            HStack(alignment: .top, spacing: 8) {
+                MergeStatusDot(status: pr.mergeStatus)
+                    .padding(.top, 6)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(pr.title)
+                        .monitorFont(size: 12)
+                        .foregroundColor(.white.opacity(0.85))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 6) {
+                        Text("\(pr.repoFullName)#\(pr.number)")
+                            .monitorFont(size: 10)
+                            .foregroundColor(accentColor.opacity(0.7))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if pr.openCommentThreads > 0 {
+                            HStack(spacing: 2) {
+                                Image(systemName: "bubble.left")
+                                    .font(.system(size: 9))
+                                Text("\(pr.openCommentThreads)")
+                                    .monitorFont(size: 9)
+                            }
+                            .foregroundColor(.gray.opacity(0.5))
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cornerRadius(3)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func openPR() {
+        guard let url = URL(string: pr.url) else { return }
+        NSWorkspace.shared.open(url)
+    }
+}
+
+private struct MergeStatusDot: View {
+    let status: PRMergeStatus
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 6, height: 6)
+            .help(tooltip)
+    }
+
+    private var color: Color {
+        switch status {
+        case .ready:         return Color(hex: "6BFF8E")    // green
+        case .behind:        return Color(hex: "FFD06B")    // yellow
+        case .checksFailing: return Color(hex: "FFD06B")    // yellow
+        case .blocked:       return Color(hex: "FF6B6B")    // red
+        case .conflicts:     return Color(hex: "FF6B6B")    // red
+        case .unknown:       return Color.gray.opacity(0.4)
+        }
+    }
+
+    private var tooltip: String {
+        switch status {
+        case .ready:         return "Ready to merge"
+        case .behind:        return "Behind base — needs rebase or merge"
+        case .checksFailing: return "Checks failing"
+        case .blocked:       return "Blocked — protections or required reviews not satisfied"
+        case .conflicts:     return "Merge conflicts"
+        case .unknown:       return "GitHub hasn't computed merge status yet"
+        }
     }
 }
 

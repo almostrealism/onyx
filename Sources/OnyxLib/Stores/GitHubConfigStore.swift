@@ -1,0 +1,59 @@
+//
+// GitHubConfigStore.swift
+//
+// Responsibility: Persists the user's GitHub personal-access token and
+//                 the list of repo URLs they want the PR section to
+//                 watch. Both live in UserDefaults — the token follows
+//                 the same convention as TimingDataStore.apiToken.
+// Scope: Shared singleton.
+// Threading: UserDefaults is thread-safe; no extra locking.
+//
+
+import Foundation
+import Combine
+
+public final class GitHubConfigStore: ObservableObject {
+
+    public static let shared = GitHubConfigStore()
+
+    /// PAT for the GitHub API. Stored verbatim — same convention as
+    /// TimingDataStore.apiToken. Empty string means "not configured".
+    public var token: String {
+        get { UserDefaults.standard.string(forKey: "github_token") ?? "" }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "github_token")
+            objectWillChange.send()
+        }
+    }
+
+    /// The raw URL strings the user pasted (one per line in settings).
+    /// Persisted verbatim so the settings UI can round-trip the user's
+    /// input rather than rewriting it into a canonical form.
+    public var repoURLs: [String] {
+        get {
+            (UserDefaults.standard.array(forKey: "github_repos") as? [String]) ?? []
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "github_repos")
+            objectWillChange.send()
+        }
+    }
+
+    /// Parsed view of repoURLs — only the entries that look like a real
+    /// owner/repo pair. Invalid lines (typos, blanks, comments) are
+    /// silently filtered.
+    public var parsedRepos: [GitHubRepoSpec] {
+        repoURLs.compactMap(GitHubRepoSpec.parse)
+    }
+
+    public var isConfigured: Bool { !token.isEmpty && !parsedRepos.isEmpty }
+
+    private init() {}
+
+    /// Test-only — wipes the persisted config so unit tests start clean.
+    public func resetForTesting() {
+        UserDefaults.standard.removeObject(forKey: "github_token")
+        UserDefaults.standard.removeObject(forKey: "github_repos")
+        objectWillChange.send()
+    }
+}
