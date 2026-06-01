@@ -52,7 +52,7 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
 
     init(isPreview: Bool) {
         super.init()
-        scene.background.contents = NSColor.black
+        setupBackground()
         setupEnvironment()
         setupCamera(isPreview: isPreview)
         setupLights()
@@ -341,6 +341,24 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         cameraNode.position = SCNVector3(0, 4, 58)
         cameraNode.eulerAngles = SCNVector3(-Float.pi / 30, 0, 0)
         scene.rootNode.addChildNode(cameraNode)
+    }
+
+    /// Load the bundled Milky Way image (MIT/2024 news image) as the
+    /// scene background. SceneKit wraps the image around a notional
+    /// sphere — the bright galactic band becomes a soft horizontal arc
+    /// behind the totems, which is visually right for "deep space backdrop"
+    /// without competing with the foreground for attention. Dimmed via
+    /// `intensity` so it stays subordinate to the cube colors.
+    /// Falls back to black if the image isn't in the bundle for any reason.
+    private func setupBackground() {
+        let bundle = Bundle(for: SculptureScene.self)
+        if let path = bundle.path(forResource: "MilkyWay", ofType: "jpg"),
+           let image = NSImage(contentsOfFile: path) {
+            scene.background.contents = image
+            scene.background.intensity = 0.55
+        } else {
+            scene.background.contents = NSColor.black
+        }
     }
 
     /// Image-based lighting for the PBR materials. The metallic cubes have

@@ -74,6 +74,17 @@ xcrun swiftc \
 
 cp "$SCRIPT_DIR/Resources/Info.plist" "$BUNDLE_DIR/Contents/Info.plist"
 
+# Copy other resources (background image, future assets) into the bundle's
+# Resources/ — they're loaded via Bundle(for: ...).path(forResource:ofType:).
+shopt -s nullglob
+for f in "$SCRIPT_DIR"/Resources/*; do
+    name=$(basename "$f")
+    if [[ "$name" != "Info.plist" ]]; then
+        cp -R "$f" "$BUNDLE_DIR/Contents/Resources/"
+    fi
+done
+shopt -u nullglob
+
 # Ad-hoc sign so macOS will load the bundle without quarantine complaints
 # on the local machine. Distribution would need a real developer ID.
 codesign --force --sign - --timestamp=none "$BUNDLE_DIR" || {
