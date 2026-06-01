@@ -193,19 +193,23 @@ final class HostTotem {
     /// are cubic in their average over the most recent ~10 samples, so
     /// a small steady load reads light while sustained busy work reads
     /// very heavy. GPU coefficient is 3× the CPU coefficient — a fully
-    /// utilized GPU is a serious gravitational presence, much more so
-    /// than a busy CPU alone. Hosts with no GPU sensor get only the CPU
-    /// contribution; their average isn't diluted by implicit zeros.
+    /// utilized GPU is a serious gravitational presence. Hosts with no
+    /// GPU sensor get only the CPU contribution; their average isn't
+    /// diluted by implicit zeros.
+    ///
+    /// Whole formula scaled by 1.5 — totems were drifting too fast for
+    /// the user's taste, and more mass means each force changes velocity
+    /// less, so the system feels heavier overall.
     ///
     /// Reference points (CPU%, GPU%):
-    ///   ·   0,   0  →   1
-    ///   ·  50, nil  →  10
-    ///   · 100, nil  →  76
-    ///   ·  50,  50  →  38
-    ///   · 100, 100  → 301
+    ///   ·   0,   0  →   1.5
+    ///   ·  50, nil  →  15.6
+    ///   · 100, nil  → 114
+    ///   ·  50,  50  →  57
+    ///   · 100, 100  → 451
     static func computeMass(from samples: [CPUSample]) -> Float {
         let recent = samples.suffix(10)
-        guard !recent.isEmpty else { return 1.0 }
+        guard !recent.isEmpty else { return 1.5 }
 
         // CPU contribution — always present.
         let cpuAvg = recent.map { max(0, min(100, $0.cpu)) }.reduce(0, +)
@@ -213,9 +217,6 @@ final class HostTotem {
         let cpuTerm = 75.0 * pow(cpuAvg / 100.0, 3)
 
         // GPU contribution — only if at least one sample has a GPU reading.
-        // We average just the non-nil values so a partial-GPU history
-        // doesn't get diluted by samples taken before the host even
-        // exposed a GPU sensor.
         let gpuValues = recent.compactMap { $0.gpu }
             .map { max(0, min(100, $0)) }
         let gpuTerm: Double
@@ -226,7 +227,7 @@ final class HostTotem {
             gpuTerm = 225.0 * pow(gpuAvg / 100.0, 3)
         }
 
-        return Float(1.0 + cpuTerm + gpuTerm)
+        return Float(1.5 * (1.0 + cpuTerm + gpuTerm))
     }
 
     /// Quantize CPU% into one of six buckets so every ring has 4-fold rotational

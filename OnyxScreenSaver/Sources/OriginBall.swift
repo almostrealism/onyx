@@ -33,13 +33,10 @@ final class OriginBall {
     static let calibrationRadius: Float = 7
 
     /// At calibration hours, the ball's mass is this many "totem masses".
-    /// Anchored, so this only affects the gravity field. 600 was strong
-    /// enough that totems couldn't get far between collisions — they
-    /// kept restaging into the well. 420 keeps the ball clearly
-    /// dominant against cubic-scaled totems (≈10× the heaviest at peak)
-    /// while leaving room for a struck totem to actually travel before
-    /// gravity catches it.
-    static let calibrationMass: Float = 420
+    /// Anchored, so this only affects the gravity field. Scaled together
+    /// with the totem mass formula (×1.5) so the relative dominance of
+    /// the ball stays the same after the system-wide mass bump.
+    static let calibrationMass: Float = 630
 
     private let sphere: SCNSphere
     private let material: SCNMaterial
