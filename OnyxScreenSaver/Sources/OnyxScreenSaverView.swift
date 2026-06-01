@@ -28,15 +28,21 @@ public final class OnyxScreenSaverView: ScreenSaverView {
         // ScreenSaver framework calls animateOneFrame on a timer; SceneKit
         // drives its own render loop, so we just need to keep the host view
         // sized and let SceneKit do the work.
-        animationTimeInterval = 1.0 / 30.0
+        animationTimeInterval = 1.0 / 24.0
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
 
         sceneView.autoresizingMask = [.width, .height]
         sceneView.frame = bounds
         sceneView.backgroundColor = .black
-        sceneView.antialiasingMode = .multisampling4X
-        sceneView.preferredFramesPerSecond = 30
+        // Anti-alias was 4× — meaningful perf hit on base-M1 hardware at
+        // screensaver resolutions. 2× is barely distinguishable visually
+        // and ~half the fragment cost on the cubes.
+        sceneView.antialiasingMode = .multisampling2X
+        // 24 fps is the perf floor: enough to look smooth on slow drift
+        // and orbit motion, low enough that we stay inside the per-frame
+        // budget on integrated GPUs and avoid visible stuttering.
+        sceneView.preferredFramesPerSecond = 24
         sceneView.isPlaying = true
         addSubview(sceneView)
 

@@ -330,12 +330,10 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         camera.zNear = 0.1
         camera.zFar = 500
         camera.fieldOfView = isPreview ? 65 : 55
-        // Subtle depth-of-field — keeps the foreground crisp but blurs the
-        // back of the scene slightly, makes the 3D space feel deeper without
-        // ever looking out of focus.
-        camera.wantsDepthOfField = true
-        camera.focusDistance = 55
-        camera.fStop = 8
+        // Depth-of-field disabled — it required a separate render pass,
+        // and with the cube count we ended up with on busy days the cost
+        // was visible as stutter on integrated GPUs. Saves several ms
+        // per frame on base-M1.
         cameraNode.camera = camera
         // Pulled back a touch and tilted slightly down: a 3/4 view reads as
         // more dimensional than dead-on, and a 6° downward tilt makes the

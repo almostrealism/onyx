@@ -52,6 +52,15 @@ final class HostTotem {
     /// Map of container name → orbiting moon. Synced from the publisher's
     /// `containers` field on every snapshot.
     private var moons: [String: Moon] = [:]
+
+    /// Per-host geometry+material cache. Cubes within a ring all share
+    /// the same (CPU level, age) pair, so we only need a handful of
+    /// geometries per host: 3 CPU levels × N age buckets. Reuses
+    /// SCNGeometry instances across all SCNNodes in the ring AND across
+    /// rebuilds, so each sample update mutates only the node graph
+    /// (cheap) rather than re-allocating thousands of materials.
+    private var cubeGeometryCache: [String: SCNGeometry] = [:]
+    private var saturnBlockCache: [String: SCNGeometry] = [:]
     private var baseColor: NSColor
     private var lastLabel: String?
 
@@ -240,12 +249,17 @@ final class HostTotem {
         let radius = max(Self.cubeSize * 1.2,
                          Self.arcSpacing * CGFloat(cubeCount) / (2 * .pi))
 
+        // One geometry per ring, shared across all of its cubes. Per-cube
+        // material allocation was the dominant cost during rebuilds —
+        // 24-cube rings now allocate 1 geometry instead of 24.
+        let geometry = cubeGeometry(forCPU: cpu, ageFraction: ageFraction)
+
         for i in 0..<cubeCount {
             let angle = 2 * Double.pi * Double(i) / Double(cubeCount)
             let x = radius * CGFloat(cos(angle))
             let z = radius * CGFloat(sin(angle))
 
-            let cube = SCNNode(geometry: makeCubeGeometry(cpu: cpu, ageFraction: ageFraction))
+            let cube = SCNNode(geometry: geometry)
             cube.position = SCNVector3(Float(x), 0, Float(z))
             // Orient cube so its face points outward — looks tidier than
             // axis-aligned cubes whose corners poke randomly toward the camera.
@@ -256,11 +270,20 @@ final class HostTotem {
         return ringNode
     }
 
-    /// Cube color is now driven by the CPU level (blue → yellow → red
-    /// ramp matching the main-app monitor bars). Per-host identity is
-    /// carried by a subtle baseColor emission tint so each totem still
-    /// has a distinct cast in low-light areas, plus the floating label.
-    private func makeCubeGeometry(cpu: Double, ageFraction: Double) -> SCNGeometry {
+    /// Cube color is driven by the CPU level (blue → yellow → red ramp
+    /// matching the main-app monitor bars). Per-host identity is carried
+    /// by a subtle baseColor emission tint so each totem still has a
+    /// distinct cast in low-light areas, plus the floating label.
+    ///
+    /// Geometries are cached by (CPU level bucket × age bucket). Across
+    /// the totem's lifetime we end up with ~3 × 6 = 18 unique geometries
+    /// — vs ~600 fresh ones per poll under the previous approach.
+    private func cubeGeometry(forCPU cpu: Double, ageFraction: Double) -> SCNGeometry {
+        let level = Self.cpuLevelBucket(cpu)                      // 0..2
+        let ageBucket = min(5, max(0, Int(ageFraction * 6)))      // 0..5
+        let key = "c\(level)-a\(ageBucket)"
+        if let cached = cubeGeometryCache[key] { return cached }
+
         let box = SCNBox(width: Self.cubeSize,
                          height: Self.cubeSize,
                          length: Self.cubeSize,
@@ -268,24 +291,26 @@ final class HostTotem {
         let material = SCNMaterial()
         material.lightingModel = .physicallyBased
 
-        // Diffuse: blue/yellow/red by CPU level, dimmed by age.
+        let bucketAge = Double(ageBucket) / 5.0  // quantize the input too
         let levelColor = Self.levelColor(forPct: cpu)
-        let brightness = 1.0 - 0.45 * ageFraction
+        let brightness = 1.0 - 0.45 * bucketAge
         material.diffuse.contents = levelColor.withBrightnessMultiplied(by: CGFloat(brightness))
-        // Emission: per-host tint, very dim. Visible mostly in the shaded
-        // sides of cubes — gives each machine a faint signature color
-        // without overwhelming the CPU-level reading.
         material.emission.contents = baseColor.withBrightnessMultiplied(by: 0.12)
-
-        // High metalness + low roughness = polished colored surface. Older
-        // rings (deeper in the stack) get progressively rougher, so they
-        // catch less environment light. Reads as "the past was duller".
         material.metalness.contents = NSNumber(value: 0.85)
-        material.roughness.contents = NSNumber(value: 0.18 + 0.35 * ageFraction)
+        material.roughness.contents = NSNumber(value: 0.18 + 0.35 * bucketAge)
         material.isDoubleSided = false
 
         box.materials = [material]
+        cubeGeometryCache[key] = box
         return box
+    }
+
+    /// CPU% → 0/1/2 bucket aligned with the levelColor ramp (≤40% / ≤80% / >80%).
+    private static func cpuLevelBucket(_ pct: Double) -> Int {
+        let v = max(0, min(100, pct))
+        if v > 80 { return 2 }
+        if v > 40 { return 1 }
+        return 0
     }
 
     // MARK: - Container moons
@@ -366,24 +391,39 @@ final class HostTotem {
             let x = radius * CGFloat(cos(angle))
             let z = radius * CGFloat(sin(angle))
 
-            let box = SCNBox(width: blockW, height: blockH, length: blockL,
-                             chamferRadius: blockW * 0.18)
-            let mat = SCNMaterial()
-            mat.lightingModel = .physicallyBased
-            let tint = Self.levelColor(forPct: gpu)
-            mat.diffuse.contents = tint
-            // Brighter emission than CPU cubes so the GPU ring reads as
-            // its own visual layer rather than blending into the totem.
-            mat.emission.contents = tint.withBrightnessMultiplied(by: 0.35)
-            mat.metalness.contents = NSNumber(value: 0.6)
-            mat.roughness.contents = NSNumber(value: 0.25)
-            box.materials = [mat]
-
-            let node = SCNNode(geometry: box)
+            let geometry = saturnBlockGeometry(forGPU: gpu,
+                                               width: blockW,
+                                               height: blockH,
+                                               length: blockL)
+            let node = SCNNode(geometry: geometry)
             node.position = SCNVector3(Float(x), 0, Float(z))
             // Rotate so blockL is tangent to the ring (block "faces" outward).
             node.eulerAngles = SCNVector3(0, Float(-angle), 0)
             saturnNode.addChildNode(node)
         }
+    }
+
+    /// Saturn block geometry cache. GPU level → one of three shared
+    /// geometries. ≤30 blocks per host now reuse 1–3 geometries instead
+    /// of allocating a new SCNBox + SCNMaterial each.
+    private func saturnBlockGeometry(forGPU gpu: Double,
+                                     width: CGFloat, height: CGFloat,
+                                     length: CGFloat) -> SCNGeometry {
+        let level = Self.cpuLevelBucket(gpu)
+        let key = "g\(level)"
+        if let cached = saturnBlockCache[key] { return cached }
+
+        let box = SCNBox(width: width, height: height, length: length,
+                         chamferRadius: width * 0.18)
+        let mat = SCNMaterial()
+        mat.lightingModel = .physicallyBased
+        let tint = Self.levelColor(forPct: gpu)
+        mat.diffuse.contents = tint
+        mat.emission.contents = tint.withBrightnessMultiplied(by: 0.35)
+        mat.metalness.contents = NSNumber(value: 0.6)
+        mat.roughness.contents = NSNumber(value: 0.25)
+        box.materials = [mat]
+        saturnBlockCache[key] = box
+        return box
     }
 }
