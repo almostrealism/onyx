@@ -1238,8 +1238,10 @@ public class AppState: ObservableObject {
     /// this version preserves the actual ssh command, the captured
     /// stderr, the socket-file stat, and the exit code — everything the
     /// monitor overlay needs to render an actionable "why isn't this
-    /// working?" view.
+    /// working?" view. Also logs the result to the `ssh` os.Logger
+    /// category so it shows up in Console for forensics later.
     public func diagnoseSSHMux(for host: HostConfig) -> SSHMuxDiagnostic {
+        OnyxLog.ssh.info("mux check started: host=\(host.label, privacy: .public)")
         let controlPath = sshControlPath(for: host)
         let fm = FileManager.default
         let exists = fm.fileExists(atPath: controlPath)
@@ -1298,7 +1300,7 @@ public class AppState: ObservableObject {
             output = "ssh failed to launch: \(error.localizedDescription)"
         }
 
-        return SSHMuxDiagnostic(
+        let diag = SSHMuxDiagnostic(
             muxAlive: exitCode == 0,
             controlPath: controlPath,
             socketExists: exists,
@@ -1309,6 +1311,18 @@ public class AppState: ObservableObject {
             host: host,
             timestamp: Date()
         )
+        if diag.muxAlive {
+            OnyxLog.ssh.info("mux alive: host=\(host.label, privacy: .public)")
+        } else {
+            OnyxLog.ssh.error("""
+                mux DOWN: host=\(host.label, privacy: .public) \
+                exit=\(exitCode ?? -1, privacy: .public) \
+                socketExists=\(exists, privacy: .public) \
+                summary=\(diag.summary, privacy: .public) \
+                output=\(diag.checkOutput, privacy: .public)
+                """)
+        }
+        return diag
     }
 
     /// Run a bare `ssh -v -o BatchMode=yes -o ConnectTimeout=5 user@host
@@ -1364,7 +1378,7 @@ public class AppState: ObservableObject {
             output = "ssh failed to launch: \(error.localizedDescription)"
         }
 
-        return SSHConnectTest(
+        let result = SSHConnectTest(
             host: host,
             success: exitCode == 0,
             command: command,
@@ -1372,12 +1386,19 @@ public class AppState: ObservableObject {
             exitCode: exitCode,
             timestamp: Date()
         )
+        OnyxLog.ssh.info("""
+            connect test: host=\(host.label, privacy: .public) \
+            success=\(result.success, privacy: .public) \
+            exit=\(exitCode ?? -1, privacy: .public)
+            """)
+        return result
     }
 
     /// Stop the host's mux process and delete its socket file. Use when
     /// the diagnostic shows a stale socket — the next short-lived
     /// utility command will spin up a fresh one.
     public func resetSSHMux(for host: HostConfig) {
+        OnyxLog.ssh.notice("resetting mux: host=\(host.label, privacy: .public)")
         sshMuxStop(for: host)
         let path = sshControlPath(for: host)
         try? FileManager.default.removeItem(atPath: path)

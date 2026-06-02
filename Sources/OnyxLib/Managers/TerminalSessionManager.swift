@@ -843,6 +843,8 @@ class OnyxTerminalView: NSView {
         // First check if mux master is alive — if so, skip the expensive nc+ssh probe
         if appState.sshMuxAlive(for: host) { return .ok }
 
+        OnyxLog.session.info("probing host: \(host.label, privacy: .public)")
+
         let nc = Process()
         nc.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
         nc.arguments = ["-z", "-w", "3", host.ssh.host, "\(host.ssh.port)"]
@@ -850,22 +852,39 @@ class OnyxTerminalView: NSView {
         nc.standardError = FileHandle.nullDevice
         try? nc.run()
         nc.waitUntilExit()
-        guard nc.terminationStatus == 0 else { return .unreachable }
+        guard nc.terminationStatus == 0 else {
+            OnyxLog.session.error("probe: \(host.label, privacy: .public) unreachable (nc -z failed)")
+            return .unreachable
+        }
 
-        // Try SSH auth up to 2 times — the first attempt on startup may fail
-        // transiently (SSH agent not ready, network still initializing, etc.)
-        // This also establishes the mux master connection for subsequent commands.
+        // Capture stderr from the auth probe — the previous version
+        // discarded it entirely, so "keyAuthFailed" came back as a black
+        // box. Now the actual ssh error makes it into the log.
+        var lastErr = ""
         for attempt in 1...2 {
             let probe = Process()
+            let errPipe = Pipe()
             probe.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
             var probeArgs = appState.sshBaseArgs(for: host)
             probeArgs += [appState.sshUserHost(for: host), "true"]
             probe.arguments = probeArgs
             probe.standardOutput = FileHandle.nullDevice
-            probe.standardError = FileHandle.nullDevice
+            probe.standardError = errPipe
             try? probe.run()
             probe.waitUntilExit()
-            if probe.terminationStatus == 0 { return .ok }
+            if probe.terminationStatus == 0 {
+                OnyxLog.session.info("probe ok: \(host.label, privacy: .public) attempt=\(attempt, privacy: .public)")
+                return .ok
+            }
+            let data = errPipe.fileHandleForReading.readDataToEndOfFile()
+            lastErr = (String(data: data, encoding: .utf8) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            OnyxLog.session.error("""
+                probe attempt \(attempt, privacy: .public) failed: \
+                host=\(host.label, privacy: .public) \
+                exit=\(probe.terminationStatus, privacy: .public) \
+                stderr=\(lastErr, privacy: .public)
+                """)
             if attempt < 2 {
                 Thread.sleep(forTimeInterval: 1.0) // brief pause before retry
             }
