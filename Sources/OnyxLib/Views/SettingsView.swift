@@ -777,7 +777,7 @@ private struct GitHubSettingsSection: View {
                         hasInitializedText = true
                     }
                 }
-                .onChange(of: reposText) { newValue in
+                .onChange(of: reposText) { _, newValue in
                     let lines = newValue
                         .split(whereSeparator: \.isNewline)
                         .map { String($0).trimmingCharacters(in: .whitespaces) }
