@@ -35,6 +35,19 @@ public final class SSHKeeper {
     /// while leaving headroom for the actual `ssh -O check` (2s timeout).
     public static let tickInterval: TimeInterval = 2
 
+    /// Smoke-test cadence — periodically run an actual `true` command
+    /// through each slot's mux to catch the "socket is fine but the
+    /// underlying TCP died silently" failure mode that `ssh -O check`
+    /// cannot detect. ServerAliveInterval inside the master would
+    /// notice eventually, but smoke testing catches it within 30s.
+    public static let smokeTestInterval: TimeInterval = 30
+
+    /// Rotation cadence — pre-emptively recycle each slot's master on
+    /// this period so we never accumulate long-running connection state
+    /// that an OS, sshd, or network device might decide to clean up.
+    /// 30 min per slot ⇒ no master older than ~30 min at any time.
+    public static let rotationInterval: TimeInterval = 1800
+
     /// Aggressive ServerAlive — fail a silent TCP connection in ≈25s.
     public static let serverAliveInterval = 10
     public static let serverAliveCountMax = 3
@@ -52,12 +65,22 @@ public final class SSHKeeper {
         public var establishing: Bool = false
         public var consecutiveFailures: Int = 0
         public var establishedAt: Date? = nil
+        /// When we last successfully smoke-tested an actual command
+        /// through this slot. `nil` means "never" — fires on next tick.
+        public var lastSmokeTestAt: Date? = nil
+        /// Set when `ssh -O check` says the slot is alive but a smoke
+        /// test (real command through the mux) failed. Indicates a
+        /// silently-broken connection that the cheap check missed.
+        public var lastSmokeTestFailed: Bool = false
     }
 
     /// One host's pair of slots + which one is currently primary.
     public struct HostState: Equatable {
         public var slots: [SlotState]
         public var primarySlot: Int     // 0 or 1
+        /// Last time we rotated this host's slots — used to schedule
+        /// the next pre-emptive rotation.
+        public var lastRotationAt: Date? = nil
 
         public var primary: SlotState { slots[primarySlot] }
         public var spare: SlotState { slots[1 - primarySlot] }
@@ -173,11 +196,13 @@ public final class SSHKeeper {
         var state = hostStates[host.id]!
         lock.unlock()
 
-        // Health-check both slots in sequence (each ssh -O check is
-        // bounded at 2s, so this whole loop is ≤ 4s in worst case).
+        let userHost = Self.userHost(for: host)
+        let now = Date()
+
+        // 1. Cheap socket-level health check on each slot.
         for i in 0..<state.slots.count {
             let alive = Self.checkAlive(path: state.slots[i].path,
-                                        userHost: Self.userHost(for: host))
+                                        userHost: userHost)
             let wasAlive = state.slots[i].alive
             state.slots[i].alive = alive
             if alive {
@@ -197,7 +222,27 @@ public final class SSHKeeper {
             }
         }
 
-        // Promote the spare if primary is dead and spare is alive.
+        // 2. Smoke test — for any slot that passed the cheap check, run
+        //    an actual `true` through it every `smokeTestInterval`s to
+        //    catch silently-broken TCP that the IPC check can't see.
+        for i in 0..<state.slots.count where state.slots[i].alive {
+            let last = state.slots[i].lastSmokeTestAt ?? .distantPast
+            guard now.timeIntervalSince(last) >= Self.smokeTestInterval else { continue }
+            state.slots[i].lastSmokeTestAt = now
+            let smokeOk = Self.smokeTest(path: state.slots[i].path,
+                                         userHost: userHost)
+            state.slots[i].lastSmokeTestFailed = !smokeOk
+            if !smokeOk {
+                OnyxLog.ssh.notice("""
+                    smoke test FAILED: host=\(host.label, privacy: .public) \
+                    slot=\(i, privacy: .public) — socket alive but command timed out, \
+                    flagging dead so it gets re-established
+                    """)
+                state.slots[i].alive = false
+            }
+        }
+
+        // 3. Promote the spare if primary is dead and spare is alive.
         if !state.slots[state.primarySlot].alive,
            state.slots[1 - state.primarySlot].alive {
             let old = state.primarySlot
@@ -208,19 +253,74 @@ public final class SSHKeeper {
                 """)
         }
 
+        // 4. Pre-emptive rotation. When both slots are alive and the
+        //    rotation period has elapsed, swap primary/spare and tear
+        //    down the new spare (= old primary). The next pass through
+        //    the establish step will rebuild it fresh. Net effect: no
+        //    master ever stays alive longer than ~rotationInterval.
+        if state.slots[0].alive && state.slots[1].alive {
+            let lastRotation = state.lastRotationAt ?? .distantPast
+            if now.timeIntervalSince(lastRotation) >= Self.rotationInterval {
+                let oldPrimary = state.primarySlot
+                state.primarySlot = 1 - state.primarySlot
+                state.lastRotationAt = now
+                OnyxLog.ssh.notice("""
+                    MUX ROTATION: host=\(host.label, privacy: .public) \
+                    slot \(oldPrimary, privacy: .public) → slot \(state.primarySlot, privacy: .public) \
+                    (recycling old primary for freshness)
+                    """)
+                // Tear down the old primary (now the spare). It'll be
+                // marked dead so step 5 establishes a fresh master.
+                let oldPath = state.slots[oldPrimary].path
+                Self.stopMaster(at: oldPath, userHost: userHost)
+                try? FileManager.default.removeItem(atPath: oldPath)
+                state.slots[oldPrimary].alive = false
+                state.slots[oldPrimary].establishedAt = nil
+                state.slots[oldPrimary].lastSmokeTestAt = nil
+            }
+        }
+
         // Persist the updated state.
         lock.lock()
         hostStates[host.id] = state
         lock.unlock()
 
-        // Spawn replacements for any dead slot that isn't already
-        // mid-establishment. The establishment itself runs synchronously
-        // on this queue but we're concurrent, so other hosts aren't
-        // blocked.
+        // 5. Spawn replacements for any dead slot that isn't already
+        //    mid-establishment. Runs on this same concurrent queue —
+        //    other hosts' maintenance isn't blocked.
         for i in 0..<state.slots.count {
             if !state.slots[i].alive && !state.slots[i].establishing {
                 establish(host: host, slot: i)
             }
+        }
+    }
+
+    /// Smoke-test a slot's mux by actually sending `true` through it.
+    /// Bounded at 3s — anything longer means the multiplexed stream is
+    /// hung even though the control socket is alive (silent TCP death).
+    /// This is the failure mode `ssh -O check` cannot catch.
+    private static func smokeTest(path: String, userHost: String) -> Bool {
+        guard FileManager.default.fileExists(atPath: path) else { return false }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.arguments = [
+            "-o", "ControlPath=\(path)",
+            "-o", "BatchMode=yes",
+            userHost, "true"
+        ]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            let killTimer = DispatchSource.makeTimerSource(queue: .global())
+            killTimer.schedule(deadline: .now() + 3)
+            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
+            killTimer.resume()
+            process.waitUntilExit()
+            killTimer.cancel()
+            return process.terminationStatus == 0
+        } catch {
+            return false
         }
     }
 

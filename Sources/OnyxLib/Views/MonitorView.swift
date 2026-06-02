@@ -1604,12 +1604,20 @@ private struct SSHDiagnosticPanel: View {
             // diagnostic still appears below.
             if let keeper = SSHKeeper.shared.state(for: host) {
                 row("ACTIVE",
-                    "slot \(keeper.primarySlot == 0 ? "A" : "B") · \(keeper.primary.alive ? "alive" : "DEAD")",
+                    slotSummary(keeper.primary,
+                                label: keeper.primarySlot == 0 ? "A" : "B"),
                     color: keeper.primary.alive ? "6BFF8E" : "FF6B6B")
                 row("SPARE",
-                    "slot \(keeper.primarySlot == 0 ? "B" : "A") · \(keeper.spare.alive ? "alive" : keeper.spare.establishing ? "establishing" : "DEAD")",
+                    slotSummary(keeper.spare,
+                                label: keeper.primarySlot == 0 ? "B" : "A"),
                     color: keeper.spare.alive ? "6BFF8E"
                           : (keeper.spare.establishing ? "FFD06B" : "FF6B6B"))
+                if let rot = keeper.lastRotationAt {
+                    row("ROTATE",
+                        "last \(formatAge(Date().timeIntervalSince(rot))) ago · "
+                          + "next in \(formatAge(max(0, SSHKeeper.rotationInterval - Date().timeIntervalSince(rot))))",
+                        color: nil)
+                }
             } else {
                 row("KEEPER", "not yet observed", color: nil)
             }
@@ -1718,9 +1726,27 @@ private struct SSHDiagnosticPanel: View {
 
     private func formatAge(_ seconds: TimeInterval?) -> String {
         guard let s = seconds else { return "?" }
-        if s < 60 { return "\(Int(s))s old" }
-        if s < 3600 { return "\(Int(s / 60))m old" }
-        return "\(Int(s / 3600))h old"
+        if s < 60 { return "\(Int(s))s" }
+        if s < 3600 { return "\(Int(s / 60))m" }
+        return "\(Int(s / 3600))h"
+    }
+
+    /// Compact one-line summary of a slot for the keeper rows. Shows
+    /// liveness, smoke-test status, and age since establish.
+    private func slotSummary(_ slot: SSHKeeper.SlotState, label: String) -> String {
+        let aliveTag: String
+        if slot.alive {
+            aliveTag = slot.lastSmokeTestFailed ? "alive (smoke fail)" : "alive"
+        } else if slot.establishing {
+            aliveTag = "establishing…"
+        } else {
+            aliveTag = "DEAD"
+        }
+        var parts = ["slot \(label)", aliveTag]
+        if let est = slot.establishedAt, slot.alive {
+            parts.append("age \(formatAge(Date().timeIntervalSince(est)))")
+        }
+        return parts.joined(separator: " · ")
     }
 }
 
