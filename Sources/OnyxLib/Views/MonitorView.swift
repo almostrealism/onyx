@@ -1353,6 +1353,13 @@ struct TimingHeatmapGrid: View {
 struct ConnectionPoolSection: View {
     @ObservedObject var appState: AppState
     @State private var muxStatus: [UUID: Bool] = [:]  // hostID -> mux alive
+    /// Which hostID currently has its diagnostic panel expanded inline.
+    @State private var expandedDiagHost: UUID?
+    /// Cached diagnostics indexed by hostID. Re-fetched when the row is
+    /// expanded; cleared when collapsed.
+    @State private var muxDiagnostics: [UUID: SSHMuxDiagnostic] = [:]
+    @State private var connectTests: [UUID: SSHConnectTest] = [:]
+    @State private var connectInFlight: Set<UUID> = []
 
     /// Merge pool entries with pending entries, deduplicating by ID
     private var allConnections: [ConnectionInfo] {
@@ -1458,20 +1465,43 @@ struct ConnectionPoolSection: View {
 
                     ForEach(remoteHosts) { host in
                         let alive = muxStatus[host.id] ?? false
-                        HStack(spacing: 0) {
-                            Circle()
-                                .fill(Color(hex: alive ? "6BFF8E" : "FF6B6B"))
-                                .frame(width: 5, height: 5)
-                                .padding(.trailing, 3)
-                            Text(host.label)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .lineLimit(1)
-                            Text(alive ? "multiplexed" : "no mux")
-                                .frame(width: 85, alignment: .trailing)
-                                .foregroundColor(Color(hex: alive ? "6BFF8E" : "FF6B6B").opacity(0.8))
+                        let expanded = expandedDiagHost == host.id
+                        VStack(alignment: .leading, spacing: 4) {
+                            Button(action: { toggleDiagnostic(for: host) }) {
+                                HStack(spacing: 0) {
+                                    Circle()
+                                        .fill(Color(hex: alive ? "6BFF8E" : "FF6B6B"))
+                                        .frame(width: 5, height: 5)
+                                        .padding(.trailing, 3)
+                                    Text(host.label)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .lineLimit(1)
+                                    Image(systemName: expanded
+                                          ? "chevron.down" : "chevron.right")
+                                        .font(.system(size: 8))
+                                        .foregroundColor(.gray.opacity(0.4))
+                                        .padding(.trailing, 6)
+                                    Text(alive ? "multiplexed" : "no mux")
+                                        .frame(width: 85, alignment: .trailing)
+                                        .foregroundColor(Color(hex: alive ? "6BFF8E" : "FF6B6B").opacity(0.8))
+                                }
+                                .monitorFont(size: 11)
+                                .foregroundColor(.white.opacity(0.7))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            if expanded {
+                                SSHDiagnosticPanel(
+                                    host: host,
+                                    diagnostic: muxDiagnostics[host.id],
+                                    connectTest: connectTests[host.id],
+                                    isTesting: connectInFlight.contains(host.id),
+                                    onReset: { resetMux(for: host) },
+                                    onTestConnect: { runConnectTest(for: host) }
+                                )
+                                .transition(.opacity)
+                            }
                         }
-                        .monitorFont(size: 11)
-                        .foregroundColor(.white.opacity(0.7))
                     }
                 }
             }
@@ -1493,6 +1523,171 @@ struct ConnectionPoolSection: View {
                 muxStatus = status
             }
         }
+    }
+
+    private func toggleDiagnostic(for host: HostConfig) {
+        if expandedDiagHost == host.id {
+            expandedDiagHost = nil
+            return
+        }
+        expandedDiagHost = host.id
+        // Fetch fresh diagnostic in the background — the `ssh -O check`
+        // is bounded by its 3s kill timer, so this can never block the UI
+        // for long.
+        DispatchQueue.global(qos: .userInitiated).async {
+            let diag = appState.diagnoseSSHMux(for: host)
+            DispatchQueue.main.async {
+                muxDiagnostics[host.id] = diag
+            }
+        }
+    }
+
+    private func resetMux(for host: HostConfig) {
+        appState.resetSSHMux(for: host)
+        // Re-run the diagnostic immediately so the user sees the new
+        // (empty) state right away.
+        DispatchQueue.global(qos: .userInitiated).async {
+            let diag = appState.diagnoseSSHMux(for: host)
+            DispatchQueue.main.async {
+                muxDiagnostics[host.id] = diag
+                muxStatus[host.id] = diag.muxAlive
+            }
+        }
+    }
+
+    private func runConnectTest(for host: HostConfig) {
+        connectInFlight.insert(host.id)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = appState.testSSHConnection(for: host)
+            DispatchQueue.main.async {
+                connectTests[host.id] = result
+                connectInFlight.remove(host.id)
+            }
+        }
+    }
+}
+
+/// Inline diagnostic panel for a single host. Shown under the SSH MUX row
+/// when the user expands it. Renders the captured ssh command + output +
+/// socket state, with actions to reset the mux or run a fresh
+/// connection test.
+private struct SSHDiagnosticPanel: View {
+    let host: HostConfig
+    let diagnostic: SSHMuxDiagnostic?
+    let connectTest: SSHConnectTest?
+    let isTesting: Bool
+    let onReset: () -> Void
+    let onTestConnect: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let d = diagnostic {
+                row("STATUS", d.summary, color: d.muxAlive ? "6BFF8E" : "FF6B6B")
+                row("SOCKET",
+                    d.socketExists
+                        ? "\(d.controlPath) — \(formatAge(d.socketAgeSeconds))"
+                        : "(missing)",
+                    color: nil)
+                row("EXIT", d.checkExitCode.map(String.init) ?? "(no exit)",
+                    color: nil)
+                if !d.checkOutput.isEmpty {
+                    Text("SSH OUTPUT")
+                        .monitorFont(size: 9, weight: .medium)
+                        .foregroundColor(.gray.opacity(0.5))
+                        .tracking(1)
+                        .padding(.top, 2)
+                    ScrollView {
+                        Text(d.checkOutput)
+                            .monitorFont(size: 10)
+                            .foregroundColor(.white.opacity(0.7))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxHeight: 80)
+                }
+                Text(d.checkCommand)
+                    .monitorFont(size: 9)
+                    .foregroundColor(.gray.opacity(0.5))
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            } else {
+                Text("Loading diagnostic…")
+                    .monitorFont(size: 10)
+                    .foregroundColor(.gray.opacity(0.4))
+            }
+
+            if let t = connectTest {
+                Divider().background(Color.white.opacity(0.06))
+                Text(t.success ? "CONNECT OK" : "CONNECT FAILED (exit \(t.exitCode.map(String.init) ?? "?"))")
+                    .monitorFont(size: 9, weight: .medium)
+                    .foregroundColor(Color(hex: t.success ? "6BFF8E" : "FF6B6B"))
+                    .tracking(1)
+                if !t.output.isEmpty {
+                    ScrollView {
+                        Text(t.output)
+                            .monitorFont(size: 10)
+                            .foregroundColor(.white.opacity(0.7))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxHeight: 120)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Button(action: onReset) {
+                    Text("Reset mux")
+                        .monitorFont(size: 10)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(3)
+                }
+                .buttonStyle(.plain)
+                Button(action: onTestConnect) {
+                    Text(isTesting ? "Testing…" : "Test connection")
+                        .monitorFont(size: 10)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(3)
+                }
+                .buttonStyle(.plain)
+                .disabled(isTesting)
+            }
+            .foregroundColor(.white.opacity(0.7))
+            .padding(.top, 4)
+        }
+        .padding(8)
+        .background(Color.white.opacity(0.03))
+        .cornerRadius(4)
+        .padding(.leading, 14)
+    }
+
+    private func row(_ label: String, _ value: String, color: String?) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(label)
+                .monitorFont(size: 9, weight: .medium)
+                .foregroundColor(.gray.opacity(0.5))
+                .tracking(1)
+                .frame(width: 50, alignment: .leading)
+            Text(value)
+                .monitorFont(size: 10)
+                .foregroundColor(color.map { Color(hex: $0) } ?? .white.opacity(0.7))
+                .textSelection(.enabled)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func formatAge(_ seconds: TimeInterval?) -> String {
+        guard let s = seconds else { return "?" }
+        if s < 60 { return "\(Int(s))s old" }
+        if s < 3600 { return "\(Int(s / 60))m old" }
+        return "\(Int(s / 3600))h old"
     }
 }
 

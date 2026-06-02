@@ -1233,6 +1233,157 @@ public class AppState: ObservableObject {
         host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
     }
 
+    /// Capture a full diagnostic of the host's SSH mux state. Unlike
+    /// `sshMuxAlive` (which throws away every signal except success/fail)
+    /// this version preserves the actual ssh command, the captured
+    /// stderr, the socket-file stat, and the exit code — everything the
+    /// monitor overlay needs to render an actionable "why isn't this
+    /// working?" view.
+    public func diagnoseSSHMux(for host: HostConfig) -> SSHMuxDiagnostic {
+        let controlPath = sshControlPath(for: host)
+        let fm = FileManager.default
+        let exists = fm.fileExists(atPath: controlPath)
+        let age: TimeInterval? = {
+            guard exists,
+                  let attrs = try? fm.attributesOfItem(atPath: controlPath),
+                  let m = attrs[.modificationDate] as? Date else { return nil }
+            return Date().timeIntervalSince(m)
+        }()
+
+        // Localhost: short-circuit. Mux is irrelevant but the section
+        // still asks for diagnostics for consistency.
+        guard !host.isLocal else {
+            return SSHMuxDiagnostic(
+                muxAlive: true,
+                controlPath: "(local — no mux needed)",
+                socketExists: false,
+                socketAgeSeconds: nil,
+                checkCommand: "(local)",
+                checkOutput: "Localhost — no SSH mux required.",
+                checkExitCode: 0,
+                host: host,
+                timestamp: Date()
+            )
+        }
+
+        let args = [
+            "-o", "ControlPath=\(controlPath)",
+            "-O", "check",
+            sshUserHost(for: host)
+        ]
+        let command = "/usr/bin/ssh " + args.map { $0.contains(" ") ? "\"\($0)\"" : $0 }
+                                            .joined(separator: " ")
+
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.arguments = args
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        var output = ""
+        var exitCode: Int32?
+        do {
+            try process.run()
+            let killTimer = DispatchSource.makeTimerSource(queue: .global())
+            killTimer.schedule(deadline: .now() + 3)
+            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
+            killTimer.resume()
+            process.waitUntilExit()
+            killTimer.cancel()
+            exitCode = process.terminationStatus
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            output = String(data: data, encoding: .utf8) ?? ""
+        } catch {
+            output = "ssh failed to launch: \(error.localizedDescription)"
+        }
+
+        return SSHMuxDiagnostic(
+            muxAlive: exitCode == 0,
+            controlPath: controlPath,
+            socketExists: exists,
+            socketAgeSeconds: age,
+            checkCommand: command,
+            checkOutput: output.trimmingCharacters(in: .whitespacesAndNewlines),
+            checkExitCode: exitCode,
+            host: host,
+            timestamp: Date()
+        )
+    }
+
+    /// Run a bare `ssh -v -o BatchMode=yes -o ConnectTimeout=5 user@host
+    /// true` and capture the output. Useful for sanity-checking that
+    /// keys / network / sshd are all working, independent of the mux.
+    public func testSSHConnection(for host: HostConfig) -> SSHConnectTest {
+        guard !host.isLocal else {
+            return SSHConnectTest(host: host, success: true,
+                                  command: "(local)",
+                                  output: "Localhost — no SSH connection required.",
+                                  exitCode: 0, timestamp: Date())
+        }
+
+        // Built from scratch — no mux options, just basic + verbose. This
+        // is intentionally an apples-to-apples reproduction of "what
+        // happens if I run ssh -v from my terminal" so the user can
+        // correlate Onyx's failure mode with their shell behavior.
+        var args: [String] = ["-v",
+                              "-o", "BatchMode=yes",
+                              "-o", "ConnectTimeout=5",
+                              "-o", "StrictHostKeyChecking=accept-new"]
+        if host.ssh.port != 22 {
+            args.append("-p"); args.append("\(host.ssh.port)")
+        }
+        if !host.ssh.identityFile.isEmpty {
+            args.append("-i"); args.append(host.ssh.identityFile)
+        }
+        args.append(sshUserHost(for: host))
+        args.append("true")
+
+        let command = "/usr/bin/ssh " + args.joined(separator: " ")
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.arguments = args
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        var output = ""
+        var exitCode: Int32?
+        do {
+            try process.run()
+            let killTimer = DispatchSource.makeTimerSource(queue: .global())
+            killTimer.schedule(deadline: .now() + 12)
+            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
+            killTimer.resume()
+            process.waitUntilExit()
+            killTimer.cancel()
+            exitCode = process.terminationStatus
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            output = String(data: data, encoding: .utf8) ?? ""
+        } catch {
+            output = "ssh failed to launch: \(error.localizedDescription)"
+        }
+
+        return SSHConnectTest(
+            host: host,
+            success: exitCode == 0,
+            command: command,
+            output: output.trimmingCharacters(in: .whitespacesAndNewlines),
+            exitCode: exitCode,
+            timestamp: Date()
+        )
+    }
+
+    /// Stop the host's mux process and delete its socket file. Use when
+    /// the diagnostic shows a stale socket — the next short-lived
+    /// utility command will spin up a fresh one.
+    public func resetSSHMux(for host: HostConfig) {
+        sshMuxStop(for: host)
+        let path = sshControlPath(for: host)
+        try? FileManager.default.removeItem(atPath: path)
+        muxNeedsCleanup.remove(host.id)
+    }
+
     /// Check if the SSH mux master is alive for a host.
     /// Has a 3s timeout to avoid blocking if the mux socket is stale.
     public func sshMuxAlive(for host: HostConfig) -> Bool {
