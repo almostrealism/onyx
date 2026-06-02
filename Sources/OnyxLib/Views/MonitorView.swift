@@ -414,28 +414,45 @@ struct MonitorView: View {
                     .padding(.horizontal, 40)
                     } // end else (detailed view)
                 } else if let error = monitor.lastError {
-                    VStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .monitorFont(size: 20, design: .default)
-                            .foregroundColor(Color(hex: "FF6B6B"))
-                        Text(error)
-                            .monitorFont(size: 12)
-                            .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 400)
-                        Text("Retrying every 5s... (attempt \(monitor.pollCount))")
-                            .monitorFont(size: 10)
-                            .foregroundColor(.gray.opacity(0.4))
+                    // Even when stats failed, surface the connection pool
+                    // so the user can diagnose any host's mux state — that
+                    // diagnostic panel is exactly what's needed to figure
+                    // out *why* the stats aren't coming in.
+                    VStack(spacing: 16) {
+                        VStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .monitorFont(size: 20, design: .default)
+                                .foregroundColor(Color(hex: "FF6B6B"))
+                            Text(error)
+                                .monitorFont(size: 12)
+                                .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: 400)
+                            Text("Retrying every 5s... (attempt \(monitor.pollCount))")
+                                .monitorFont(size: 10)
+                                .foregroundColor(.gray.opacity(0.4))
+                        }
+                        ConnectionPoolSection(appState: appState)
+                            .frame(maxWidth: 480)
                     }
+                    .padding(.horizontal, 40)
                 } else {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .colorScheme(.dark)
-                        Text("Fetching stats from \(appState.activeHost?.label ?? "host")...")
-                            .monitorFont(size: 12)
-                            .foregroundColor(.gray.opacity(0.5))
+                    VStack(spacing: 16) {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .colorScheme(.dark)
+                            Text("Fetching stats from \(appState.activeHost?.label ?? "host")...")
+                                .monitorFont(size: 12)
+                                .foregroundColor(.gray.opacity(0.5))
+                        }
+                        // Connection pool is always useful — especially
+                        // while we're stuck waiting for the active host's
+                        // first sample.
+                        ConnectionPoolSection(appState: appState)
+                            .frame(maxWidth: 480)
                     }
+                    .padding(.horizontal, 40)
                 }
 
                 Spacer()
