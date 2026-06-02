@@ -1598,6 +1598,22 @@ private struct SSHDiagnosticPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // Supervisor (SSHKeeper) state. Goes first because this is
+            // what the user actually wants to know — "is the supervisor
+            // keeping things alive for me?" The legacy point-in-time
+            // diagnostic still appears below.
+            if let keeper = SSHKeeper.shared.state(for: host) {
+                row("ACTIVE",
+                    "slot \(keeper.primarySlot == 0 ? "A" : "B") · \(keeper.primary.alive ? "alive" : "DEAD")",
+                    color: keeper.primary.alive ? "6BFF8E" : "FF6B6B")
+                row("SPARE",
+                    "slot \(keeper.primarySlot == 0 ? "B" : "A") · \(keeper.spare.alive ? "alive" : keeper.spare.establishing ? "establishing" : "DEAD")",
+                    color: keeper.spare.alive ? "6BFF8E"
+                          : (keeper.spare.establishing ? "FFD06B" : "FF6B6B"))
+            } else {
+                row("KEEPER", "not yet observed", color: nil)
+            }
+            Divider().background(Color.white.opacity(0.06)).padding(.vertical, 2)
             if let d = diagnostic {
                 row("STATUS", d.summary, color: d.muxAlive ? "6BFF8E" : "FF6B6B")
                 row("SOCKET",

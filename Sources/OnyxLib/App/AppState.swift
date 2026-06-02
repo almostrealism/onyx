@@ -1055,6 +1055,9 @@ public class AppState: ObservableObject {
             // manager guards itself against an empty config and is a
             // no-op under XCTest.
             PullRequestManager.shared.startPolling()
+            // SSH mux supervisor — maintains two warm-spare mux masters
+            // per host so a single mux failure is instantly recoverable.
+            SSHKeeper.shared.start(appState: self)
         }
     }
 
@@ -1133,9 +1136,13 @@ public class AppState: ObservableObject {
         return dir
     }
 
-    /// ControlPath pattern for SSH multiplexing — one socket per host
-    private func sshControlPath(for host: HostConfig) -> String {
-        sshMuxDir.appendingPathComponent("mux-\(host.id.uuidString)").path
+    /// ControlPath pattern for SSH multiplexing. Consults the SSHKeeper
+    /// supervisor, which maintains two warm-spare mux masters and
+    /// returns whichever slot is currently primary. Falls back to the
+    /// legacy single-slot path when the keeper hasn't observed this
+    /// host yet (e.g. before its first tick).
+    func sshControlPath(for host: HostConfig) -> String {
+        SSHKeeper.shared.controlPath(for: host)
     }
 
     /// SSH multiplexing args for SHORT-LIVED utility commands only.
@@ -1394,43 +1401,24 @@ public class AppState: ObservableObject {
         return result
     }
 
-    /// Stop the host's mux process and delete its socket file. Use when
-    /// the diagnostic shows a stale socket — the next short-lived
-    /// utility command will spin up a fresh one.
+    /// Tear down both keeper slots for a host. The next supervisor
+    /// tick re-establishes them from scratch — typically within ≈4s.
     public func resetSSHMux(for host: HostConfig) {
-        OnyxLog.ssh.notice("resetting mux: host=\(host.label, privacy: .public)")
-        sshMuxStop(for: host)
-        let path = sshControlPath(for: host)
-        try? FileManager.default.removeItem(atPath: path)
+        OnyxLog.ssh.notice("user reset: host=\(host.label, privacy: .public)")
+        SSHKeeper.shared.reset(for: host)
         muxNeedsCleanup.remove(host.id)
     }
 
-    /// Check if the SSH mux master is alive for a host.
-    /// Has a 3s timeout to avoid blocking if the mux socket is stale.
+    /// Check if the SSH mux master is alive for a host. Now delegates
+    /// to the SSHKeeper supervisor for an instant cached answer — the
+    /// keeper polls every 2s anyway, so callers don't need to pay for
+    /// a fresh `ssh -O check` themselves.
+    ///
+    /// Returns true for localhost (no mux needed) and for any host the
+    /// keeper has confirmed alive on its current primary slot.
     public func sshMuxAlive(for host: HostConfig) -> Bool {
         guard !host.isLocal else { return true }
-        let controlPath = sshControlPath(for: host)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = [
-            "-o", "ControlPath=\(controlPath)",
-            "-O", "check",
-            sshUserHost(for: host)
-        ]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            let killTimer = DispatchSource.makeTimerSource(queue: .global())
-            killTimer.schedule(deadline: .now() + 3)
-            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
-            killTimer.resume()
-            process.waitUntilExit()
-            killTimer.cancel()
-            return process.terminationStatus == 0
-        } catch {
-            return false
-        }
+        return SSHKeeper.shared.isMuxAlive(for: host)
     }
 
     /// Tear down the SSH mux master for a host (e.g. when host config changes)
