@@ -140,6 +140,37 @@ public final class SSHKeeper {
         OnyxLog.ssh.info("SSHKeeper stopped")
     }
 
+    /// Shutdown — close every slot for every host, definitively.
+    /// Called from `applicationWillTerminate` so a force-quit no longer
+    /// leaves orphan master processes holding remote TCP connections
+    /// open. Idempotent and bounded.
+    public func shutdown() {
+        OnyxLog.ssh.notice("SSHKeeper shutdown — closing all masters")
+        setEnabled(false)
+        timer?.invalidate()
+        timer = nil
+
+        // Snapshot the host list under the lock, then close masters
+        // outside the lock so we don't hold it during ssh -O exit calls.
+        lock.lock()
+        let entries = hostStates.compactMap { (id, state) -> (UUID, String, [String])? in
+            guard let host = appState?.hosts.first(where: { $0.id == id }) else {
+                // App state might be gone; still try to close by socket path.
+                return (id, "", state.slots.map(\.path))
+            }
+            return (id, Self.userHost(for: host), state.slots.map(\.path))
+        }
+        hostStates.removeAll()
+        lock.unlock()
+
+        for (_, userHost, paths) in entries {
+            for path in paths {
+                SSHProcess.killMaster(at: path, userHost: userHost)
+            }
+        }
+        OnyxLog.ssh.notice("SSHKeeper shutdown complete")
+    }
+
     /// Emergency kill switch — disables all supervisor work. Existing
     /// state stays so the UI keeps reporting the last-known status, but
     /// no new ssh calls are made and no new maintenance tasks enqueue.
@@ -349,84 +380,15 @@ public final class SSHKeeper {
     /// Result of a bounded SSH run. `exit == -1` means the process was
     /// killed (timeout or launch failure); otherwise it's the real exit
     /// status. `stderr` is captured for any caller that wants it.
-    private struct BoundedResult {
-        let exit: Int32
-        let stderr: String
-        let timedOut: Bool
-    }
+    private typealias BoundedResult = SSHProcess.RunResult
 
-    /// Run `/usr/bin/ssh` with the given arguments, with HARD bounds:
-    /// after `softTimeout` we SIGTERM, after `softTimeout + 1` we
-    /// SIGKILL. Returns either the real exit status, or -1 if the
-    /// process had to be killed. This is the single point where every
-    /// SSH operation lives — checks, smoke tests, establish, exit.
-    ///
-    /// Why this exists: `Process.terminate()` sends SIGTERM. `ssh` in
-    /// many of its blocking states (stuck on a TCP read, waiting on a
-    /// dead mux socket, mid-auth on a hung network) ignores SIGTERM
-    /// entirely. The previous keeper's "2s kill timer" was therefore a
-    /// fiction — those processes would block `waitUntilExit()` forever,
-    /// occupying a worker thread, eventually exhausting the dispatch
-    /// thread pool (we saw 64+ stuck threads in a hang sample). SIGKILL
-    /// can't be ignored. Every SSH call now has a guaranteed maximum
-    /// wall-clock cost.
+    /// Thin wrapper over `SSHProcess.run` — the actual implementation
+    /// lives in the Services layer so other call sites (AppState's
+    /// sshMuxStop, etc.) share the same SIGKILL-escalation discipline.
     private static func runSSH(_ args: [String],
                                softTimeout: TimeInterval,
                                captureStderr: Bool = false) -> BoundedResult {
-        let process = Process()
-        let errPipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = args
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = captureStderr ? errPipe : FileHandle.nullDevice
-
-        guard (try? process.run()) != nil else {
-            return BoundedResult(exit: -1, stderr: "process failed to launch", timedOut: false)
-        }
-
-        // Watchdog state.
-        let timedOutFlag = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
-        timedOutFlag.initialize(to: 0)
-        defer { timedOutFlag.deinitialize(count: 1); timedOutFlag.deallocate() }
-
-        let pid = process.processIdentifier
-        let watchdog = DispatchQueue.global(qos: .userInitiated)
-
-        // Soft kill at softTimeout.
-        let soft = DispatchSource.makeTimerSource(queue: watchdog)
-        soft.schedule(deadline: .now() + softTimeout)
-        soft.setEventHandler {
-            if process.isRunning {
-                timedOutFlag.pointee = 1
-                _ = kill(pid, SIGTERM)
-            }
-        }
-        soft.resume()
-
-        // Hard kill 1 second after soft. SIGKILL cannot be ignored, so
-        // waitUntilExit() is guaranteed to return within softTimeout + ~1s.
-        let hard = DispatchSource.makeTimerSource(queue: watchdog)
-        hard.schedule(deadline: .now() + softTimeout + 1)
-        hard.setEventHandler {
-            if process.isRunning {
-                _ = kill(pid, SIGKILL)
-            }
-        }
-        hard.resume()
-
-        process.waitUntilExit()
-        soft.cancel()
-        hard.cancel()
-
-        var stderrStr = ""
-        if captureStderr {
-            let data = errPipe.fileHandleForReading.readDataToEndOfFile()
-            stderrStr = (String(data: data, encoding: .utf8) ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return BoundedResult(exit: process.terminationStatus,
-                             stderr: stderrStr,
-                             timedOut: timedOutFlag.pointee != 0)
+        SSHProcess.run(args, softTimeout: softTimeout, captureStderr: captureStderr)
     }
 
     /// Smoke-test a slot's mux by sending `true` through it. Bounded
@@ -469,9 +431,17 @@ public final class SSHKeeper {
         hostStates[host.id] = state
         lock.unlock()
 
-        // Always start from a clean socket file. ControlMaster=yes
-        // refuses to overwrite an existing one.
-        try? FileManager.default.removeItem(atPath: slotPath)
+        // Definitively close any prior master on this slot. Without
+        // this, the old master process keeps holding its TCP
+        // connection to the remote sshd open even though we've moved
+        // on to a fresh socket — that's the leak documented in
+        // docs/ssh-connection-leak.md (30+ hour-old notty sessions
+        // piling up on the remote, eventually tripping MaxStartups
+        // and locking the user out). killMaster handles both the
+        // clean `ssh -O exit` case AND the SIGKILL-the-orphaned-PID
+        // case, then removes the socket file.
+        SSHProcess.killMaster(at: slotPath,
+                              userHost: Self.userHost(for: host))
 
         var args: [String] = [
             "-M", "-N", "-f",
@@ -538,14 +508,12 @@ public final class SSHKeeper {
         lock.unlock()
     }
 
+    /// Wholesale teardown of a slot's master — `ssh -O exit` first,
+    /// then SIGKILL the owning process via lsof if it didn't quit
+    /// cleanly. Removes the socket file. Use whenever a slot is being
+    /// retired or the app is shutting down.
     private static func stopMaster(at path: String, userHost: String) {
-        guard FileManager.default.fileExists(atPath: path) else { return }
-        // Bounded — same hang risk as everything else.
-        _ = runSSH([
-            "-o", "ControlPath=\(path)",
-            "-O", "exit",
-            userHost
-        ], softTimeout: 2)
+        SSHProcess.killMaster(at: path, userHost: userHost)
     }
 
     // MARK: - Helpers

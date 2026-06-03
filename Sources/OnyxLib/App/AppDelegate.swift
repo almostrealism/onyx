@@ -37,6 +37,16 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    /// Called when the app is about to quit (normal or via Cmd+Q).
+    /// Shut down the SSH supervisor — definitively closes every mux
+    /// master so we don't leave orphan processes holding remote TCP
+    /// connections open. Without this, the leaks documented in
+    /// docs/ssh-connection-leak.md keep accumulating on the remote.
+    public func applicationWillTerminate(_ notification: Notification) {
+        OnyxLog.ssh.notice("applicationWillTerminate — shutting down SSHKeeper")
+        SSHKeeper.shared.shutdown()
+    }
+
     /// Style window.
     public static func styleWindow(_ window: NSWindow) {
         window.isOpaque = false

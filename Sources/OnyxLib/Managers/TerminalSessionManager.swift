@@ -1345,6 +1345,48 @@ class OnyxTerminalView: NSView {
         }
     }
 
+    /// Per-host reconnect gate. Without this, a network blip caused
+    /// every pooled session for a host to reconnect simultaneously
+    /// (each session has its own per-session backoff but they don't
+    /// coordinate), which trips the remote sshd's `MaxStartups 10:30:100`
+    /// default and locks the user out. See docs/ssh-connection-leak.md.
+    /// The Set is keyed by host UUID; an entry being present means a
+    /// reconnect to that host is already scheduled or in-flight.
+    private static var reconnectsInFlight: Set<UUID> = []
+    private static let reconnectGateLock = NSLock()
+
+    /// Hard maximum the gate can stay closed for any one host. Watchdog
+    /// timeout in case a reconnect path forgets to clear. 30s is well
+    /// beyond any legitimate reconnect duration.
+    private static let reconnectGateMaxSeconds: TimeInterval = 30
+
+    private func acquireReconnectGate(_ hostID: UUID) -> Bool {
+        Self.reconnectGateLock.lock()
+        let already = Self.reconnectsInFlight.contains(hostID)
+        if !already {
+            Self.reconnectsInFlight.insert(hostID)
+            // Watchdog — auto-clear if the reconnect path forgets.
+            DispatchQueue.global(qos: .utility)
+                .asyncAfter(deadline: .now() + Self.reconnectGateMaxSeconds) { [weak self] in
+                    self?.releaseReconnectGate(hostID, reason: "watchdog")
+                }
+        }
+        Self.reconnectGateLock.unlock()
+        return !already
+    }
+
+    private func releaseReconnectGate(_ hostID: UUID, reason: String) {
+        Self.reconnectGateLock.lock()
+        let wasHeld = Self.reconnectsInFlight.remove(hostID) != nil
+        Self.reconnectGateLock.unlock()
+        if wasHeld {
+            OnyxLog.session.info("""
+                reconnect gate released: host=\(hostID.uuidString, privacy: .public) \
+                reason=\(reason, privacy: .public)
+                """)
+        }
+    }
+
     private func reconnect() {
         let targetSession = appState.activeSession
 
@@ -1361,10 +1403,27 @@ class OnyxTerminalView: NSView {
             if let session = targetSession {
                 clearPendingStatus(for: session.id)
             }
+            if let hid = hostID { releaseReconnectGate(hid, reason: "max-attempts") }
             return
         }
 
-        let delay = min(pow(2.0, Double(reconnectAttempt)) * 0.5, maxBackoff)
+        // Gate: at most one in-flight reconnect per host. Subsequent
+        // reconnect() calls for the same host before the gate clears
+        // are dropped — preventing reconnect storms.
+        if let hid = hostID, !acquireReconnectGate(hid) {
+            OnyxLog.session.notice("""
+                reconnect gated: host=\(hid.uuidString, privacy: .public) — \
+                another reconnect already in flight
+                """)
+            return
+        }
+
+        // Backoff with jitter — the jitter spreads any simultaneous
+        // unblock events across hosts so we don't accidentally re-create
+        // the storm at a slightly later moment.
+        let base = min(pow(2.0, Double(reconnectAttempt)) * 0.5, maxBackoff)
+        let jitter = Double.random(in: 0...(base * 0.3))
+        let delay = base + jitter
         reconnectAttempt += 1
 
         setPendingStatus(.reconnecting, for: targetSession)
@@ -1384,6 +1443,7 @@ class OnyxTerminalView: NSView {
                 print("reconnect: user switched away from \(tid), abandoning reconnect")
                 self.appState.isReconnecting = false
                 if let session = targetSession { self.clearPendingStatus(for: session.id) }
+                if let hid = hostID { self.releaseReconnectGate(hid, reason: "user-switched") }
                 return
             }
 
@@ -1397,15 +1457,19 @@ class OnyxTerminalView: NSView {
                     let reachable = self.probeHost(host)
                     DispatchQueue.main.async {
                         if reachable != .ok {
-                            // Host not reachable — retry with backoff, don't waste an attempt
+                            // Host not reachable — retry with backoff, don't waste an attempt.
+                            // Release the gate so the next attempt can acquire fresh.
                             self.appState.isReconnecting = false
+                            if let hid = hostID { self.releaseReconnectGate(hid, reason: "unreachable-retry") }
                             self.reconnect()
                             return
                         }
+                        if let hid = hostID { self.releaseReconnectGate(hid, reason: "committed") }
                         self.performReconnect(targetSession: targetSession)
                     }
                 }
             } else {
+                if let hid = hostID { self.releaseReconnectGate(hid, reason: "committed-local") }
                 self.performReconnect(targetSession: targetSession)
             }
         }

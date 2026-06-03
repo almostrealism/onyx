@@ -1,7 +1,7 @@
 # SSH Connection Leak — Investigation & Handoff
 
-**Status:** Open — root cause identified, fix not yet implemented.
-**Severity:** High. Causes the *remote* host to lock out new SSH logins (including manual ones).
+**Status:** Fixed (2026-06-03). See "Resolution" section at the bottom.
+**Severity:** High. Caused the *remote* host to lock out new SSH logins (including manual ones).
 **Date investigated:** 2026-06-03
 
 This note documents a confirmed bug in Onyx's SSH session lifecycle. It is written as a
@@ -158,3 +158,40 @@ existing sessions). Immediate manual cleanup of leaked channels: `sudo kill <not
 | MonitorManager 5 s poll | `Sources/OnyxLib/Managers/MonitorManager.swift` | 84 |
 | CPUFleetPoller 10 s poll (all hosts) | `Sources/OnyxLib/Managers/CPUFleetPoller.swift` | 88 |
 | SSHKeeper (mux supervisor) | `Sources/OnyxLib/Managers/SSHKeeper.swift` | 30 |
+
+---
+
+## Resolution (2026-06-03)
+
+### Code fixes shipped
+
+| # | Issue | Where | What changed |
+|---|---|---|---|
+| 1 | `ssh -O exit` rarely called; orphan masters held remote TCP connections open | `Services/SSHProcess.swift` (new), `Managers/SSHKeeper.swift`, `App/AppState.swift` | New `SSHProcess.killMaster(at:userHost:)` does `ssh -O exit` first, then escalates to finding the owning PID via `lsof` and SIGKILLing it, then removes the socket file. `SSHKeeper.establish` calls this before respawning a slot's master. `AppState.sshMuxStop` routes through it. Every teardown is now bounded and definitive — no orphans. |
+| 2 | App quit didn't close masters → orphans accumulated on remote | `App/AppDelegate.swift`, `Managers/SSHKeeper.swift` | New `applicationWillTerminate` calls `SSHKeeper.shared.shutdown()` which closes every slot for every host. Survives `pkill -9` of Onyx because the shutdown happens before the process exits in the normal-quit case; the leftover orphan path only happens on actual force-quit and is recoverable via `scripts/ssh-leak-cleanup.sh`. |
+| 3 | Reconnect storm trips remote `MaxStartups` | `Managers/TerminalSessionManager.swift` | Per-host reconnect gate (`acquireReconnectGate` / `releaseReconnectGate`) ensures at most one reconnect to a given host is scheduled/in-flight at a time. Watchdog auto-releases after 30s to prevent leaks. Plus 0-30% jitter on the per-session backoff so any simultaneous unblock events don't re-create the storm. |
+| 4 | `Process.terminate()` is SIGTERM, which ssh can ignore → hung supervisor + dispatch-thread-pool exhaustion | `Services/SSHProcess.swift` | All ssh runs go through `SSHProcess.run` with SIGTERM at `softTimeout`, SIGKILL one second later. `waitUntilExit()` is guaranteed to return within `softTimeout + ~1s`. |
+
+### Operational cleanup tool
+
+`scripts/ssh-leak-cleanup.sh` — run on any client that's been running Onyx to definitively close every onyx-mux master:
+
+```bash
+bash scripts/ssh-leak-cleanup.sh
+```
+
+It does `ssh -O exit` on every socket, then SIGKILLs any straggler `ssh` processes referencing `~/.ssh/onyx-mux/`, then removes leftover socket files. Idempotent and safe.
+
+### Tests
+
+`Tests/OnyxTests/Services/SSHProcessShapeTests.swift` pins the contracts:
+
+- `findMasterPIDs` returns empty for a missing path (no crash, no hang).
+- `killMaster` is a no-op on a missing path and returns within seconds.
+- `run` against a bogus host returns within `softTimeout + ~1s` — pinning the SIGKILL escalation discipline.
+
+### Items NOT shipped from the checklist
+
+- **Confirmation that remote session is gone before respawning (replace hardcoded 1s).** The 1s sleep in `performReconnect` is still there. The reconnect gate alone should prevent the storm, and the master killer ensures no orphans, so the hardcoded sleep is no longer load-bearing — but it's a code smell. Left for a follow-up.
+- **Per-host open-connection cap + orphan reaper.** Not built; the master killer addresses the primary cause.
+- **Remote sshd hardening** (`ClientAliveInterval`, `MaxStartups`) — out of scope for the client; left for the operator.

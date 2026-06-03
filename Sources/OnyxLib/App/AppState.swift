@@ -1421,30 +1421,24 @@ public class AppState: ObservableObject {
         return SSHKeeper.shared.isMuxAlive(for: host)
     }
 
-    /// Tear down the SSH mux master for a host (e.g. when host config changes)
+    /// Tear down the SSH mux master(s) for a host — *definitively*.
+    /// `ssh -O exit` first (clean), then SIGKILL the owning process
+    /// via lsof if the clean exit didn't kill it, then remove the
+    /// socket file. Covers both keeper-managed slots and any legacy
+    /// single-slot path. Bounded; never hangs.
     public func sshMuxStop(for host: HostConfig) {
         guard !host.isLocal else { return }
-        let controlPath = sshControlPath(for: host)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = [
-            "-o", "ControlPath=\(controlPath)",
-            "-O", "exit",
-            sshUserHost(for: host)
-        ]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            // Don't wait indefinitely — kill after 3s if it hangs
-            let killTimer = DispatchSource.makeTimerSource(queue: .global())
-            killTimer.schedule(deadline: .now() + 3)
-            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
-            killTimer.resume()
-            process.waitUntilExit()
-            killTimer.cancel()
-        } catch {
-            // SSH not available or socket already gone — fine
+        let userHost = sshUserHost(for: host)
+        // Both slot paths the keeper manages, plus the legacy single-
+        // slot path (which is the same as slot 0 by construction but
+        // we list explicitly for clarity).
+        let paths = Set([
+            SSHKeeper.defaultSlotPath(for: host.id, slot: 0),
+            SSHKeeper.defaultSlotPath(for: host.id, slot: 1),
+            sshControlPath(for: host)
+        ])
+        for path in paths {
+            SSHProcess.killMaster(at: path, userHost: userHost)
         }
     }
 
