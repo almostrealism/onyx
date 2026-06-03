@@ -1698,6 +1698,23 @@ private struct SSHDiagnosticPanel: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isTesting)
+                Spacer()
+                // Kill switch — disables the entire supervisor when the
+                // user suspects it's misbehaving. Stops all new SSH
+                // calls, freezes existing slot state for the UI.
+                Button(action: {
+                    SSHKeeper.shared.setEnabled(!SSHKeeper.shared.enabled)
+                }) {
+                    Text(SSHKeeper.shared.enabled ? "Disable keeper" : "Enable keeper")
+                        .monitorFont(size: 10)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(SSHKeeper.shared.enabled
+                                    ? Color(hex: "FF6B6B").opacity(0.2)
+                                    : Color(hex: "6BFF8E").opacity(0.2))
+                        .cornerRadius(3)
+                }
+                .buttonStyle(.plain)
             }
             .foregroundColor(.white.opacity(0.7))
             .padding(.top, 4)

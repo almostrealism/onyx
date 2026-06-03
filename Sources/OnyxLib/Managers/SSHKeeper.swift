@@ -26,6 +26,7 @@
 //
 
 import Foundation
+import Darwin
 
 public final class SSHKeeper {
 
@@ -88,13 +89,32 @@ public final class SSHKeeper {
 
     private var hostStates: [UUID: HostState] = [:]
     private let lock = NSLock()
-    private weak var appState: AppState?
+    /// Strong ref — keeper outlives any single AppState. The original
+    /// weak ref let the keeper silently stop when a window closed.
+    private var appState: AppState?
     private var timer: Timer?
-    private let queue = DispatchQueue(label: "com.onyx.ssh-keeper",
-                                     qos: .userInitiated,
-                                     attributes: .concurrent)
+    /// Per-host serial queue. Eliminates the dispatch-thread pile-up that
+    /// the concurrent queue caused — each host gets exactly one worker
+    /// thread, and a stuck SSH call only stalls that one host.
+    private var hostQueues: [UUID: DispatchQueue] = [:]
+    /// Hosts that already have a maintenance task enqueued. We never let
+    /// a second one pile in until the first dequeues — that's how we
+    /// killed the dispatch pool last time.
+    private var enqueued: Set<UUID> = []
+    /// Kill switch. When true, tick() does nothing. Toggled from the
+    /// monitor overlay's mux diagnostic panel.
+    public private(set) var enabled: Bool = true
 
     private init() {}
+
+    private func hostQueue(for hostID: UUID) -> DispatchQueue {
+        lock.lock(); defer { lock.unlock() }
+        if let q = hostQueues[hostID] { return q }
+        let q = DispatchQueue(label: "com.onyx.ssh-keeper.host.\(hostID.uuidString.prefix(8))",
+                              qos: .userInitiated)
+        hostQueues[hostID] = q
+        return q
+    }
 
     // MARK: - Lifecycle
 
@@ -118,6 +138,18 @@ public final class SSHKeeper {
         timer?.invalidate()
         timer = nil
         OnyxLog.ssh.info("SSHKeeper stopped")
+    }
+
+    /// Emergency kill switch — disables all supervisor work. Existing
+    /// state stays so the UI keeps reporting the last-known status, but
+    /// no new ssh calls are made and no new maintenance tasks enqueue.
+    /// Toggled by the user from the diagnostic panel when the keeper
+    /// itself is misbehaving.
+    public func setEnabled(_ value: Bool) {
+        lock.lock()
+        enabled = value
+        lock.unlock()
+        OnyxLog.ssh.notice("SSHKeeper \(value ? "ENABLED" : "DISABLED", privacy: .public)")
     }
 
     // MARK: - Public API for AppState
@@ -169,11 +201,30 @@ public final class SSHKeeper {
     // MARK: - Tick
 
     private func tick() {
-        guard let appState = appState else { stop(); return }
+        // No longer stops the supervisor when appState is briefly nil;
+        // we just skip this tick. The previous behavior silently killed
+        // the supervisor when any window closed.
+        guard enabled, let appState = appState else { return }
         let hosts = appState.hosts.filter { !$0.isLocal }
         for host in hosts {
-            queue.async { [weak self] in
+            // Skip if this host's maintenance is already enqueued or
+            // running. Without this guard, every tick piled work onto a
+            // concurrent queue, exhausting the dispatch thread pool when
+            // SSH calls hung. The hang trace showed 64+ stuck worker
+            // threads — exactly the dispatch pool soft limit.
+            lock.lock()
+            if enqueued.contains(host.id) {
+                lock.unlock()
+                continue
+            }
+            enqueued.insert(host.id)
+            lock.unlock()
+
+            hostQueue(for: host.id).async { [weak self] in
                 self?.maintain(host: host)
+                self?.lock.lock()
+                self?.enqueued.remove(host.id)
+                self?.lock.unlock()
             }
         }
     }
@@ -295,63 +346,119 @@ public final class SSHKeeper {
         }
     }
 
-    /// Smoke-test a slot's mux by actually sending `true` through it.
-    /// Bounded at 3s — anything longer means the multiplexed stream is
-    /// hung even though the control socket is alive (silent TCP death).
-    /// This is the failure mode `ssh -O check` cannot catch.
+    /// Result of a bounded SSH run. `exit == -1` means the process was
+    /// killed (timeout or launch failure); otherwise it's the real exit
+    /// status. `stderr` is captured for any caller that wants it.
+    private struct BoundedResult {
+        let exit: Int32
+        let stderr: String
+        let timedOut: Bool
+    }
+
+    /// Run `/usr/bin/ssh` with the given arguments, with HARD bounds:
+    /// after `softTimeout` we SIGTERM, after `softTimeout + 1` we
+    /// SIGKILL. Returns either the real exit status, or -1 if the
+    /// process had to be killed. This is the single point where every
+    /// SSH operation lives — checks, smoke tests, establish, exit.
+    ///
+    /// Why this exists: `Process.terminate()` sends SIGTERM. `ssh` in
+    /// many of its blocking states (stuck on a TCP read, waiting on a
+    /// dead mux socket, mid-auth on a hung network) ignores SIGTERM
+    /// entirely. The previous keeper's "2s kill timer" was therefore a
+    /// fiction — those processes would block `waitUntilExit()` forever,
+    /// occupying a worker thread, eventually exhausting the dispatch
+    /// thread pool (we saw 64+ stuck threads in a hang sample). SIGKILL
+    /// can't be ignored. Every SSH call now has a guaranteed maximum
+    /// wall-clock cost.
+    private static func runSSH(_ args: [String],
+                               softTimeout: TimeInterval,
+                               captureStderr: Bool = false) -> BoundedResult {
+        let process = Process()
+        let errPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.arguments = args
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = captureStderr ? errPipe : FileHandle.nullDevice
+
+        guard (try? process.run()) != nil else {
+            return BoundedResult(exit: -1, stderr: "process failed to launch", timedOut: false)
+        }
+
+        // Watchdog state.
+        let timedOutFlag = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
+        timedOutFlag.initialize(to: 0)
+        defer { timedOutFlag.deinitialize(count: 1); timedOutFlag.deallocate() }
+
+        let pid = process.processIdentifier
+        let watchdog = DispatchQueue.global(qos: .userInitiated)
+
+        // Soft kill at softTimeout.
+        let soft = DispatchSource.makeTimerSource(queue: watchdog)
+        soft.schedule(deadline: .now() + softTimeout)
+        soft.setEventHandler {
+            if process.isRunning {
+                timedOutFlag.pointee = 1
+                _ = kill(pid, SIGTERM)
+            }
+        }
+        soft.resume()
+
+        // Hard kill 1 second after soft. SIGKILL cannot be ignored, so
+        // waitUntilExit() is guaranteed to return within softTimeout + ~1s.
+        let hard = DispatchSource.makeTimerSource(queue: watchdog)
+        hard.schedule(deadline: .now() + softTimeout + 1)
+        hard.setEventHandler {
+            if process.isRunning {
+                _ = kill(pid, SIGKILL)
+            }
+        }
+        hard.resume()
+
+        process.waitUntilExit()
+        soft.cancel()
+        hard.cancel()
+
+        var stderrStr = ""
+        if captureStderr {
+            let data = errPipe.fileHandleForReading.readDataToEndOfFile()
+            stderrStr = (String(data: data, encoding: .utf8) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return BoundedResult(exit: process.terminationStatus,
+                             stderr: stderrStr,
+                             timedOut: timedOutFlag.pointee != 0)
+    }
+
+    /// Smoke-test a slot's mux by sending `true` through it. Bounded
+    /// at 3s — anything longer means the multiplexed stream is hung
+    /// even though the socket is alive (silent TCP death).
     private static func smokeTest(path: String, userHost: String) -> Bool {
         guard FileManager.default.fileExists(atPath: path) else { return false }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = [
+        let result = runSSH([
             "-o", "ControlPath=\(path)",
             "-o", "BatchMode=yes",
             userHost, "true"
-        ]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            let killTimer = DispatchSource.makeTimerSource(queue: .global())
-            killTimer.schedule(deadline: .now() + 3)
-            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
-            killTimer.resume()
-            process.waitUntilExit()
-            killTimer.cancel()
-            return process.terminationStatus == 0
-        } catch {
-            return false
-        }
+        ], softTimeout: 3)
+        return result.exit == 0
     }
 
-    /// Run `ssh -O check` for the given control path. 2s kill timer
-    /// keeps a hung socket from blocking the maintenance loop.
+    /// Run `ssh -O check`. 2s bound + 1s hard kill = ≤3s wall clock.
     private static func checkAlive(path: String, userHost: String) -> Bool {
         guard FileManager.default.fileExists(atPath: path) else { return false }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = ["-o", "ControlPath=\(path)", "-O", "check", userHost]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            let killTimer = DispatchSource.makeTimerSource(queue: .global())
-            killTimer.schedule(deadline: .now() + 2)
-            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
-            killTimer.resume()
-            process.waitUntilExit()
-            killTimer.cancel()
-            return process.terminationStatus == 0
-        } catch {
-            return false
-        }
+        let result = runSSH([
+            "-o", "ControlPath=\(path)",
+            "-O", "check",
+            userHost
+        ], softTimeout: 2)
+        return result.exit == 0
     }
 
-    /// Spawn a fresh `ssh -M -N -f` master on the given slot. Logs both
-    /// success and the stderr on failure (visible in Console under
-    /// subsystem:com.onyx category:ssh).
+    /// Spawn a fresh `ssh -M -N -f` master on the given slot, verify it
+    /// actually responds, and record the result. Every SSH call here
+    /// runs through `runSSH` and is wall-clock bounded — this function
+    /// is guaranteed to complete within ≈(connectTimeout + 3s) regardless
+    /// of how broken the remote host is.
     private func establish(host: HostConfig, slot: Int) {
-        // Mark establishing so concurrent ticks don't double-fire.
         lock.lock()
         guard var state = hostStates[host.id], !state.slots[slot].establishing else {
             lock.unlock()
@@ -362,8 +469,8 @@ public final class SSHKeeper {
         hostStates[host.id] = state
         lock.unlock()
 
-        // Stale socket may still be on disk — remove it before
-        // ControlMaster=yes refuses to overwrite.
+        // Always start from a clean socket file. ControlMaster=yes
+        // refuses to overwrite an existing one.
         try? FileManager.default.removeItem(atPath: slotPath)
 
         var args: [String] = [
@@ -377,57 +484,42 @@ public final class SSHKeeper {
             "-o", "BatchMode=yes",
             "-o", "StrictHostKeyChecking=accept-new"
         ]
-        if host.ssh.port != 22 {
-            args += ["-p", "\(host.ssh.port)"]
-        }
-        if !host.ssh.identityFile.isEmpty {
-            args += ["-i", host.ssh.identityFile]
-        }
+        if host.ssh.port != 22 { args += ["-p", "\(host.ssh.port)"] }
+        if !host.ssh.identityFile.isEmpty { args += ["-i", host.ssh.identityFile] }
         args.append(Self.userHost(for: host))
 
         OnyxLog.ssh.notice("""
             establishing mux: host=\(host.label, privacy: .public) \
-            slot=\(slot, privacy: .public) path=\(slotPath, privacy: .public)
+            slot=\(slot, privacy: .public)
             """)
 
-        let process = Process()
-        let errPipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = args
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = errPipe
+        let result = Self.runSSH(args,
+                                 softTimeout: TimeInterval(Self.connectTimeout + 2),
+                                 captureStderr: true)
 
-        var exitCode: Int32 = -1
-        do {
-            try process.run()
-            // The -f flag detaches after auth, so the launching process
-            // exits within seconds even if the master persists. Bound
-            // it anyway in case auth hangs.
-            let killTimer = DispatchSource.makeTimerSource(queue: .global())
-            killTimer.schedule(deadline: .now() + TimeInterval(Self.connectTimeout + 2))
-            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
-            killTimer.resume()
-            process.waitUntilExit()
-            killTimer.cancel()
-            exitCode = process.terminationStatus
-        } catch {
-            OnyxLog.ssh.error("""
-                establish launch failed: host=\(host.label, privacy: .public) \
-                slot=\(slot, privacy: .public) \
-                error=\(error.localizedDescription, privacy: .public)
-                """)
+        // Even if ssh exited 0, the -f fork could have failed silently
+        // to create the master. Verify with a real -O check before
+        // claiming success.
+        var success = result.exit == 0
+        if success {
+            success = Self.checkAlive(path: slotPath,
+                                      userHost: Self.userHost(for: host))
+            if !success {
+                OnyxLog.ssh.error("""
+                    establish appeared OK but post-check failed: \
+                    host=\(host.label, privacy: .public) slot=\(slot, privacy: .public) — \
+                    master forked but socket isn't responding
+                    """)
+            }
         }
 
-        let success = exitCode == 0
         if !success {
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-            let err = (String(data: errData, encoding: .utf8) ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
             OnyxLog.ssh.error("""
                 establish FAILED: host=\(host.label, privacy: .public) \
                 slot=\(slot, privacy: .public) \
-                exit=\(exitCode, privacy: .public) \
-                stderr=\(err, privacy: .public)
+                exit=\(result.exit, privacy: .public) \
+                timedOut=\(result.timedOut, privacy: .public) \
+                stderr=\(result.stderr, privacy: .public)
                 """)
         } else {
             OnyxLog.ssh.info("""
@@ -448,13 +540,12 @@ public final class SSHKeeper {
 
     private static func stopMaster(at path: String, userHost: String) {
         guard FileManager.default.fileExists(atPath: path) else { return }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = ["-o", "ControlPath=\(path)", "-O", "exit", userHost]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try? process.run()
-        process.waitUntilExit()
+        // Bounded — same hang risk as everything else.
+        _ = runSSH([
+            "-o", "ControlPath=\(path)",
+            "-O", "exit",
+            userHost
+        ], softTimeout: 2)
     }
 
     // MARK: - Helpers
