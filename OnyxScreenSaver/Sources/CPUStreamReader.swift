@@ -39,6 +39,10 @@ final class CPUStreamReader {
     private var timer: Timer?
     private var lastMtime: TimeInterval?
     private var lastWasIdle = false
+    /// Cached decoder — JSONDecoder is reusable and not creating a
+    /// fresh one per tick avoids ~thousands of small allocations per
+    /// hour over a long saver session.
+    private let decoder = JSONDecoder()
 
     init() {
         // /Users/Shared is reachable from the legacyScreenSaver sandbox;
@@ -83,7 +87,7 @@ final class CPUStreamReader {
 
         do {
             let data = try Data(contentsOf: url)
-            let file = try JSONDecoder().decode(CPUStreamFile.self, from: data)
+            let file = try decoder.decode(CPUStreamFile.self, from: data)
 
             let age = Date().timeIntervalSince1970 - file.updatedAt
             if age > Self.staleThreshold {

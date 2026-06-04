@@ -63,6 +63,15 @@ final class HostTotem {
     private var saturnBlockCache: [String: SCNGeometry] = [:]
     private var baseColor: NSColor
     private var lastLabel: String?
+    /// Timestamp of the newest sample at last rebuild. Cheap dedup —
+    /// the publisher rewrites cpu-stream.json on every poll across all
+    /// hosts/projects, so the reader fires often even when a given
+    /// host's CPU history hasn't actually changed. Without this, every
+    /// such event triggered a full rebuild of ~430 SCNNodes per host;
+    /// across hours that allocation churn was the dominant source of
+    /// the 20+ GB memory growth seen in long-running sessions.
+    private var lastNewestSampleT: TimeInterval?
+    private var lastSampleCount: Int = 0
 
     /// Saturn ring's radius — outside the widest cube ring (max ~1.15 at
     /// arcSpacing=0.3 and 24 cubes) with breathing room so it doesn't
@@ -150,6 +159,20 @@ final class HostTotem {
         // this every frame, so it picks up new values on the next render
         // tick without any explicit notification.
         motion.mass = Self.computeMass(from: samples)
+
+        // Skip the (expensive) rebuild if the sample history is the same
+        // as last time — the file-watcher fires on every cpu-stream.json
+        // mtime change, which the publisher writes for ANY field
+        // (weekly hours, project mix, other hosts) not just this host's
+        // samples. The newest-sample timestamp + sample count uniquely
+        // identifies a host's window of history, so equality there means
+        // there's nothing new to render.
+        let newestT = samples.last?.t
+        if newestT == lastNewestSampleT && samples.count == lastSampleCount {
+            return
+        }
+        lastNewestSampleT = newestT
+        lastSampleCount = samples.count
 
         // Rebuild stack — but preserve saturnNode (and its blocks) since
         // it lives on stackNode as a sibling of the ring nodes. We'll

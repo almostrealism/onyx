@@ -41,6 +41,13 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
     private var balls: [String: OriginBall] = [:]
     private var insertionCounter = 0
     private var lastRenderTime: TimeInterval = 0
+    /// Per-frame reusable buffers so the renderer's hot path doesn't
+    /// allocate fresh arrays on every tick. Invalidated when the totem
+    /// set changes.
+    private var sortedTotemIDsCache: [String] = []
+    private var sortedTotemIDsValid = false
+    private var motionStatesScratch: [MotionState] = []
+    private var activeBallsScratch: [OriginBall] = []
 
     private let reader = CPUStreamReader()
     private var liveDataActive = false
@@ -134,9 +141,12 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         let incomingIDs = Set(hosts.map { $0.hostID })
         let existingIDs = Set(totems.keys)
 
+        var totemSetChanged = false
+
         for goneID in existingIDs.subtracting(incomingIDs) {
             totems[goneID]?.rootNode.removeFromParentNode()
             totems.removeValue(forKey: goneID)
+            totemSetChanged = true
         }
 
         for stream in hosts where totems[stream.hostID] == nil {
@@ -155,7 +165,10 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
             totem.rootNode.position = totem.motion.position
             totems[stream.hostID] = totem
             scene.rootNode.addChildNode(totem.rootNode)
+            totemSetChanged = true
         }
+
+        if totemSetChanged { sortedTotemIDsValid = false }
 
         for stream in hosts {
             totems[stream.hostID]?.update(samples: stream.samples)
@@ -288,32 +301,51 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         lastRenderTime = time
         guard !totems.isEmpty else { return }
 
-        // Collect → advance → write back. The Motion engine doesn't know
-        // about SceneKit nodes; we hand it raw position/velocity pairs.
-        // Every visible ball joins the array so totems exchange gravity
-        // and collisions with each well like any other body.
-        let totemIDs = totems.keys.sorted()  // stable order for reproducible math
-        var states = totemIDs.map { totems[$0]!.motion }
-        let activeBalls = balls.values.filter { !$0.rootNode.isHidden }
-        for ball in activeBalls { states.append(ball.motion) }
+        // Refresh the sorted IDs cache only when the totem set changed.
+        // Previously this allocated + sorted every frame (24/sec) — small
+        // each time but accumulates over a multi-hour saver session.
+        if !sortedTotemIDsValid {
+            sortedTotemIDsCache = totems.keys.sorted()
+            sortedTotemIDsValid = true
+        }
 
-        Motion.advance(&states, dt: dt)
+        // Reuse the scratch buffers — the previous code allocated
+        // [MotionState] and [OriginBall] every frame. Empty + append in
+        // place doesn't shrink the underlying capacity, so steady-state
+        // there's no allocation here at all.
+        motionStatesScratch.removeAll(keepingCapacity: true)
+        activeBallsScratch.removeAll(keepingCapacity: true)
+        for id in sortedTotemIDsCache {
+            if let t = totems[id] { motionStatesScratch.append(t.motion) }
+        }
+        for ball in balls.values where !ball.rootNode.isHidden {
+            activeBallsScratch.append(ball)
+            motionStatesScratch.append(ball.motion)
+        }
 
-        for (i, id) in totemIDs.enumerated() {
+        Motion.advance(&motionStatesScratch, dt: dt)
+
+        // Wrap the position writes in an SCNTransaction that explicitly
+        // disables implicit Core Animation actions. SCNNode position
+        // assignments outside a transaction can queue interpolation
+        // animations that hold references to the previous position
+        // value, and those queue entries can accumulate over a long
+        // run. disableActions=true makes every write instant + free.
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        let totemCount = sortedTotemIDsCache.count
+        for (i, id) in sortedTotemIDsCache.enumerated() {
             guard let totem = totems[id] else { continue }
-            totem.motion = states[i]
-            totem.rootNode.position = states[i].position
-            // Container moons orbit on a kinematic path — independent
-            // of the gravity sim, just driven by wall-clock time.
-            // Moons are children of rootNode so they inherit the
-            // totem's world position automatically.
+            totem.motion = motionStatesScratch[i]
+            totem.rootNode.position = motionStatesScratch[i].position
             totem.updateMoonPositions(time: time)
         }
         // Anchored balls don't actually move, but read-back keeps the
         // MotionState in sync in case the engine ever stops anchoring them.
-        for (i, ball) in activeBalls.enumerated() {
-            ball.motion = states[totemIDs.count + i]
+        for (i, ball) in activeBallsScratch.enumerated() {
+            ball.motion = motionStatesScratch[totemCount + i]
         }
+        SCNTransaction.commit()
     }
 
     private func removeAllTotems() {
@@ -321,6 +353,7 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
             totem.rootNode.removeFromParentNode()
         }
         totems.removeAll()
+        sortedTotemIDsValid = false
     }
 
     // MARK: - Scene setup
