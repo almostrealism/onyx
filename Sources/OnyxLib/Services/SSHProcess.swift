@@ -152,4 +152,80 @@ public enum SSHProcess {
         return str.split(whereSeparator: \.isNewline)
             .compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
     }
+
+    /// Find every `ssh` process currently running with a `ControlPath`
+    /// argument matching the given prefix (typically `~/.ssh/onyx-mux/`).
+    /// Returns (pid, controlPath) tuples. Used by the keeper's orphan
+    /// reaper — any master whose ControlPath we no longer recognize
+    /// gets SIGKILLed because it's holding a remote TCP connection
+    /// without serving any of our current sessions.
+    ///
+    /// Critically, this finds processes even when their socket file has
+    /// been unlinked — which is exactly the leak case: we removed the
+    /// socket file from disk, but the master process is stuck in a
+    /// syscall and hasn't reaped, so it's still holding the connection.
+    public static func findAllSSHMastersInDir(_ prefix: String) -> [(pid: pid_t, controlPath: String)] {
+        let ps = Process()
+        let pipe = Pipe()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = ["-axww", "-o", "pid=,args="]
+        ps.standardOutput = pipe
+        ps.standardError = FileHandle.nullDevice
+        guard (try? ps.run()) != nil else { return [] }
+
+        let watchdog = DispatchQueue.global(qos: .userInitiated)
+        let pid = ps.processIdentifier
+        let killer = DispatchSource.makeTimerSource(queue: watchdog)
+        killer.schedule(deadline: .now() + 3)
+        killer.setEventHandler { if ps.isRunning { _ = kill(pid, SIGKILL) } }
+        killer.resume()
+        ps.waitUntilExit()
+        killer.cancel()
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let str = String(data: data, encoding: .utf8) else { return [] }
+
+        // Each line: "<pid> <command line>". We want the lines that
+        // (a) have `ssh` as the program, AND (b) reference a control
+        // path under `prefix`. Pull the actual ControlPath value out
+        // for the caller.
+        var result: [(pid_t, String)] = []
+        for line in str.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard let firstSpace = trimmed.firstIndex(of: " "),
+                  let pidNum = Int32(trimmed[..<firstSpace]) else { continue }
+            let args = trimmed[firstSpace...].trimmingCharacters(in: .whitespaces)
+            // Quick filters before regex/range work.
+            guard args.contains(prefix) else { continue }
+            guard args.contains("ssh") else { continue }
+            // Extract the ControlPath value. Format is either
+            //   `ControlPath=<path>`   (with -o ControlPath=…)
+            //   or `ControlPath <path>` (rare). We look for the first
+            // occurrence and read until whitespace.
+            guard let cpRange = args.range(of: "ControlPath=") else { continue }
+            let after = args[cpRange.upperBound...]
+            let endIdx = after.firstIndex(where: { $0 == " " || $0 == "\t" }) ?? after.endIndex
+            let controlPath = String(after[..<endIdx])
+            result.append((pidNum, controlPath))
+        }
+        return result
+    }
+
+    /// SIGKILL a process and verify it actually died. Returns true if
+    /// the process is gone within `timeoutMs`. Used by the keeper to
+    /// know when a master is genuinely-leaked-and-stuck (kernel queued
+    /// the signal but the process is sleeping uninterruptibly in a
+    /// syscall) vs successfully reaped.
+    public static func killAndVerify(pid: pid_t, timeoutMs: Int = 500) -> Bool {
+        _ = kill(pid, SIGKILL)
+        let deadline = Date().addingTimeInterval(TimeInterval(timeoutMs) / 1000.0)
+        while Date() < deadline {
+            if kill(pid, 0) != 0 {
+                // ESRCH (3): no such process. Cleanly reaped.
+                return errno == ESRCH
+            }
+            usleep(20_000)  // 20ms
+        }
+        return false
+    }
 }

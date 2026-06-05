@@ -39,9 +39,11 @@ public final class SSHKeeper {
     /// Smoke-test cadence — periodically run an actual `true` command
     /// through each slot's mux to catch the "socket is fine but the
     /// underlying TCP died silently" failure mode that `ssh -O check`
-    /// cannot detect. ServerAliveInterval inside the master would
-    /// notice eventually, but smoke testing catches it within 30s.
-    public static let smokeTestInterval: TimeInterval = 30
+    /// cannot detect. Previously 30s, which left a long window where
+    /// the status line could show "alive" while connections were
+    /// actually dead. 4s is fast enough that the cached state usually
+    /// matches reality within one UI refresh cycle.
+    public static let smokeTestInterval: TimeInterval = 4
 
     /// Rotation cadence — pre-emptively recycle each slot's master on
     /// this period so we never accumulate long-running connection state
@@ -73,6 +75,14 @@ public final class SSHKeeper {
         /// test (real command through the mux) failed. Indicates a
         /// silently-broken connection that the cheap check missed.
         public var lastSmokeTestFailed: Bool = false
+        /// PID of the master process that owns this slot's socket.
+        /// Captured right after establish via lsof, used by killMaster
+        /// to terminate the master directly even after the socket file
+        /// has been removed from disk. Without this, masters stuck in
+        /// uninterruptible kernel sleeps (D state with pending TCP I/O)
+        /// got orphaned because lsof can't find them by path once the
+        /// socket file is gone.
+        public var masterPID: pid_t? = nil
     }
 
     /// One host's pair of slots + which one is currently primary.
@@ -153,19 +163,19 @@ public final class SSHKeeper {
         // Snapshot the host list under the lock, then close masters
         // outside the lock so we don't hold it during ssh -O exit calls.
         lock.lock()
-        let entries = hostStates.compactMap { (id, state) -> (UUID, String, [String])? in
+        let entries = hostStates.compactMap { (id, state) -> (UUID, String, [(String, pid_t?)])? in
+            let slotInfo = state.slots.map { ($0.path, $0.masterPID) }
             guard let host = appState?.hosts.first(where: { $0.id == id }) else {
-                // App state might be gone; still try to close by socket path.
-                return (id, "", state.slots.map(\.path))
+                return (id, "", slotInfo)
             }
-            return (id, Self.userHost(for: host), state.slots.map(\.path))
+            return (id, Self.userHost(for: host), slotInfo)
         }
         hostStates.removeAll()
         lock.unlock()
 
-        for (_, userHost, paths) in entries {
-            for path in paths {
-                SSHProcess.killMaster(at: path, userHost: userHost)
+        for (_, userHost, slotInfo) in entries {
+            for (path, pid) in slotInfo {
+                Self.stopMaster(at: path, userHost: userHost, knownPID: pid)
             }
         }
         OnyxLog.ssh.notice("SSHKeeper shutdown complete")
@@ -219,14 +229,18 @@ public final class SSHKeeper {
     /// the user clicks "Reset mux".
     public func reset(for host: HostConfig) {
         OnyxLog.ssh.notice("SSHKeeper reset: host=\(host.label, privacy: .public)")
-        for slot in 0...1 {
-            let path = Self.defaultSlotPath(for: host.id, slot: slot)
-            Self.stopMaster(at: path, userHost: Self.userHost(for: host))
-            try? FileManager.default.removeItem(atPath: path)
-        }
         lock.lock()
+        let knownPIDs = (hostStates[host.id]?.slots.map(\.masterPID)) ?? [nil, nil]
         hostStates.removeValue(forKey: host.id)
         lock.unlock()
+
+        let userHost = Self.userHost(for: host)
+        for slot in 0...1 {
+            let path = Self.defaultSlotPath(for: host.id, slot: slot)
+            let pid = slot < knownPIDs.count ? knownPIDs[slot] : nil
+            Self.stopMaster(at: path, userHost: userHost, knownPID: pid)
+            try? FileManager.default.removeItem(atPath: path)
+        }
     }
 
     // MARK: - Tick
@@ -257,6 +271,66 @@ public final class SSHKeeper {
                 self?.enqueued.remove(host.id)
                 self?.lock.unlock()
             }
+        }
+
+        // Orphan reaper. Runs on its own concurrent queue so a slow
+        // ps/lsof can't starve per-host maintenance. Deduplicated the
+        // same way as host maintenance.
+        lock.lock()
+        let reapInFlight = orphanReapInFlight
+        if !reapInFlight { orphanReapInFlight = true }
+        lock.unlock()
+        if !reapInFlight {
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                self?.reapOrphanMasters()
+                self?.lock.lock()
+                self?.orphanReapInFlight = false
+                self?.lock.unlock()
+            }
+        }
+    }
+
+    private var orphanReapInFlight = false
+
+    /// Walk every `ssh` process on the box that has a `ControlPath`
+    /// argument pointing somewhere under `~/.ssh/onyx-mux/`. Any PID
+    /// whose path isn't in our current slot set gets SIGKILLed. This
+    /// is what catches masters that survived past their re-establish
+    /// because killMaster couldn't find them (the socket file was
+    /// already gone — lsof returned nothing — so the previous reap
+    /// missed them and they kept holding remote TCP connections open).
+    /// Those are the "tons of connections" the user kept seeing pile
+    /// up before quitting + running the cleanup script.
+    private func reapOrphanMasters() {
+        // Build the set of paths we currently expect.
+        lock.lock()
+        var current = Set<String>()
+        for state in hostStates.values {
+            for slot in state.slots { current.insert(slot.path) }
+        }
+        lock.unlock()
+
+        let muxDirPrefix = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".ssh/onyx-mux")
+            .path
+
+        let processes = SSHProcess.findAllSSHMastersInDir(muxDirPrefix)
+        var reaped = 0
+        for (pid, path) in processes {
+            if current.contains(path) { continue }
+            let died = SSHProcess.killAndVerify(pid: pid)
+            if died { reaped += 1 } else {
+                OnyxLog.ssh.error("""
+                    orphan reap: pid \(pid, privacy: .public) refused SIGKILL — \
+                    probably stuck in kernel D state; will retry next cycle
+                    """)
+            }
+        }
+        if reaped > 0 {
+            OnyxLog.ssh.notice("""
+                orphan reap: killed \(reaped, privacy: .public) leaked master(s) \
+                from a previous re-establish cycle
+                """)
         }
     }
 
@@ -354,10 +428,14 @@ public final class SSHKeeper {
                 // Tear down the old primary (now the spare). It'll be
                 // marked dead so step 5 establishes a fresh master.
                 let oldPath = state.slots[oldPrimary].path
-                Self.stopMaster(at: oldPath, userHost: userHost)
+                let oldPID = state.slots[oldPrimary].masterPID
+                Self.stopMaster(at: oldPath,
+                                userHost: userHost,
+                                knownPID: oldPID)
                 try? FileManager.default.removeItem(atPath: oldPath)
                 state.slots[oldPrimary].alive = false
                 state.slots[oldPrimary].establishedAt = nil
+                state.slots[oldPrimary].masterPID = nil
                 state.slots[oldPrimary].lastSmokeTestAt = nil
             }
         }
@@ -428,6 +506,8 @@ public final class SSHKeeper {
         }
         state.slots[slot].establishing = true
         let slotPath = state.slots[slot].path
+        let oldMasterPID = state.slots[slot].masterPID
+        state.slots[slot].masterPID = nil  // forget old PID — we're killing it now
         hostStates[host.id] = state
         lock.unlock()
 
@@ -437,11 +517,12 @@ public final class SSHKeeper {
         // on to a fresh socket — that's the leak documented in
         // docs/ssh-connection-leak.md (30+ hour-old notty sessions
         // piling up on the remote, eventually tripping MaxStartups
-        // and locking the user out). killMaster handles both the
-        // clean `ssh -O exit` case AND the SIGKILL-the-orphaned-PID
-        // case, then removes the socket file.
-        SSHProcess.killMaster(at: slotPath,
-                              userHost: Self.userHost(for: host))
+        // and locking the user out). The captured PID is the most
+        // reliable way to kill the master; lsof-by-socket can miss
+        // masters whose socket file has already been removed.
+        Self.stopMaster(at: slotPath,
+                        userHost: Self.userHost(for: host),
+                        knownPID: oldMasterPID)
 
         var args: [String] = [
             "-M", "-N", "-f",
@@ -471,6 +552,7 @@ public final class SSHKeeper {
         // to create the master. Verify with a real -O check before
         // claiming success.
         var success = result.exit == 0
+        var capturedPID: pid_t? = nil
         if success {
             success = Self.checkAlive(path: slotPath,
                                       userHost: Self.userHost(for: host))
@@ -480,6 +562,13 @@ public final class SSHKeeper {
                     host=\(host.label, privacy: .public) slot=\(slot, privacy: .public) — \
                     master forked but socket isn't responding
                     """)
+            } else {
+                // Capture the master's actual PID NOW, while the socket
+                // file is fresh. After SIGKILL+reap or a removeItem
+                // call this lookup would return nothing. Without this
+                // we couldn't kill a stuck master that had outlived
+                // its socket file.
+                capturedPID = SSHProcess.findMasterPIDs(socketPath: slotPath).first
             }
         }
 
@@ -502,17 +591,42 @@ public final class SSHKeeper {
         if var s = hostStates[host.id] {
             s.slots[slot].establishing = false
             s.slots[slot].alive = success
-            if success { s.slots[slot].establishedAt = Date() }
+            if success {
+                s.slots[slot].establishedAt = Date()
+                s.slots[slot].masterPID = capturedPID
+                s.slots[slot].lastSmokeTestAt = nil  // re-test soon
+                s.slots[slot].lastSmokeTestFailed = false
+            } else {
+                s.slots[slot].masterPID = nil
+            }
             hostStates[host.id] = s
         }
         lock.unlock()
     }
 
-    /// Wholesale teardown of a slot's master — `ssh -O exit` first,
-    /// then SIGKILL the owning process via lsof if it didn't quit
-    /// cleanly. Removes the socket file. Use whenever a slot is being
-    /// retired or the app is shutting down.
-    private static func stopMaster(at path: String, userHost: String) {
+    /// Wholesale teardown of a slot's master. Prefers the captured
+    /// PID over `lsof`-by-socket because the socket file may already
+    /// be gone (a previous removeItem call, or the kernel reaping it
+    /// after the master crashed). Without the PID fallback, stuck
+    /// masters got orphaned every cycle and accumulated as the leaked
+    /// connections the user reported piling up on remote hosts.
+    private static func stopMaster(at path: String,
+                                   userHost: String,
+                                   knownPID: pid_t? = nil) {
+        // Try clean exit first if the socket is still there.
+        if FileManager.default.fileExists(atPath: path) {
+            _ = SSHProcess.run([
+                "-o", "ControlPath=\(path)",
+                "-O", "exit",
+                userHost
+            ], softTimeout: 2)
+        }
+        // Direct PID kill if we captured one at establish time.
+        if let pid = knownPID, kill(pid, 0) == 0 {
+            _ = SSHProcess.killAndVerify(pid: pid)
+        }
+        // Standard lsof-based cleanup as a backup. This still catches
+        // masters where we never captured a PID (legacy state, etc.).
         SSHProcess.killMaster(at: path, userHost: userHost)
     }
 
