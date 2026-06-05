@@ -216,7 +216,12 @@ public enum SSHProcess {
     /// know when a master is genuinely-leaked-and-stuck (kernel queued
     /// the signal but the process is sleeping uninterruptibly in a
     /// syscall) vs successfully reaped.
-    public static func killAndVerify(pid: pid_t, timeoutMs: Int = 500) -> Bool {
+    ///
+    /// Default of 5 seconds: most D-state processes return from their
+    /// syscall within a few seconds when the TCP times out. Worth the
+    /// wait because every uncaught orphan keeps holding a remote
+    /// connection slot.
+    public static func killAndVerify(pid: pid_t, timeoutMs: Int = 5000) -> Bool {
         _ = kill(pid, SIGKILL)
         let deadline = Date().addingTimeInterval(TimeInterval(timeoutMs) / 1000.0)
         while Date() < deadline {
@@ -224,8 +229,76 @@ public enum SSHProcess {
                 // ESRCH (3): no such process. Cleanly reaped.
                 return errno == ESRCH
             }
-            usleep(20_000)  // 20ms
+            // Re-send SIGKILL periodically — if the process briefly came
+            // out of its uninterruptible sleep, a fresh signal queued
+            // while it's runnable can land cleanly.
+            usleep(100_000)  // 100ms
+            _ = kill(pid, SIGKILL)
         }
         return false
+    }
+
+    /// Definitively reap every ssh master process referencing the given
+    /// directory. This is the nuclear option behind the in-app "Reap
+    /// all SSH" button and the cleanup script — used when accumulated
+    /// orphans have started tripping the remote sshd's MaxStartups.
+    ///
+    /// Returns (killed, refusedSIGKILL) — killed is the number of
+    /// processes that died successfully, refusedSIGKILL is the number
+    /// stuck in uninterruptible kernel sleep that we couldn't get rid
+    /// of (those will die on their own when the underlying TCP syscall
+    /// returns — typically within seconds to minutes of the remote
+    /// sshd's keepalive timing them out).
+    @discardableResult
+    public static func reapAllInDir(_ prefix: String) -> (killed: Int, refused: Int) {
+        let processes = findAllSSHMastersInDir(prefix)
+        var killed = 0
+        var refused = 0
+        for (pid, _) in processes {
+            if killAndVerify(pid: pid) {
+                killed += 1
+            } else {
+                refused += 1
+            }
+        }
+        // Sweep the directory clean of leftover socket files too.
+        if let entries = try? FileManager.default.contentsOfDirectory(atPath: prefix) {
+            for name in entries {
+                try? FileManager.default.removeItem(atPath: "\(prefix)/\(name)")
+            }
+        }
+        return (killed, refused)
+    }
+
+    /// Diagnostic — dump every ssh process on the system with its
+    /// command line, plus the contents of the mux dir. Returns a
+    /// human-readable string suitable for logging. Used when the
+    /// keeper appears to be misbehaving so a human can see ground
+    /// truth instead of relying on what the keeper *thinks* is true.
+    public static func inventoryDump(muxDir: String) -> String {
+        var lines: [String] = []
+        lines.append("=== SSH process inventory ===")
+        let processes = findAllSSHMastersInDir(muxDir)
+        if processes.isEmpty {
+            lines.append("  (no ssh processes referencing \(muxDir))")
+        } else {
+            for (pid, path) in processes {
+                lines.append("  pid=\(pid) controlPath=\(path)")
+            }
+        }
+        lines.append("")
+        lines.append("=== Mux dir contents (\(muxDir)) ===")
+        if let entries = try? FileManager.default.contentsOfDirectory(atPath: muxDir) {
+            if entries.isEmpty {
+                lines.append("  (empty)")
+            } else {
+                for name in entries.sorted() {
+                    lines.append("  \(name)")
+                }
+            }
+        } else {
+            lines.append("  (could not read directory)")
+        }
+        return lines.joined(separator: "\n")
     }
 }

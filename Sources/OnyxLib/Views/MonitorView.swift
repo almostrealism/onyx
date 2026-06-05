@@ -1595,6 +1595,7 @@ private struct SSHDiagnosticPanel: View {
     let isTesting: Bool
     let onReset: () -> Void
     let onTestConnect: () -> Void
+    @State private var lastReapResult: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1715,6 +1716,52 @@ private struct SSHDiagnosticPanel: View {
                         .cornerRadius(3)
                 }
                 .buttonStyle(.plain)
+            }
+            .foregroundColor(.white.opacity(0.7))
+            .padding(.top, 4)
+
+            // Global, host-independent: reap every ssh process the
+            // keeper has spawned (or that anyone has spawned with a
+            // ControlPath in our mux dir). Equivalent to running the
+            // ssh-leak-cleanup.sh script. Use when accumulated orphans
+            // have started tripping the remote sshd MaxStartups.
+            HStack(spacing: 8) {
+                Button(action: {
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        let result = SSHKeeper.shared.reapAll()
+                        DispatchQueue.main.async {
+                            lastReapResult = "Killed \(result.killed), refused \(result.refused)"
+                        }
+                    }
+                }) {
+                    Text("Reap all SSH (nuclear)")
+                        .monitorFont(size: 10)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color(hex: "FF6B6B").opacity(0.25))
+                        .cornerRadius(3)
+                }
+                .buttonStyle(.plain)
+                Button(action: {
+                    let dump = SSHKeeper.shared.inventoryDump()
+                    // Drop on the pasteboard so the user can share it.
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(dump, forType: .string)
+                    lastReapResult = "Inventory copied to clipboard"
+                }) {
+                    Text("Copy inventory")
+                        .monitorFont(size: 10)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(3)
+                }
+                .buttonStyle(.plain)
+                if let summary = lastReapResult {
+                    Text(summary)
+                        .monitorFont(size: 9)
+                        .foregroundColor(.gray.opacity(0.6))
+                }
             }
             .foregroundColor(.white.opacity(0.7))
             .padding(.top, 4)

@@ -181,6 +181,77 @@ public final class SSHKeeper {
         OnyxLog.ssh.notice("SSHKeeper shutdown complete")
     }
 
+    /// Nuclear cleanup — kill every ssh master process the keeper has
+    /// ever spawned (or that anyone else has spawned with a ControlPath
+    /// in our mux dir), reset all in-memory state, sweep socket files.
+    /// Equivalent to running `scripts/ssh-leak-cleanup.sh` but from
+    /// inside the app. Returns (killed, refused) — `refused` are
+    /// processes stuck in uninterruptible kernel sleep that even
+    /// SIGKILL can't reach immediately; those generally die on their
+    /// own when the underlying TCP times out.
+    @discardableResult
+    public func reapAll() -> (killed: Int, refused: Int) {
+        OnyxLog.ssh.notice("SSHKeeper reapAll: nuclear cleanup requested")
+
+        // Snapshot every known PID across every host so the targeted
+        // kills run before the directory-wide sweep (preferring our
+        // precise tracking over a process-table scan).
+        lock.lock()
+        var knownPIDs: [(pid_t, String?)] = []
+        for state in hostStates.values {
+            for slot in state.slots {
+                if let pid = slot.masterPID {
+                    knownPIDs.append((pid, nil))
+                }
+            }
+        }
+        hostStates.removeAll()
+        lock.unlock()
+
+        for (pid, _) in knownPIDs {
+            _ = SSHProcess.killAndVerify(pid: pid)
+        }
+
+        let muxDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".ssh/onyx-mux").path
+        let result = SSHProcess.reapAllInDir(muxDir)
+        OnyxLog.ssh.notice("""
+            reapAll done: killed=\(result.killed, privacy: .public) \
+            refused=\(result.refused, privacy: .public)
+            """)
+        return result
+    }
+
+    /// Dump a human-readable inventory of every ssh process and every
+    /// mux socket the keeper can see. Logs it under
+    /// subsystem:com.onyx category:ssh AND returns it for the UI to
+    /// display. Use when "why are there so many connections?" needs
+    /// ground truth instead of cached state.
+    public func inventoryDump() -> String {
+        let muxDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".ssh/onyx-mux").path
+        var dump = SSHProcess.inventoryDump(muxDir: muxDir)
+
+        lock.lock()
+        dump += "\n\n=== Keeper state ===\n"
+        if hostStates.isEmpty {
+            dump += "  (no host state tracked)\n"
+        }
+        for (hid, state) in hostStates {
+            dump += "  host \(hid.uuidString.prefix(8)) primary=slot\(state.primarySlot)\n"
+            for slot in state.slots {
+                let pidStr = slot.masterPID.map { "pid \($0)" } ?? "no pid"
+                let aliveStr = slot.alive ? "alive" : (slot.establishing ? "establishing" : "DEAD")
+                dump += "    slot\(slot.slot) \(aliveStr) \(pidStr)\n"
+                dump += "      path=\(slot.path)\n"
+            }
+        }
+        lock.unlock()
+
+        OnyxLog.ssh.notice("inventoryDump:\n\(dump, privacy: .public)")
+        return dump
+    }
+
     /// Emergency kill switch — disables all supervisor work. Existing
     /// state stays so the UI keeps reporting the last-known status, but
     /// no new ssh calls are made and no new maintenance tasks enqueue.
