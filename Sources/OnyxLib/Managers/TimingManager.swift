@@ -47,6 +47,39 @@ public class TimingManager: ObservableObject {
     private let windowIndex: Int
 
     /// DailyTime.
+    /// Reorder every day's slice list using the week-total ranking so
+    /// each bar in the daily-hours chart stacks projects in the same
+    /// order. The view renders the slice array top-to-bottom, so we
+    /// sort smallest-weekly-total → largest, which means the largest
+    /// weekly-total project lands at the BOTTOM of every bar. A user
+    /// can then visually follow a single colored band across the week
+    /// to track that project's daily progression.
+    ///
+    /// `totals` must be sorted biggest-first (the canonical ordering
+    /// `recomputeWeekly` produces); we depend on that for the rank
+    /// derivation. Verified by `TimingProjectOrderTests`.
+    public static func applyConsistentStackOrder(
+        daily: [DailyTime],
+        totals: [ProjectTotal]
+    ) -> [DailyTime] {
+        // Build rank map: biggest weekly total → largest rank value.
+        // `totals` is sorted biggest-first, so element at offset 0 gets
+        // rank = totals.count, the last element gets rank = 1.
+        var weeklyRank: [String: Int] = [:]
+        for (offset, t) in totals.enumerated() {
+            weeklyRank[t.title] = totals.count - offset
+        }
+        return daily.map { day in
+            let sorted = day.projects.sorted {
+                (weeklyRank[$0.projectTitle] ?? 0)
+                    < (weeklyRank[$1.projectTitle] ?? 0)
+            }
+            return DailyTime(id: day.id, dayLabel: day.dayLabel,
+                             date: day.date, hours: day.hours,
+                             projects: sorted)
+        }
+    }
+
     public struct DailyTime: Identifiable {
         /// Id.
         public let id: String
@@ -222,10 +255,14 @@ public class TimingManager: ObservableObject {
                 if color.isEmpty || color.count != 6 {
                     color = palette[abs(entry.key.hashValue) % palette.count]
                 }
-                return ProjectSlice(projectTitle: entry.key, color: color, hours: entry.value.seconds / 3600.0)
-            }.sorted { $0.hours > $1.hours }
-
-            daily.append(DailyTime(id: dayLabels[i], dayLabel: dayLabels[i], date: date, hours: hours, projects: slices))
+                return ProjectSlice(projectTitle: entry.key,
+                                    color: color,
+                                    hours: entry.value.seconds / 3600.0)
+            }
+            // Ordering is applied per-day below once we've computed the
+            // week-total ranking (so all days share the same stack order).
+            daily.append(DailyTime(id: dayLabels[i], dayLabel: dayLabels[i],
+                                   date: date, hours: hours, projects: slices))
         }
 
         var colorIndex = 0
@@ -237,6 +274,8 @@ public class TimingManager: ObservableObject {
             }
             return ProjectTotal(title: entry.key, color: color, hours: entry.value.seconds / 3600.0)
         }.sorted { $0.hours > $1.hours }
+
+        daily = Self.applyConsistentStackOrder(daily: daily, totals: totals)
 
         dailyHours = daily
         projectTotals = totals
