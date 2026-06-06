@@ -224,10 +224,40 @@ public final class WorkflowMonitor: ObservableObject {
                        completion: @escaping (Result<PipelineStatus, Error>) -> Void) {
         switch spec.target {
         case .run(let id):
-            fetchJobs(spec: spec, runID: id, token: token,
-                      runNumber: nil, runURL: nil,
-                      headBranch: nil, title: nil,
-                      completion: completion)
+            // 1. Fetch the run detail to recover head_branch + the
+            //    workflow's display name. Without this, run-target
+            //    rows showed "run #<id>" with no branch, which is
+            //    visually useless for a PR-tracking flow.
+            var components = URLComponents()
+            components.scheme = "https"
+            components.host = "api.github.com"
+            components.path = "/repos/\(spec.owner)/\(spec.repo)/actions/runs/\(id)"
+            guard let url = components.url else {
+                completion(.failure(NSError(domain: "WorkflowMonitor", code: 1)))
+                return
+            }
+            var req = URLRequest(url: url)
+            applyAuth(&req, token: token)
+            session.dataTask(with: req) { [weak self] data, _, error in
+                if let e = error { completion(.failure(e)); return }
+                guard let data = data,
+                      let run = try? JSONDecoder().decode(WorkflowRunsResponse.Run.self,
+                                                          from: data) else {
+                    // Decoder failure — fall back to jobs-only fetch so
+                    // at least the counts populate.
+                    self?.fetchJobs(spec: spec, runID: id, token: token,
+                                    runNumber: nil, runURL: nil,
+                                    headBranch: nil, title: nil,
+                                    completion: completion)
+                    return
+                }
+                self?.fetchJobs(spec: spec, runID: id, token: token,
+                                runNumber: run.run_number,
+                                runURL: run.html_url,
+                                headBranch: run.head_branch,
+                                title: run.name ?? run.display_title,
+                                completion: completion)
+            }.resume()
         case .workflow(let file, let branch):
             // 1. Find the latest run on the (file, branch) combo.
             var components = URLComponents()

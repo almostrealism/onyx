@@ -2346,14 +2346,17 @@ private struct PipelineRow: View {
     }
 
     /// Workflow name without any branch suffix — the branch lives in
-    /// its own chip on the title row, so we don't want it doubled up.
-    /// For run-based specs the row title is just the workflow display.
+    /// its own slot on the title row, so we don't want it doubled up.
+    /// For run-based specs we prefer the resolved workflow name from
+    /// the run detail (e.g. "Build") and only fall back to "run #N"
+    /// if the detail hasn't been fetched yet.
     private var workflowTitle: String {
+        if let t = status.title, !t.isEmpty { return t }
         switch status.spec.target {
         case .workflow(let file, _):
             return (file as NSString).deletingPathExtension
         case .run:
-            return status.title ?? status.spec.displayName
+            return status.spec.displayName
         }
     }
 
