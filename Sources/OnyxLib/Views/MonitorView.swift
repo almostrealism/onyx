@@ -2286,18 +2286,24 @@ private struct PipelineRow: View {
                                 .foregroundColor(.white.opacity(0.85))
                                 .lineLimit(1)
                                 .truncationMode(.tail)
-                            if let branch = branchTag {
-                                Text("/")
-                                    .monitorFont(size: 12)
-                                    .foregroundColor(.gray.opacity(0.4))
-                                    .layoutPriority(1)
-                                Text(branch)
-                                    .monitorFont(size: 12, weight: .medium)
-                                    .foregroundColor(accentColor)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .layoutPriority(1)
-                            }
+                            Text("/")
+                                .monitorFont(size: 12)
+                                .foregroundColor(.gray.opacity(0.4))
+                                .layoutPriority(1)
+                            // Always render the branch slot so it's
+                            // obvious when we're missing data: "?" means
+                            // the API didn't return a head_branch for
+                            // the latest run, which we can then dig
+                            // into. A truly empty slot would be
+                            // ambiguous (view bug vs missing data).
+                            Text(branchTag ?? "?")
+                                .monitorFont(size: 12, weight: .medium)
+                                .foregroundColor(branchTag == nil
+                                                 ? .gray.opacity(0.5)
+                                                 : accentColor)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .layoutPriority(1)
                         }
                         HStack(spacing: 6) {
                             Text(secondaryLine)
