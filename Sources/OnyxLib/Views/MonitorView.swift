@@ -2272,27 +2272,30 @@ private struct PipelineRow: View {
                     PipelineStatusDot(overall: status.overall)
                         .padding(.top, 6)
                     VStack(alignment: .leading, spacing: 1) {
-                        // Title row: workflow name + branch chip. The
-                        // chip has higher layout priority so the
+                        // Title row: workflow name, separator, branch.
+                        // Branch gets the higher layout priority so the
                         // workflow name truncates before the branch
-                        // disappears — branch is the more useful
-                        // identifier when multiple pipelines for the
-                        // same workflow file are being tracked at once.
-                        HStack(spacing: 5) {
+                        // disappears. Render as inline Text rather than
+                        // a chip so it's visible even when the column
+                        // is very narrow — the branch is the single
+                        // most useful identifier when the same workflow
+                        // is being tracked on multiple branches at once.
+                        HStack(spacing: 4) {
                             Text(workflowTitle)
                                 .monitorFont(size: 12)
                                 .foregroundColor(.white.opacity(0.85))
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                             if let branch = branchTag {
+                                Text("/")
+                                    .monitorFont(size: 12)
+                                    .foregroundColor(.gray.opacity(0.4))
+                                    .layoutPriority(1)
                                 Text(branch)
-                                    .monitorFont(size: 9, weight: .medium)
-                                    .foregroundColor(.white.opacity(0.85))
+                                    .monitorFont(size: 12, weight: .medium)
+                                    .foregroundColor(accentColor)
                                     .lineLimit(1)
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(accentColor.opacity(0.22))
-                                    .cornerRadius(3)
+                                    .truncationMode(.middle)
                                     .layoutPriority(1)
                             }
                         }
