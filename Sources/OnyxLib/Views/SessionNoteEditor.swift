@@ -90,6 +90,16 @@ struct SessionNoteEditor: View {
                 text = existing.text
             }
             isFocused = true
+            // Select-all once the TextField has actually become first
+            // responder. SwiftUI's @FocusState doesn't expose a
+            // pre-select API, so we fire a NSText.selectAll up the
+            // responder chain — the field receives it and highlights
+            // its contents. The brief delay lets focus settle first;
+            // without it the action arrives before the field is the
+            // first responder and is dropped silently.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+            }
         }
     }
 
