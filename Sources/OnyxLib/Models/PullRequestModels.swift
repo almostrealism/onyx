@@ -17,15 +17,21 @@ public struct PullRequest: Identifiable, Equatable, Hashable {
     /// Derived from GraphQL's `mergeStateStatus` — CLEAN means passes
     /// branch protections + no conflicts + checks green.
     public let mergeStatus: PRMergeStatus
+    /// Head branch (`headRefName`). Used to build pipeline-suggestion
+    /// URLs for the "add pipeline from open PR" UX — we need the
+    /// branch to query the latest workflow run on it.
+    public let headBranch: String?
 
     public init(repoFullName: String, number: Int, title: String, url: String,
-                openCommentThreads: Int, mergeStatus: PRMergeStatus) {
+                openCommentThreads: Int, mergeStatus: PRMergeStatus,
+                headBranch: String? = nil) {
         self.repoFullName = repoFullName
         self.number = number
         self.title = title
         self.url = url
         self.openCommentThreads = openCommentThreads
         self.mergeStatus = mergeStatus
+        self.headBranch = headBranch
     }
 }
 

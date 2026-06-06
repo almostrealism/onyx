@@ -46,6 +46,21 @@ public final class GitHubConfigStore: ObservableObject {
         repoURLs.compactMap(GitHubRepoSpec.parse)
     }
 
+    /// Verbatim URLs the user has added for GitHub Actions pipeline
+    /// tracking. Same UserDefaults convention as repoURLs.
+    public var pipelineURLs: [String] {
+        get { (UserDefaults.standard.array(forKey: "github_pipelines") as? [String]) ?? [] }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "github_pipelines")
+            objectWillChange.send()
+        }
+    }
+
+    /// Parsed pipeline specs — invalid entries silently filtered.
+    public var parsedPipelines: [PipelineSpec] {
+        pipelineURLs.compactMap(PipelineSpec.parse)
+    }
+
     public var isConfigured: Bool { !token.isEmpty && !parsedRepos.isEmpty }
 
     private init() {}

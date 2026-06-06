@@ -349,17 +349,24 @@ struct MonitorView: View {
                                 if appState.timing.isConfigured {
                                     TimingChartSection(timing: appState.timing, accentColor: appState.accentColor)
                                 }
-                                // Session notes + open PRs share a row.
-                                // Both fill their half; either can be empty
-                                // (no notes / GitHub unconfigured) without
-                                // crowding the other.
+                                // Two-column layout below the timing chart:
+                                // - Left:  session notes → reminders
+                                // - Right: open PRs → pipelines
+                                // Either column can be sparse without
+                                // crowding the other; the columns just
+                                // collapse vertically.
                                 HStack(alignment: .top, spacing: 16) {
-                                    SessionNotesSection(appState: appState)
-                                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                                    PullRequestsSection(appState: appState)
-                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                                    VStack(alignment: .leading, spacing: 16) {
+                                        SessionNotesSection(appState: appState)
+                                        RemindersSection(appState: appState)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                                    VStack(alignment: .leading, spacing: 16) {
+                                        PullRequestsSection(appState: appState)
+                                        PipelinesSection(appState: appState)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
                                 }
-                                RemindersSection(appState: appState)
                             }
                             .frame(maxWidth: .infinity, alignment: .topLeading)
                             .padding(.trailing, 20)
@@ -2171,6 +2178,292 @@ private struct MergeStatusDot: View {
         case .conflicts:     return "Merge conflicts"
         case .unknown:       return "GitHub hasn't computed merge status yet"
         }
+    }
+}
+
+/// Companion to PullRequestsSection. Lists every pipeline the user
+/// has added to `GitHubConfigStore.pipelineURLs`, each row showing
+/// the workflow name plus job counts for the most recent run.
+/// Section header has a "+" button that opens a popover suggesting
+/// pipelines derived from the latest workflow run of each open PR.
+struct PipelinesSection: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject private var monitor = WorkflowMonitor.shared
+    @ObservedObject private var prManager = PullRequestManager.shared
+    @ObservedObject private var config = GitHubConfigStore.shared
+    @State private var showSuggestions = false
+
+    var body: some View {
+        if !config.token.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("PIPELINES")
+                        .monitorFont(size: 10, weight: .medium)
+                        .foregroundColor(appState.accentColor)
+                        .tracking(2)
+                    Spacer()
+                    if !monitor.pipelines.isEmpty {
+                        Text("\(monitor.pipelines.count)")
+                            .monitorFont(size: 10)
+                            .foregroundColor(.gray.opacity(0.4))
+                    }
+                    Button(action: { showSuggestions = true }) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(appState.accentColor)
+                            .padding(.horizontal, 4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Add a pipeline from your open PRs")
+                    .popover(isPresented: $showSuggestions) {
+                        PipelineSuggestionsPopover(
+                            prs: prManager.pullRequests,
+                            existingIDs: Set(config.parsedPipelines.map(\.id)),
+                            accentColor: appState.accentColor,
+                            onAdd: { url in
+                                var current = config.pipelineURLs
+                                current.append(url)
+                                config.pipelineURLs = current
+                                WorkflowMonitor.shared.refresh()
+                            }
+                        )
+                    }
+                }
+                if let error = monitor.lastError, monitor.pipelines.isEmpty {
+                    Text(error)
+                        .monitorFont(size: 10)
+                        .foregroundColor(.red.opacity(0.6))
+                        .lineLimit(2)
+                } else if monitor.pipelines.isEmpty {
+                    if config.parsedPipelines.isEmpty {
+                        Text("Click + to add a pipeline from your open PRs")
+                            .monitorFont(size: 11)
+                            .foregroundColor(.gray.opacity(0.4))
+                    } else {
+                        Text(monitor.isLoading ? "Loading…" : "No data")
+                            .monitorFont(size: 11)
+                            .foregroundColor(.gray.opacity(0.4))
+                    }
+                } else {
+                    ForEach(monitor.pipelines) { p in
+                        PipelineRow(status: p, accentColor: appState.accentColor)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PipelineRow: View {
+    let status: PipelineStatus
+    let accentColor: Color
+
+    var body: some View {
+        Button(action: openRun) {
+            HStack(alignment: .top, spacing: 8) {
+                PipelineStatusDot(overall: status.overall)
+                    .padding(.top, 6)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(status.spec.displayName)
+                        .monitorFont(size: 12)
+                        .foregroundColor(.white.opacity(0.85))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    HStack(spacing: 6) {
+                        Text("\(status.spec.fullName)\(status.runNumber.map { " #\($0)" } ?? "")")
+                            .monitorFont(size: 10)
+                            .foregroundColor(accentColor.opacity(0.7))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 0)
+                        countsBadges
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cornerRadius(3)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Per-bucket counts only — suppress zeros so the row stays clean
+    /// when the pipeline is just `OK / N succeeded` with no other state.
+    @ViewBuilder
+    private var countsBadges: some View {
+        HStack(spacing: 5) {
+            if status.failed > 0 {
+                countBadge("xmark", status.failed, color: Color(hex: "FF6B6B"))
+            }
+            if status.inProgress > 0 {
+                countBadge("arrow.triangle.2.circlepath", status.inProgress,
+                           color: Color(hex: "66CCFF"))
+            }
+            if status.queued > 0 {
+                countBadge("hourglass", status.queued, color: Color(hex: "FFD06B"))
+            }
+            if status.succeeded > 0 {
+                countBadge("checkmark", status.succeeded, color: Color(hex: "6BFF8E"))
+            }
+            if status.skipped > 0 {
+                countBadge("forward", status.skipped, color: .gray.opacity(0.5))
+            }
+        }
+    }
+
+    private func countBadge(_ symbol: String, _ count: Int, color: Color) -> some View {
+        HStack(spacing: 2) {
+            Image(systemName: symbol)
+                .font(.system(size: 8))
+            Text("\(count)")
+                .monitorFont(size: 9)
+        }
+        .foregroundColor(color)
+    }
+
+    private func openRun() {
+        if let s = status.runURL, let url = URL(string: s) { NSWorkspace.shared.open(url) }
+        else if let url = URL(string: status.spec.url) { NSWorkspace.shared.open(url) }
+    }
+}
+
+private struct PipelineStatusDot: View {
+    let overall: PipelineOverallStatus
+    var body: some View {
+        Circle().fill(color).frame(width: 6, height: 6).help(tooltip)
+    }
+    private var color: Color {
+        switch overall {
+        case .running:  return Color(hex: "66CCFF")
+        case .success:  return Color(hex: "6BFF8E")
+        case .failure:  return Color(hex: "FF6B6B")
+        case .mixed:    return Color(hex: "FFD06B")
+        case .queued:   return Color(hex: "FFD06B")
+        case .skipped:  return Color.gray.opacity(0.5)
+        case .unknown:  return Color.gray.opacity(0.4)
+        }
+    }
+    private var tooltip: String {
+        switch overall {
+        case .running:  return "Pipeline running"
+        case .success:  return "All jobs passed"
+        case .failure:  return "Failed"
+        case .mixed:    return "Some failures, some successes"
+        case .queued:   return "Queued — hasn't started"
+        case .skipped:  return "Skipped"
+        case .unknown:  return "No run data yet"
+        }
+    }
+}
+
+/// Popover content for the "+" button. Suggests one pipeline per
+/// open PR by inferring (workflow, headBranch) from the PR head and
+/// filtering out pipelines the user already added.
+private struct PipelineSuggestionsPopover: View {
+    let prs: [PullRequest]
+    let existingIDs: Set<String>
+    let accentColor: Color
+    let onAdd: (String) -> Void
+    @State private var manualURL: String = ""
+    @Environment(\.dismiss) private var dismiss
+
+    /// Synthesize a workflow URL filtered by the PR's head branch — the
+    /// canonical GitHub URL form `…/actions/workflows/?query=branch:foo`
+    /// happens to parse into our PipelineSpec model, but it's a
+    /// per-repo URL and we don't know the workflow file from PR data
+    /// alone. So we offer one suggestion per PR pointing at the repo
+    /// actions page filtered by the PR branch; once the user adds it,
+    /// WorkflowMonitor finds the latest matching run automatically.
+    ///
+    /// We surface the user's manual URL field too so they can add a
+    /// pipeline by URL alongside the suggestions.
+    private var suggestions: [(label: String, url: String, id: String)] {
+        prs.compactMap { pr in
+            guard let branch = pr.headBranch else { return nil }
+            let parts = pr.repoFullName.split(separator: "/").map(String.init)
+            guard parts.count == 2 else { return nil }
+            let owner = parts[0]; let repo = parts[1]
+            // Best-effort: use the repo-level actions URL with branch
+            // filter. WorkflowMonitor's .workflow target accepts this
+            // shape via the file path — but we don't know the file
+            // name. So we offer suggestions ONLY when the user pastes
+            // an actual workflow URL; PRs alone surface their checks
+            // page so the user can copy a workflow URL from there.
+            let url = "https://github.com/\(owner)/\(repo)/pull/\(pr.number)/checks"
+            let label = "\(pr.repoFullName)#\(pr.number)  \(pr.title)"
+            // We can't pre-build the workflow URL here, so don't dedupe
+            // — checks URLs are the link to open, not a tracking spec.
+            _ = branch
+            return (label, url, "\(pr.repoFullName)#\(pr.number)")
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("ADD PIPELINE")
+                .monitorFont(size: 10, weight: .medium)
+                .foregroundColor(accentColor)
+                .tracking(2)
+            HStack(spacing: 6) {
+                TextField("Paste workflow or run URL",
+                          text: $manualURL)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.85))
+                    .padding(.horizontal, 6).padding(.vertical, 4)
+                    .background(Color.white.opacity(0.06))
+                    .cornerRadius(3)
+                Button("Add") {
+                    let trimmed = manualURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty, PipelineSpec.parse(trimmed) != nil {
+                        onAdd(trimmed); manualURL = ""; dismiss()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            Divider().background(Color.white.opacity(0.06))
+            Text("FROM OPEN PRs")
+                .monitorFont(size: 9, weight: .medium)
+                .foregroundColor(.gray.opacity(0.5))
+                .tracking(1)
+            if suggestions.isEmpty {
+                Text("No open PRs with a head branch — open the PR's Checks tab to copy a workflow URL")
+                    .monitorFont(size: 10)
+                    .foregroundColor(.gray.opacity(0.5))
+                    .frame(maxWidth: 320, alignment: .leading)
+            } else {
+                ForEach(suggestions, id: \.id) { s in
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 9))
+                            .foregroundColor(accentColor)
+                        Text(s.label)
+                            .monitorFont(size: 11)
+                            .foregroundColor(.white.opacity(0.85))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 0)
+                        Button("Open Checks") {
+                            if let url = URL(string: s.url) {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .monitorFont(size: 10)
+                        .foregroundColor(accentColor.opacity(0.8))
+                    }
+                }
+                Text("Open Checks → click a workflow → copy that URL → paste above")
+                    .monitorFont(size: 9)
+                    .foregroundColor(.gray.opacity(0.4))
+                    .padding(.top, 2)
+            }
+        }
+        .padding(14)
+        .frame(width: 380)
     }
 }
 

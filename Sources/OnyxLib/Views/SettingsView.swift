@@ -724,6 +724,8 @@ private struct GitHubSettingsSection: View {
     @ObservedObject private var config = GitHubConfigStore.shared
     @State private var reposText: String = ""
     @State private var hasInitializedText = false
+    @State private var pipelinesText: String = ""
+    @State private var hasInitializedPipelinesText = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -792,6 +794,43 @@ private struct GitHubSettingsSection: View {
 
             if !config.parsedRepos.isEmpty {
                 Text("Watching \(config.parsedRepos.count) repo\(config.parsedRepos.count == 1 ? "" : "s")")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+            }
+
+            Text("PIPELINES — one workflow or run URL per line")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.5))
+                .tracking(1)
+                .padding(.top, 10)
+
+            TextEditor(text: $pipelinesText)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(3)
+                .frame(minHeight: 70, maxHeight: 110)
+                .onAppear {
+                    if !hasInitializedPipelinesText {
+                        pipelinesText = config.pipelineURLs.joined(separator: "\n")
+                        hasInitializedPipelinesText = true
+                    }
+                }
+                .onChange(of: pipelinesText) { _, newValue in
+                    let lines = newValue
+                        .split(whereSeparator: \.isNewline)
+                        .map { String($0).trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                    if lines != config.pipelineURLs {
+                        config.pipelineURLs = lines
+                        WorkflowMonitor.shared.refresh()
+                    }
+                }
+
+            if !config.parsedPipelines.isEmpty {
+                Text("Watching \(config.parsedPipelines.count) pipeline\(config.parsedPipelines.count == 1 ? "" : "s")")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.4))
             }

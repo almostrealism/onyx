@@ -137,6 +137,7 @@ public final class PullRequestManager: ObservableObject {
             url
             mergeStateStatus
             mergeable
+            headRefName
             reviewThreads(first: 100) {
               nodes { isResolved }
             }
@@ -186,7 +187,8 @@ public final class PullRequestManager: ObservableObject {
                         openCommentThreads: node.reviewThreads?.nodes?
                             .filter { $0.isResolved == false }.count ?? 0,
                         mergeStatus: PRMergeStatus.fromGraphQL(state: node.mergeStateStatus,
-                                                               mergeable: node.mergeable)
+                                                               mergeable: node.mergeable),
+                        headBranch: node.headRefName
                     )
                 }
                 completion(.success(prs))
@@ -232,6 +234,7 @@ public final class PullRequestManager: ObservableObject {
         let url: String
         let mergeStateStatus: String?
         let mergeable: String?
+        let headRefName: String?
         let reviewThreads: ThreadList?
     }
     private struct ThreadList: Decodable {
