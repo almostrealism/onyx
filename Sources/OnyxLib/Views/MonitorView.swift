@@ -2270,7 +2270,7 @@ private struct PipelineRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     HStack(spacing: 6) {
-                        Text("\(status.spec.fullName)\(status.runNumber.map { " #\($0)" } ?? "")")
+                        Text(secondaryLine)
                             .monitorFont(size: 10)
                             .foregroundColor(accentColor.opacity(0.7))
                             .lineLimit(1)
@@ -2287,6 +2287,20 @@ private struct PipelineRow: View {
             .cornerRadius(3)
         }
         .buttonStyle(.plain)
+    }
+
+    /// `owner/repo · branch-name #123` — branch elided only when the
+    /// API hasn't told us one yet (no run resolved). Always shown when
+    /// available, even on main/master, since the run number alone
+    /// isn't enough to distinguish two `.run(id)` pipelines at a glance.
+    private var secondaryLine: String {
+        var parts: [String] = [status.spec.fullName]
+        if let b = status.headBranch, !b.isEmpty {
+            parts.append(b)
+        }
+        var line = parts.joined(separator: " · ")
+        if let n = status.runNumber { line += " #\(n)" }
+        return line
     }
 
     /// Per-bucket counts only — suppress zeros so the row stays clean
