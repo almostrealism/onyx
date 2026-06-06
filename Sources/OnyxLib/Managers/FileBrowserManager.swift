@@ -610,56 +610,29 @@ public class FileBrowserManager: ObservableObject {
         return RemoteScript.cleanedOutput(output)
     }
 
-    static func runProcessWithStatus(cmd: String, args: [String], stdin: String? = nil, timeout: TimeInterval = 10) -> ProcessResult {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: cmd)
-        process.arguments = args
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        let inputPipe: Pipe? = stdin.map { _ in Pipe() }
-        if let inputPipe = inputPipe {
-            process.standardInput = inputPipe
-        }
-
-        do {
-            try process.run()
-
-            if let inputPipe = inputPipe,
-               let scriptText = stdin,
-               let data = scriptText.data(using: .utf8) {
-                inputPipe.fileHandleForWriting.write(data)
-                try? inputPipe.fileHandleForWriting.close()
-            }
-
-            // Track whether OUR timer killed the process so callers can
-            // distinguish a timeout from a remote-side error of the same code.
-            let timedOutFlag = TimeoutFlag()
-            let killTimer = DispatchSource.makeTimerSource(queue: .global())
-            killTimer.schedule(deadline: .now() + timeout)
-            killTimer.setEventHandler {
-                if process.isRunning {
-                    timedOutFlag.tripped = true
-                    process.terminate()
-                }
-            }
-            killTimer.resume()
-
-            process.waitUntilExit()
-            killTimer.cancel()
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8)
-            return ProcessResult(output: output, exitCode: process.terminationStatus, timedOut: timedOutFlag.tripped)
-        } catch {
-            return ProcessResult(output: nil, exitCode: -1, timedOut: false)
-        }
-    }
-
-    /// Tiny boxed flag so the kill-timer closure can write to it from another queue.
-    private final class TimeoutFlag {
-        var tripped: Bool = false
+    static func runProcessWithStatus(cmd: String,
+                                     args: [String],
+                                     stdin: String? = nil,
+                                     timeout: TimeInterval = 10) -> ProcessResult {
+        // Route through the central RemoteExec so the PID gets tracked
+        // in the unified registry — every spawned process is reachable
+        // by the orphan reaper and inventory dump regardless of which
+        // manager initiated it. This is the migration the user asked
+        // for: ONE component for engaging with remote hosts.
+        let result = RemoteExec.shared.run(
+            cmd, args: args, stdin: stdin,
+            softTimeout: timeout,
+            captureStdout: true,
+            captureStderr: true,
+            label: "fileBrowser:\((cmd as NSString).lastPathComponent)"
+        )
+        // Old contract merged stdout and stderr together. Preserve it.
+        let merged = result.stdout + (result.stderr.isEmpty ? "" : "\n" + result.stderr)
+        return ProcessResult(
+            output: merged.isEmpty ? nil : merged,
+            exitCode: result.exit,
+            timedOut: result.timedOut
+        )
     }
 
     /// Build a user-facing error message from a failed ProcessResult. Prefers

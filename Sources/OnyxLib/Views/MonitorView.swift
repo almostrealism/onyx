@@ -1369,7 +1369,14 @@ struct TimingHeatmapGrid: View {
 
 struct ConnectionPoolSection: View {
     @ObservedObject var appState: AppState
-    @State private var muxStatus: [UUID: Bool] = [:]  // hostID -> mux alive
+    /// Observe the keeper directly — `stateGeneration` bumps on every
+    /// per-host slot mutation. SwiftUI re-renders this whole view tree
+    /// (column + expanded panel) in the same pass, so they CAN'T get
+    /// out of sync the way they did under the old cached-dict + 10s
+    /// timer approach (where the column showed "no mux" but the
+    /// expanded panel showed "alive" because they sampled the state
+    /// at different times).
+    @ObservedObject private var keeper = SSHKeeper.shared
     /// Which hostID currently has its diagnostic panel expanded inline.
     @State private var expandedDiagHost: UUID?
     /// Cached diagnostics indexed by hostID. Re-fetched when the row is
@@ -1481,7 +1488,13 @@ struct ConnectionPoolSection: View {
                     .foregroundColor(.gray.opacity(0.4))
 
                     ForEach(remoteHosts) { host in
-                        let alive = muxStatus[host.id] ?? false
+                        // Read directly from the keeper. Both this and
+                        // the expanded panel below source from the same
+                        // call, in the same SwiftUI pass — divergence is
+                        // structurally impossible. SwiftUI re-renders
+                        // on any keeper.stateGeneration bump because
+                        // we @ObservedObject the keeper above.
+                        let alive = SSHKeeper.shared.isMuxAlive(for: host)
                         let expanded = expandedDiagHost == host.id
                         VStack(alignment: .leading, spacing: 4) {
                             Button(action: { toggleDiagnostic(for: host) }) {
@@ -1523,24 +1536,16 @@ struct ConnectionPoolSection: View {
                 }
             }
         }
-        .onAppear { refreshMuxStatus() }
-        .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in
-            refreshMuxStatus()
-        }
+        // No timer-based refresh needed — keeper.stateGeneration
+        // bumps push updates to this view automatically. Dead /
+        // failover / re-establish events surface within one render
+        // cycle of when the keeper observed them.
     }
 
-    private func refreshMuxStatus() {
-        let hosts = appState.hosts.filter { !$0.isLocal }
-        DispatchQueue.global(qos: .utility).async {
-            var status: [UUID: Bool] = [:]
-            for host in hosts {
-                status[host.id] = appState.sshMuxAlive(for: host)
-            }
-            DispatchQueue.main.async {
-                muxStatus = status
-            }
-        }
-    }
+    // refreshMuxStatus / muxStatus have been removed — the keeper's
+    // ObservableObject + stateGeneration is now the single source the
+    // view binds to. Per-row alive flags are read directly from
+    // SSHKeeper.shared.isMuxAlive at render time.
 
     private func toggleDiagnostic(for host: HostConfig) {
         if expandedDiagHost == host.id {
@@ -1562,12 +1567,12 @@ struct ConnectionPoolSection: View {
     private func resetMux(for host: HostConfig) {
         appState.resetSSHMux(for: host)
         // Re-run the diagnostic immediately so the user sees the new
-        // (empty) state right away.
+        // (empty) state right away. The status column updates via the
+        // keeper's @Published stateGeneration; no manual sync needed.
         DispatchQueue.global(qos: .userInitiated).async {
             let diag = appState.diagnoseSSHMux(for: host)
             DispatchQueue.main.async {
                 muxDiagnostics[host.id] = diag
-                muxStatus[host.id] = diag.muxAlive
             }
         }
     }

@@ -30,64 +30,23 @@ public enum SSHProcess {
         public let timedOut: Bool       // true if SIGTERM/SIGKILL was used
     }
 
-    /// Run `/usr/bin/ssh` with the given args, killing it hard if it
-    /// exceeds `softTimeout`. SIGTERM at softTimeout, SIGKILL one
-    /// second later. `waitUntilExit()` is GUARANTEED to return within
-    /// softTimeout + ~1 second.
+    /// Run `/usr/bin/ssh` with the given args. Forwards to
+    /// `RemoteExec.shared.ssh` so every SSH process the keeper spawns
+    /// is registered in the central tracking registry alongside the
+    /// rest of the app's remote-bound work. SIGKILL escalation is the
+    /// same as before.
     @discardableResult
     public static func run(_ args: [String],
                            softTimeout: TimeInterval,
-                           captureStderr: Bool = false) -> RunResult {
-        let process = Process()
-        let errPipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = args
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = captureStderr ? errPipe : FileHandle.nullDevice
-
-        guard (try? process.run()) != nil else {
-            return RunResult(exit: -1,
-                             stderr: "process failed to launch",
-                             timedOut: false)
-        }
-
-        let timedOutBox = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
-        timedOutBox.initialize(to: 0)
-        defer { timedOutBox.deinitialize(count: 1); timedOutBox.deallocate() }
-
-        let pid = process.processIdentifier
-        let watchdog = DispatchQueue.global(qos: .userInitiated)
-
-        let soft = DispatchSource.makeTimerSource(queue: watchdog)
-        soft.schedule(deadline: .now() + softTimeout)
-        soft.setEventHandler {
-            if process.isRunning {
-                timedOutBox.pointee = 1
-                _ = kill(pid, SIGTERM)
-            }
-        }
-        soft.resume()
-
-        let hard = DispatchSource.makeTimerSource(queue: watchdog)
-        hard.schedule(deadline: .now() + softTimeout + 1)
-        hard.setEventHandler {
-            if process.isRunning { _ = kill(pid, SIGKILL) }
-        }
-        hard.resume()
-
-        process.waitUntilExit()
-        soft.cancel()
-        hard.cancel()
-
-        var stderrStr = ""
-        if captureStderr {
-            let data = errPipe.fileHandleForReading.readDataToEndOfFile()
-            stderrStr = (String(data: data, encoding: .utf8) ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return RunResult(exit: process.terminationStatus,
-                         stderr: stderrStr,
-                         timedOut: timedOutBox.pointee != 0)
+                           captureStderr: Bool = false,
+                           label: String = "keeper") -> RunResult {
+        let r = RemoteExec.shared.ssh(
+            args: args,
+            softTimeout: softTimeout,
+            captureStderr: captureStderr,
+            label: label
+        )
+        return RunResult(exit: r.exit, stderr: r.stderr, timedOut: r.timedOut)
     }
 
     /// Definitively close a mux master listening on `socketPath`. Tries

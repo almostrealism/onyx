@@ -28,7 +28,26 @@
 import Foundation
 import Darwin
 
-public final class SSHKeeper {
+public final class SSHKeeper: ObservableObject {
+
+    /// Monotonic counter that increments whenever per-host slot state
+    /// changes (alive flag, primary slot, smoke-test outcome, master
+    /// PID, etc.). SwiftUI views that ObservedObject the keeper
+    /// re-render on every bump, so the status column ("multiplexed" /
+    /// "no mux") and the expanded diagnostic panel always reflect the
+    /// same single source of truth — no possible "column says no mux
+    /// but the panel says alive" divergence.
+    @Published public private(set) var stateGeneration: UInt64 = 0
+
+    /// Bump the generation from any thread; the SwiftUI publishing
+    /// must run on main. Cheap (a couple of dispatches + an atomic
+    /// increment); we call it from the lock-holding update sites.
+    private func bumpGeneration() {
+        DispatchQueue.main.async { [weak self] in
+            self?.stateGeneration &+= 1
+        }
+    }
+
 
     public static let shared = SSHKeeper()
 
@@ -214,10 +233,17 @@ public final class SSHKeeper {
 
         let muxDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".ssh/onyx-mux").path
-        let result = SSHProcess.reapAllInDir(muxDir)
+        let dirResult = SSHProcess.reapAllInDir(muxDir)
+        // Also drain the central executor registry — catches scp, nc,
+        // interactive sessions, anything not under onyx-mux/.
+        let execResult = RemoteExec.shared.reapAll()
+        let result = (killed: dirResult.killed + execResult.killed,
+                      refused: dirResult.refused + execResult.refused)
         OnyxLog.ssh.notice("""
             reapAll done: killed=\(result.killed, privacy: .public) \
-            refused=\(result.refused, privacy: .public)
+            refused=\(result.refused, privacy: .public) \
+            (dir=\(dirResult.killed, privacy: .public)/\(dirResult.refused, privacy: .public) \
+            exec=\(execResult.killed, privacy: .public)/\(execResult.refused, privacy: .public))
             """)
         return result
     }
@@ -231,6 +257,9 @@ public final class SSHKeeper {
         let muxDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".ssh/onyx-mux").path
         var dump = SSHProcess.inventoryDump(muxDir: muxDir)
+
+        dump += "\n\n=== RemoteExec tracked PIDs ===\n"
+        dump += RemoteExec.shared.inventoryDump()
 
         lock.lock()
         dump += "\n\n=== Keeper state ===\n"
@@ -312,6 +341,7 @@ public final class SSHKeeper {
             Self.stopMaster(at: path, userHost: userHost, knownPID: pid)
             try? FileManager.default.removeItem(atPath: path)
         }
+        bumpGeneration()
     }
 
     // MARK: - Tick
@@ -515,6 +545,7 @@ public final class SSHKeeper {
         lock.lock()
         hostStates[host.id] = state
         lock.unlock()
+        bumpGeneration()  // notify SwiftUI observers — status column + panel re-render
 
         // 5. Spawn replacements for any dead slot that isn't already
         //    mid-establishment. Runs on this same concurrent queue —
@@ -673,6 +704,7 @@ public final class SSHKeeper {
             hostStates[host.id] = s
         }
         lock.unlock()
+        bumpGeneration()
     }
 
     /// Wholesale teardown of a slot's master. Prefers the captured

@@ -117,80 +117,47 @@ public class DockerStatsManager: ObservableObject {
         """
         let (cmd, args, stdinScript) = appState.remoteScript(script)
 
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let process = Process()
-            let pipe = Pipe()
-            process.executableURL = URL(fileURLWithPath: cmd)
-            process.arguments = args
-            process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
+        let hostLabel = appState.activeHost?.label ?? "local"
 
-            // Remote hosts: feed the wrapped script via stdin to defeat
-            // any noexec mode in the remote login profile.
-            let inputPipe: Pipe? = stdinScript.map { _ in Pipe() }
-            if let inputPipe = inputPipe {
-                process.standardInput = inputPipe
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            // Route through the central executor for bounded execution +
+            // PID tracking. Previously this was a raw Process with a
+            // SIGTERM-only kill timer.
+            let result = RemoteExec.shared.run(
+                cmd, args: args, stdin: stdinScript,
+                softTimeout: 10,
+                captureStdout: true,
+                captureStderr: false,
+                label: "dockerStats:\(hostLabel)"
+            )
+            let raw = result.stdout
+            guard RemoteScript.executionVerified(in: raw) else {
+                DispatchQueue.main.async { self?.isAvailable = false }
+                return
+            }
+            let output = RemoteScript.cleanedOutput(raw)
+            let (cores, parsed) = Self.parse(output: output)
+
+            if !parsed.isEmpty, let hostID = self?.appState.activeHost?.id {
+                let names = parsed.map(\.name)
+                NetworkTopologyStore.shared.confirmContainersAlive(
+                    hostID: hostID, containerNames: names)
             }
 
-            do {
-                try process.run()
+            DispatchQueue.main.async {
+                self?.cpuCores = cores
+                self?.containers = parsed
+                self?.isAvailable = !parsed.isEmpty
 
-                if let inputPipe = inputPipe,
-                   let scriptText = stdinScript,
-                   let data = scriptText.data(using: .utf8) {
-                    inputPipe.fileHandleForWriting.write(data)
-                    try? inputPipe.fileHandleForWriting.close()
-                }
-
-                let killTimer = DispatchSource.makeTimerSource(queue: .global())
-                killTimer.schedule(deadline: .now() + 10)
-                killTimer.setEventHandler { if process.isRunning { process.terminate() } }
-                killTimer.resume()
-
-                process.waitUntilExit()
-                killTimer.cancel()
-
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let raw = String(data: data, encoding: .utf8) ?? ""
-                // If the script never executed (remote noexec), mark
-                // unavailable and bail. The existing parser would also
-                // produce empty results, but failing explicitly here
-                // keeps the cause visible if we later surface it in UI.
-                guard RemoteScript.executionVerified(in: raw) else {
-                    DispatchQueue.main.async { self?.isAvailable = false }
-                    return
-                }
-                let output = RemoteScript.cleanedOutput(raw)
-
-                let (cores, parsed) = Self.parse(output: output)
-
-                // Feed alive containers into topology store
-                if !parsed.isEmpty, let hostID = self?.appState.activeHost?.id {
-                    let names = parsed.map(\.name)
-                    NetworkTopologyStore.shared.confirmContainersAlive(hostID: hostID, containerNames: names)
-                }
-
-                DispatchQueue.main.async {
-                    self?.cpuCores = cores
-                    self?.containers = parsed
-                    self?.isAvailable = !parsed.isEmpty
-
-                    // Track per-container CPU activity
-                    let now = Date()
-                    for container in parsed {
-                        let pct = Self.parseCPUPct(container.cpu)
-                        if pct >= 1.0 {
-                            self?.lastActiveTime[container.name] = now
-                        }
+                let now = Date()
+                for container in parsed {
+                    let pct = Self.parseCPUPct(container.cpu)
+                    if pct >= 1.0 {
+                        self?.lastActiveTime[container.name] = now
                     }
-                    // Prune containers not seen in a while
-                    let cutoff = now.addingTimeInterval(-(self?.visibilityWindow ?? 300) * 2)
-                    self?.lastActiveTime = self?.lastActiveTime.filter { $0.value > cutoff } ?? [:]
                 }
-            } catch {
-                DispatchQueue.main.async {
-                    self?.isAvailable = false
-                }
+                let cutoff = now.addingTimeInterval(-(self?.visibilityWindow ?? 300) * 2)
+                self?.lastActiveTime = self?.lastActiveTime.filter { $0.value > cutoff } ?? [:]
             }
         }
     }

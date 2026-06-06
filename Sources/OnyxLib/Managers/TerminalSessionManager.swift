@@ -446,6 +446,12 @@ class OnyxTerminalView: NSView {
 
     private func destroyPoolEntry(_ sessionID: String) {
         guard let entry = pool.removeValue(forKey: sessionID) else { return }
+        // Unregister the interactive ssh PID from the central executor
+        // BEFORE terminating — if SIGTERM kills it cleanly the natural
+        // process-exit handler would unregister too, but if it's stuck
+        // the registry entry would linger.
+        let pid = entry.terminalView.process.shellPid
+        if pid > 0 { RemoteExec.shared.unregister(pid: pid) }
         // Terminate the process BEFORE removing the view. Do NOT SIGKILL —
         // that races with SwiftTerm's dispatch IO cleanup and causes
         // "Resurrection of an object" crash (the dispatch source tries to
@@ -823,8 +829,21 @@ class OnyxTerminalView: NSView {
         let (cmd, args) = self.appState.commandForSession(session)
         tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
         self.pool[session.id]?.processRunning = true
+        // Register the interactive ssh PID in the central executor's
+        // long-lived registry so the orphan reaper / inventory dump
+        // sees it. Unregistered in `destroyPoolEntry` and
+        // `processTerminated`. Without this, an interactive ssh stuck
+        // on a dead network was invisible to the reaper — one of the
+        // sources of leaked connections the user reported.
+        let pid = tv.process.shellPid
+        if pid > 0 {
+            RemoteExec.shared.register(
+                pid: pid,
+                label: "interactive:\(session.displayLabel)",
+                longLived: true
+            )
+        }
         self.appState.saveLastSession()
-        // Now in pool — clear pending status and refresh pool display
         clearPendingStatus(for: session.id)
         publishPoolStatus()
     }
@@ -845,49 +864,36 @@ class OnyxTerminalView: NSView {
 
         OnyxLog.session.info("probing host: \(host.label, privacy: .public)")
 
-        let nc = Process()
-        nc.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
-        nc.arguments = ["-z", "-w", "3", host.ssh.host, "\(host.ssh.port)"]
-        nc.standardOutput = FileHandle.nullDevice
-        nc.standardError = FileHandle.nullDevice
-        try? nc.run()
-        nc.waitUntilExit()
-        guard nc.terminationStatus == 0 else {
+        // nc reachability via the central executor.
+        guard RemoteExec.shared.ncReachable(host: host.ssh.host,
+                                            port: host.ssh.port,
+                                            timeout: 3) else {
             OnyxLog.session.error("probe: \(host.label, privacy: .public) unreachable (nc -z failed)")
             return .unreachable
         }
 
-        // Capture stderr from the auth probe — the previous version
-        // discarded it entirely, so "keyAuthFailed" came back as a black
-        // box. Now the actual ssh error makes it into the log.
+        // SSH auth probe via central executor. Bounded, tracked, captures
+        // stderr so a failure surfaces with the real error.
         var lastErr = ""
         for attempt in 1...2 {
-            let probe = Process()
-            let errPipe = Pipe()
-            probe.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
             var probeArgs = appState.sshBaseArgs(for: host)
             probeArgs += [appState.sshUserHost(for: host), "true"]
-            probe.arguments = probeArgs
-            probe.standardOutput = FileHandle.nullDevice
-            probe.standardError = errPipe
-            try? probe.run()
-            probe.waitUntilExit()
-            if probe.terminationStatus == 0 {
+            let r = RemoteExec.shared.ssh(
+                args: probeArgs, softTimeout: 8,
+                captureStderr: true,
+                label: "probe:\(host.label)")
+            if r.exit == 0 {
                 OnyxLog.session.info("probe ok: \(host.label, privacy: .public) attempt=\(attempt, privacy: .public)")
                 return .ok
             }
-            let data = errPipe.fileHandleForReading.readDataToEndOfFile()
-            lastErr = (String(data: data, encoding: .utf8) ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            lastErr = r.stderr
             OnyxLog.session.error("""
                 probe attempt \(attempt, privacy: .public) failed: \
                 host=\(host.label, privacy: .public) \
-                exit=\(probe.terminationStatus, privacy: .public) \
+                exit=\(r.exit, privacy: .public) \
                 stderr=\(lastErr, privacy: .public)
                 """)
-            if attempt < 2 {
-                Thread.sleep(forTimeInterval: 1.0) // brief pause before retry
-            }
+            if attempt < 2 { Thread.sleep(forTimeInterval: 1.0) }
         }
         return .keyAuthFailed
     }
@@ -1538,6 +1544,14 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
 
         if let id = terminatedSessionID {
             pool[id]?.processRunning = false
+            // The interactive ssh PID died naturally — drop it from the
+            // central executor registry. (The destroyPoolEntry path also
+            // unregisters but this catches the case where ssh exits on
+            // its own without going through destroy.)
+            if let entry = pool[id] {
+                let pid = entry.terminalView.process.shellPid
+                if pid > 0 { RemoteExec.shared.unregister(pid: pid) }
+            }
         }
 
         print("processTerminated: session=\(terminatedSessionID ?? "unknown") active=\(activeSessionID ?? "none") exit=\(exitCode.map(String.init) ?? "nil")")

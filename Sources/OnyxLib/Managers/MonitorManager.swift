@@ -164,108 +164,66 @@ public class MonitorManager: ObservableObject {
 
     private func poll() {
         let hostID = appState.activeHost?.id ?? HostConfig.localhostID
+        let hostLabel = appState.activeHost?.label ?? "local"
         let (cmd, args, stdinScript) = appState.statsCommand()
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let process = Process()
-            let pipe = Pipe()
-            process.executableURL = URL(fileURLWithPath: cmd)
-            process.arguments = args
-            process.standardOutput = pipe
-            process.standardError = pipe
+            // Route through the central executor — bounded, tracked,
+            // SIGKILL-escalated. Previously this was a raw Process with
+            // a SIGTERM-only kill timer that ssh could (and did) ignore.
+            let result = RemoteExec.shared.run(
+                cmd, args: args, stdin: stdinScript,
+                softTimeout: 10,
+                captureStdout: true,
+                captureStderr: true,
+                label: "monitor:\(hostLabel)"
+            )
+            let output = (result.stdout + result.stderr)
+                .replacingOccurrences(of: "\r", with: "")
 
-            // For remote hosts the stats script is fed via stdin to an
-            // interactive ssh shell (see AppState.statsCommand).
-            let inputPipe: Pipe? = stdinScript.map { _ in Pipe() }
-            if let inputPipe = inputPipe {
-                process.standardInput = inputPipe
-            }
+            DispatchQueue.main.async { self?.pollCount += 1 }
 
-            do {
-                try process.run()
-
-                if let inputPipe = inputPipe,
-                   let scriptText = stdinScript,
-                   let data = scriptText.data(using: .utf8) {
-                    inputPipe.fileHandleForWriting.write(data)
-                    try? inputPipe.fileHandleForWriting.close()
-                }
-
-                let killTimer = DispatchSource.makeTimerSource(queue: .global())
-                killTimer.schedule(deadline: .now() + 10)
-                killTimer.setEventHandler {
-                    if process.isRunning { process.terminate() }
-                }
-                killTimer.resume()
-
-                process.waitUntilExit()
-                killTimer.cancel()
-
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                // Normalize \r\n → \n (ssh -tt yields CR-LF) before parsing.
-                // We keep the execution marker visible in `output` so the
-                // diagnostic check below can see it; only the
-                // section-by-section parser sees the cleaned form.
-                let output = (String(data: data, encoding: .utf8) ?? "")
-                    .replacingOccurrences(of: "\r", with: "")
-
-                DispatchQueue.main.async { self?.pollCount += 1 }
-
-                // Exit code 255 = SSH connection failed; other non-zero may just
-                // mean the stats script had a partial failure (GPU check, etc.)
-                // Still try to parse output even on non-zero exit codes.
-                if process.terminationStatus == 255 {
-                    DispatchQueue.main.async {
-                        guard let self = self else { return }
-                        var data = self.hostData[hostID] ?? HostMonitorData()
-                        data.lastError = "SSH connection failed (code 255)"
-                        self.hostData[hostID] = data
-                        self.objectWillChange.send()
-                    }
-                    return
-                }
-                guard !output.isEmpty else {
-                    DispatchQueue.main.async {
-                        guard let self = self else { return }
-                        var data = self.hostData[hostID] ?? HostMonitorData()
-                        data.lastError = "Empty response from remote"
-                        self.hostData[hostID] = data
-                        self.objectWillChange.send()
-                    }
-                    return
-                }
-
-                if let sample = Self.parse(output: output) {
-                    let cpuDiag = sample.cpuUsage == nil ? Self.cpuDiagnostic(from: output) : nil
-                    DispatchQueue.main.async {
-                        guard let self = self else { return }
-
-                        // Store sample in per-host data — clear any previous error
-                        var data = self.hostData[hostID] ?? HostMonitorData()
-                        data.lastError = nil
-                        data.latestSample = sample
-                        data.samples.append(sample)
-                        if data.samples.count > self.maxSamples {
-                            data.samples.removeFirst(data.samples.count - self.maxSamples)
-                        }
-                        if sample.gpuUsage != nil {
-                            data.gpuEverSeen = true
-                            data.consecutiveGpuMisses = 0
-                        } else if data.gpuEverSeen {
-                            data.consecutiveGpuMisses += 1
-                            if data.consecutiveGpuMisses >= 60 {
-                                data.gpuEverSeen = false
-                            }
-                        }
-                        data.cpuParseFailureReason = cpuDiag
-                        self.hostData[hostID] = data
-                        self.objectWillChange.send()
-                    }
-                }
-            } catch {
+            if result.exit == 255 {
                 DispatchQueue.main.async {
                     guard let self = self else { return }
                     var data = self.hostData[hostID] ?? HostMonitorData()
-                    data.lastError = "Failed to run ssh: \(error.localizedDescription)"
+                    data.lastError = "SSH connection failed (code 255)"
+                    self.hostData[hostID] = data
+                    self.objectWillChange.send()
+                }
+                return
+            }
+            guard !output.isEmpty else {
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    var data = self.hostData[hostID] ?? HostMonitorData()
+                    data.lastError = "Empty response from remote"
+                    self.hostData[hostID] = data
+                    self.objectWillChange.send()
+                }
+                return
+            }
+
+            if let sample = Self.parse(output: output) {
+                let cpuDiag = sample.cpuUsage == nil ? Self.cpuDiagnostic(from: output) : nil
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    var data = self.hostData[hostID] ?? HostMonitorData()
+                    data.lastError = nil
+                    data.latestSample = sample
+                    data.samples.append(sample)
+                    if data.samples.count > self.maxSamples {
+                        data.samples.removeFirst(data.samples.count - self.maxSamples)
+                    }
+                    if sample.gpuUsage != nil {
+                        data.gpuEverSeen = true
+                        data.consecutiveGpuMisses = 0
+                    } else if data.gpuEverSeen {
+                        data.consecutiveGpuMisses += 1
+                        if data.consecutiveGpuMisses >= 60 {
+                            data.gpuEverSeen = false
+                        }
+                    }
+                    data.cpuParseFailureReason = cpuDiag
                     self.hostData[hostID] = data
                     self.objectWillChange.send()
                 }

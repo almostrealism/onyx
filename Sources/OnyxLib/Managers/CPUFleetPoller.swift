@@ -146,67 +146,37 @@ public final class CPUFleetPoller {
 
         let (cmd, args, stdinScript) = appState.statsCommand(host: host)
 
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: cmd)
-        process.arguments = args
-        process.standardOutput = pipe
-        process.standardError = pipe
+        // Route through the central executor — bounded with SIGKILL
+        // escalation, PID tracked in the unified registry.
+        let result = RemoteExec.shared.run(
+            cmd, args: args, stdin: stdinScript,
+            softTimeout: Self.perHostTimeout,
+            captureStdout: true,
+            captureStderr: true,
+            label: "fleetPoller:\(host.label)"
+        )
+        let output = (result.stdout + result.stderr)
+            .replacingOccurrences(of: "\r", with: "")
 
-        let inputPipe: Pipe? = stdinScript.map { _ in Pipe() }
-        if let inputPipe = inputPipe { process.standardInput = inputPipe }
+        guard let sample = MonitorManager.parse(output: output),
+              let cpu = sample.cpuUsage else { return }
 
-        do {
-            try process.run()
+        CPUStreamStore.shared.appendSample(
+            hostID: host.id.uuidString,
+            label: Self.label(for: host),
+            color: Self.color(for: host),
+            cpu: cpu,
+            gpu: sample.gpuUsage,
+            timestamp: timestamp
+        )
 
-            if let inputPipe = inputPipe,
-               let script = stdinScript,
-               let data = script.data(using: .utf8) {
-                inputPipe.fileHandleForWriting.write(data)
-                try? inputPipe.fileHandleForWriting.close()
-            }
-
-            let killTimer = DispatchSource.makeTimerSource(queue: .global())
-            killTimer.schedule(deadline: .now() + Self.perHostTimeout)
-            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
-            killTimer.resume()
-            process.waitUntilExit()
-            killTimer.cancel()
-
-            let raw = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = (String(data: raw, encoding: .utf8) ?? "")
-                .replacingOccurrences(of: "\r", with: "")
-
-            guard let sample = MonitorManager.parse(output: output),
-                  let cpu = sample.cpuUsage else { return }
-
-            CPUStreamStore.shared.appendSample(
-                hostID: host.id.uuidString,
-                label: Self.label(for: host),
-                color: Self.color(for: host),
-                cpu: cpu,
-                gpu: sample.gpuUsage,
-                timestamp: timestamp
-            )
-
-            // Containers (docker stats) come from the same SSH output.
-            // Hosts without docker emit an empty section — we just
-            // publish nil so the screensaver knows "no moons" rather
-            // than "no docker survey yet". Containers that have been
-            // consistently idle (< 1% CPU) for the full activity
-            // window are filtered out so the saver isn't cluttered
-            // with dozens of dim moons for sidecars and crons.
-            let containers = Self.parseContainers(in: output)
-            let active = self.filterByActivity(containers,
-                                               hostID: host.id.uuidString)
-            CPUStreamStore.shared.setContainers(
-                hostID: host.id.uuidString,
-                containers: active.isEmpty ? nil : active
-            )
-        } catch {
-            // Process couldn't start — fail quietly. The screensaver's idle
-            // state covers gaps where we get nothing back.
-        }
+        let containers = Self.parseContainers(in: output)
+        let active = self.filterByActivity(containers,
+                                           hostID: host.id.uuidString)
+        CPUStreamStore.shared.setContainers(
+            hostID: host.id.uuidString,
+            containers: active.isEmpty ? nil : active
+        )
     }
 
     // MARK: - Label / color derivation
