@@ -2272,17 +2272,36 @@ private struct PipelineRow: View {
                     PipelineStatusDot(overall: status.overall)
                         .padding(.top, 6)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(status.spec.displayName)
-                            .monitorFont(size: 12)
-                            .foregroundColor(.white.opacity(0.85))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                        // Title row: workflow name + branch chip. The
+                        // chip has higher layout priority so the
+                        // workflow name truncates before the branch
+                        // disappears — branch is the more useful
+                        // identifier when multiple pipelines for the
+                        // same workflow file are being tracked at once.
+                        HStack(spacing: 5) {
+                            Text(workflowTitle)
+                                .monitorFont(size: 12)
+                                .foregroundColor(.white.opacity(0.85))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            if let branch = branchTag {
+                                Text(branch)
+                                    .monitorFont(size: 9, weight: .medium)
+                                    .foregroundColor(.white.opacity(0.85))
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(accentColor.opacity(0.22))
+                                    .cornerRadius(3)
+                                    .layoutPriority(1)
+                            }
+                        }
                         HStack(spacing: 6) {
                             Text(secondaryLine)
                                 .monitorFont(size: 10)
                                 .foregroundColor(accentColor.opacity(0.7))
                                 .lineLimit(1)
-                                .truncationMode(.middle)
+                                .truncationMode(.tail)
                             Spacer(minLength: 0)
                             countsBadges
                                 // Reserve room so the badges don't jump
@@ -2317,16 +2336,35 @@ private struct PipelineRow: View {
         .onHover { hovering = $0 }
     }
 
-    /// `owner/repo · branch-name #123` — branch elided only when the
-    /// API hasn't told us one yet (no run resolved). Always shown when
-    /// available, even on main/master, since the run number alone
-    /// isn't enough to distinguish two `.run(id)` pipelines at a glance.
-    private var secondaryLine: String {
-        var parts: [String] = [status.spec.fullName]
-        if let b = status.headBranch, !b.isEmpty {
-            parts.append(b)
+    /// Workflow name without any branch suffix — the branch lives in
+    /// its own chip on the title row, so we don't want it doubled up.
+    /// For run-based specs the row title is just the workflow display.
+    private var workflowTitle: String {
+        switch status.spec.target {
+        case .workflow(let file, _):
+            return (file as NSString).deletingPathExtension
+        case .run:
+            return status.title ?? status.spec.displayName
         }
-        var line = parts.joined(separator: " · ")
+    }
+
+    /// Branch to render as a chip on the title row. Prefer the resolved
+    /// `headBranch` from the run payload (always up-to-date), fall back
+    /// to the branch declared in the spec URL when no run has resolved
+    /// yet, and finally fall back to nil when we genuinely don't know.
+    private var branchTag: String? {
+        if let b = status.headBranch, !b.isEmpty { return b }
+        if case .workflow(_, let branch) = status.spec.target,
+           let b = branch, !b.isEmpty {
+            return b
+        }
+        return nil
+    }
+
+    /// `owner/repo #123` — branch lives in the chip above, so this
+    /// stays compact and survives narrow columns.
+    private var secondaryLine: String {
+        var line = status.spec.fullName
         if let n = status.runNumber { line += " #\(n)" }
         return line
     }
