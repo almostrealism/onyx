@@ -2358,45 +2358,26 @@ private struct PipelineStatusDot: View {
     }
 }
 
-/// Popover content for the "+" button. Suggests one pipeline per
-/// open PR by inferring (workflow, headBranch) from the PR head and
-/// filtering out pipelines the user already added.
+/// Popover content for the "+" button. Surfaces one suggestion per
+/// (open PR, workflow that ran on its head branch) — typically up to
+/// `numPRs × numWorkflowsPerPR` rows. Filters out any suggestion the
+/// user has already added.
 private struct PipelineSuggestionsPopover: View {
     let prs: [PullRequest]
     let existingIDs: Set<String>
     let accentColor: Color
     let onAdd: (String) -> Void
     @State private var manualURL: String = ""
+    @State private var suggestions: [WorkflowMonitor.Suggestion] = []
+    @State private var loading = false
     @Environment(\.dismiss) private var dismiss
 
-    /// Synthesize a workflow URL filtered by the PR's head branch — the
-    /// canonical GitHub URL form `…/actions/workflows/?query=branch:foo`
-    /// happens to parse into our PipelineSpec model, but it's a
-    /// per-repo URL and we don't know the workflow file from PR data
-    /// alone. So we offer one suggestion per PR pointing at the repo
-    /// actions page filtered by the PR branch; once the user adds it,
-    /// WorkflowMonitor finds the latest matching run automatically.
-    ///
-    /// We surface the user's manual URL field too so they can add a
-    /// pipeline by URL alongside the suggestions.
-    private var suggestions: [(label: String, url: String, id: String)] {
-        prs.compactMap { pr in
-            guard let branch = pr.headBranch else { return nil }
-            let parts = pr.repoFullName.split(separator: "/").map(String.init)
-            guard parts.count == 2 else { return nil }
-            let owner = parts[0]; let repo = parts[1]
-            // Best-effort: use the repo-level actions URL with branch
-            // filter. WorkflowMonitor's .workflow target accepts this
-            // shape via the file path — but we don't know the file
-            // name. So we offer suggestions ONLY when the user pastes
-            // an actual workflow URL; PRs alone surface their checks
-            // page so the user can copy a workflow URL from there.
-            let url = "https://github.com/\(owner)/\(repo)/pull/\(pr.number)/checks"
-            let label = "\(pr.repoFullName)#\(pr.number)  \(pr.title)"
-            // We can't pre-build the workflow URL here, so don't dedupe
-            // — checks URLs are the link to open, not a tracking spec.
-            _ = branch
-            return (label, url, "\(pr.repoFullName)#\(pr.number)")
+    /// The filtered list — drops suggestions the user already added,
+    /// matched by the parsed PipelineSpec id.
+    private var visibleSuggestions: [WorkflowMonitor.Suggestion] {
+        suggestions.filter { s in
+            guard let parsed = PipelineSpec.parse(s.url) else { return true }
+            return !existingIDs.contains(parsed.id)
         }
     }
 
@@ -2407,8 +2388,7 @@ private struct PipelineSuggestionsPopover: View {
                 .foregroundColor(accentColor)
                 .tracking(2)
             HStack(spacing: 6) {
-                TextField("Paste workflow or run URL",
-                          text: $manualURL)
+                TextField("Paste workflow or run URL", text: $manualURL)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(0.85))
@@ -2429,41 +2409,100 @@ private struct PipelineSuggestionsPopover: View {
                 .monitorFont(size: 9, weight: .medium)
                 .foregroundColor(.gray.opacity(0.5))
                 .tracking(1)
-            if suggestions.isEmpty {
-                Text("No open PRs with a head branch — open the PR's Checks tab to copy a workflow URL")
+            if loading {
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.6).colorScheme(.dark)
+                    Text("Looking up pipelines for each open PR…")
+                        .monitorFont(size: 10)
+                        .foregroundColor(.gray.opacity(0.5))
+                }
+            } else if visibleSuggestions.isEmpty {
+                Text(suggestions.isEmpty
+                     ? "No workflow runs found on any open PR head branch."
+                     : "All of these are already being tracked.")
                     .monitorFont(size: 10)
                     .foregroundColor(.gray.opacity(0.5))
                     .frame(maxWidth: 320, alignment: .leading)
             } else {
-                ForEach(suggestions, id: \.id) { s in
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.up.right.square")
-                            .font(.system(size: 9))
-                            .foregroundColor(accentColor)
-                        Text(s.label)
-                            .monitorFont(size: 11)
-                            .foregroundColor(.white.opacity(0.85))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer(minLength: 0)
-                        Button("Open Checks") {
-                            if let url = URL(string: s.url) {
-                                NSWorkspace.shared.open(url)
-                            }
+                // Up to ~10 rows visible at once; scrolls beyond that.
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(visibleSuggestions) { s in
+                            SuggestionRow(suggestion: s,
+                                          accentColor: accentColor,
+                                          onAdd: {
+                                              onAdd(s.url)
+                                          })
                         }
-                        .buttonStyle(.plain)
-                        .monitorFont(size: 10)
-                        .foregroundColor(accentColor.opacity(0.8))
                     }
                 }
-                Text("Open Checks → click a workflow → copy that URL → paste above")
-                    .monitorFont(size: 9)
-                    .foregroundColor(.gray.opacity(0.4))
-                    .padding(.top, 2)
+                .frame(maxHeight: 280)
             }
         }
         .padding(14)
-        .frame(width: 380)
+        .frame(width: 420)
+        .onAppear { loadSuggestions() }
+    }
+
+    private func loadSuggestions() {
+        loading = true
+        WorkflowMonitor.shared.fetchSuggestions(for: prs) { results in
+            suggestions = results
+            loading = false
+        }
+    }
+}
+
+private struct SuggestionRow: View {
+    let suggestion: WorkflowMonitor.Suggestion
+    let accentColor: Color
+    let onAdd: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Dot reflecting the LAST run's conclusion — gives a hint of
+            // whether this pipeline is currently green/red without
+            // having to click in.
+            Circle().fill(conclusionColor)
+                .frame(width: 5, height: 5)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(suggestion.workflowName)
+                        .monitorFont(size: 11)
+                        .foregroundColor(.white.opacity(0.9))
+                        .lineLimit(1)
+                    Text(suggestion.workflowFile)
+                        .monitorFont(size: 9)
+                        .foregroundColor(.gray.opacity(0.4))
+                        .lineLimit(1)
+                }
+                Text("\(suggestion.pr.repoFullName)#\(suggestion.pr.number)  ·  \(suggestion.branch)")
+                    .monitorFont(size: 9)
+                    .foregroundColor(accentColor.opacity(0.6))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+            Button("Add") { onAdd() }
+                .buttonStyle(.plain)
+                .monitorFont(size: 10, weight: .medium)
+                .foregroundColor(accentColor)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(accentColor.opacity(0.12))
+                .cornerRadius(3)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var conclusionColor: Color {
+        switch suggestion.mostRecentConclusion {
+        case "success": return Color(hex: "6BFF8E")
+        case "failure", "timed_out", "cancelled", "action_required":
+            return Color(hex: "FF6B6B")
+        case "skipped": return Color.gray.opacity(0.5)
+        case nil: return Color(hex: "66CCFF")   // in progress
+        default: return Color.gray.opacity(0.4)
+        }
     }
 }
 

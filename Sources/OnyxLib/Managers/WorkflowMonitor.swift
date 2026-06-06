@@ -58,6 +58,120 @@ public final class WorkflowMonitor: ObservableObject {
         DispatchQueue.main.async { [weak self] in self?.tick() }
     }
 
+    // MARK: - Suggestions (one per workflow per PR)
+
+    /// One suggested pipeline for a given (PR, workflow) pair. Surfaced
+    /// by the monitor overlay's PIPELINES "+" popover.
+    public struct Suggestion: Identifiable, Equatable {
+        public let id: String              // unique per (repo, workflow file, branch)
+        public let pr: PullRequest
+        public let workflowName: String    // human-readable display (e.g. "Build")
+        public let workflowFile: String    // canonical file name (e.g. "build.yml")
+        public let branch: String
+        public let url: String             // what we'd add to pipelineURLs
+        public let mostRecentRunURL: String?
+        public let mostRecentConclusion: String?  // success / failure / nil
+    }
+
+    /// For every PR that has a head branch, find every workflow that
+    /// has run on that branch, take the most recent run of each, and
+    /// emit one Suggestion per (PR, workflow) pair. The popover hides
+    /// any whose URL is already in `pipelineURLs`. Calls back on the
+    /// main queue.
+    public func fetchSuggestions(for prs: [PullRequest],
+                                 completion: @escaping ([Suggestion]) -> Void) {
+        let token = GitHubConfigStore.shared.token
+        guard !token.isEmpty else { completion([]); return }
+
+        let candidates = prs.filter { $0.headBranch != nil && !$0.headBranch!.isEmpty }
+        if candidates.isEmpty { completion([]); return }
+
+        let group = DispatchGroup()
+        var collected: [Suggestion] = []
+        let lock = NSLock()
+
+        for pr in candidates {
+            guard let branch = pr.headBranch else { continue }
+            let parts = pr.repoFullName.split(separator: "/").map(String.init)
+            guard parts.count == 2 else { continue }
+            let owner = parts[0]
+            let repo = parts[1]
+
+            var comps = URLComponents()
+            comps.scheme = "https"
+            comps.host = "api.github.com"
+            comps.path = "/repos/\(owner)/\(repo)/actions/runs"
+            comps.queryItems = [
+                URLQueryItem(name: "branch", value: branch),
+                URLQueryItem(name: "per_page", value: "30"),
+            ]
+            guard let url = comps.url else { continue }
+
+            var req = URLRequest(url: url)
+            applyAuth(&req, token: token)
+
+            group.enter()
+            session.dataTask(with: req) { data, _, _ in
+                defer { group.leave() }
+                guard let data = data,
+                      let resp = try? JSONDecoder().decode(SuggestionRunsResponse.self,
+                                                           from: data),
+                      let runs = resp.workflow_runs else { return }
+
+                // Group by workflow file path; keep the most recent
+                // per group (the API already orders desc by created_at,
+                // so the first seen of each path IS the most recent).
+                var seen: Set<String> = []
+                var perWorkflow: [Suggestion] = []
+                for run in runs {
+                    guard let path = run.path, !seen.contains(path) else { continue }
+                    seen.insert(path)
+                    let file = (path as NSString).lastPathComponent
+                    let suggestionURL = "https://github.com/\(owner)/\(repo)/actions/workflows/\(file)?branch=\(branch)"
+                    let displayName = run.name ?? (file as NSString).deletingPathExtension
+                    let s = Suggestion(
+                        id: "\(owner)/\(repo)/\(file)/\(branch)",
+                        pr: pr,
+                        workflowName: displayName,
+                        workflowFile: file,
+                        branch: branch,
+                        url: suggestionURL,
+                        mostRecentRunURL: run.html_url,
+                        mostRecentConclusion: run.conclusion
+                    )
+                    perWorkflow.append(s)
+                }
+                lock.lock()
+                collected.append(contentsOf: perWorkflow)
+                lock.unlock()
+            }.resume()
+        }
+
+        group.notify(queue: .main) {
+            // Stable, predictable ordering for the UI: group by PR, then
+            // by workflow name within each PR.
+            let sorted = collected.sorted {
+                if $0.pr.repoFullName != $1.pr.repoFullName {
+                    return $0.pr.repoFullName < $1.pr.repoFullName
+                }
+                if $0.pr.number != $1.pr.number { return $0.pr.number < $1.pr.number }
+                return $0.workflowName < $1.workflowName
+            }
+            completion(sorted)
+        }
+    }
+
+    private struct SuggestionRunsResponse: Decodable {
+        let workflow_runs: [Run]?
+        struct Run: Decodable {
+            let id: Int
+            let name: String?
+            let path: String?
+            let html_url: String?
+            let conclusion: String?
+        }
+    }
+
     // MARK: - Poll cycle
 
     private func tick() {
