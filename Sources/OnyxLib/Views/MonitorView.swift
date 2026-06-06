@@ -2246,7 +2246,12 @@ struct PipelinesSection: View {
                     }
                 } else {
                     ForEach(monitor.pipelines) { p in
-                        PipelineRow(status: p, accentColor: appState.accentColor)
+                        PipelineRow(status: p,
+                                    accentColor: appState.accentColor,
+                                    onRemove: {
+                                        config.removePipeline(p.spec)
+                                        WorkflowMonitor.shared.refresh()
+                                    })
                     }
                 }
             }
@@ -2257,36 +2262,59 @@ struct PipelinesSection: View {
 private struct PipelineRow: View {
     let status: PipelineStatus
     let accentColor: Color
+    let onRemove: () -> Void
+    @State private var hovering = false
 
     var body: some View {
-        Button(action: openRun) {
-            HStack(alignment: .top, spacing: 8) {
-                PipelineStatusDot(overall: status.overall)
-                    .padding(.top, 6)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(status.spec.displayName)
-                        .monitorFont(size: 12)
-                        .foregroundColor(.white.opacity(0.85))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    HStack(spacing: 6) {
-                        Text(secondaryLine)
-                            .monitorFont(size: 10)
-                            .foregroundColor(accentColor.opacity(0.7))
+        ZStack(alignment: .topTrailing) {
+            Button(action: openRun) {
+                HStack(alignment: .top, spacing: 8) {
+                    PipelineStatusDot(overall: status.overall)
+                        .padding(.top, 6)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(status.spec.displayName)
+                            .monitorFont(size: 12)
+                            .foregroundColor(.white.opacity(0.85))
                             .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer(minLength: 0)
-                        countsBadges
+                            .truncationMode(.tail)
+                        HStack(spacing: 6) {
+                            Text(secondaryLine)
+                                .monitorFont(size: 10)
+                                .foregroundColor(accentColor.opacity(0.7))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer(minLength: 0)
+                            countsBadges
+                                // Reserve room so the badges don't jump
+                                // when the × button slides in on hover.
+                                .padding(.trailing, hovering ? 16 : 0)
+                        }
                     }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cornerRadius(3)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .cornerRadius(3)
+            .buttonStyle(.plain)
+
+            if hovering {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.gray.opacity(0.8))
+                        .padding(4)
+                        .background(Color.black.opacity(0.4))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Stop tracking this pipeline")
+                .padding(.top, 4)
+                .padding(.trailing, 6)
+            }
         }
-        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 
     /// `owner/repo · branch-name #123` — branch elided only when the
@@ -2547,30 +2575,23 @@ struct RemindersSection: View {
                     .monitorFont(size: 11)
                     .foregroundColor(.gray.opacity(0.4))
             } else if reminders.isMultiList {
-                // Grouped display: 2-column grid layout
+                // Grouped display: single column. We used to lay out
+                // two columns when the section had the full overlay
+                // width, but the overlay now reserves the right half
+                // for Open PRs / Pipelines so reminders only get the
+                // left half — not enough room for two columns of titles.
                 let nonEmpty = reminders.groupedReminders.filter { !$0.reminders.isEmpty }
                 if nonEmpty.isEmpty {
                     Text(reminders.emptyMessage)
                         .monitorFont(size: 11)
                         .foregroundColor(.gray.opacity(0.3))
                 } else {
-                    HStack(alignment: .top, spacing: 12) {
-                        // Column 1: odd-indexed groups (0, 2, 4, ...)
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(nonEmpty.enumerated()).filter { $0.offset % 2 == 0 }, id: \.element.id) { _, group in
-                                ReminderListColumn(group: group, appState: appState, reminders: reminders)
-                            }
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(nonEmpty, id: \.id) { group in
+                            ReminderListColumn(group: group, appState: appState, reminders: reminders)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                        // Column 2: even-indexed groups (1, 3, 5, ...)
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(nonEmpty.enumerated()).filter { $0.offset % 2 == 1 }, id: \.element.id) { _, group in
-                                ReminderListColumn(group: group, appState: appState, reminders: reminders)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else if reminders.reminders.isEmpty {
                 Text(reminders.emptyMessage)

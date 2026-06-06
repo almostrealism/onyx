@@ -61,6 +61,20 @@ public final class GitHubConfigStore: ObservableObject {
         pipelineURLs.compactMap(PipelineSpec.parse)
     }
 
+    /// Drop the first stored URL whose parsed spec matches `spec.id`.
+    /// Matches by parsed id rather than raw string so equivalent URL
+    /// variants (`?branch=foo` vs `?query=branch:foo`) collapse to the
+    /// same entry.
+    public func removePipeline(_ spec: PipelineSpec) {
+        let idx = pipelineURLs.firstIndex { raw in
+            PipelineSpec.parse(raw)?.id == spec.id
+        }
+        guard let i = idx else { return }
+        var current = pipelineURLs
+        current.remove(at: i)
+        pipelineURLs = current
+    }
+
     public var isConfigured: Bool { !token.isEmpty && !parsedRepos.isEmpty }
 
     private init() {}
