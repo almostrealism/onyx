@@ -1108,6 +1108,13 @@ struct TimingChartSection: View {
         max(timing.dailyHours.map(\.hours).max() ?? 1, 1)
     }
 
+    /// Bar-chart plot height. Matched to the heatmap grid's height
+    /// (7 rows × 12pt cells + 6 × 2pt gaps = 96pt) so the bottom of
+    /// the bars lines up with the bottom of the heatmap, and the day
+    /// labels sit level with the heatmap legend. Taller bars also help
+    /// the bars look less stubby/over-wide at common window sizes.
+    private static let barAreaHeight: CGFloat = 96
+
     /// Consistent color palette for projects
     private static let projectColors = ["66CCFF", "6BFF8E", "FFD06B", "C06BFF", "FF6B6B", "FF6BCD", "6BFFD0"]
 
@@ -1138,8 +1145,10 @@ struct TimingChartSection: View {
                 }
             }
 
-            // Top row: week bar chart (left) + 26-week heatmap (right)
-            HStack(alignment: .top, spacing: 12) {
+            // Top row: week bar chart (left) + 26-week heatmap (right).
+            // Wider gap pushes the bars narrower, countering the stubby
+            // over-wide look at common window sizes.
+            HStack(alignment: .top, spacing: 28) {
                 // Stacked bar chart: one bar per day, segments per project
                 VStack(spacing: 2) {
                     HStack(alignment: .bottom, spacing: 3) {
@@ -1151,20 +1160,20 @@ struct TimingChartSection: View {
                                         ForEach(day.projects) { slice in
                                             Rectangle()
                                                 .fill(Color(hex: slice.color).opacity(0.75))
-                                                .frame(height: max(1, CGFloat(slice.hours / maxHours) * 76))
+                                                .frame(height: max(1, CGFloat(slice.hours / maxHours) * Self.barAreaHeight))
                                         }
                                     }
                                     .cornerRadius(2)
                                 } else {
                                     RoundedRectangle(cornerRadius: 2)
                                         .fill(day.hours > 0 ? Color(hex: day.projects.first?.color ?? "66CCFF").opacity(0.7) : Color.white.opacity(0.04))
-                                        .frame(height: max(2, CGFloat(day.hours / maxHours) * 76))
+                                        .frame(height: max(2, CGFloat(day.hours / maxHours) * Self.barAreaHeight))
                                 }
                             }
                             .frame(maxWidth: .infinity)
                         }
                     }
-                    .frame(height: 76)
+                    .frame(height: Self.barAreaHeight)
                     HStack(spacing: 3) {
                         ForEach(timing.dailyHours) { day in
                             Text(day.dayLabel)
@@ -1494,7 +1503,7 @@ struct ConnectionPoolSection: View {
                         Text("SSH MUX")
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Text("STATUS")
-                            .frame(width: 85, alignment: .trailing)
+                            .frame(width: 96, alignment: .trailing)
                     }
                     .monitorFont(size: 9, weight: .medium)
                     .foregroundColor(.gray.opacity(0.4))
@@ -1524,7 +1533,9 @@ struct ConnectionPoolSection: View {
                                         .foregroundColor(.gray.opacity(0.4))
                                         .padding(.trailing, 6)
                                     Text(alive ? "multiplexed" : "no mux")
-                                        .frame(width: 85, alignment: .trailing)
+                                        .lineLimit(1)
+                                        .fixedSize(horizontal: true, vertical: false)
+                                        .frame(width: 96, alignment: .trailing)
                                         .foregroundColor(Color(hex: alive ? "6BFF8E" : "FF6B6B").opacity(0.8))
                                 }
                                 .monitorFont(size: 11)
