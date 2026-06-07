@@ -769,11 +769,13 @@ struct SimpleMonitorBody: View {
 
                 Spacer(minLength: 0)
 
-                // Bottom strip: top-CPU containers on the left,
-                // weekly Timing tile on the right.
+                // Bottom strip: top-CPU containers on the left, then the
+                // compact pipeline activity indicators, then the weekly
+                // Timing tile flush against the trailing edge.
                 HStack(alignment: .center, spacing: 12) {
                     SimpleContainersStrip(dockerStats: dockerStats)
                     Spacer(minLength: 12)
+                    SimplePipelinesStrip()
                     if timing.isConfigured {
                         WeeklyTimingTile(timing: timing, accentColor: accentColor)
                     }
@@ -852,6 +854,71 @@ private struct SimpleContainerPill: View {
             }
         )
         .cornerRadius(4)
+    }
+}
+
+/// Compact strip of pipeline activity indicators for simple mode. One
+/// chip per tracked pipeline, showing just the in-progress and succeeded
+/// job counts (same icons/colors as the full PIPELINES list) so you can
+/// tell at a glance whether anything is running. No labels — hover for
+/// the workflow name + branch. Zero-height when nothing is tracked.
+struct SimplePipelinesStrip: View {
+    @ObservedObject private var monitor = WorkflowMonitor.shared
+
+    var body: some View {
+        if !monitor.pipelines.isEmpty {
+            HStack(spacing: 8) {
+                ForEach(monitor.pipelines) { p in
+                    SimplePipelinePill(status: p)
+                }
+            }
+        } else {
+            EmptyView()
+        }
+    }
+}
+
+/// One pill in the simple-mode pipeline strip: a status dot plus the
+/// in-progress and succeeded counts. Other buckets (queued, skipped,
+/// failed) are folded into the dot's color rather than shown as text —
+/// this strip is purely an "is it active?" glance.
+private struct SimplePipelinePill: View {
+    let status: PipelineStatus
+
+    var body: some View {
+        HStack(spacing: 5) {
+            PipelineStatusDot(overall: status.overall)
+            if status.inProgress > 0 {
+                miniBadge("arrow.triangle.2.circlepath", status.inProgress,
+                          color: Color(hex: "66CCFF"))
+            }
+            if status.succeeded > 0 {
+                miniBadge("checkmark", status.succeeded, color: Color(hex: "6BFF8E"))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.white.opacity(0.04))
+        .cornerRadius(4)
+        .help(tooltip)
+    }
+
+    private func miniBadge(_ symbol: String, _ count: Int, color: Color) -> some View {
+        HStack(spacing: 2) {
+            Image(systemName: symbol)
+                .font(.system(size: 8))
+            Text("\(count)")
+                .monitorFont(size: 9)
+        }
+        .foregroundColor(color)
+    }
+
+    private var tooltip: String {
+        let name = status.title?.isEmpty == false
+            ? status.title!
+            : status.spec.displayName
+        if let b = status.headBranch, !b.isEmpty { return "\(name) · \(b)" }
+        return name
     }
 }
 
