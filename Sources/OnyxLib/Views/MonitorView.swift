@@ -1302,8 +1302,11 @@ struct TimingHeatmapGrid: View {
     }
 
     /// Fixed square cell size — guarantees the grid never stretches.
-    private static let cellSize: CGFloat = 9
-    private static let cellGap: CGFloat = 1
+    /// Tuned so 7 rows of cells (with gaps) land close to the bar
+    /// chart's 76pt height, so the two halves of the top row read as
+    /// roughly equal weight instead of bar-huge / heatmap-tiny.
+    private static let cellSize: CGFloat = 12
+    private static let cellGap: CGFloat = 2
 
     private static let dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -1347,7 +1350,7 @@ struct TimingHeatmapGrid: View {
                     HStack(spacing: Self.cellGap) {
                         ForEach(0..<weeks.count, id: \.self) { week in
                             let hours = weeks[week][day]
-                            RoundedRectangle(cornerRadius: 1.5)
+                            RoundedRectangle(cornerRadius: 2)
                                 .fill(Self.heatColor(hours: hours))
                                 .frame(width: Self.cellSize, height: Self.cellSize)
                                 .help(tooltip(week: week, day: day))
@@ -1358,17 +1361,17 @@ struct TimingHeatmapGrid: View {
             // Legend directly under the grid, same width
             HStack(spacing: 3) {
                 Text("26W")
-                    .monitorFont(size: 7)
+                    .monitorFont(size: 8)
                     .foregroundColor(.gray.opacity(0.35))
                 HStack(spacing: 0) {
-                    ForEach(0..<24, id: \.self) { i in
+                    ForEach(0..<32, id: \.self) { i in
                         Rectangle()
-                            .fill(Self.heatColor(hours: Double(i) / 24 * Self.dayReference))
-                            .frame(width: 3, height: 3)
+                            .fill(Self.heatColor(hours: Double(i) / 32 * Self.dayReference))
+                            .frame(width: 4, height: 4)
                     }
                 }
                 Text("40h")
-                    .monitorFont(size: 7)
+                    .monitorFont(size: 8)
                     .foregroundColor(.gray.opacity(0.35))
             }
         }
