@@ -60,9 +60,13 @@ public struct ContentView: View {
     public var body: some View {
         VStack(spacing: 0) {
             ZStack {
-                // Dark tint — opacity driven by settings, desktop shows through
+                // Dark tint — opacity driven by settings, desktop shows
+                // through. Suppressed while the monitor overlay is up: the
+                // monitor draws its own (lower) tint, and stacking both
+                // would make the overlay darker than the terminal instead
+                // of more transparent.
                 Color(nsColor: NSColor(white: 0.04, alpha: 1.0))
-                    .opacity(appState.appearance.windowOpacity)
+                    .opacity(appState.showMonitor ? 0 : appState.appearance.windowOpacity)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
 
@@ -73,7 +77,8 @@ public struct ContentView: View {
                             SessionContentView(
                                 appState: appState,
                                 browserManager: appState.browserManager,
-                                hasOverlay: hasOverlay
+                                hasOverlay: hasOverlay,
+                                monitorActive: appState.showMonitor
                             )
 
                             // Terminal text mode — selectable text overlay
@@ -82,11 +87,12 @@ public struct ContentView: View {
                                     .transition(.opacity)
                             }
 
-                            // Monitor overlay — blur terminal for privacy, then show stats
+                            // Monitor overlay. The terminal beneath is fully
+                            // hidden (see SessionContentView.monitorActive) so
+                            // it can never show through — a privacy shield in
+                            // both windowed and fullscreen. The overlay draws
+                            // its own opacity-driven tint, no vibrancy needed.
                             if appState.showMonitor {
-                                VibrancyBackground()
-                                    .ignoresSafeArea()
-                                    .allowsHitTesting(false)
                                 MonitorView(appState: appState)
                                     .transition(.opacity)
                             }
@@ -337,6 +343,10 @@ private struct SessionContentView: View {
     @ObservedObject var appState: AppState
     @ObservedObject var browserManager: BrowserManager
     let hasOverlay: Bool
+    /// When the monitor overlay is up, the terminal/browser is hidden
+    /// outright (opacity 0) rather than merely dimmed — guarantees the
+    /// content behind never shows through the overlay, in any window mode.
+    var monitorActive: Bool = false
 
     private var isLocalSession: Bool {
         appState.activeSession?.source.isLocal == true
@@ -346,8 +356,8 @@ private struct SessionContentView: View {
         ZStack {
             // Terminal view — always in tree so updateNSView fires for session switching
             TerminalHostView(appState: appState)
-                .opacity(isLocalSession ? 0 : (hasOverlay ? 0.3 : 1.0))
-                .allowsHitTesting(!isLocalSession && !hasOverlay)
+                .opacity(isLocalSession || monitorActive ? 0 : (hasOverlay ? 0.3 : 1.0))
+                .allowsHitTesting(!isLocalSession && !hasOverlay && !monitorActive)
 
             // Browser view — shown when active session is a browser
             if isLocalSession {
@@ -356,8 +366,8 @@ private struct SessionContentView: View {
                     Divider().background(Color.white.opacity(0.1))
                     BrowserHostView(appState: appState, browserManager: browserManager)
                 }
-                .opacity(hasOverlay ? 0.3 : 1.0)
-                .allowsHitTesting(!hasOverlay)
+                .opacity(monitorActive ? 0 : (hasOverlay ? 0.3 : 1.0))
+                .allowsHitTesting(!hasOverlay && !monitorActive)
             }
         }
     }

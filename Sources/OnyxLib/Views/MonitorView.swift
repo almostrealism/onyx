@@ -264,7 +264,13 @@ struct MonitorView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.75)
+            // The overlay's tint. Driven by the opacity setting (via
+            // monitorTintOpacity) so the overlay is at least as transparent
+            // as the terminal: near the slider floor it vanishes to just the
+            // floating widgets over the desktop, at the top it's a solid
+            // privacy shield. The terminal beneath is already hidden, so this
+            // is the only thing between the widgets and the desktop.
+            Color.black.opacity(appState.appearance.monitorTintOpacity)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 

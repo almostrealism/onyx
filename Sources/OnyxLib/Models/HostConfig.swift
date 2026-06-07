@@ -100,6 +100,21 @@ public struct AppearanceConfig: Codable {
         terminalFontSize ?? fontSize
     }
 
+    /// Opacity of the monitor overlay's tint, derived from windowOpacity.
+    ///
+    /// The terminal needs an elevated, readable opacity (it has text), but
+    /// the monitor overlay is meant to be ambient — "my desktop plus some
+    /// widgets". So we map the window-opacity slider (floored at 0.3) down
+    /// onto 0...1: at the bottom of the slider the overlay tint vanishes
+    /// entirely (just the CPU colors floating over the desktop), and at the
+    /// top it's fully opaque (a solid privacy shield). For every slider
+    /// value this stays ≤ windowOpacity, so the overlay is always *at least
+    /// as transparent* as the terminal behind it.
+    public var monitorTintOpacity: Double {
+        let sliderFloor = 0.3   // matches the SettingsView opacity slider's lower bound
+        return max(0, min(1, (windowOpacity - sliderFloor) / (1.0 - sliderFloor)))
+    }
+
     /// Accent options.
     public static let accentOptions = ["66CCFF", "FF6B6B", "6BFF8E", "FFD06B", "C06BFF", "FF6BCD"]
 
