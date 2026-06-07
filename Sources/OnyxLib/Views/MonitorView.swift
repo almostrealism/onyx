@@ -350,18 +350,20 @@ struct MonitorView: View {
                                     TimingChartSection(timing: appState.timing, accentColor: appState.accentColor)
                                 }
                                 // Two-column layout below the timing chart:
-                                // - Left:  session notes → reminders
-                                // - Right: open PRs → pipelines
-                                // Either column can be sparse without
-                                // crowding the other; the columns just
-                                // collapse vertically.
+                                // - Left:  reminders (often long; gets
+                                //          a column to itself)
+                                // - Right: session notes → PRs → pipelines
+                                //          (the work-tracking column,
+                                //          ordered the way work flows:
+                                //          jot a note, work on it, open
+                                //          a PR, watch the pipeline)
                                 HStack(alignment: .top, spacing: 16) {
                                     VStack(alignment: .leading, spacing: 16) {
-                                        SessionNotesSection(appState: appState)
                                         RemindersSection(appState: appState)
                                     }
                                     .frame(maxWidth: .infinity, alignment: .topLeading)
                                     VStack(alignment: .leading, spacing: 16) {
+                                        SessionNotesSection(appState: appState)
                                         PullRequestsSection(appState: appState)
                                         PipelinesSection(appState: appState)
                                     }
