@@ -1,4 +1,83 @@
 import SwiftUI
+import AppKit
+
+/// NSTextField-backed text field we can focus and select atomically on
+/// appear. SwiftUI's TextField + @FocusState is async, so any
+/// follow-up "select all" sent via the responder chain races against
+/// the focus landing — when it loses the race the terminal behind the
+/// overlay becomes the recipient and its contents get selected, which
+/// is exactly the bug we hit before.
+private struct FocusedSelectAllField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var font: NSFont
+    var textColor: NSColor
+    var onSubmit: () -> Void
+    var onCancel: () -> Void
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
+        field.delegate = context.coordinator
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = font
+        field.textColor = textColor
+        field.placeholderString = placeholder
+        field.stringValue = text
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.submit(_:))
+        // Atomic focus + select. Runs after the view is in the window
+        // so makeFirstResponder finds a window to work with. Selecting
+        // before yielding back to the run loop prevents any other
+        // responder from receiving a stray selectAll.
+        DispatchQueue.main.async {
+            if let window = field.window {
+                window.makeFirstResponder(field)
+                if let editor = field.currentEditor() as? NSTextView {
+                    editor.selectAll(nil)
+                }
+            }
+        }
+        return field
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onSubmit: onSubmit, onCancel: onCancel)
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var text: Binding<String>
+        let onSubmit: () -> Void
+        let onCancel: () -> Void
+        init(text: Binding<String>, onSubmit: @escaping () -> Void, onCancel: @escaping () -> Void) {
+            self.text = text; self.onSubmit = onSubmit; self.onCancel = onCancel
+        }
+        func controlTextDidChange(_ obj: Notification) {
+            if let field = obj.object as? NSTextField {
+                text.wrappedValue = field.stringValue
+            }
+        }
+        func control(_ control: NSControl,
+                     textView: NSTextView,
+                     doCommandBy commandSelector: Selector) -> Bool {
+            // Escape cancels — handle it here rather than relying on
+            // SwiftUI keyboardShortcut so the editor closes even with
+            // focus inside the field.
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                onCancel(); return true
+            }
+            return false
+        }
+        @objc func submit(_ sender: Any?) { onSubmit() }
+    }
+}
 
 /// Small text-field overlay for setting the status note on the currently
 /// active tmux session. Triggered by Cmd+; — the user types a one-liner
@@ -6,8 +85,23 @@ import SwiftUI
 /// the monitor view between the timing chart and the reminders list.
 struct SessionNoteEditor: View {
     @ObservedObject var appState: AppState
-    @State private var text: String = ""
-    @FocusState private var isFocused: Bool
+    @State private var text: String
+
+    init(appState: AppState) {
+        self.appState = appState
+        // Seed text BEFORE the field's makeNSView runs so the initial
+        // stringValue + selection are both correct. Doing this in
+        // .onAppear is too late — by then the NSTextField is already
+        // built and `selectAll` would select an empty string.
+        let seed: String = {
+            if let session = appState.activeSession,
+               let existing = SessionNotesStore.shared.note(for: session.id) {
+                return existing.text
+            }
+            return ""
+        }()
+        _text = State(initialValue: seed)
+    }
 
     var body: some View {
         ZStack {
@@ -28,19 +122,22 @@ struct SessionNoteEditor: View {
                     }
                 }
 
-                TextField("What's this session doing?", text: $text)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 16, weight: .light, design: .monospaced))
-                    .foregroundColor(.white)
-                    .focused($isFocused)
-                    .padding(12)
-                    .background(Color.white.opacity(0.06))
-                    .cornerRadius(6)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(appState.accentColor.opacity(0.3), lineWidth: 1)
-                    )
-                    .onSubmit { save() }
+                FocusedSelectAllField(
+                    text: $text,
+                    placeholder: "What's this session doing?",
+                    font: NSFont.monospacedSystemFont(ofSize: 16, weight: .light),
+                    textColor: .white,
+                    onSubmit: { save() },
+                    onCancel: { appState.showSessionNoteEditor = false }
+                )
+                .frame(height: 22)
+                .padding(12)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(appState.accentColor.opacity(0.3), lineWidth: 1)
+                )
 
                 Text("Empty to clear · Esc to cancel · ⏎ to save")
                     .font(.system(size: 10, design: .monospaced))
@@ -81,25 +178,6 @@ struct SessionNoteEditor: View {
                     .stroke(Color.white.opacity(0.08), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.5), radius: 30)
-        }
-        .onAppear {
-            // Pre-populate with the current note text if any, so the
-            // user can edit rather than start fresh.
-            if let session = appState.activeSession,
-               let existing = SessionNotesStore.shared.note(for: session.id) {
-                text = existing.text
-            }
-            isFocused = true
-            // Select-all once the TextField has actually become first
-            // responder. SwiftUI's @FocusState doesn't expose a
-            // pre-select API, so we fire a NSText.selectAll up the
-            // responder chain — the field receives it and highlights
-            // its contents. The brief delay lets focus settle first;
-            // without it the action arrives before the field is the
-            // first responder and is dropped silently.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
-            }
         }
     }
 
