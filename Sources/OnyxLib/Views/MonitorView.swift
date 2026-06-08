@@ -61,6 +61,14 @@ public class RemindersManager: ObservableObject {
     @Published public var accessGranted = false
     @Published public var availableLists: [String] = []
 
+    /// Scope counts across ALL lists, independent of selectedLists — for
+    /// the "how much is due" indicator. dueTodayCount is incomplete
+    /// reminders due by end of today (overdue included); dueTomorrowCount
+    /// is the cumulative count due by end of tomorrow (so it's always
+    /// ≥ dueTodayCount and shows how much the load grows tomorrow).
+    @Published public var dueTodayCount: Int = 0
+    @Published public var dueTomorrowCount: Int = 0
+
     private let store = EKEventStore()
     private var refreshTimer: Timer?
     private var changeObserver: Any?
@@ -96,6 +104,7 @@ public class RemindersManager: ObservableObject {
         ) { [weak self] _ in
             self?.refreshLists()
             self?.fetchReminders()
+            self?.fetchScopeCounts()
         }
     }
 
@@ -113,6 +122,7 @@ public class RemindersManager: ObservableObject {
                 if granted {
                     self?.refreshLists()
                     self?.fetchReminders()
+                    self?.fetchScopeCounts()
                     self?.startTimer()
                 }
             }
@@ -122,6 +132,7 @@ public class RemindersManager: ObservableObject {
     private func startTimer() {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.fetchReminders()
+            self?.fetchScopeCounts()
         }
     }
 
@@ -238,6 +249,41 @@ public class RemindersManager: ObservableObject {
             DispatchQueue.main.async {
                 self.groupedReminders = groups
                 self.reminders = groups.flatMap(\.reminders)
+            }
+        }
+    }
+
+    /// Count incomplete reminders due by end of today and by end of
+    /// tomorrow, across every list. Runs regardless of which lists are
+    /// currently displayed. The predicate requires a due date, so
+    /// dateless reminders are correctly excluded from "what's due".
+    public func fetchScopeCounts() {
+        guard accessGranted else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let cal = Calendar.current
+            let startOfDay = cal.startOfDay(for: Date())
+            let endOfToday = cal.date(byAdding: .day, value: 1, to: startOfDay)!
+            let endOfTomorrow = cal.date(byAdding: .day, value: 2, to: startOfDay)!
+
+            let todayPred = self.store.predicateForIncompleteReminders(
+                withDueDateStarting: nil, ending: endOfToday, calendars: nil)
+            let tomorrowPred = self.store.predicateForIncompleteReminders(
+                withDueDateStarting: nil, ending: endOfTomorrow, calendars: nil)
+
+            let group = DispatchGroup()
+            var todayN = 0, tomorrowN = 0
+            group.enter()
+            self.store.fetchReminders(matching: todayPred) { rs in
+                todayN = (rs ?? []).count; group.leave()
+            }
+            group.enter()
+            self.store.fetchReminders(matching: tomorrowPred) { rs in
+                tomorrowN = (rs ?? []).count; group.leave()
+            }
+            group.notify(queue: .main) {
+                self.dueTodayCount = todayN
+                self.dueTomorrowCount = tomorrowN
             }
         }
     }
@@ -2709,6 +2755,19 @@ struct RemindersSection: View {
                 }
             }
 
+            // Scope indicator — totals across ALL lists regardless of
+            // what's displayed: how much is due now, and how much larger
+            // that gets by tomorrow.
+            if reminders.accessGranted {
+                HStack(spacing: 8) {
+                    scopeWidget(count: reminders.dueTodayCount,
+                                label: "today", color: Color(hex: "FF6B6B"))
+                    scopeWidget(count: reminders.dueTomorrowCount,
+                                label: "by tmrw", color: Color(hex: "FFD06B"))
+                    Spacer(minLength: 0)
+                }
+            }
+
             if !reminders.accessGranted {
                 Text("Reminders access not granted")
                     .monitorFont(size: 11)
@@ -2757,6 +2816,22 @@ struct RemindersSection: View {
             reminders.selectedLists = newValue
             reminders.fetchReminders()
         }
+    }
+
+    /// One count + label chip for the scope indicator.
+    private func scopeWidget(count: Int, label: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Text("\(count)")
+                .monitorFont(size: 11, weight: .medium)
+                .foregroundColor(color)
+            Text(label)
+                .monitorFont(size: 9)
+                .foregroundColor(.gray.opacity(0.5))
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(color.opacity(0.1))
+        .cornerRadius(4)
     }
 }
 
