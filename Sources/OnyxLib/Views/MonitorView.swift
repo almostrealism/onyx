@@ -1465,6 +1465,15 @@ struct TimingHeatmapGrid: View {
         return Calendar.current.date(byAdding: .day, value: -daysBack, to: anchorMonday)!
     }
 
+    /// A cell whose date is after today — a day that hasn't started yet.
+    /// These exist only in the current (rightmost) week's column and
+    /// should render as empty space, not a zero-hours black square.
+    private func isFuture(week: Int, day: Int) -> Bool {
+        let cal = Calendar.current
+        return cal.startOfDay(for: cellDate(week: week, day: day))
+             > cal.startOfDay(for: Date())
+    }
+
     /// "Wed Apr 2: 4.2 hrs · 28% of 15.0h week"
     private func tooltip(week: Int, day: Int) -> String {
         let hours = weeks[week][day]
@@ -1486,11 +1495,15 @@ struct TimingHeatmapGrid: View {
                 ForEach(0..<7, id: \.self) { day in
                     HStack(spacing: Self.cellGap) {
                         ForEach(0..<weeks.count, id: \.self) { week in
+                            let future = isFuture(week: week, day: day)
                             let hours = weeks[week][day]
                             RoundedRectangle(cornerRadius: 2)
-                                .fill(Self.heatColor(hours: hours))
+                                // Future days haven't begun — render as empty
+                                // space, like the gaps between cells, rather
+                                // than a black "zero" square.
+                                .fill(future ? Color.clear : Self.heatColor(hours: hours))
                                 .frame(width: Self.cellSize, height: Self.cellSize)
-                                .help(tooltip(week: week, day: day))
+                                .help(future ? "" : tooltip(week: week, day: day))
                         }
                     }
                 }
