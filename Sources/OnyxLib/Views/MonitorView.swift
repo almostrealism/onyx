@@ -166,7 +166,11 @@ public class RemindersManager: ObservableObject {
             guard let self = self else { return }
             let cal = Calendar.current
             let startOfDay = cal.startOfDay(for: Date())
-            let endOfDay = cal.date(byAdding: .day, value: 1, to: startOfDay)!
+            // Last second of today, not start-of-tomorrow: the predicate's
+            // end is inclusive, so an all-day reminder due tomorrow (which
+            // resolves to tomorrow 00:00) would otherwise be pulled into
+            // today's list. See fetchScopeCounts for the same fix.
+            let endOfDay = cal.date(byAdding: DateComponents(day: 1, second: -1), to: startOfDay)!
 
             let predicate = self.store.predicateForIncompleteReminders(
                 withDueDateStarting: nil,
@@ -263,8 +267,13 @@ public class RemindersManager: ObservableObject {
             guard let self = self else { return }
             let cal = Calendar.current
             let startOfDay = cal.startOfDay(for: Date())
-            let endOfToday = cal.date(byAdding: .day, value: 1, to: startOfDay)!
-            let endOfTomorrow = cal.date(byAdding: .day, value: 2, to: startOfDay)!
+            // predicateForIncompleteReminders(ending:) is *inclusive*, and an
+            // all-day (date-only) reminder due tomorrow resolves to tomorrow
+            // 00:00 — i.e. exactly start-of-tomorrow. Ending the window there
+            // would pull every such reminder one day early. End at the last
+            // second of the day instead so tomorrow's midnight stays out.
+            let endOfToday = cal.date(byAdding: DateComponents(day: 1, second: -1), to: startOfDay)!
+            let endOfTomorrow = cal.date(byAdding: DateComponents(day: 2, second: -1), to: startOfDay)!
 
             let todayPred = self.store.predicateForIncompleteReminders(
                 withDueDateStarting: nil, ending: endOfToday, calendars: nil)
