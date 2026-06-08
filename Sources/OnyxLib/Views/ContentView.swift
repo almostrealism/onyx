@@ -269,6 +269,12 @@ public struct ContentView: View {
         .modifier(ContentViewAnimations(appState: appState))
         .background(WindowFinderView { window in
             hostWindow = window
+            // Style every window as it appears, not just the ones present
+            // at launch. New windows (Cmd+N) come from WindowGroup and
+            // would otherwise stay opaque — no desktop bleed, no overlay
+            // transparency. styleWindow is idempotent so re-running it on
+            // the original windows is harmless.
+            AppDelegate.styleWindow(window)
         })
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
