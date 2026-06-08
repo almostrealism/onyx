@@ -2807,18 +2807,61 @@ private struct ReminderRow: View {
 
             Spacer()
 
-            if let due = reminder.dueDateComponents, let hour = due.hour, let minute = due.minute {
-                let isOverdue = isReminderOverdue(due)
-                Text(String(format: "%d:%02d", hour, minute))
+            if let due = reminder.dueDateComponents, let label = dueLabel(due) {
+                Text(label)
                     .monitorFont(size: 10)
-                    .foregroundColor(isOverdue && !reminder.isCompleted ? Color(hex: "FF6B6B") : .gray.opacity(0.4))
+                    .foregroundColor(isReminderOverdue(due) && !reminder.isCompleted ? Color(hex: "FF6B6B") : .gray.opacity(0.4))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
         }
         .padding(.vertical, 2)
     }
 
-    private func isReminderOverdue(_ components: DateComponents) -> Bool {
-        guard let date = Calendar.current.date(from: components) else { return false }
-        return date < Date()
+    /// Compact due-date string for the trailing slot. Shows the time when
+    /// the reminder has one, and the day whenever it isn't today, so
+    /// list-mode reminders (which can be due on any date) are
+    /// distinguishable: "15:00" today, "Tmrw", "Mon 9:00", "Jun 10".
+    private func dueLabel(_ comps: DateComponents) -> String? {
+        let cal = Calendar.current
+        guard let date = cal.date(from: comps) else { return nil }
+        let hasTime = comps.hour != nil && comps.minute != nil
+        let timeStr = hasTime ? String(format: "%d:%02d", comps.hour!, comps.minute!) : nil
+
+        let dayDiff = cal.dateComponents([.day],
+                                         from: cal.startOfDay(for: Date()),
+                                         to: cal.startOfDay(for: date)).day ?? 0
+        let dayStr: String?
+        switch dayDiff {
+        case 0:  dayStr = nil               // today — the time alone is enough
+        case 1:  dayStr = "Tmrw"
+        case -1: dayStr = "Yest"
+        case 2..<7:  dayStr = Self.weekdayFormatter.string(from: date)
+        default: dayStr = Self.monthDayFormatter.string(from: date)
+        }
+
+        switch (dayStr, timeStr) {
+        case let (day?, time?): return "\(day) \(time)"
+        case let (day?, nil):   return day
+        case let (nil, time?):  return time
+        case (nil, nil):        return "Today"   // due today, no time set
+        }
     }
+
+    private func isReminderOverdue(_ comps: DateComponents) -> Bool {
+        let cal = Calendar.current
+        guard let date = cal.date(from: comps) else { return false }
+        // With a time, compare instants. All-day reminders are only
+        // overdue once the whole day has passed — midnight-today is not
+        // "overdue" just because the current clock time is later.
+        if comps.hour != nil && comps.minute != nil { return date < Date() }
+        return cal.startOfDay(for: date) < cal.startOfDay(for: Date())
+    }
+
+    private static let weekdayFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "EEE"; return f
+    }()
+    private static let monthDayFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MMM d"; return f
+    }()
 }
