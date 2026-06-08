@@ -1073,13 +1073,13 @@ struct FavoritesBar: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        // Track the window opacity so the bar is continuous with the rest
-        // of the UI instead of a hard opaque line at the bottom edge —
-        // nudged a little darker than the window tint so its small text
-        // stays legible at low opacity.
+        // Match the backdrop tint of the current mode so the bar blends
+        // into the window instead of forming a hard opaque line at the
+        // bottom edge — and so it goes see-through along with the overlay
+        // during an `x` peek.
         .background(
             Color(nsColor: NSColor(white: 0.04, alpha: 1.0))
-                .opacity(min(1.0, appState.appearance.windowOpacity + 0.12))
+                .opacity(appState.backdropTintOpacity)
         )
     }
 }

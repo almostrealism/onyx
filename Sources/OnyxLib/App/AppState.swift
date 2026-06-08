@@ -129,6 +129,18 @@ public class AppState: ObservableObject {
     public var effectiveWindowOpacity: Double {
         (showMonitor && monitorPeek) ? 0.3 : appearance.windowOpacity
     }
+
+    /// Opacity of the window's backdrop tint in the current mode — the
+    /// value the bottom bar matches so it blends in instead of forming a
+    /// solid strip at the screen edge. In monitor mode that's the
+    /// overlay's (peek-aware) tint; otherwise it's the plain window
+    /// opacity. So when the `x` peek drops the overlay to see-through,
+    /// the bar goes with it.
+    public var backdropTintOpacity: Double {
+        showMonitor
+            ? AppearanceConfig.monitorTintOpacity(for: effectiveWindowOpacity)
+            : appearance.windowOpacity
+    }
     @Published public var showSetup = false
     @Published public var activeRightPanel: RightPanel?
     @Published public var showSettings = false
