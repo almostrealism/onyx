@@ -549,6 +549,10 @@ private struct ContentViewNotifications: ViewModifier {
                 guard isKeyWindow, appState.showMonitor else { return }
                 appState.showSimpleMonitor.toggle()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleMonitorPeek)) { _ in
+                guard isKeyWindow, appState.showMonitor else { return }
+                appState.monitorPeek.toggle()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .editSessionNote)) { _ in
                 guard isKeyWindow, appState.activeSession != nil else { return }
                 appState.showSessionNoteEditor = true
@@ -572,7 +576,10 @@ private struct ContentViewNotifications: ViewModifier {
             // palette all funnel through showMonitor, so observing it
             // here is the single source of truth for routing focus back
             // to the terminal after the overlay closes.
-            .onChange(of: appState.showMonitor) { _, _ in
+            .onChange(of: appState.showMonitor) { _, isShown in
+                // A peek only makes sense while the overlay is up — don't
+                // let it persist into the next time the monitor opens.
+                if !isShown { appState.monitorPeek = false }
                 appState.recalculateFocus()
             }
             .onChange(of: appState.appearance.windowTitle) { _, _ in updateWindowTitle() }
@@ -1066,7 +1073,14 @@ struct FavoritesBar: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(Color(nsColor: NSColor(white: 0.04, alpha: 1.0)))
+        // Track the window opacity so the bar is continuous with the rest
+        // of the UI instead of a hard opaque line at the bottom edge —
+        // nudged a little darker than the window tint so its small text
+        // stays legible at low opacity.
+        .background(
+            Color(nsColor: NSColor(white: 0.04, alpha: 1.0))
+                .opacity(min(1.0, appState.appearance.windowOpacity + 0.12))
+        )
     }
 }
 

@@ -25,6 +25,7 @@ public extension Notification.Name {
     static let toggleAllContainers = Notification.Name("toggleAllContainers")
     static let toggleClockFormat = Notification.Name("toggleClockFormat")
     static let toggleSimpleMonitor = Notification.Name("toggleSimpleMonitor")
+    static let toggleMonitorPeek = Notification.Name("toggleMonitorPeek")
     static let editSessionNote = Notification.Name("editSessionNote")
     static let focusURLBar = Notification.Name("focusURLBar")
     static let tmuxResizeUp = Notification.Name("tmuxResizeUp")
@@ -120,6 +121,14 @@ public class AppState: ObservableObject {
             objectWillChange.send()
         }
     }
+
+    /// Window opacity to use right now. Normally the user's setting, but
+    /// while the monitor overlay is up and the `x` peek is engaged it
+    /// drops to the slider floor so the desktop shows through. Drives the
+    /// monitor overlay's tint (see MonitorView / AppearanceConfig).
+    public var effectiveWindowOpacity: Double {
+        (showMonitor && monitorPeek) ? 0.3 : appearance.windowOpacity
+    }
     @Published public var showSetup = false
     @Published public var activeRightPanel: RightPanel?
     @Published public var showSettings = false
@@ -130,6 +139,11 @@ public class AppState: ObservableObject {
     /// top-CPU containers along the bottom, and a small weekly Timing
     /// tile in the bottom-right. Toggle with `s` while monitor is open.
     @Published public var showSimpleMonitor = false
+    /// Temporary "peek" while the monitor overlay is up: drops the
+    /// overlay's opacity to the slider floor (0.3) so the user can glance
+    /// at the desktop behind it, then restore their chosen opacity.
+    /// Toggled by `x`. Auto-clears when the monitor closes.
+    @Published public var monitorPeek = false
     /// When true, show the small text-field overlay for editing the
     /// note attached to the active session. Toggled by Cmd+;.
     @Published public var showSessionNoteEditor = false

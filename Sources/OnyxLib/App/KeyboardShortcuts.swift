@@ -192,6 +192,9 @@ public class ShortcutManager {
                 case 1: // S → toggle simple monitor layout
                     NotificationCenter.default.post(name: .toggleSimpleMonitor, object: nil)
                     return nil
+                case 7: // X → peek behind the overlay (drop to 30% opacity)
+                    NotificationCenter.default.post(name: .toggleMonitorPeek, object: nil)
+                    return nil
                 default:
                     break
                 }

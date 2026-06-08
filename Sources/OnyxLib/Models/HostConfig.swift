@@ -111,6 +111,12 @@ public struct AppearanceConfig: Codable {
     /// value this stays ≤ windowOpacity, so the overlay is always *at least
     /// as transparent* as the terminal behind it.
     public var monitorTintOpacity: Double {
+        Self.monitorTintOpacity(for: windowOpacity)
+    }
+
+    /// The monitor-tint mapping for an arbitrary window opacity — used
+    /// directly when a transient override (e.g. the `x` peek) is in play.
+    public static func monitorTintOpacity(for windowOpacity: Double) -> Double {
         let sliderFloor = 0.3   // matches the SettingsView opacity slider's lower bound
         return max(0, min(1, (windowOpacity - sliderFloor) / (1.0 - sliderFloor)))
     }

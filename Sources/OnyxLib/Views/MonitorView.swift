@@ -325,7 +325,7 @@ struct MonitorView: View {
             // floating widgets over the desktop, at the top it's a solid
             // privacy shield. The terminal beneath is already hidden, so this
             // is the only thing between the widgets and the desktop.
-            Color.black.opacity(appState.appearance.monitorTintOpacity)
+            Color.black.opacity(AppearanceConfig.monitorTintOpacity(for: appState.effectiveWindowOpacity))
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
@@ -379,7 +379,7 @@ struct MonitorView: View {
                         Text(monitor.useShortInterval ? "5s intervals" : "1m intervals")
                             .monitorFont(size: 10)
                             .foregroundColor(.gray.opacity(0.4))
-                        Text("(T interval · M memory · C containers · P 12/24hr · S simple)")
+                        Text("(T interval · M memory · C containers · P 12/24hr · S simple · X peek)")
                             .monitorFont(size: 10)
                             .foregroundColor(.gray.opacity(0.25))
                     }
