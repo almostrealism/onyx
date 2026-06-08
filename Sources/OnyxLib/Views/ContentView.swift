@@ -261,7 +261,9 @@ public struct ContentView: View {
         }
         .overlay {
             if showStartupAnimation {
-                StartupOverlay(accentHex: appState.effectiveAccentHex, statusText: appState.startupStatus)
+                StartupOverlay(accentHex: appState.effectiveAccentHex,
+                               statusText: appState.startupStatus,
+                               opacity: appState.appearance.windowOpacity)
                     .transition(.opacity)
                     .zIndex(999)
             }
@@ -384,10 +386,15 @@ private struct SessionContentView: View {
 private struct StartupOverlay: View {
     let accentHex: String
     let statusText: String
+    /// Matches the loaded window's base tint so the desktop bleeds
+    /// through during startup exactly as it does afterward — no opaque
+    /// flash before the window settles in.
+    var opacity: Double = 1.0
 
     var body: some View {
         ZStack {
             Color(nsColor: NSColor(white: 0.03, alpha: 1.0))
+                .opacity(opacity)
                 .ignoresSafeArea()
 
             VStack(spacing: 24) {
