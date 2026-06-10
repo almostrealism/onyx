@@ -192,20 +192,20 @@ public class FileBrowserManager: ObservableObject {
 
     /// Navigate back.
     public func navigateBack() {
-        // If viewing a file and we came from search, return to search results
-        if viewingFileName != nil && wasSearchActiveBeforeFile {
-            fileContent = nil
-            imageData = nil
-            viewingFileName = nil
-            isUnsupportedFile = false
-            wasSearchActiveBeforeFile = false
-            isSearchActive = true
+        // When something is *open* — a viewed file or a search result —
+        // "back" just returns you to whatever you were looking at before
+        // it opened: the folder you were browsing, or the search results.
+        // It must NOT also pop the directory history; opening a file never
+        // pushed to it, so popping would skip a folder back. closeFile()
+        // handles both the plain-folder and from-search cases.
+        if viewingFileName != nil {
+            closeFile()
             return
         }
 
+        // No file open: step back through the directory history.
         fileContent = nil
         imageData = nil
-        viewingFileName = nil
         isUnsupportedFile = false
         wasSearchActiveBeforeFile = false
         if let prev = pathHistory.popLast() {

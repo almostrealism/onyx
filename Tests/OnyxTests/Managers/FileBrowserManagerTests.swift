@@ -74,6 +74,44 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(entries[0].modified, "Mar 5 10:22")
     }
 
+    // MARK: - navigateBack with an open file
+    //
+    // Opening a file never pushes to pathHistory — currentPath stays the
+    // file's folder. So "back" from an open file must only close the file
+    // and leave you in that folder; it must NOT pop pathHistory and skip a
+    // directory back. This has regressed repeatedly; these pin it.
+
+    func testNavigateBack_fromOpenFile_staysInSameFolder() {
+        let browser = makeBrowser()
+        // Browsing /a/b, having arrived from /a.
+        browser.pathHistory = ["/a"]
+        browser.currentPath = "/a/b"
+        // A file in /a/b is now open.
+        browser.viewingFileName = "notes.txt"
+        browser.fileContent = "hello"
+
+        browser.navigateBack()
+
+        XCTAssertNil(browser.viewingFileName, "Back should close the open file")
+        XCTAssertEqual(browser.currentPath, "/a/b",
+                       "Back from an open file must stay in its folder, not jump to the parent")
+        XCTAssertEqual(browser.pathHistory, ["/a"],
+                       "Back from an open file must not consume directory history")
+    }
+
+    func testNavigateBack_noOpenFile_popsDirectoryHistory() {
+        let browser = makeBrowser()
+        // No file open: back should walk the directory history as before.
+        browser.pathHistory = ["/a"]
+        browser.currentPath = "/a/b"
+
+        browser.navigateBack()
+
+        XCTAssertEqual(browser.currentPath, "/a",
+                       "With no file open, back pops to the previous directory")
+        XCTAssertTrue(browser.pathHistory.isEmpty)
+    }
+
     // MARK: - escapeForShell
 
     func testEscapeForShell_simplePath() {
