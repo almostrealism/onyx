@@ -1009,7 +1009,15 @@ struct WeeklyTimingTile: View {
         let perDay = daysWithData > 0 ? total / Double(daysWithData) : 0
 
         if total > 0 {
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: .trailing, spacing: 5) {
+                // Horizontal project-ratio bar across the top of the tile,
+                // same visual as the vertical one beside the daily bars.
+                if timing.projectTotals.count > 1 {
+                    WeeklyTimeRatioBar(totals: timing.projectTotals,
+                                       axis: .horizontal,
+                                       thickness: 5,
+                                       length: Self.contentWidth)
+                }
                 Text(formatHours(total))
                     .monitorFont(size: 18, weight: .light)
                     .foregroundColor(accentColor)
@@ -1022,12 +1030,16 @@ struct WeeklyTimingTile: View {
                         .foregroundColor(.gray.opacity(0.4))
                 }
             }
+            .frame(width: Self.contentWidth, alignment: .trailing)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Color.white.opacity(0.04))
             .cornerRadius(4)
         }
     }
+
+    /// Fixed content width so the ratio bar and the numbers share an edge.
+    private static let contentWidth: CGFloat = 84
 
     private func formatHours(_ h: Double) -> String {
         // 8.0 → "8h"; 8.5 → "8.5h"; 0.25 → "15m"
@@ -1220,6 +1232,58 @@ func monitorCompactSize(_ part: String) -> String {
     return t
 }
 
+// MARK: - Weekly time ratio bar
+
+/// A fixed-extent stacked bar showing each project's share of the week's
+/// total time — a linear "pie chart". Segments are sized proportional to
+/// hours and colored per project, using the same palette as the day bars
+/// so a color band can be followed between the two.
+///
+/// Vertical orientation stacks the largest project at the BOTTOM (matching
+/// how the daily bars stack); horizontal places the largest at the LEADING
+/// edge. `totals` is expected biggest-first (TimingManager.projectTotals).
+struct WeeklyTimeRatioBar: View {
+    let totals: [TimingManager.ProjectTotal]
+    var axis: Axis = .vertical
+    /// Cross-axis size: width when vertical, height when horizontal.
+    var thickness: CGFloat = 6
+    /// Main-axis size: height when vertical, width when horizontal.
+    var length: CGFloat = 96
+    var cornerRadius: CGFloat = 2
+
+    private var total: Double {
+        max(totals.reduce(0) { $0 + $1.hours }, 0.0001)
+    }
+
+    var body: some View {
+        // Vertical: largest at the bottom → render smallest-first, top-down.
+        // Horizontal: largest at the leading edge → render biggest-first.
+        let ordered = axis == .vertical ? Array(totals.reversed()) : totals
+        Group {
+            if axis == .vertical {
+                VStack(spacing: 0) {
+                    ForEach(ordered) { p in
+                        Rectangle()
+                            .fill(Color(hex: p.color).opacity(0.8))
+                            .frame(height: CGFloat(p.hours / total) * length)
+                    }
+                }
+                .frame(width: thickness, height: length)
+            } else {
+                HStack(spacing: 0) {
+                    ForEach(ordered) { p in
+                        Rectangle()
+                            .fill(Color(hex: p.color).opacity(0.8))
+                            .frame(width: CGFloat(p.hours / total) * length)
+                    }
+                }
+                .frame(width: length, height: thickness)
+            }
+        }
+        .cornerRadius(cornerRadius)
+    }
+}
+
 // MARK: - Timing.app Chart
 
 struct TimingChartSection: View {
@@ -1277,6 +1341,16 @@ struct TimingChartSection: View {
             // Wider gap pushes the bars narrower, countering the stubby
             // over-wide look at common window sizes.
             HStack(alignment: .top, spacing: 28) {
+                // Left group: the weekly project-ratio bar, then the daily
+                // bars. The ratio bar is exactly barAreaHeight tall and
+                // top-aligned, so its bottom lines up with the bars' bottom.
+                HStack(alignment: .top, spacing: 8) {
+                    if timing.projectTotals.count > 1 {
+                        WeeklyTimeRatioBar(totals: timing.projectTotals,
+                                           axis: .vertical,
+                                           thickness: 6,
+                                           length: Self.barAreaHeight)
+                    }
                 // Stacked bar chart: one bar per day, segments per project
                 VStack(spacing: 2) {
                     HStack(alignment: .bottom, spacing: 3) {
@@ -1312,6 +1386,7 @@ struct TimingChartSection: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
+                }  // end left group (ratio bar + daily bars)
 
                 // 26-week heatmap, forced square cells
                 if !timing.heatmap.isEmpty {
