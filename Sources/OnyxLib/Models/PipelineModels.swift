@@ -5,23 +5,42 @@ import Foundation
 /// locked-in run identified by ID.
 public struct PipelineSpec: Equatable, Hashable {
     public let url: String        // verbatim URL the user pasted
-    public let owner: String
-    public let repo: String
+    public let provider: GitProvider
+    /// Full project path: "owner/repo" (GitHub) or "group/[sub/]project"
+    /// (GitLab). GitHub paths are always two segments.
+    public let path: String
     public let target: Target
 
     public enum Target: Equatable, Hashable {
         /// Latest run of `file` on `branch`. `branch == nil` means the
-        /// repo's default branch.
+        /// repo's default branch. (GitHub)
         case workflow(file: String, branch: String?)
-        /// A specific, frozen workflow run.
+        /// A specific, frozen workflow run. (GitHub)
         case run(id: Int)
+        /// A specific, frozen GitLab pipeline.
+        case pipeline(id: Int)
     }
 
+    public init(url: String, provider: GitProvider = .github,
+                path: String, target: Target) {
+        self.url = url; self.provider = provider; self.path = path; self.target = target
+    }
+
+    /// Back-compat convenience for GitHub owner/repo construction.
     public init(url: String, owner: String, repo: String, target: Target) {
-        self.url = url; self.owner = owner; self.repo = repo; self.target = target
+        self.init(url: url, provider: .github, path: "\(owner)/\(repo)", target: target)
     }
 
-    public var fullName: String { "\(owner)/\(repo)" }
+    /// First path segment — the GitHub owner. (GitHub REST URLs need it.)
+    public var owner: String { path.split(separator: "/").first.map(String.init) ?? path }
+    /// Last path segment — the GitHub repo / GitLab project leaf.
+    public var repo: String { path.split(separator: "/").last.map(String.init) ?? path }
+    /// URL-encoded full path for the GitLab REST API (`/projects/:id`).
+    public var encodedPath: String {
+        path.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? path
+    }
+
+    public var fullName: String { path }
 
     public var displayName: String {
         switch target {
@@ -33,6 +52,8 @@ public struct PipelineSpec: Equatable, Hashable {
             return stem
         case .run(let id):
             return "run #\(id)"
+        case .pipeline(let id):
+            return "pipeline #\(id)"
         }
     }
 
@@ -40,18 +61,27 @@ public struct PipelineSpec: Equatable, Hashable {
     public var id: String {
         switch target {
         case .workflow(let file, let branch):
-            return "\(owner)/\(repo)/wf/\(file)/\(branch ?? "*")"
+            return "\(provider.rawValue):\(path)/wf/\(file)/\(branch ?? "*")"
         case .run(let id):
-            return "\(owner)/\(repo)/run/\(id)"
+            return "\(provider.rawValue):\(path)/run/\(id)"
+        case .pipeline(let id):
+            return "\(provider.rawValue):\(path)/pipeline/\(id)"
         }
     }
 
-    /// Parse any github.com URL the user might paste — workflow file
-    /// URL, workflow run URL, optionally with a `?branch=…` query.
-    /// Rejects non-github hosts so we never hit the API with bad data.
+    /// Parse any github.com or gitlab.com pipeline URL the user might
+    /// paste. GitHub: workflow-file or run URL (optionally `?branch=…`).
+    /// GitLab: a `/-/pipelines/<id>` URL. The provider is detected from
+    /// the host and recorded on the spec so the right manager handles it.
     public static func parse(_ raw: String) -> PipelineSpec? {
-        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return nil }
+        if let gitlab = parseGitLab(s) { return gitlab }
+        return parseGitHub(s)
+    }
+
+    private static func parseGitHub(_ raw: String) -> PipelineSpec? {
+        var s = raw
 
         // Strip protocol + host. Require github.com (or no host).
         if let r = s.range(of: "://") {
@@ -115,11 +145,45 @@ public struct PipelineSpec: Equatable, Hashable {
         }
         return nil
     }
+
+    /// GitLab: `https://gitlab.com/group/[sub/]project/-/pipelines/<id>`.
+    /// The project path is everything before the `/-/` marker; the
+    /// pipeline id is the trailing segment.
+    private static func parseGitLab(_ raw: String) -> PipelineSpec? {
+        var s = raw
+        if let r = s.range(of: "://") {
+            let tail = String(s[r.upperBound...])
+            if tail.hasPrefix("gitlab.com/") {
+                s = String(tail.dropFirst("gitlab.com/".count))
+            } else if tail.hasPrefix("www.gitlab.com/") {
+                s = String(tail.dropFirst("www.gitlab.com/".count))
+            } else {
+                return nil
+            }
+        } else if s.hasPrefix("gitlab.com/") {
+            s = String(s.dropFirst("gitlab.com/".count))
+        } else {
+            return nil   // GitLab requires an explicit host to disambiguate
+        }
+
+        // Drop any query/fragment.
+        if let qIdx = s.firstIndex(of: "?") { s = String(s[..<qIdx]) }
+
+        guard let r = s.range(of: "/-/") else { return nil }
+        let path = String(s[..<r.lowerBound])
+        let rest = s[r.upperBound...].split(separator: "/").map(String.init)
+        guard !path.isEmpty,
+              rest.count >= 2, rest[0] == "pipelines",
+              let id = Int(rest[1]) else { return nil }
+        return PipelineSpec(url: raw, provider: .gitlab, path: path,
+                            target: .pipeline(id: id))
+    }
 }
 
 /// Aggregated job counts + overall state for a single tracked pipeline.
 public struct PipelineStatus: Identifiable, Equatable {
     public var id: String { spec.id }
+    public var provider: GitProvider { spec.provider }
     public let spec: PipelineSpec
     public let runNumber: Int?
     public let runURL: String?
@@ -154,4 +218,20 @@ public enum PipelineOverallStatus: String, Equatable {
     case queued         // hasn't started yet
     case skipped        // pipeline as a whole was skipped
     case unknown
+
+    /// Roll per-bucket job counts up into one overall state. Shared by
+    /// the GitHub (WorkflowMonitor) and GitLab (GitLabPipelineMonitor)
+    /// pollers so both read the same way. `totalJobs` distinguishes an
+    /// empty pipeline (→ .unknown) from one that's genuinely all-success.
+    public static func derive(succeeded: Int, inProgress: Int, queued: Int,
+                              skipped: Int, failed: Int, totalJobs: Int)
+        -> PipelineOverallStatus {
+        if failed > 0 && succeeded > 0 { return .mixed }
+        if failed > 0 { return .failure }
+        if inProgress > 0 { return .running }
+        if queued > 0 && succeeded == 0 { return .queued }
+        if totalJobs == 0 { return .unknown }
+        if skipped > 0 && succeeded == 0 && failed == 0 { return .skipped }
+        return .success
+    }
 }

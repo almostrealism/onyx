@@ -89,8 +89,14 @@ public final class PullRequestManager: ObservableObject {
         }
         let token = config.token
         let repos = config.parsedRepos
+        let mineOnly = config.mineOnly
+        let me = config.username.lowercased()
         inFlight = true
         isLoading = true
+
+        // Opportunistically resolve the authenticated user's login so the
+        // "only mine" filter and the settings readout have a username.
+        if config.username.isEmpty { resolveViewerLogin(token: token) }
 
         let group = DispatchGroup()
         var collected: [PullRequest] = []
@@ -116,11 +122,40 @@ public final class PullRequestManager: ObservableObject {
             self.inFlight = false
             self.isLoading = false
             self.lastError = firstError
+            // "Only mine": keep PRs this user authored. Skipped until a
+            // username is known (resolveViewerLogin populates it shortly,
+            // and the next tick applies the filter).
+            if mineOnly, !me.isEmpty {
+                collected = collected.filter { ($0.author ?? "").lowercased() == me }
+            }
             self.pullRequests = collected.sorted {
                 if $0.repoFullName != $1.repoFullName { return $0.repoFullName < $1.repoFullName }
                 return $0.number > $1.number
             }
         }
+    }
+
+    /// One-shot `{ viewer { login } }` query to learn the token owner's
+    /// login. Stores it in GitHubConfigStore and re-ticks so any active
+    /// "only mine" filter takes effect.
+    private func resolveViewerLogin(token: String) {
+        var req = URLRequest(url: Self.graphqlURL)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(
+            withJSONObject: ["query": "{ viewer { login } }"])
+        session.dataTask(with: req) { data, _, _ in
+            guard let data = data,
+                  let decoded = try? JSONDecoder().decode(ViewerResponse.self, from: data),
+                  let login = decoded.data?.viewer?.login, !login.isEmpty else { return }
+            DispatchQueue.main.async {
+                if GitHubConfigStore.shared.username != login {
+                    GitHubConfigStore.shared.username = login
+                    self.refresh()
+                }
+            }
+        }.resume()
     }
 
     // MARK: - GraphQL
@@ -138,6 +173,7 @@ public final class PullRequestManager: ObservableObject {
             mergeStateStatus
             mergeable
             headRefName
+            author { login }
             reviewThreads(first: 100) {
               nodes { isResolved }
             }
@@ -180,6 +216,7 @@ public final class PullRequestManager: ObservableObject {
                 let nodes = decoded.data?.repository?.pullRequests?.nodes ?? []
                 let prs = nodes.map { node in
                     PullRequest(
+                        provider: .github,
                         repoFullName: repo.fullName,
                         number: node.number,
                         title: node.title,
@@ -188,7 +225,8 @@ public final class PullRequestManager: ObservableObject {
                             .filter { $0.isResolved == false }.count ?? 0,
                         mergeStatus: PRMergeStatus.fromGraphQL(state: node.mergeStateStatus,
                                                                mergeable: node.mergeable),
-                        headBranch: node.headRefName
+                        headBranch: node.headRefName,
+                        author: node.author?.login
                     )
                 }
                 completion(.success(prs))
@@ -235,13 +273,28 @@ public final class PullRequestManager: ObservableObject {
         let mergeStateStatus: String?
         let mergeable: String?
         let headRefName: String?
+        let author: Author?
         let reviewThreads: ThreadList?
+    }
+    private struct Author: Decodable {
+        let login: String?
     }
     private struct ThreadList: Decodable {
         let nodes: [Thread]?
     }
     private struct Thread: Decodable {
         let isResolved: Bool
+    }
+
+    // viewer { login } response
+    private struct ViewerResponse: Decodable {
+        let data: ViewerData?
+    }
+    private struct ViewerData: Decodable {
+        let viewer: Viewer?
+    }
+    private struct Viewer: Decodable {
+        let login: String?
     }
 }
 

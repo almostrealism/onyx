@@ -2587,7 +2587,7 @@ private struct PipelineRow: View {
         switch status.spec.target {
         case .workflow(let file, _):
             return (file as NSString).deletingPathExtension
-        case .run:
+        case .run, .pipeline:
             return status.spec.displayName
         }
     }

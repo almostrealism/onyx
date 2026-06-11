@@ -223,6 +223,13 @@ public final class WorkflowMonitor: ObservableObject {
                        token: String,
                        completion: @escaping (Result<PipelineStatus, Error>) -> Void) {
         switch spec.target {
+        case .pipeline:
+            // GitLab pipelines are handled by GitLabPipelineMonitor; a
+            // GitLab spec should never reach this GitHub manager (the
+            // config store filters by provider), but stay exhaustive.
+            completion(.failure(NSError(domain: "WorkflowMonitor", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Not a GitHub pipeline"])))
+            return
         case .run(let id):
             // 1. Fetch the run detail to recover head_branch + the
             //    workflow's display name. Without this, run-target

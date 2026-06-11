@@ -56,9 +56,32 @@ public final class GitHubConfigStore: ObservableObject {
         }
     }
 
-    /// Parsed pipeline specs — invalid entries silently filtered.
+    /// Parsed pipeline specs — invalid entries silently filtered, and
+    /// only GitHub specs kept (a GitLab URL pasted here is ignored; it
+    /// belongs in the GitLab settings field, which owns the GitLab token).
     public var parsedPipelines: [PipelineSpec] {
-        pipelineURLs.compactMap(PipelineSpec.parse)
+        pipelineURLs.compactMap(PipelineSpec.parse).filter { $0.provider == .github }
+    }
+
+    /// When true, only PRs authored by `username` are shown. Off by
+    /// default — GitHub repos here tend to have small PR lists.
+    public var mineOnly: Bool {
+        get { UserDefaults.standard.bool(forKey: "github_mine_only") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "github_mine_only")
+            objectWillChange.send()
+        }
+    }
+
+    /// The authenticated user's login, auto-detected from the token via
+    /// the GraphQL `viewer.login`. Empty until first resolved. Feeds the
+    /// `mineOnly` filter.
+    public var username: String {
+        get { UserDefaults.standard.string(forKey: "github_username") ?? "" }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "github_username")
+            objectWillChange.send()
+        }
     }
 
     /// Drop the first stored URL whose parsed spec matches `spec.id`.

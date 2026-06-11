@@ -4,9 +4,13 @@ import Foundation
 /// GraphQL API by `PullRequestManager` and rendered by
 /// `PullRequestsSection`.
 public struct PullRequest: Identifiable, Equatable, Hashable {
-    /// "owner/repo#123" — stable across polls so SwiftUI doesn't churn.
-    public var id: String { "\(repoFullName)#\(number)" }
-    public let repoFullName: String   // "owner/repo"
+    /// "github:owner/repo#123" — provider-qualified so GitHub and GitLab
+    /// items never collide in the merged list, and stable across polls so
+    /// SwiftUI doesn't churn.
+    public var id: String { "\(provider.rawValue):\(repoFullName)#\(number)" }
+    /// Which forge this PR/MR lives on.
+    public let provider: GitProvider
+    public let repoFullName: String   // "owner/repo" (GitHub) or "group/project" (GitLab)
     public let number: Int
     public let title: String
     public let url: String
@@ -21,10 +25,15 @@ public struct PullRequest: Identifiable, Equatable, Hashable {
     /// URLs for the "add pipeline from open PR" UX — we need the
     /// branch to query the latest workflow run on it.
     public let headBranch: String?
+    /// Author login/username. Lets the "only mine" filter work and is
+    /// shown nowhere directly, but kept for filtering robustness.
+    public let author: String?
 
-    public init(repoFullName: String, number: Int, title: String, url: String,
+    public init(provider: GitProvider = .github,
+                repoFullName: String, number: Int, title: String, url: String,
                 openCommentThreads: Int, mergeStatus: PRMergeStatus,
-                headBranch: String? = nil) {
+                headBranch: String? = nil, author: String? = nil) {
+        self.provider = provider
         self.repoFullName = repoFullName
         self.number = number
         self.title = title
@@ -32,6 +41,7 @@ public struct PullRequest: Identifiable, Equatable, Hashable {
         self.openCommentThreads = openCommentThreads
         self.mergeStatus = mergeStatus
         self.headBranch = headBranch
+        self.author = author
     }
 }
 
@@ -104,5 +114,61 @@ public struct GitHubRepoSpec: Equatable, Hashable {
         guard parts.count >= 2,
               !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
         return GitHubRepoSpec(url: raw, owner: parts[0], name: parts[1])
+    }
+}
+
+/// One configured GitLab project to watch for merge requests. GitLab
+/// projects live at an arbitrary-depth path (group/subgroup/project), so
+/// unlike GitHub we keep the whole path rather than an owner/name pair —
+/// the REST API takes the URL-encoded full path as the project id.
+public struct GitLabProjectSpec: Equatable, Hashable {
+    public let url: String
+    /// Full project path, e.g. "group/project" or "group/sub/project".
+    public let path: String
+
+    /// "project" — last path segment, for compact display.
+    public var name: String { path.split(separator: "/").last.map(String.init) ?? path }
+    /// URL-encoded path for the REST API (`/projects/:id`).
+    public var encodedPath: String {
+        path.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? path
+    }
+
+    public init(url: String, path: String) {
+        self.url = url; self.path = path
+    }
+
+    /// Parse "https://gitlab.com/group/project", "gitlab.com/group/sub/project",
+    /// or a bare "group/project". A leading `https://host` must be
+    /// gitlab.com. Bare paths are accepted (the GitLab settings field
+    /// disambiguates intent). Anything with a `/-/` segment (a deep link
+    /// into the project) is trimmed back to the project path.
+    public static func parse(_ raw: String) -> GitLabProjectSpec? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+
+        if let r = s.range(of: "://") {
+            let tail = String(s[r.upperBound...])
+            if tail.hasPrefix("gitlab.com/") {
+                s = String(tail.dropFirst("gitlab.com/".count))
+            } else if tail.hasPrefix("www.gitlab.com/") {
+                s = String(tail.dropFirst("www.gitlab.com/".count))
+            } else {
+                return nil
+            }
+        } else if s.hasPrefix("gitlab.com/") {
+            s = String(s.dropFirst("gitlab.com/".count))
+        }
+
+        // Trim a deep link (…/-/merge_requests, …/-/pipelines, …) down to
+        // the project path that precedes the "/-/" marker.
+        if let r = s.range(of: "/-/") {
+            s = String(s[..<r.lowerBound])
+        }
+        if s.hasSuffix("/") { s = String(s.dropLast()) }
+        if s.hasSuffix(".git") { s = String(s.dropLast(4)) }
+
+        let parts = s.split(separator: "/").map(String.init)
+        guard parts.count >= 2, parts.allSatisfy({ !$0.isEmpty }) else { return nil }
+        return GitLabProjectSpec(url: raw, path: parts.joined(separator: "/"))
     }
 }
