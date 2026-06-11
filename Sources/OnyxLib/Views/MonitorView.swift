@@ -2380,7 +2380,8 @@ private struct PullRequestRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 6) {
                         ProviderBadge(provider: pr.provider)
-                        Text("\(pr.repoFullName)#\(pr.number)")
+                        // GitLab references MRs as !123, GitHub PRs as #123.
+                        Text("\(pr.repoFullName)\(pr.provider == .gitlab ? "!" : "#")\(pr.number)")
                             .monitorFont(size: 10)
                             .foregroundColor(accentColor.opacity(0.7))
                             .lineLimit(1)
