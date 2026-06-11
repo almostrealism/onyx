@@ -1,5 +1,17 @@
 import Foundation
 
+/// Character set for URL-encoding a GitLab project path into a REST
+/// `/projects/:id` segment: only the slash (and other reserved chars)
+/// get escaped; -._ and alphanumerics pass through, matching GitLab's
+/// documented `group%2Fproject-client` form.
+enum GitLabPath {
+    static let allowed: CharacterSet = {
+        var set = CharacterSet.alphanumerics
+        set.insert(charactersIn: "-._")
+        return set
+    }()
+}
+
 /// One open PR surfaced by the monitor overlay. Polled from the GitHub
 /// GraphQL API by `PullRequestManager` and rendered by
 /// `PullRequestsSection`.
@@ -128,9 +140,11 @@ public struct GitLabProjectSpec: Equatable, Hashable {
 
     /// "project" — last path segment, for compact display.
     public var name: String { path.split(separator: "/").last.map(String.init) ?? path }
-    /// URL-encoded path for the REST API (`/projects/:id`).
+    /// URL-encoded path for the REST API (`/projects/:id`). GitLab's own
+    /// docs encode only the slash (group%2Fproject-client), so we keep
+    /// the common -._ path characters unescaped.
     public var encodedPath: String {
-        path.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? path
+        path.addingPercentEncoding(withAllowedCharacters: GitLabPath.allowed) ?? path
     }
 
     public init(url: String, path: String) {

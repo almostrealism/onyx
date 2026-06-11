@@ -1084,6 +1084,11 @@ public class AppState: ObservableObject {
             // GitHub Actions pipeline monitor — same poll/config pattern
             // as the PR manager, polls the user's configured pipelines.
             WorkflowMonitor.shared.startPolling()
+            // GitLab counterparts — merge requests + explicit pipelines.
+            // Same self-guarding/no-op-under-XCTest pattern; their output
+            // is merged with GitHub's in the monitor overlay.
+            GitLabMergeRequestManager.shared.startPolling()
+            GitLabPipelineMonitor.shared.startPolling()
             // SSH mux supervisor — maintains two warm-spare mux masters
             // per host so a single mux failure is instantly recoverable.
             SSHKeeper.shared.start(appState: self)

@@ -390,6 +390,7 @@ struct SettingsView: View {
                         }
 
                         GitHubSettingsSection()
+                        GitLabSettingsSection()
                     }
                 }
                 .frame(maxHeight: 500)
@@ -798,6 +799,12 @@ private struct GitHubSettingsSection: View {
                     .foregroundColor(.gray.opacity(0.4))
             }
 
+            MineOnlyToggle(
+                isOn: Binding(get: { config.mineOnly },
+                              set: { config.mineOnly = $0; PullRequestManager.shared.refresh() }),
+                username: config.username
+            )
+
             Text("PIPELINES — one workflow or run URL per line")
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.5))
@@ -826,6 +833,148 @@ private struct GitHubSettingsSection: View {
                     if lines != config.pipelineURLs {
                         config.pipelineURLs = lines
                         WorkflowMonitor.shared.refresh()
+                    }
+                }
+
+            if !config.parsedPipelines.isEmpty {
+                Text("Watching \(config.parsedPipelines.count) pipeline\(config.parsedPipelines.count == 1 ? "" : "s")")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+            }
+        }
+    }
+}
+
+/// Compact "only my PRs/MRs" switch with the auto-detected username shown
+/// once it's resolved. Shared by the GitHub and GitLab settings sections.
+private struct MineOnlyToggle: View {
+    @Binding var isOn: Bool
+    let username: String
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            Text(username.isEmpty ? "Only mine" : "Only mine (@\(username))")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.6))
+        }
+        .toggleStyle(.switch)
+        .controlSize(.mini)
+        .tint(Color(hex: "66CCFF"))
+        .padding(.top, 2)
+    }
+}
+
+private struct GitLabSettingsSection: View {
+    @ObservedObject private var config = GitLabConfigStore.shared
+    @State private var projectsText: String = ""
+    @State private var hasInitializedProjects = false
+    @State private var pipelinesText: String = ""
+    @State private var hasInitializedPipelines = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("GITLAB")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color(hex: "FC6D26").opacity(0.85))
+                .tracking(2)
+                .padding(.top, 12)
+
+            HStack(spacing: 8) {
+                SecureField("Personal access token (scope: read_api)",
+                            text: Binding(
+                                get: { config.token },
+                                set: { config.token = $0 }
+                            ))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.8))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.white.opacity(0.06))
+                    .cornerRadius(3)
+
+                if !config.token.isEmpty {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(hex: "6BFF8E"))
+                }
+            }
+
+            Text("Get token at gitlab.com/-/user_settings/personal_access_tokens")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.3))
+
+            Text("PROJECTS — one per line, e.g. group/project")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.5))
+                .tracking(1)
+                .padding(.top, 6)
+
+            TextEditor(text: $projectsText)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(3)
+                .frame(minHeight: 70, maxHeight: 110)
+                .onAppear {
+                    if !hasInitializedProjects {
+                        projectsText = config.projectURLs.joined(separator: "\n")
+                        hasInitializedProjects = true
+                    }
+                }
+                .onChange(of: projectsText) { _, newValue in
+                    let lines = newValue
+                        .split(whereSeparator: \.isNewline)
+                        .map { String($0).trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                    if lines != config.projectURLs {
+                        config.projectURLs = lines
+                        GitLabMergeRequestManager.shared.refresh()
+                    }
+                }
+
+            if !config.parsedProjects.isEmpty {
+                Text("Watching \(config.parsedProjects.count) project\(config.parsedProjects.count == 1 ? "" : "s")")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+            }
+
+            MineOnlyToggle(
+                isOn: Binding(get: { config.mineOnly },
+                              set: { config.mineOnly = $0; GitLabMergeRequestManager.shared.refresh() }),
+                username: config.username
+            )
+
+            Text("PIPELINES — one /-/pipelines/<id> URL per line")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.5))
+                .tracking(1)
+                .padding(.top, 10)
+
+            TextEditor(text: $pipelinesText)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(3)
+                .frame(minHeight: 70, maxHeight: 110)
+                .onAppear {
+                    if !hasInitializedPipelines {
+                        pipelinesText = config.pipelineURLs.joined(separator: "\n")
+                        hasInitializedPipelines = true
+                    }
+                }
+                .onChange(of: pipelinesText) { _, newValue in
+                    let lines = newValue
+                        .split(whereSeparator: \.isNewline)
+                        .map { String($0).trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                    if lines != config.pipelineURLs {
+                        config.pipelineURLs = lines
+                        GitLabPipelineMonitor.shared.refresh()
                     }
                 }
 

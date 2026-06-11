@@ -37,7 +37,7 @@ public struct PipelineSpec: Equatable, Hashable {
     public var repo: String { path.split(separator: "/").last.map(String.init) ?? path }
     /// URL-encoded full path for the GitLab REST API (`/projects/:id`).
     public var encodedPath: String {
-        path.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? path
+        path.addingPercentEncoding(withAllowedCharacters: GitLabPath.allowed) ?? path
     }
 
     public var fullName: String { path }

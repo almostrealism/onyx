@@ -2294,11 +2294,28 @@ private struct SessionNoteRow: View {
 /// layout doesn't reserve empty real estate.
 struct PullRequestsSection: View {
     @ObservedObject var appState: AppState
-    @ObservedObject private var manager = PullRequestManager.shared
-    @ObservedObject private var config = GitHubConfigStore.shared
+    @ObservedObject private var ghManager = PullRequestManager.shared
+    @ObservedObject private var glManager = GitLabMergeRequestManager.shared
+    @ObservedObject private var ghConfig = GitHubConfigStore.shared
+    @ObservedObject private var glConfig = GitLabConfigStore.shared
+
+    /// GitHub PRs then GitLab MRs, each already filtered/sorted by its
+    /// own manager. Rows carry a provider badge so the source is clear.
+    private var merged: [PullRequest] {
+        ghManager.pullRequests + glManager.mergeRequests
+    }
+
+    private var anyConfigured: Bool { ghConfig.isConfigured || glConfig.isConfigured }
+    private var isLoading: Bool { ghManager.isLoading || glManager.isLoading }
+    private var firstError: String? {
+        // Surface an error only when there's nothing to show, so a single
+        // failing provider doesn't mask the other's results.
+        guard merged.isEmpty else { return nil }
+        return ghManager.lastError ?? glManager.lastError
+    }
 
     var body: some View {
-        if config.isConfigured {
+        if anyConfigured {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("OPEN PRs")
@@ -2306,28 +2323,42 @@ struct PullRequestsSection: View {
                         .foregroundColor(appState.accentColor)
                         .tracking(2)
                     Spacer()
-                    if !manager.pullRequests.isEmpty {
-                        Text("\(manager.pullRequests.count)")
+                    if !merged.isEmpty {
+                        Text("\(merged.count)")
                             .monitorFont(size: 10)
                             .foregroundColor(.gray.opacity(0.4))
                     }
                 }
-                if let error = manager.lastError, manager.pullRequests.isEmpty {
+                if let error = firstError {
                     Text(error)
                         .monitorFont(size: 10)
                         .foregroundColor(.red.opacity(0.6))
                         .lineLimit(2)
-                } else if manager.pullRequests.isEmpty {
-                    Text(manager.isLoading ? "Loading…" : "No open PRs")
+                } else if merged.isEmpty {
+                    Text(isLoading ? "Loading…" : "No open PRs")
                         .monitorFont(size: 11)
                         .foregroundColor(.gray.opacity(0.4))
                 } else {
-                    ForEach(manager.pullRequests) { pr in
+                    ForEach(merged) { pr in
                         PullRequestRow(pr: pr, accentColor: appState.accentColor)
                     }
                 }
             }
         }
+    }
+}
+
+/// Compact two-letter provider tag (GH / GL) for merged rows.
+struct ProviderBadge: View {
+    let provider: GitProvider
+    var body: some View {
+        Text(provider.badge)
+            .font(.system(size: 8, weight: .bold, design: .monospaced))
+            .foregroundColor(Color(hex: provider.badgeHex))
+            .padding(.horizontal, 3)
+            .padding(.vertical, 1)
+            .background(Color(hex: provider.badgeHex).opacity(0.14))
+            .cornerRadius(2)
     }
 }
 
@@ -2348,6 +2379,7 @@ private struct PullRequestRow: View {
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 6) {
+                        ProviderBadge(provider: pr.provider)
                         Text("\(pr.repoFullName)#\(pr.number)")
                             .monitorFont(size: 10)
                             .foregroundColor(accentColor.opacity(0.7))
@@ -2421,12 +2453,50 @@ private struct MergeStatusDot: View {
 struct PipelinesSection: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var monitor = WorkflowMonitor.shared
+    @ObservedObject private var glMonitor = GitLabPipelineMonitor.shared
     @ObservedObject private var prManager = PullRequestManager.shared
-    @ObservedObject private var config = GitHubConfigStore.shared
+    @ObservedObject private var ghConfig = GitHubConfigStore.shared
+    @ObservedObject private var glConfig = GitLabConfigStore.shared
     @State private var showSuggestions = false
 
+    private var merged: [PipelineStatus] { monitor.pipelines + glMonitor.pipelines }
+    private var anyToken: Bool { !ghConfig.token.isEmpty || !glConfig.token.isEmpty }
+    private var anyTracked: Bool {
+        !ghConfig.parsedPipelines.isEmpty || !glConfig.parsedPipelines.isEmpty
+    }
+    private var isLoading: Bool { monitor.isLoading || glMonitor.isLoading }
+    private var firstError: String? {
+        guard merged.isEmpty else { return nil }
+        return monitor.lastError ?? glMonitor.lastError
+    }
+
+    /// Route a pasted/added pipeline URL to the store for its provider —
+    /// each provider's pipelines live alongside that provider's token.
+    private func addPipeline(_ url: String) {
+        guard let spec = PipelineSpec.parse(url) else { return }
+        switch spec.provider {
+        case .github:
+            ghConfig.pipelineURLs.append(url)
+            WorkflowMonitor.shared.refresh()
+        case .gitlab:
+            glConfig.pipelineURLs.append(url)
+            GitLabPipelineMonitor.shared.refresh()
+        }
+    }
+
+    private func removePipeline(_ status: PipelineStatus) {
+        switch status.provider {
+        case .github:
+            ghConfig.removePipeline(status.spec)
+            WorkflowMonitor.shared.refresh()
+        case .gitlab:
+            glConfig.removePipeline(status.spec)
+            GitLabPipelineMonitor.shared.refresh()
+        }
+    }
+
     var body: some View {
-        if !config.token.isEmpty {
+        if anyToken {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("PIPELINES")
@@ -2434,8 +2504,8 @@ struct PipelinesSection: View {
                         .foregroundColor(appState.accentColor)
                         .tracking(2)
                     Spacer()
-                    if !monitor.pipelines.isEmpty {
-                        Text("\(monitor.pipelines.count)")
+                    if !merged.isEmpty {
+                        Text("\(merged.count)")
                             .monitorFont(size: 10)
                             .foregroundColor(.gray.opacity(0.4))
                     }
@@ -2446,44 +2516,37 @@ struct PipelinesSection: View {
                             .padding(.horizontal, 4)
                     }
                     .buttonStyle(.plain)
-                    .help("Add a pipeline from your open PRs")
+                    .help("Add a pipeline from your open PRs, or paste a URL")
                     .popover(isPresented: $showSuggestions) {
                         PipelineSuggestionsPopover(
                             prs: prManager.pullRequests,
-                            existingIDs: Set(config.parsedPipelines.map(\.id)),
+                            existingIDs: Set(ghConfig.parsedPipelines.map(\.id)
+                                             + glConfig.parsedPipelines.map(\.id)),
                             accentColor: appState.accentColor,
-                            onAdd: { url in
-                                var current = config.pipelineURLs
-                                current.append(url)
-                                config.pipelineURLs = current
-                                WorkflowMonitor.shared.refresh()
-                            }
+                            onAdd: addPipeline
                         )
                     }
                 }
-                if let error = monitor.lastError, monitor.pipelines.isEmpty {
+                if let error = firstError {
                     Text(error)
                         .monitorFont(size: 10)
                         .foregroundColor(.red.opacity(0.6))
                         .lineLimit(2)
-                } else if monitor.pipelines.isEmpty {
-                    if config.parsedPipelines.isEmpty {
-                        Text("Click + to add a pipeline from your open PRs")
+                } else if merged.isEmpty {
+                    if !anyTracked {
+                        Text("Click + to add a pipeline from your open PRs, or paste a URL")
                             .monitorFont(size: 11)
                             .foregroundColor(.gray.opacity(0.4))
                     } else {
-                        Text(monitor.isLoading ? "Loading…" : "No data")
+                        Text(isLoading ? "Loading…" : "No data")
                             .monitorFont(size: 11)
                             .foregroundColor(.gray.opacity(0.4))
                     }
                 } else {
-                    ForEach(monitor.pipelines) { p in
+                    ForEach(merged) { p in
                         PipelineRow(status: p,
                                     accentColor: appState.accentColor,
-                                    onRemove: {
-                                        config.removePipeline(p.spec)
-                                        WorkflowMonitor.shared.refresh()
-                                    })
+                                    onRemove: { removePipeline(p) })
                     }
                 }
             }
@@ -2538,6 +2601,7 @@ private struct PipelineRow: View {
                                 .layoutPriority(1)
                         }
                         HStack(spacing: 6) {
+                            ProviderBadge(provider: status.provider)
                             Text(secondaryLine)
                                 .monitorFont(size: 10)
                                 .foregroundColor(accentColor.opacity(0.7))
