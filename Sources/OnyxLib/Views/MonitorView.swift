@@ -925,11 +925,14 @@ private struct SimpleContainerPill: View {
 /// the workflow name + branch. Zero-height when nothing is tracked.
 struct SimplePipelinesStrip: View {
     @ObservedObject private var monitor = WorkflowMonitor.shared
+    @ObservedObject private var glMonitor = GitLabPipelineMonitor.shared
+
+    private var merged: [PipelineStatus] { monitor.pipelines + glMonitor.pipelines }
 
     var body: some View {
-        if !monitor.pipelines.isEmpty {
+        if !merged.isEmpty {
             HStack(spacing: 8) {
-                ForEach(monitor.pipelines) { p in
+                ForEach(merged) { p in
                     SimplePipelinePill(status: p)
                 }
             }
