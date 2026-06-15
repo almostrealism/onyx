@@ -25,8 +25,8 @@ final class GitManagerParseTests: XCTestCase {
      src/main.swift | 5 +-
      1 file changed, 4 insertions(+), 1 deletion(-)
     ---GIT_DIFF_CACHED_STAT---
-    ---GIT_TOPLEVEL---
-    /Users/me/code/repo
+    ---GIT_PREFIX---
+    ---GIT_PREFIX_END---
     """
 
     // MARK: - extractSection
@@ -108,7 +108,8 @@ final class GitManagerParseTests: XCTestCase {
         echo "---GIT_STATUS---" && git status --porcelain 2>/dev/null && \\
         echo "---GIT_DIFF_STAT---" && git diff --stat 2>/dev/null && \\
         echo "---GIT_DIFF_CACHED_STAT---" && git diff --cached --stat 2>/dev/null && \\
-        echo "---GIT_TOPLEVEL---" && git rev-parse --show-toplevel 2>/dev/null
+        echo "---GIT_PREFIX---" && git rev-parse --show-prefix 2>/dev/null && \\
+        echo "---GIT_PREFIX_END---"
         """
         let raw = PollutedOutputFixture.fullEchoThenRuntime(
             script: script, runtime: Self.realRuntime)
@@ -125,11 +126,10 @@ final class GitManagerParseTests: XCTestCase {
         XCTAssertEqual(gm.repoStatus?.diffStats?.deletions, 1)
     }
 
-    func test_parseOutput_rejectsWhenToplevelDoesntMatchCurrentPath() {
-        // When git points us at a different repo (e.g. we're in a
-        // subdirectory), GitManager refuses to mark it as the repo root.
-        // Make sure this still works after source-echo stripping.
-        let script = "git rev-parse --show-toplevel"
+    func test_parseOutput_rejectsSubdirectory_nonEmptyPrefix() {
+        // In a subdirectory of a repo, `git rev-parse --show-prefix` is a
+        // non-empty path ending in "/". GitManager must NOT show the landing
+        // there (it's only for the repo root).
         let runtime = """
         true
         ---GIT_BRANCH---
@@ -139,18 +139,74 @@ final class GitManagerParseTests: XCTestCase {
         ---GIT_STATUS---
         ---GIT_DIFF_STAT---
         ---GIT_DIFF_CACHED_STAT---
-        ---GIT_TOPLEVEL---
-        /some/other/repo
+        ---GIT_PREFIX---
+        src/feature/
+        ---GIT_PREFIX_END---
         """
-        let raw = PollutedOutputFixture.fullEchoThenRuntime(
-            script: script, runtime: runtime)
-        let cleaned = RemoteScript.cleanedOutput(raw)
+        let cleaned = RemoteScript.cleanedOutput(
+            PollutedOutputFixture.fullEchoThenRuntime(script: "git ...", runtime: runtime))
+        let gm = makeManager()
+        gm.parseOutput(cleaned, currentPath: "/Users/me/code/repo/src/feature")
+
+        XCTAssertFalse(gm.isGitRepo,
+                       "non-empty --show-prefix means a subdirectory — not the repo root")
+        XCTAssertNil(gm.repoStatus)
+    }
+
+    func test_parseOutput_repoRoot_emptyPrefix_regardlessOfSymlinkSpelling() {
+        // THE regression: the old code compared --show-toplevel (which git
+        // canonicalises, e.g. /private/tmp/...) to the navigated path (e.g.
+        // /tmp/...) and hid the panel when they differed by a symlink. The
+        // empty --show-prefix means "this IS the root" no matter how the
+        // path is spelled, so the landing must show.
+        let runtime = """
+        true
+        ---GIT_BRANCH---
+        main
+        ---GIT_HEAD---
+        abc1234
+        ---GIT_STATUS---
+         M file.swift
+        ---GIT_DIFF_STAT---
+        ---GIT_DIFF_CACHED_STAT---
+        ---GIT_PREFIX---
+        ---GIT_PREFIX_END---
+        """
+        let cleaned = RemoteScript.cleanedOutput(
+            PollutedOutputFixture.fullEchoThenRuntime(script: "git ...", runtime: runtime))
+        let gm = makeManager()
+        // currentPath spelled with the symlink (/tmp), which would NOT have
+        // matched git's canonical /private/tmp under the old equality check.
+        gm.parseOutput(cleaned, currentPath: "/tmp/realrepo")
+
+        XCTAssertTrue(gm.isGitRepo,
+                      "empty --show-prefix is the repo root even when the path is a symlink alias")
+        XCTAssertEqual(gm.repoStatus?.changedFiles.count, 1)
+    }
+
+    func test_parseOutput_emptyPrefixWithTrailingPromptNoise_stillRoot() {
+        // On ssh -tt the prefix section's tail can carry prompt/exit echo.
+        // An empty prefix (root) must survive that: only a line ending in
+        // "/" counts as a subdirectory signal, so prompt noise is ignored.
+        let runtime = """
+        true
+        ---GIT_BRANCH---
+        main
+        ---GIT_HEAD---
+        abc1234
+        ---GIT_STATUS---
+        ---GIT_DIFF_STAT---
+        ---GIT_DIFF_CACHED_STAT---
+        ---GIT_PREFIX---
+        ---GIT_PREFIX_END---
+        user@host:~$ exit
+        """
+        let cleaned = RemoteScript.cleanedOutput(
+            PollutedOutputFixture.fullEchoThenRuntime(script: "git ...", runtime: runtime))
         let gm = makeManager()
         gm.parseOutput(cleaned, currentPath: "/Users/me/code/repo")
 
-        XCTAssertFalse(gm.isGitRepo,
-                       "current path differs from toplevel — must not claim this is the repo root")
-        XCTAssertNil(gm.repoStatus)
+        XCTAssertTrue(gm.isGitRepo, "trailing prompt noise must not be mistaken for a subdir prefix")
     }
 
     func test_parseOutput_handlesDetachedHEAD() {
@@ -166,8 +222,8 @@ final class GitManagerParseTests: XCTestCase {
         ---GIT_STATUS---
         ---GIT_DIFF_STAT---
         ---GIT_DIFF_CACHED_STAT---
-        ---GIT_TOPLEVEL---
-        /Users/me/code/repo
+        ---GIT_PREFIX---
+        ---GIT_PREFIX_END---
         """
         let gm = makeManager()
         gm.parseOutput(RemoteScript.cleanedOutput(

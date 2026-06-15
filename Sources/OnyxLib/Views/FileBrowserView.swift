@@ -744,13 +744,16 @@ struct SearchTreeNodeView: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 if node.isDirectory {
-                    // Navigate into this directory
+                    // Navigate into this directory — leaving search behind.
                     browser.clearSearch()
                     browser.navigateTo(node.fullPath)
                 } else {
-                    // Open the file
+                    // Open the file but KEEP the search results intact so
+                    // "back" returns to them. Clearing search here was the
+                    // long-standing bug: it wiped isSearchActive + the
+                    // results tree before readFileFromSearch could remember
+                    // we came from search, so back never restored them.
                     let name = (node.fullPath as NSString).lastPathComponent
-                    browser.clearSearch()
                     browser.readFileFromSearch(node.fullPath, name: name)
                 }
             }

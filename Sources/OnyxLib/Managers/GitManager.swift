@@ -64,8 +64,9 @@ public class GitManager: ObservableObject {
         git -C \(escaped) diff --stat 2>/dev/null && \
         echo "---GIT_DIFF_CACHED_STAT---" && \
         git -C \(escaped) diff --cached --stat 2>/dev/null && \
-        echo "---GIT_TOPLEVEL---" && \
-        git -C \(escaped) rev-parse --show-toplevel 2>/dev/null
+        echo "---GIT_PREFIX---" && \
+        git -C \(escaped) rev-parse --show-prefix 2>/dev/null && \
+        echo "---GIT_PREFIX_END---"
         """
 
         let (cmd, args, stdin) = appState.remoteScript(script)
@@ -275,18 +276,22 @@ public class GitManager: ObservableObject {
             return
         }
 
-        // Only show git landing at repo root.
-        // `---GIT_TOPLEVEL---` is the last marker, so extractSection with
-        // end:nil grabs everything to EOF. On `ssh -tt` that tail can
-        // contain the closing prompt and `exit` echo — we want only the
-        // first non-empty line, which is the actual toplevel path.
-        let toplevelTail = extractSection(output, start: "---GIT_TOPLEVEL---", end: nil)
-        let toplevel = toplevelTail
+        // Only show the git landing at the repo ROOT, not in subdirectories.
+        // We use `git rev-parse --show-prefix`, which is EMPTY exactly when
+        // the path is the work-tree root and otherwise the subdirectory path
+        // (e.g. "src/"). This replaces the old `--show-toplevel == currentPath`
+        // equality check, which falsely hid the panel whenever the path was
+        // spelled differently from git's canonical form — most commonly a
+        // symlink (macOS /tmp → /private/tmp, or a symlinked project/home dir
+        // on a remote host). A non-empty prefix line (git always ends it with
+        // "/") means we're below the root; bias toward showing otherwise.
+        let prefixSection = extractSection(output, start: "---GIT_PREFIX---",
+                                           end: "---GIT_PREFIX_END---")
+        let inSubdirectory = prefixSection
             .components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first(where: { !$0.isEmpty }) ?? ""
-        let normalizedPath = currentPath.hasSuffix("/") ? String(currentPath.dropLast()) : currentPath
-        if !toplevel.isEmpty && toplevel != normalizedPath {
+            .contains { !$0.isEmpty && $0.hasSuffix("/") }
+        if inSubdirectory {
             isGitRepo = false
             repoStatus = nil
             return
@@ -300,7 +305,7 @@ public class GitManager: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let statusRaw = extractSection(output, start: "---GIT_STATUS---", end: "---GIT_DIFF_STAT---")
         let diffRaw = extractSection(output, start: "---GIT_DIFF_STAT---", end: "---GIT_DIFF_CACHED_STAT---")
-        let diffCachedRaw = extractSection(output, start: "---GIT_DIFF_CACHED_STAT---", end: "---GIT_TOPLEVEL---")
+        let diffCachedRaw = extractSection(output, start: "---GIT_DIFF_CACHED_STAT---", end: "---GIT_PREFIX---")
 
         let isDetached = branchRaw.isEmpty
         let branch = isDetached ? (headRaw.isEmpty ? "unknown" : headRaw) : branchRaw

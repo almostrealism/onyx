@@ -153,6 +153,126 @@ final class FileBrowserTests: XCTestCase {
             current: nil, folders: ["/A"]))
     }
 
+    // MARK: - Search → open file → back returns to the SEARCH RESULTS
+    //
+    // This has regressed repeatedly. The root cause was the *view* clearing
+    // search (isSearchActive + the results tree) before the manager could
+    // record that we came from search, so "back" never restored the results.
+    // The contract these pin: opening a file out of search keeps the search
+    // state intact (the file view merely layers on top), and back/close
+    // returns to the results. Opening a file when NOT searching must NOT
+    // enter search mode on close.
+
+    private func searchingBrowser(results: [String] = ["a/hit.txt", "b/hit.txt"]) -> FileBrowserManager {
+        let b = makeBrowser()
+        for r in results { b.searchResults.insertPath(r, basePath: "/repo") }
+        b.isSearchActive = true
+        b.currentPath = "/repo"
+        return b
+    }
+
+    func testSearchOpen_recordsCameFromSearch() {
+        let b = searchingBrowser()
+        b.beginOpenFromSearch(parentOf: "/repo/a/hit.txt")
+        XCTAssertTrue(b.wasSearchActiveBeforeFile)
+    }
+
+    func testSearchOpen_keepsSearchActive() {
+        let b = searchingBrowser()
+        b.beginOpenFromSearch(parentOf: "/repo/a/hit.txt")
+        XCTAssertTrue(b.isSearchActive, "opening a file must not turn search off")
+    }
+
+    func testSearchOpen_keepsResultsTree() {
+        let b = searchingBrowser()
+        let before = b.searchResults.resultCount
+        XCTAssertGreaterThan(before, 0)
+        b.beginOpenFromSearch(parentOf: "/repo/a/hit.txt")
+        XCTAssertEqual(b.searchResults.resultCount, before,
+                       "the results tree must survive opening a file")
+    }
+
+    func testSearchOpen_movesCurrentPathToFileParent() {
+        let b = searchingBrowser()
+        b.beginOpenFromSearch(parentOf: "/repo/a/hit.txt")
+        XCTAssertEqual(b.currentPath, "/repo/a")
+    }
+
+    func testSearchOpen_pushesPreviousPathToHistory() {
+        let b = searchingBrowser()
+        b.beginOpenFromSearch(parentOf: "/repo/a/hit.txt")
+        XCTAssertEqual(b.pathHistory.last, "/repo")
+    }
+
+    func testSearchOpen_sameParentDoesNotPushHistory() {
+        let b = searchingBrowser()
+        b.currentPath = "/repo/a"
+        b.pathHistory = []
+        b.beginOpenFromSearch(parentOf: "/repo/a/hit.txt")
+        XCTAssertTrue(b.pathHistory.isEmpty)
+    }
+
+    func testBackFromSearchFile_restoresSearch() {
+        let b = searchingBrowser()
+        b.beginOpenFromSearch(parentOf: "/repo/a/hit.txt")
+        b.viewingFileName = "hit.txt"          // simulate the file now open
+        b.fileContent = "contents"
+        b.navigateBack()
+        XCTAssertNil(b.viewingFileName, "back closes the file")
+        XCTAssertTrue(b.isSearchActive, "back from a search-opened file returns to the results")
+    }
+
+    func testBackFromSearchFile_keepsResults() {
+        let b = searchingBrowser()
+        let before = b.searchResults.resultCount
+        b.beginOpenFromSearch(parentOf: "/repo/a/hit.txt")
+        b.viewingFileName = "hit.txt"
+        b.navigateBack()
+        XCTAssertEqual(b.searchResults.resultCount, before,
+                       "the results we return to must still be there")
+    }
+
+    func testBackFromSearchFile_doesNotPopDirectoryHistory() {
+        let b = searchingBrowser()
+        b.beginOpenFromSearch(parentOf: "/repo/a/hit.txt")   // pushes /repo
+        b.viewingFileName = "hit.txt"
+        b.navigateBack()
+        XCTAssertEqual(b.pathHistory, ["/repo"],
+                       "back closed the file; it must not also walk the directory history")
+    }
+
+    func testCloseFileButton_fromSearch_restoresSearch() {
+        // The X button on the file view calls closeFile() directly.
+        let b = searchingBrowser()
+        b.beginOpenFromSearch(parentOf: "/repo/a/hit.txt")
+        b.viewingFileName = "hit.txt"
+        b.closeFile()
+        XCTAssertTrue(b.isSearchActive)
+        XCTAssertNil(b.viewingFileName)
+    }
+
+    func testOpenFileNotFromSearch_backGoesToDirectoryNotSearch() {
+        // Opening a changed file from the git landing page: search was never
+        // active, so back must return to the directory, not enter search.
+        let b = makeBrowser()
+        b.currentPath = "/repo"
+        b.isSearchActive = false
+        b.beginOpenFromSearch(parentOf: "/repo/file.txt")
+        b.viewingFileName = "file.txt"
+        b.navigateBack()
+        XCTAssertFalse(b.isSearchActive, "no search was active; back must not enter search mode")
+        XCTAssertNil(b.viewingFileName)
+    }
+
+    func testNavigateToDirectory_clearsActiveSearch() {
+        // Issue #4 guard: tapping a saved folder while a search is active
+        // must leave search, or stale results mask the directory + git panel.
+        let b = searchingBrowser()
+        b.navigateTo("/some/dir")
+        XCTAssertFalse(b.isSearchActive, "navigating into a directory leaves search")
+        XCTAssertEqual(b.searchResults.resultCount, 0, "results cleared on directory navigation")
+    }
+
     // MARK: - escapeForShell
 
     func testEscapeForShell_simplePath() {

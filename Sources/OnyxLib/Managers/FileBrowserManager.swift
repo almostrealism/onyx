@@ -193,6 +193,11 @@ public class FileBrowserManager: ObservableObject {
 
     /// Navigate to.
     public func navigateTo(_ path: String) {
+        // Navigating into a directory leaves search behind. Without this,
+        // a still-active search from before masks the directory listing and
+        // its git landing (the content chain prioritises SearchResultsView),
+        // so changed files appeared to vanish after tapping a folder.
+        if isSearchActive { clearSearch() }
         fileContent = nil
         imageData = nil
         viewingFileName = nil
@@ -311,12 +316,24 @@ public class FileBrowserManager: ObservableObject {
         }
     }
 
-    /// Open a file by full path (used by search results)
+    /// Open a file by full path (used by search results and the git
+    /// landing page). The synchronous state setup is split out so the
+    /// back-to-search behaviour is unit-testable without remote I/O.
     public func readFileFromSearch(_ path: String, name: String) {
-        // Remember that we came from search so back returns to results
+        beginOpenFromSearch(parentOf: path)
+        readFile(path, name: name)
+    }
+
+    /// Synchronous bookkeeping for opening a file out of search results:
+    /// remember whether search was active (so back/close returns to the
+    /// results) and move currentPath to the file's folder. Crucially it
+    /// must NOT clear `isSearchActive` or the results tree — the file view
+    /// simply layers on top of search, and closing it reveals the results
+    /// again. (The bug we kept hitting was the *caller* clearing search
+    /// before this ran, which erased the breadcrumb.)
+    func beginOpenFromSearch(parentOf path: String) {
         wasSearchActiveBeforeFile = isSearchActive
 
-        // Set the current path to the file's parent directory
         let parent = (path as NSString).deletingLastPathComponent
         if currentPath != parent {
             if let current = currentPath {
@@ -324,7 +341,6 @@ public class FileBrowserManager: ObservableObject {
             }
             currentPath = parent
         }
-        readFile(path, name: name)
     }
 
     // MARK: - Remote Operations
