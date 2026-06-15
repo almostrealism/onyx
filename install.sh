@@ -6,6 +6,22 @@ INSTALL_DIR="/Applications"
 BUILD_DIR=".build/release"
 APP_BUNDLE="$INSTALL_DIR/$APP_NAME.app"
 
+# Onyx relies on tmux for session persistence. It must be present on the
+# machine that actually hosts the sessions — the remote host for SSH
+# sessions, or this Mac for local ones. We can only check this machine,
+# so a miss is a non-fatal warning rather than a hard failure.
+if command -v tmux >/dev/null 2>&1; then
+    echo ""
+    echo "  Found tmux: $(tmux -V) ($(command -v tmux))"
+else
+    echo ""
+    echo "  WARNING: tmux was not found on this machine."
+    echo "  Onyx uses tmux for session persistence. Local sessions need it"
+    echo "  here; SSH sessions need it on the remote host. Install it with"
+    echo "  'brew install tmux' (or your package manager) if you'll run"
+    echo "  sessions on this Mac."
+fi
+
 echo ""
 echo "  Building $APP_NAME..."
 echo ""
