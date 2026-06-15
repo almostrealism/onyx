@@ -112,6 +112,47 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(browser.pathHistory.isEmpty)
     }
 
+    // MARK: - narrowestContainingFolder (sidebar highlight)
+
+    func testNarrowestFolder_picksLongestContainingPath() {
+        // Both /A and /A/B are saved; inside /A/B only /A/B highlights.
+        let result = FileBrowserManager.narrowestContainingFolder(
+            current: "/A/B", folders: ["/A", "/A/B"])
+        XCTAssertEqual(result, "/A/B")
+    }
+
+    func testNarrowestFolder_deeperPathStillPicksNarrowest() {
+        let result = FileBrowserManager.narrowestContainingFolder(
+            current: "/A/B/C/D", folders: ["/A", "/A/B"])
+        XCTAssertEqual(result, "/A/B")
+    }
+
+    func testNarrowestFolder_exactMatch() {
+        let result = FileBrowserManager.narrowestContainingFolder(
+            current: "/A", folders: ["/A", "/A/B"])
+        XCTAssertEqual(result, "/A")
+    }
+
+    func testNarrowestFolder_componentBoundary() {
+        // /A must not claim /Apple — they share a string prefix only.
+        let result = FileBrowserManager.narrowestContainingFolder(
+            current: "/Apple", folders: ["/A"])
+        XCTAssertNil(result)
+    }
+
+    func testNarrowestFolder_toleratesTrailingSlash() {
+        let result = FileBrowserManager.narrowestContainingFolder(
+            current: "/A/B", folders: ["/A/"])
+        XCTAssertEqual(result, "/A/")
+    }
+
+    func testNarrowestFolder_noMatchOrNilCurrent() {
+        XCTAssertNil(FileBrowserManager.narrowestContainingFolder(
+            current: "/X/Y", folders: ["/A", "/A/B"]))
+        XCTAssertNil(FileBrowserManager.narrowestContainingFolder(
+            current: nil, folders: ["/A"]))
+    }
+
     // MARK: - escapeForShell
 
     func testEscapeForShell_simplePath() {

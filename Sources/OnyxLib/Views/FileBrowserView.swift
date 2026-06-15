@@ -237,6 +237,16 @@ struct FolderSidebar: View {
     @ObservedObject var browser: FileBrowserManager
     @State private var newFolderPath = ""
 
+    /// The single saved folder to highlight: the *narrowest* (longest
+    /// path) one that contains the current path. With both `/A` and `/A/B`
+    /// saved, navigating into `/A/B` highlights only `/A/B`. Matching is
+    /// component-aware so `/A` doesn't claim `/Apple`.
+    private var selectedFolderPath: String? {
+        FileBrowserManager.narrowestContainingFolder(
+            current: browser.currentPath,
+            folders: browser.activeFolders.map(\.path))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -309,7 +319,7 @@ struct FolderSidebar: View {
                         FolderRow(
                             path: folder.path,
                             hostLabel: appState.hosts.count > 1 ? appState.host(for: folder.hostID)?.label : nil,
-                            isSelected: browser.currentPath?.hasPrefix(folder.path) == true,
+                            isSelected: folder.path == selectedFolderPath,
                             accentColor: appState.accentColor
                         )
                         .onTapGesture {

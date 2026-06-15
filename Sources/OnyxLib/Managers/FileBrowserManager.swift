@@ -175,6 +175,22 @@ public class FileBrowserManager: ObservableObject {
 
     // MARK: - Navigation
 
+    /// Of the saved-folder paths that *contain* `current`, return the
+    /// narrowest (longest path) — the one the sidebar should highlight.
+    /// With both `/A` and `/A/B` saved, navigating into `/A/B` returns
+    /// `/A/B`. Matching is component-aware so `/A` doesn't claim `/Apple`,
+    /// and a trailing slash on a saved path is tolerated.
+    public static func narrowestContainingFolder(current: String?,
+                                                 folders: [String]) -> String? {
+        guard let current = current else { return nil }
+        return folders
+            .filter { folder in
+                let f = folder.hasSuffix("/") ? String(folder.dropLast()) : folder
+                return current == f || current.hasPrefix(f + "/")
+            }
+            .max(by: { $0.count < $1.count })
+    }
+
     /// Navigate to.
     public func navigateTo(_ path: String) {
         fileContent = nil
