@@ -766,7 +766,7 @@ private struct GitHubSettingsSection: View {
                 .tracking(1)
                 .padding(.top, 6)
 
-            TextEditor(text: $reposText)
+            TextEditor(text: $reposText.sanitizingStylizedText())
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.white.opacity(0.8))
                 .scrollContentBackground(.hidden)
@@ -811,7 +811,7 @@ private struct GitHubSettingsSection: View {
                 .tracking(1)
                 .padding(.top, 10)
 
-            TextEditor(text: $pipelinesText)
+            TextEditor(text: $pipelinesText.sanitizingStylizedText())
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.white.opacity(0.8))
                 .scrollContentBackground(.hidden)
@@ -910,7 +910,7 @@ private struct GitLabSettingsSection: View {
                 .tracking(1)
                 .padding(.top, 6)
 
-            TextEditor(text: $projectsText)
+            TextEditor(text: $projectsText.sanitizingStylizedText())
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.white.opacity(0.8))
                 .scrollContentBackground(.hidden)
@@ -953,7 +953,7 @@ private struct GitLabSettingsSection: View {
                 .tracking(1)
                 .padding(.top, 10)
 
-            TextEditor(text: $pipelinesText)
+            TextEditor(text: $pipelinesText.sanitizingStylizedText())
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.white.opacity(0.8))
                 .scrollContentBackground(.hidden)

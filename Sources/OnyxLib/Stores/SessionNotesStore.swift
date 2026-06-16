@@ -80,7 +80,9 @@ public class SessionNotesStore: ObservableObject {
     /// Set (or clear) the note for a session. Empty/whitespace input
     /// deletes the entry rather than storing an empty note.
     public func setNote(_ text: String, for sessionID: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Backstop: strip smart-quote/dash substitutions before storing.
+        let trimmed = TextSanitizer.sanitize(text)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             notes.removeValue(forKey: sessionID)
         } else {

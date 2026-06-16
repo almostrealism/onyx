@@ -6,6 +6,17 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     public func applicationWillFinishLaunching(_ notification: Notification) {
         // Force the process to be a regular GUI app with menu bar and focus
         NSApplication.shared.setActivationPolicy(.regular)
+        // Kill macOS "smart" text substitution app-wide BEFORE any text view
+        // is created. NSTextView / the window field editor read these defaults
+        // for their initial state, so a typed " stays a straight " instead of
+        // being auto-curled. Forced (not register:) so it overrides the user's
+        // system-wide smart-quotes setting. The TextSanitizer backstop catches
+        // anything pasted in.
+        for key in ["NSAutomaticQuoteSubstitutionEnabled",
+                    "NSAutomaticDashSubstitutionEnabled",
+                    "NSAutomaticTextReplacementEnabled"] {
+            UserDefaults.standard.set(false, forKey: key)
+        }
         ShortcutManager.setupMenuShortcuts()
     }
 

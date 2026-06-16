@@ -81,7 +81,10 @@ public class NotesManager: ObservableObject {
     /// Save note.
     public func saveNote(_ note: Note) {
         let url = directory.appendingPathComponent(note.id)
-        try? note.content.write(to: url, atomically: true, encoding: .utf8)
+        // Backstop: never persist macOS smart-quote/dash substitutions, even
+        // if one arrived via paste before the editor could strip it.
+        let clean = TextSanitizer.sanitize(note.content)
+        try? clean.write(to: url, atomically: true, encoding: .utf8)
     }
 
     /// Delete note.

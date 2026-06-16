@@ -43,6 +43,14 @@ private struct FocusedSelectAllField: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
+        // Belt-and-suspenders on top of the app-wide disable: turn off smart
+        // substitution directly on this field's editor so a typed " never
+        // curls. (The field editor only exists while editing.)
+        if let editor = nsView.currentEditor() as? NSTextView {
+            editor.isAutomaticQuoteSubstitutionEnabled = false
+            editor.isAutomaticDashSubstitutionEnabled = false
+            editor.isAutomaticTextReplacementEnabled = false
+        }
         if nsView.stringValue != text {
             nsView.stringValue = text
         }
@@ -61,7 +69,11 @@ private struct FocusedSelectAllField: NSViewRepresentable {
         }
         func controlTextDidChange(_ obj: Notification) {
             if let field = obj.object as? NSTextField {
-                text.wrappedValue = field.stringValue
+                // Strip any stylized punctuation (e.g. pasted curly quotes)
+                // before it reaches the binding, rewriting the field in place.
+                let clean = TextSanitizer.sanitize(field.stringValue)
+                if clean != field.stringValue { field.stringValue = clean }
+                text.wrappedValue = clean
             }
         }
         func control(_ control: NSControl,

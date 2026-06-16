@@ -159,7 +159,7 @@ struct NoteEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                TextField("Untitled", text: $titleText)
+                TextField("Untitled", text: $titleText.sanitizingStylizedText())
                     .focused($titleFocused)
                     .textFieldStyle(.plain)
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
@@ -180,7 +180,7 @@ struct NoteEditorView: View {
 
             Divider().background(Color.white.opacity(0.08))
 
-            TextEditor(text: $note.content)
+            TextEditor(text: $note.content.sanitizingStylizedText())
                 .font(.system(.body, design: .monospaced))
                 .foregroundColor(.white.opacity(0.9))
                 .scrollContentBackground(.hidden)
