@@ -435,6 +435,8 @@ class OnyxTerminalView: NSView {
             lastActiveTime: Date(),
             processRunning: false
         )
+        // Bind output-activity tracking to this session id.
+        (tv as? ActivityTrackingTerminalView)?.sessionID = session.id
         activeSessionID = session.id
         if grabFocus {
             DispatchQueue.main.async {
@@ -446,6 +448,7 @@ class OnyxTerminalView: NSView {
 
     private func destroyPoolEntry(_ sessionID: String) {
         guard let entry = pool.removeValue(forKey: sessionID) else { return }
+        TerminalActivityStore.shared.forget(sessionID: sessionID)
         // Unregister the interactive ssh PID from the central executor
         // BEFORE terminating — if SIGTERM kills it cleanly the natural
         // process-exit handler would unregister too, but if it's stuck
@@ -649,7 +652,7 @@ class OnyxTerminalView: NSView {
     // MARK: - Terminal View Factory
 
     private func createTerminalView(scrollback: Int = 10000) -> LocalProcessTerminalView {
-        let tv = LocalProcessTerminalView(frame: bounds)
+        let tv = ActivityTrackingTerminalView(frame: bounds)
         tv.terminal.options.scrollback = scrollback
         tv.autoresizingMask = [.width, .height]
 
@@ -1631,6 +1634,26 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
                 self.reconnectAttempt = max(self.reconnectAttempt, 4) // at least 8s backoff
             }
             self.reconnect()
+        }
+    }
+}
+
+// MARK: - Output-activity tracking
+
+/// LocalProcessTerminalView that records the time of each chunk of PTY
+/// output into TerminalActivityStore, keyed by the session it's bound to.
+/// `dataReceived` is the single funnel for all incoming terminal bytes, so
+/// stamping it there captures every content change. The store coalesces the
+/// resulting UI updates, so the per-chunk cost here stays tiny.
+final class ActivityTrackingTerminalView: LocalProcessTerminalView {
+    /// Set once the view is placed in the pool; nil for the transient
+    /// key-setup terminal, which has no session note to annotate.
+    var sessionID: String?
+
+    override func dataReceived(slice: ArraySlice<UInt8>) {
+        super.dataReceived(slice: slice)
+        if let id = sessionID {
+            TerminalActivityStore.shared.recordOutput(sessionID: id)
         }
     }
 }

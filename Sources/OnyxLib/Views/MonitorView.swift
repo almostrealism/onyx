@@ -2280,6 +2280,12 @@ private struct SessionNoteRow: View {
                     }
                 }
                 Spacer(minLength: 0)
+                // Terminal-output activity: how long since this session last
+                // produced output. Green when it just printed something, grey
+                // "idle" once it's been quiet — so a test run that finished
+                // (or hung) stands out from one still churning.
+                activityIndicator
+                    .padding(.top, 1)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -2288,6 +2294,35 @@ private struct SessionNoteRow: View {
             .cornerRadius(3)
         }
         .buttonStyle(.plain)
+    }
+
+    /// Time-since-last-output chip. A TimelineView re-evaluates it every few
+    /// seconds so the colour drifts active → idle as a session goes quiet,
+    /// even when no new output (hence no store update) is arriving.
+    @ViewBuilder
+    private var activityIndicator: some View {
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            if let last = TerminalActivityStore.shared.lastOutput(for: session.id) {
+                let idle = context.date.timeIntervalSince(last)
+                HStack(spacing: 3) {
+                    Image(systemName: idle < 15 ? "waveform" : "moon.zzz")
+                        .font(.system(size: 8))
+                    Text(last, style: .relative)
+                        .monitorFont(size: 9)
+                }
+                .foregroundColor(activityColor(idle))
+                .help(idle < 15 ? "Producing output now"
+                                : "Quiet for \(Int(idle))s — likely idle")
+            }
+        }
+    }
+
+    /// Green when output is fresh, amber while recently active, grey once
+    /// the session has been quiet long enough to read as idle.
+    private func activityColor(_ idleSeconds: TimeInterval) -> Color {
+        if idleSeconds < 15 { return Color(hex: "6BFF8E") }   // active
+        if idleSeconds < 120 { return Color(hex: "FFD06B") }  // winding down
+        return .gray.opacity(0.45)                            // idle
     }
 }
 
