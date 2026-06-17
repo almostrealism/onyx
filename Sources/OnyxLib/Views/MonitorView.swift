@@ -2764,6 +2764,10 @@ private struct PipelineSuggestionsPopover: View {
     @State private var loading = false
     @Environment(\.dismiss) private var dismiss
 
+    /// Per-row height (two text lines + padding + inter-row spacing),
+    /// slightly generous so the exact-fit case never clips the last row.
+    private static let rowHeight: CGFloat = 36
+
     /// The filtered list — drops suggestions the user already added,
     /// matched by the parsed PipelineSpec id.
     private var visibleSuggestions: [WorkflowMonitor.Suggestion] {
@@ -2816,7 +2820,10 @@ private struct PipelineSuggestionsPopover: View {
                     .foregroundColor(.gray.opacity(0.5))
                     .frame(maxWidth: 320, alignment: .leading)
             } else {
-                // Up to ~10 rows visible at once; scrolls beyond that.
+                // Grow to fit the suggestions, up to 8 rows tall, then
+                // scroll. A bare ScrollView has no intrinsic content height,
+                // so inside a popover it collapses to ~one row — hence the
+                // explicit, row-count-driven height instead of a maxHeight.
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(visibleSuggestions) { s in
@@ -2828,7 +2835,7 @@ private struct PipelineSuggestionsPopover: View {
                         }
                     }
                 }
-                .frame(maxHeight: 280)
+                .frame(height: CGFloat(min(visibleSuggestions.count, 8)) * Self.rowHeight)
             }
         }
         .padding(14)
