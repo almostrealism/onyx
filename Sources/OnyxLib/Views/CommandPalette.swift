@@ -27,6 +27,10 @@ struct CommandPaletteView: View {
                 appState.showCommandPalette = false
                 appState.activeRightPanel = appState.activeRightPanel == .fileBrowser ? nil : .fileBrowser
             },
+            PaletteAction(title: "Full-Window File Browser", shortcut: "⇧⌘O") {
+                appState.showCommandPalette = false
+                NotificationCenter.default.post(name: .toggleFullFileBrowser, object: nil)
+            },
             PaletteAction(title: "Artifacts", shortcut: "⌘D") {
                 appState.showCommandPalette = false
                 appState.activeRightPanel = appState.activeRightPanel == .artifacts ? nil : .artifacts
@@ -35,13 +39,41 @@ struct CommandPaletteView: View {
                 appState.showCommandPalette = false
                 appState.showSessionManager.toggle()
             },
+            PaletteAction(title: "New Session", shortcut: "") {
+                appState.showCommandPalette = false
+                NotificationCenter.default.post(name: .createTmuxSession, object: nil)
+            },
+            PaletteAction(title: "Next Session", shortcut: "⇧⇥") {
+                appState.showCommandPalette = false
+                NotificationCenter.default.post(name: .cycleTmuxSession, object: nil)
+            },
             PaletteAction(title: "Toggle Monitor", shortcut: "`") {
                 appState.showCommandPalette = false
                 appState.showMonitor.toggle()
             },
+            PaletteAction(title: "Edit Session Note", shortcut: "⌘;") {
+                appState.showCommandPalette = false
+                NotificationCenter.default.post(name: .editSessionNote, object: nil)
+            },
+            PaletteAction(title: "Selectable Text Mode", shortcut: "⇧⌘C") {
+                appState.showCommandPalette = false
+                NotificationCenter.default.post(name: .toggleTerminalTextMode, object: nil)
+            },
+            PaletteAction(title: "Focus URL Bar", shortcut: "⌘L") {
+                appState.showCommandPalette = false
+                NotificationCenter.default.post(name: .focusURLBar, object: nil)
+            },
+            PaletteAction(title: "Cycle Panel Size", shortcut: "⌘\\") {
+                appState.showCommandPalette = false
+                NotificationCenter.default.post(name: .cyclePanelSize, object: nil)
+            },
             PaletteAction(title: "Settings", shortcut: "⌘,") {
                 appState.showCommandPalette = false
                 appState.showSettings = true
+            },
+            PaletteAction(title: "Keyboard Shortcuts / Help", shortcut: "⌘/") {
+                appState.showCommandPalette = false
+                appState.showHelp = true
             },
             PaletteAction(title: "Rename Window", shortcut: "") {
                 appState.showCommandPalette = false

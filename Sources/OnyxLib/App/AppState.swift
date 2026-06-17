@@ -34,6 +34,7 @@ public extension Notification.Name {
     static let tmuxResizeRight = Notification.Name("tmuxResizeRight")
     static let toggleTerminalTextMode = Notification.Name("toggleTerminalTextMode")
     static let cyclePanelSize = Notification.Name("cyclePanelSize")
+    static let toggleHelp = Notification.Name("toggleHelp")
 }
 
 // MARK: - Window Index
@@ -145,6 +146,8 @@ public class AppState: ObservableObject {
     @Published public var activeRightPanel: RightPanel?
     @Published public var showSettings = false
     @Published public var showCommandPalette = false
+    /// Full-screen help / keyboard-shortcut reference overlay (Cmd+/).
+    @Published public var showHelp = false
     @Published public var showMonitor = false
     /// When true, the monitor renders the "simple" layout: same headline
     /// row, but giant CPU/MEM/GPU charts below, a compact strip of the
@@ -1133,7 +1136,9 @@ public class AppState: ObservableObject {
 
     /// Dismiss top overlay.
     public func dismissTopOverlay() {
-        if showSessionNoteEditor {
+        if showHelp {
+            showHelp = false
+        } else if showSessionNoteEditor {
             showSessionNoteEditor = false
         } else if showCommandPalette {
             showCommandPalette = false

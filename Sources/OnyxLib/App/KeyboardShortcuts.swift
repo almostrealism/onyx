@@ -61,6 +61,12 @@ public class ShortcutManager {
                 return nil
             }
 
+            // Cmd+/ → help / keyboard-shortcut reference
+            if flags == .command && chars == "/" {
+                NotificationCenter.default.post(name: .toggleHelp, object: nil)
+                return nil
+            }
+
             // Cmd+O → toggle file browser (right panel)
             // Cmd+Shift+O → toggle full-window file browser
             if chars.lowercased() == "o" {
@@ -163,6 +169,7 @@ public class ShortcutManager {
                 || (state?.showSessionManager ?? false)
                 || (state?.showWindowRename ?? false)
                 || (state?.showSessionNoteEditor ?? false)
+                || (state?.showHelp ?? false)
 
             // For non-monitor shortcuts, also suppress when a right panel
             // with an editor is open (notes, file browser text fields).

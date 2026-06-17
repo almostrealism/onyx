@@ -38,6 +38,7 @@ public struct ContentView: View {
     private var hasOverlay: Bool {
         appState.showSetup || appState.showSettings
             || appState.showCommandPalette || appState.showSessionManager
+            || appState.showHelp
     }
 
     @ViewBuilder
@@ -251,6 +252,12 @@ public struct ContentView: View {
                     CommandPaletteView(appState: appState)
                         .modifier(FocusOutline(active: appState.focusedComponent == .commandPalette, show: appState.showFocusOutline))
                         .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                // Help / keyboard-shortcut reference (Cmd+/)
+                if appState.showHelp {
+                    HelpOverlay(appState: appState)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
                 }
             }
 
@@ -614,6 +621,10 @@ private struct ContentViewPanelNotifications: ViewModifier {
                 guard isKeyWindow else { return }
                 appState.showCommandPalette.toggle()
                 appState.recalculateFocus()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleHelp)) { _ in
+                guard isKeyWindow else { return }
+                appState.showHelp.toggle()
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleTerminalTextMode)) { _ in
                 guard isKeyWindow else { return }
