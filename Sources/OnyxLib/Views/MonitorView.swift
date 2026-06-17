@@ -393,6 +393,7 @@ struct MonitorView: View {
 
                     if appState.showSimpleMonitor {
                         SimpleMonitorBody(
+                            appState: appState,
                             monitor: monitor,
                             dockerStats: dockerStats,
                             timing: appState.timing,
@@ -775,6 +776,7 @@ struct CPUUnavailableCard: View {
 // dashboard.
 
 struct SimpleMonitorBody: View {
+    @ObservedObject var appState: AppState
     @ObservedObject var monitor: MonitorManager
     @ObservedObject var dockerStats: DockerStatsManager
     @ObservedObject var timing: TimingManager
@@ -840,6 +842,7 @@ struct SimpleMonitorBody: View {
                     SimpleRemindersScope(reminders: reminders)
                     SimpleContainersStrip(dockerStats: dockerStats)
                     Spacer(minLength: 12)
+                    SimpleSessionActivityStrip(appState: appState)
                     SimplePipelinesStrip()
                     if timing.isConfigured {
                         WeeklyTimingTile(timing: timing, accentColor: accentColor)
@@ -1021,6 +1024,69 @@ private struct SimplePipelinePill: View {
             : status.spec.displayName
         if let b = status.headBranch, !b.isEmpty { return "\(name) · \(b)" }
         return name
+    }
+}
+
+// MARK: - Session output-activity (shared visual language)
+
+/// Green when output is fresh, amber while winding down, grey once a
+/// session has been quiet long enough to read as idle. Shared by the full
+/// session-notes rows and the simple-mode activity strip.
+func monitorSessionActivityColor(_ idleSeconds: TimeInterval) -> Color {
+    if idleSeconds < 15 { return Color(hex: "6BFF8E") }
+    if idleSeconds < 120 { return Color(hex: "FFD06B") }
+    return .gray.opacity(0.45)
+}
+
+/// Waveform while actively printing, "asleep" once quiet.
+func monitorSessionActivityIcon(_ idleSeconds: TimeInterval) -> String {
+    idleSeconds < 15 ? "waveform" : "moon.zzz"
+}
+
+/// Simple-mode strip of session output-activity pills — one per noted
+/// session that has a terminal-output reading. Icon + colour only (no note
+/// text; hover for it), mirroring SimplePipelinesStrip so the two read the
+/// same. Sits just left of the pipeline pills in the bottom-right.
+struct SimpleSessionActivityStrip: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject private var notesStore = SessionNotesStore.shared
+    @ObservedObject private var activity = TerminalActivityStore.shared
+
+    var body: some View {
+        let entries = notesStore.activeNotes(in: appState.allSessions)
+            .filter { activity.lastOutput(for: $0.session.id) != nil }
+        if !entries.isEmpty {
+            HStack(spacing: 8) {
+                ForEach(entries, id: \.session.id) { entry in
+                    SimpleSessionActivityPill(session: entry.session, note: entry.note)
+                }
+            }
+        } else {
+            EmptyView()
+        }
+    }
+}
+
+private struct SimpleSessionActivityPill: View {
+    let session: TmuxSession
+    let note: SessionNote
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            if let last = TerminalActivityStore.shared.lastOutput(for: session.id) {
+                let idle = context.date.timeIntervalSince(last)
+                Image(systemName: monitorSessionActivityIcon(idle))
+                    .font(.system(size: 10))
+                    .foregroundColor(monitorSessionActivityColor(idle))
+                    .frame(width: 14)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.white.opacity(0.04))
+                    .cornerRadius(4)
+                    .help(idle < 15 ? "\(note.text) · producing output"
+                                    : "\(note.text) · quiet for \(Int(idle))s")
+            }
+        }
     }
 }
 
@@ -2343,24 +2409,16 @@ private struct SessionNoteRow: View {
             if let last = TerminalActivityStore.shared.lastOutput(for: session.id) {
                 let idle = context.date.timeIntervalSince(last)
                 HStack(spacing: 3) {
-                    Image(systemName: idle < 15 ? "waveform" : "moon.zzz")
+                    Image(systemName: monitorSessionActivityIcon(idle))
                         .font(.system(size: 8))
                     Text(last, style: .relative)
                         .monitorFont(size: 9)
                 }
-                .foregroundColor(activityColor(idle))
+                .foregroundColor(monitorSessionActivityColor(idle))
                 .help(idle < 15 ? "Producing output now"
                                 : "Quiet for \(Int(idle))s — likely idle")
             }
         }
-    }
-
-    /// Green when output is fresh, amber while recently active, grey once
-    /// the session has been quiet long enough to read as idle.
-    private func activityColor(_ idleSeconds: TimeInterval) -> Color {
-        if idleSeconds < 15 { return Color(hex: "6BFF8E") }   // active
-        if idleSeconds < 120 { return Color(hex: "FFD06B") }  // winding down
-        return .gray.opacity(0.45)                            // idle
     }
 }
 
