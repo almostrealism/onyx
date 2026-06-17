@@ -448,7 +448,9 @@ class OnyxTerminalView: NSView {
 
     private func destroyPoolEntry(_ sessionID: String) {
         guard let entry = pool.removeValue(forKey: sessionID) else { return }
-        TerminalActivityStore.shared.forget(sessionID: sessionID)
+        // NB: do NOT forget the session's output-activity here — reconnect
+        // tears down and recreates the pool entry for the same session id,
+        // and we must preserve the idle clock across that.
         // Unregister the interactive ssh PID from the central executor
         // BEFORE terminating — if SIGTERM kills it cleanly the natural
         // process-exit handler would unregister too, but if it's stuck
@@ -534,6 +536,7 @@ class OnyxTerminalView: NSView {
         if !entry.terminalView.process.running {
             print("Health check: session \(id) process is dead")
             pool[id]?.processRunning = false
+            TerminalActivityStore.shared.markDisconnected(sessionID: id)
 
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
@@ -832,6 +835,7 @@ class OnyxTerminalView: NSView {
         let (cmd, args) = self.appState.commandForSession(session)
         tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
         self.pool[session.id]?.processRunning = true
+        TerminalActivityStore.shared.markConnected(sessionID: session.id)
         // Register the interactive ssh PID in the central executor's
         // long-lived registry so the orphan reaper / inventory dump
         // sees it. Unregistered in `destroyPoolEntry` and
@@ -1285,6 +1289,7 @@ class OnyxTerminalView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
             self.pool[session.id]?.processRunning = true
+            TerminalActivityStore.shared.markConnected(sessionID: session.id)
             self.clearPendingStatus(for: session.id)
             self.publishPoolStatus()
         }
@@ -1313,6 +1318,7 @@ class OnyxTerminalView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
             self.pool[session.id]?.processRunning = true
+            TerminalActivityStore.shared.markConnected(sessionID: session.id)
         }
     }
 
@@ -1547,6 +1553,7 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
 
         if let id = terminatedSessionID {
             pool[id]?.processRunning = false
+            TerminalActivityStore.shared.markDisconnected(sessionID: id)
             // The interactive ssh PID died naturally — drop it from the
             // central executor registry. (The destroyPoolEntry path also
             // unregisters but this catches the case where ssh exits on
@@ -1596,6 +1603,7 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
                   !entry.terminalView.process.running {
             // Pool lookup failed but active session process is dead
             pool[activeID]?.processRunning = false
+            TerminalActivityStore.shared.markDisconnected(sessionID: activeID)
             isActiveSession = true
         } else {
             isActiveSession = false
