@@ -2345,7 +2345,11 @@ struct SessionNotesSection: View {
                         note: entry.note,
                         isActive: appState.activeSession?.id == entry.session.id,
                         accentColor: appState.accentColor,
-                        onTap: { appState.activeSession = entry.session }
+                        // Route through switchToSession (like the favorites
+                        // bar) so the terminal pool actually activates this
+                        // session's view — setting activeSession alone only
+                        // moved the indicator while the old terminal stayed up.
+                        onTap: { appState.switchToSession = entry.session }
                     )
                 }
             }
