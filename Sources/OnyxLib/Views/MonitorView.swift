@@ -779,6 +779,9 @@ struct SimpleMonitorBody: View {
     @ObservedObject var dockerStats: DockerStatsManager
     @ObservedObject var timing: TimingManager
     let accentColor: Color
+    /// Own reminders manager just for the due-today / due-tomorrow scope
+    /// counts (list-independent, so it needs no selectedLists wiring).
+    @StateObject private var reminders = RemindersManager()
 
     var body: some View {
         GeometryReader { geo in
@@ -830,10 +833,11 @@ struct SimpleMonitorBody: View {
 
                 Spacer(minLength: 0)
 
-                // Bottom strip: top-CPU containers on the left, then the
-                // compact pipeline activity indicators, then the weekly
-                // Timing tile flush against the trailing edge.
+                // Bottom strip: reminders due-scope counts and top-CPU
+                // containers on the left, then the compact pipeline activity
+                // indicators, then the weekly Timing tile flush trailing.
                 HStack(alignment: .center, spacing: 12) {
+                    SimpleRemindersScope(reminders: reminders)
                     SimpleContainersStrip(dockerStats: dockerStats)
                     Spacer(minLength: 12)
                     SimplePipelinesStrip()
@@ -844,6 +848,40 @@ struct SimpleMonitorBody: View {
                 .frame(height: bottomStripHeight)
             }
         }
+    }
+}
+
+/// Simple-mode reminders scope: the same due-today / due-by-tomorrow
+/// totals shown above the full reminders list, but standalone (no list)
+/// so the two numbers stay visible at a glance in the stripped-down view.
+/// Empty (zero-height) until Reminders access is granted.
+struct SimpleRemindersScope: View {
+    @ObservedObject var reminders: RemindersManager
+
+    var body: some View {
+        if reminders.accessGranted {
+            HStack(spacing: 8) {
+                chip(reminders.dueTodayCount, "today", Color(hex: "FF6B6B"))
+                chip(reminders.dueTomorrowCount, "by tmrw", Color(hex: "FFD06B"))
+            }
+        } else {
+            EmptyView()
+        }
+    }
+
+    private func chip(_ count: Int, _ label: String, _ color: Color) -> some View {
+        HStack(spacing: 4) {
+            Text("\(count)")
+                .monitorFont(size: 13, weight: .medium)
+                .foregroundColor(color)
+            Text(label)
+                .monitorFont(size: 9)
+                .foregroundColor(.gray.opacity(0.5))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(color.opacity(0.1))
+        .cornerRadius(4)
     }
 }
 
