@@ -1081,6 +1081,16 @@ struct FavoritesBar: View {
                     .foregroundColor(.gray.opacity(0.25))
                     .padding(.trailing, 4)
             }
+
+            // Help affordance — opens the shortcut/feature reference for
+            // users who don't know the Cmd+/ shortcut yet.
+            Button(action: { appState.showHelp = true }) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: sz(11)))
+                    .foregroundColor(appState.accentColor.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+            .help("Help & keyboard shortcuts (⌘/)")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
