@@ -788,46 +788,55 @@ struct TerminalTextOverlay: View {
             }
         }
 
-        // Detect URLs in the unwrapped text
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-            return result
-        }
-
-        let nsUnwrapped = unwrapped as NSString
-        let range = NSRange(location: 0, length: nsUnwrapped.length)
-
-        for match in detector.matches(in: unwrapped, range: range) {
-            guard let url = match.url,
-                  let swiftRange = Range(match.range, in: unwrapped) else { continue }
-
-            // Map each character in the match back to the original text
+        // Apply a link + color to the original attributed string for an
+        // unwrapped-text range, grouping consecutive original offsets into
+        // runs (a soft-unwrapped match can map to disjoint original spans).
+        func applyLink(_ swiftRange: Range<String.Index>, url: URL, color: Color) {
             let matchStart = unwrapped.distance(from: unwrapped.startIndex, to: swiftRange.lowerBound)
             let matchEnd = unwrapped.distance(from: unwrapped.startIndex, to: swiftRange.upperBound)
-
-            // Apply link to each character's position in the original attributed string
-            // Group consecutive original offsets into ranges for efficiency
             var i = matchStart
             while i < matchEnd && i < offsetMap.count {
                 let runStart = offsetMap[i]
                 var runEnd = runStart + 1
                 var j = i + 1
-                // Extend run while consecutive in original text
                 while j < matchEnd && j < offsetMap.count && offsetMap[j] == runEnd {
                     runEnd += 1
                     j += 1
                 }
-
-                // Apply link to this run in the original attributed string
                 if runStart < text.count && runEnd <= text.count {
                     let attrStart = result.index(result.startIndex, offsetByCharacters: runStart)
                     let attrEnd = result.index(result.startIndex, offsetByCharacters: runEnd)
                     result[attrStart..<attrEnd].link = url
-                    result[attrStart..<attrEnd].foregroundColor = Color(hex: "66CCFF")
+                    result[attrStart..<attrEnd].foregroundColor = color
                     result[attrStart..<attrEnd].underlineStyle = .single
                 }
-
                 i = j
             }
+        }
+
+        let nsUnwrapped = unwrapped as NSString
+        let range = NSRange(location: 0, length: nsUnwrapped.length)
+
+        // Pass 1 — URLs. Record their ranges so file-path detection doesn't
+        // re-link the path component inside an already-linked URL.
+        var urlRanges: [NSRange] = []
+        if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+            for match in detector.matches(in: unwrapped, range: range) {
+                guard let url = match.url,
+                      let swiftRange = Range(match.range, in: unwrapped) else { continue }
+                urlRanges.append(match.range)
+                applyLink(swiftRange, url: url, color: Color(hex: "66CCFF"))
+            }
+        }
+
+        // Pass 2 — unix file paths. Skip any that overlap a URL match.
+        let favorites = appState.fileBrowserManager.activeFolders.map(\.path)
+        for pathRange in FilePathDetector.matchRanges(in: unwrapped, favorites: favorites) {
+            if urlRanges.contains(where: { NSIntersectionRange($0, pathRange).length > 0 }) { continue }
+            guard let swiftRange = Range(pathRange, in: unwrapped),
+                  let url = FilePathDetector.linkURL(for: nsUnwrapped.substring(with: pathRange))
+            else { continue }
+            applyLink(swiftRange, url: url, color: Color(hex: "FFD06B"))
         }
 
         return result
@@ -848,7 +857,7 @@ struct TerminalTextOverlay: View {
 
                     Spacer()
 
-                    Text("click URLs to open · ⌘⇧C or Esc to close")
+                    Text("click URLs / paths (⇧ for folder) · ⌘⇧C or Esc to close")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.4))
                 }
@@ -874,6 +883,13 @@ struct TerminalTextOverlay: View {
                             .font(.system(size: CGFloat(appState.appearance.effectiveTerminalFontSize), design: .monospaced))
                             .textSelection(.enabled)
                             .environment(\.openURL, OpenURLAction { url in
+                                if url.scheme == "onyxfile" {
+                                    // Click → open the file; Shift-click →
+                                    // its containing directory.
+                                    let shift = NSEvent.modifierFlags.contains(.shift)
+                                    appState.openPathInFileBrowser(url.path, selectFile: !shift)
+                                    return .handled
+                                }
                                 NSWorkspace.shared.open(url)
                                 return .handled
                             })

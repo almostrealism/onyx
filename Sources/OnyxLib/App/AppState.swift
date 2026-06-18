@@ -724,6 +724,24 @@ public class AppState: ObservableObject {
         FileBrowserManager(appState: self)
     }()
 
+    /// Open a recognized file path (from the terminal-text overlay) in the
+    /// file browser. `selectFile` opens the file itself; otherwise we land
+    /// in its containing directory (the shift-click behavior).
+    public func openPathInFileBrowser(_ path: String, selectFile: Bool) {
+        showTerminalText = false
+        terminalTextContent = ""
+        activeRightPanel = .fileBrowser
+        if selectFile {
+            let name = (path as NSString).lastPathComponent
+            // readFileFromSearch moves currentPath to the file's folder and
+            // opens the file — exactly "browser with that file selected".
+            fileBrowserManager.readFileFromSearch(path, name: name)
+        } else {
+            let parent = (path as NSString).deletingLastPathComponent
+            fileBrowserManager.navigateTo(parent)
+        }
+    }
+
     /// Saved folders url.
     public var savedFoldersURL: URL {
         appSupportDir.appendingPathComponent("folders.json")
