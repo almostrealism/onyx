@@ -1,14 +1,20 @@
 //
 // TerminalActivityStore.swift
 //
-// Responsibility: Records the time each session's terminal last produced
-//                 output, so the monitor overlay can show how long a
-//                 session has been quiet — a quick "is it still working or
-//                 has it gone idle?" signal for sessions running tests etc.
+// Responsibility: Tracks when each session's terminal last *meaningfully*
+//                 changed, so the monitor overlay can show how long a
+//                 session has been quiet — a quick "still working or gone
+//                 idle?" signal for sessions running tests etc.
 // Scope: Shared singleton.
-// Threading: dataReceived may fire off the main thread, so the map is
-//            guarded by a lock. UI invalidations are coalesced to at most
-//            one per second on the main thread.
+// Threading: lock-guarded map; UI invalidations coalesced to ~1 Hz on main.
+//
+// Why content hashing rather than raw bytes: the terminal receives output
+// constantly that ISN'T real program activity — tmux redraws its status
+// bar (with a ticking clock) every minute, and a reconnect repaints the
+// whole pane. Stamping on bytes made the idle clock reset every 60s and on
+// every reconnect. Instead the OnyxTerminalView poller reports a hash of
+// the visible pane (minus the status-bar row); the clock only advances when
+// that hash actually changes.
 //
 
 import Foundation
@@ -19,61 +25,61 @@ public final class TerminalActivityStore: ObservableObject {
     public static let shared = TerminalActivityStore()
 
     private let lock = NSLock()
-    private var lastOutputBySession: [String: Date] = [:]
-    /// Output before this instant is ignored for a session — used to drop
-    /// reconnect noise (SSH "connection closed" messages, the tmux re-attach
-    /// redraw) so a session that's been idle for hours doesn't look freshly
-    /// active just because the connection bounced.
+    private var lastChange: [String: Date] = [:]
+    private var lastHash: [String: Int] = [:]
+    /// Content reported before this instant is ignored for a session —
+    /// used to drop the tmux re-attach redraw burst right after a reconnect.
     private var suppressUntil: [String: Date] = [:]
-    /// True while a coalesced objectWillChange is already pending on main.
     private var publishScheduled = false
 
     private init() {}
 
-    /// Stamp "output just happened" for a session. Called for every chunk
-    /// of terminal bytes, so it must stay cheap. Ignored while the session
-    /// is suppressed (disconnected / within the post-reconnect grace).
-    public func recordOutput(sessionID: String) {
+    /// Report the session's current meaningful terminal content (the visible
+    /// pane with the status-bar row excluded — the caller handles that). The
+    /// idle clock advances only when the hash differs from the last report,
+    /// so a status-bar clock tick or a redraw of identical content doesn't
+    /// count. The first report for a session seeds the clock.
+    public func recordContent(sessionID: String, contentHash: Int) {
         let now = Date()
         lock.lock()
         if let until = suppressUntil[sessionID], now < until { lock.unlock(); return }
-        lastOutputBySession[sessionID] = now
+        let changed = lastHash[sessionID] != contentHash
+        if changed {
+            lastHash[sessionID] = contentHash
+            lastChange[sessionID] = now
+        }
         lock.unlock()
-        schedulePublish()
+        if changed { schedulePublish() }
     }
 
-    /// When the session last produced output, or nil if never seen.
+    /// When the session's content last changed, or nil if never seen.
     public func lastOutput(for sessionID: String) -> Date? {
         lock.lock(); defer { lock.unlock() }
-        return lastOutputBySession[sessionID]
+        return lastChange[sessionID]
     }
 
-    /// The session's SSH process went down. Ignore everything until it's
-    /// back up — disconnect banners and reconnect chatter aren't real
-    /// program output, and the prior idle time must be preserved.
+    /// The session's SSH process went down. Ignore reported content until it
+    /// reconnects (disconnect banners / partial screens aren't real changes),
+    /// preserving the prior idle time.
     public func markDisconnected(sessionID: String) {
         lock.lock(); suppressUntil[sessionID] = .distantFuture; lock.unlock()
     }
 
-    /// The session's process (re)started. On a *reconnect* (we already have
-    /// an idle reading) ignore output for a short grace window to swallow
-    /// the tmux re-attach redraw — which restores old content, not new
-    /// output. On the very *first* connect, seed the clock and allow output
-    /// immediately so a session opened mid-build shows active right away.
-    public func markConnected(sessionID: String, grace: TimeInterval = 6) {
+    /// The session's process (re)started. On a reconnect (we already have a
+    /// content baseline) ignore reports for a grace window so the tmux
+    /// re-attach redraw settles before we compare — it restores old content,
+    /// not new output. The first-ever connect baselines immediately.
+    public func markConnected(sessionID: String, grace: TimeInterval = 8) {
         lock.lock()
-        if lastOutputBySession[sessionID] != nil {
+        if lastHash[sessionID] != nil {
             suppressUntil[sessionID] = Date().addingTimeInterval(grace)
         } else {
-            lastOutputBySession[sessionID] = Date()
             suppressUntil[sessionID] = nil
         }
         lock.unlock()
-        schedulePublish()
     }
 
-    /// Coalesce UI updates: output can arrive hundreds of times a second,
-    /// but the relative-time display only needs ~1 Hz.
+    /// Coalesce UI updates to ~1 Hz on the main thread.
     private func schedulePublish() {
         DispatchQueue.main.async { [weak self] in
             guard let self = self, !self.publishScheduled else { return }

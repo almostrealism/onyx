@@ -50,6 +50,9 @@ class OnyxTerminalView: NSView {
     private var activeSessionID: String?
     private var evictionTimer: Timer?
     private let evictionTimeout: TimeInterval = 300  // 5 minutes
+    /// Samples each pooled session's visible content to drive the idle/
+    /// activity indicators in the monitor overlay.
+    private var activityTimer: Timer?
 
     /// The currently active terminal view (used by scroll monitor and hitTest)
     private var terminalView: LocalProcessTerminalView? {
@@ -75,6 +78,7 @@ class OnyxTerminalView: NSView {
         layer?.backgroundColor = CGColor.clear
         installScrollMonitor()
         startEvictionTimer()
+        startActivityTimer()
         focusObserver = NotificationCenter.default.addObserver(
             forName: .restoreTerminalFocus, object: nil, queue: .main
         ) { [weak self] _ in
@@ -435,8 +439,6 @@ class OnyxTerminalView: NSView {
             lastActiveTime: Date(),
             processRunning: false
         )
-        // Bind output-activity tracking to this session id.
-        (tv as? ActivityTrackingTerminalView)?.sessionID = session.id
         activeSessionID = session.id
         if grabFocus {
             DispatchQueue.main.async {
@@ -477,6 +479,42 @@ class OnyxTerminalView: NSView {
             self?.evictStaleEntries()
             self?.publishPoolStatus()
         }
+    }
+
+    /// Poll each pooled session's visible terminal content so the monitor
+    /// overlay's session-activity indicators reflect real output, not raw
+    /// bytes. Driven by content change (see TerminalActivityStore) so tmux
+    /// status-bar clock ticks and re-attach redraws don't count.
+    private func startActivityTimer() {
+        activityTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            self?.pollSessionActivity()
+        }
+    }
+
+    private func pollSessionActivity() {
+        for (id, entry) in pool {
+            TerminalActivityStore.shared.recordContent(
+                sessionID: id,
+                contentHash: Self.contentHash(of: entry.terminalView))
+        }
+    }
+
+    /// Hash of the visible pane EXCLUDING the bottom row, which is where
+    /// tmux draws its status bar — a per-minute clock there is not activity.
+    /// Real program output scrolls the pane, changing rows above the bottom,
+    /// so it's still detected.
+    private static func contentHash(of tv: LocalProcessTerminalView) -> Int {
+        guard let terminal = tv.terminal else { return 0 }
+        var hasher = Hasher()
+        let lastRow = max(0, terminal.rows - 1)   // exclude the status-bar row
+        for row in 0..<lastRow {
+            for col in 0..<terminal.cols {
+                if let cd = terminal.getCharData(col: col, row: row) {
+                    hasher.combine(cd.getCharacter())
+                }
+            }
+        }
+        return hasher.finalize()
     }
 
     /// Publish the current pool state to AppState for the monitor overlay
@@ -646,6 +684,7 @@ class OnyxTerminalView: NSView {
             NSEvent.removeMonitor(monitor)
         }
         evictionTimer?.invalidate()
+        activityTimer?.invalidate()
         periodicEnumerationTimer?.invalidate()
         for id in Array(pool.keys) {
             destroyPoolEntry(id)
@@ -655,7 +694,7 @@ class OnyxTerminalView: NSView {
     // MARK: - Terminal View Factory
 
     private func createTerminalView(scrollback: Int = 10000) -> LocalProcessTerminalView {
-        let tv = ActivityTrackingTerminalView(frame: bounds)
+        let tv = LocalProcessTerminalView(frame: bounds)
         tv.terminal.options.scrollback = scrollback
         tv.autoresizingMask = [.width, .height]
 
@@ -1642,26 +1681,6 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
                 self.reconnectAttempt = max(self.reconnectAttempt, 4) // at least 8s backoff
             }
             self.reconnect()
-        }
-    }
-}
-
-// MARK: - Output-activity tracking
-
-/// LocalProcessTerminalView that records the time of each chunk of PTY
-/// output into TerminalActivityStore, keyed by the session it's bound to.
-/// `dataReceived` is the single funnel for all incoming terminal bytes, so
-/// stamping it there captures every content change. The store coalesces the
-/// resulting UI updates, so the per-chunk cost here stays tiny.
-final class ActivityTrackingTerminalView: LocalProcessTerminalView {
-    /// Set once the view is placed in the pool; nil for the transient
-    /// key-setup terminal, which has no session note to annotate.
-    var sessionID: String?
-
-    override func dataReceived(slice: ArraySlice<UInt8>) {
-        super.dataReceived(slice: slice)
-        if let id = sessionID {
-            TerminalActivityStore.shared.recordOutput(sessionID: id)
         }
     }
 }

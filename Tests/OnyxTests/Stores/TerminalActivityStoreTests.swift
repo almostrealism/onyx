@@ -7,82 +7,99 @@ final class TerminalActivityStoreTests: XCTestCase {
 
     // Unique session ids per test keep the shared singleton's state from
     // leaking between cases (there's no public reset).
-    private func sid(_ name: String = #function) -> String { "test-\(name)" }
+    private func sid(_ name: String = #function) -> String { "test-\(name)-\(UUID().uuidString)" }
 
     func test_unknownSession_isNil() {
-        XCTAssertNil(store.lastOutput(for: "never-seen-\(UUID().uuidString)"))
+        XCTAssertNil(store.lastOutput(for: sid()))
     }
 
-    func test_recordOutput_setsTimestamp() {
+    func test_firstContent_seedsClock() {
         let id = sid()
         let before = Date()
-        store.recordOutput(sessionID: id)
+        store.recordContent(sessionID: id, contentHash: 1)
         let stamp = store.lastOutput(for: id)
         XCTAssertNotNil(stamp)
         XCTAssertGreaterThanOrEqual(stamp!.timeIntervalSince(before), 0)
     }
 
-    func test_recordOutput_advancesTimestamp() {
+    func test_sameContent_doesNotAdvanceClock() {
         let id = sid()
-        store.recordOutput(sessionID: id)
+        store.recordContent(sessionID: id, contentHash: 42)
         let first = store.lastOutput(for: id)!
         Thread.sleep(forTimeInterval: 0.02)
-        store.recordOutput(sessionID: id)
-        let second = store.lastOutput(for: id)!
-        XCTAssertGreaterThan(second, first)
+        // Same hash (e.g. a tmux status-bar tick that we've already excluded,
+        // or a redraw of identical content) — clock must NOT move.
+        store.recordContent(sessionID: id, contentHash: 42)
+        XCTAssertEqual(store.lastOutput(for: id), first,
+                       "unchanged content must not reset the idle clock")
+    }
+
+    func test_changedContent_advancesClock() {
+        let id = sid()
+        store.recordContent(sessionID: id, contentHash: 1)
+        let first = store.lastOutput(for: id)!
+        Thread.sleep(forTimeInterval: 0.02)
+        store.recordContent(sessionID: id, contentHash: 2)
+        XCTAssertGreaterThan(store.lastOutput(for: id)!, first,
+                             "changed content advances the clock")
     }
 
     func test_sessionsAreIndependent() {
-        let a = sid() + "a", b = sid() + "b"
-        store.recordOutput(sessionID: a)
+        let a = sid(), b = sid()
+        store.recordContent(sessionID: a, contentHash: 1)
         XCTAssertNotNil(store.lastOutput(for: a))
         XCTAssertNil(store.lastOutput(for: b))
     }
 
     // MARK: - Disconnect / reconnect suppression
 
-    func test_disconnected_ignoresOutput() {
+    func test_disconnected_ignoresContent() {
         let id = sid()
-        store.recordOutput(sessionID: id)
+        store.recordContent(sessionID: id, contentHash: 1)
         let idleStamp = store.lastOutput(for: id)!
-        // Connection drops; reconnect chatter arrives — must be ignored.
         store.markDisconnected(sessionID: id)
         Thread.sleep(forTimeInterval: 0.02)
-        store.recordOutput(sessionID: id)
+        // Garbage/partial content while disconnected must be ignored.
+        store.recordContent(sessionID: id, contentHash: 999)
         XCTAssertEqual(store.lastOutput(for: id), idleStamp,
-                       "output while disconnected must not advance the idle clock")
+                       "content reported while disconnected must not move the clock")
     }
 
-    func test_reconnectGrace_preservesIdleClock() {
+    func test_reconnectGrace_ignoresRedraw() {
         let id = sid()
-        store.recordOutput(sessionID: id)
+        store.recordContent(sessionID: id, contentHash: 1)
         let idleStamp = store.lastOutput(for: id)!
         store.markDisconnected(sessionID: id)
-        // Reconnect with a grace window; the tmux-redraw burst is ignored.
+        // Reconnect with a grace window: even a *different* hash (the redraw
+        // settling) is ignored until grace passes.
         store.markConnected(sessionID: id, grace: 5)
-        store.recordOutput(sessionID: id)
+        store.recordContent(sessionID: id, contentHash: 7)
         XCTAssertEqual(store.lastOutput(for: id), idleStamp,
-                       "the post-reconnect redraw must not reset the clock")
+                       "post-reconnect redraw within grace must not reset the clock")
     }
 
-    func test_outputAfterGrace_advancesClock() {
+    func test_changeAfterGrace_advancesClock() {
         let id = sid()
-        store.recordOutput(sessionID: id)
+        store.recordContent(sessionID: id, contentHash: 1)
         let idleStamp = store.lastOutput(for: id)!
         store.markDisconnected(sessionID: id)
-        // Grace already elapsed (negative window) → real output counts again.
+        store.markConnected(sessionID: id, grace: -1)  // grace already elapsed
+        Thread.sleep(forTimeInterval: 0.02)
+        store.recordContent(sessionID: id, contentHash: 2)
+        XCTAssertGreaterThan(store.lastOutput(for: id)!, idleStamp,
+                             "genuine change after the grace window advances the clock")
+    }
+
+    func test_restoredContentAfterGrace_preservesClock() {
+        let id = sid()
+        store.recordContent(sessionID: id, contentHash: 100)  // baseline
+        let idleStamp = store.lastOutput(for: id)!
+        store.markDisconnected(sessionID: id)
         store.markConnected(sessionID: id, grace: -1)
         Thread.sleep(forTimeInterval: 0.02)
-        store.recordOutput(sessionID: id)
-        XCTAssertGreaterThan(store.lastOutput(for: id)!, idleStamp,
-                       "genuine output after the grace window must advance the clock")
-    }
-
-    func test_firstConnect_seedsClockImmediately() {
-        let id = sid()
-        // No prior reading → first connect seeds now and allows output.
-        store.markConnected(sessionID: id)
-        XCTAssertNotNil(store.lastOutput(for: id),
-                        "first connect seeds the idle clock so a fresh session has a baseline")
+        // tmux restored the same screen → same hash → clock preserved.
+        store.recordContent(sessionID: id, contentHash: 100)
+        XCTAssertEqual(store.lastOutput(for: id), idleStamp,
+                       "a restored identical screen after reconnect keeps the idle time")
     }
 }
