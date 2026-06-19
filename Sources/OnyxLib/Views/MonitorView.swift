@@ -790,7 +790,14 @@ struct SimpleMonitorBody: View {
             // Reserve a fixed strip for containers + timing tile, give
             // the rest to the charts. CPU gets the lion's share; MEM
             // and GPU split the bottom portion of the chart area.
-            let bottomStripHeight: CGFloat = 56
+            // Reserve enough height for the TALLEST member of the centered
+            // bottom row — the weekly Timing tile (ratio bar + the hours
+            // number + the per-day line + padding is ~60pt). The row is
+            // center-aligned, so if the reserve is shorter than a member it
+            // overflows symmetrically and the bottom half spills off the
+            // window edge. The extra headroom keeps every member fully on
+            // screen with a small margin.
+            let bottomStripHeight: CGFloat = 78
             let chartArea = max(0, geo.size.height - bottomStripHeight - 16)
             let cpuHeight = chartArea * 0.55
             let subHeight = max(40, chartArea * 0.42)
@@ -991,8 +998,10 @@ private struct SimplePipelinePill: View {
     let status: PipelineStatus
 
     var body: some View {
-        HStack(spacing: 5) {
-            PipelineStatusDot(overall: status.overall)
+        // Sized for at-a-glance reading from across the room (~50% larger
+        // than the inline badges in the full PIPELINES list).
+        HStack(spacing: 7) {
+            PipelineStatusDot(overall: status.overall, size: 9)
             if status.inProgress > 0 {
                 miniBadge("arrow.triangle.2.circlepath", status.inProgress,
                           color: Color(hex: "66CCFF"))
@@ -1001,19 +1010,19 @@ private struct SimplePipelinePill: View {
                 miniBadge("checkmark", status.succeeded, color: Color(hex: "6BFF8E"))
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
         .background(Color.white.opacity(0.04))
-        .cornerRadius(4)
+        .cornerRadius(5)
         .help(tooltip)
     }
 
     private func miniBadge(_ symbol: String, _ count: Int, color: Color) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 3) {
             Image(systemName: symbol)
-                .font(.system(size: 8))
+                .font(.system(size: 12))
             Text("\(count)")
-                .monitorFont(size: 9)
+                .monitorFont(size: 13)
         }
         .foregroundColor(color)
     }
@@ -1076,13 +1085,13 @@ private struct SimpleSessionActivityPill: View {
             if let last = TerminalActivityStore.shared.lastOutput(for: session.id) {
                 let idle = context.date.timeIntervalSince(last)
                 Image(systemName: monitorSessionActivityIcon(idle))
-                    .font(.system(size: 10))
+                    .font(.system(size: 15))
                     .foregroundColor(monitorSessionActivityColor(idle))
-                    .frame(width: 14)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
+                    .frame(width: 21)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
                     .background(Color.white.opacity(0.04))
-                    .cornerRadius(4)
+                    .cornerRadius(5)
                     .help(idle < 15 ? "\(note.text) · producing output"
                                     : "\(note.text) · quiet for \(Int(idle))s")
             }
@@ -2858,8 +2867,9 @@ private struct PipelineRow: View {
 
 private struct PipelineStatusDot: View {
     let overall: PipelineOverallStatus
+    var size: CGFloat = 6
     var body: some View {
-        Circle().fill(color).frame(width: 6, height: 6).help(tooltip)
+        Circle().fill(color).frame(width: size, height: size).help(tooltip)
     }
     private var color: Color {
         switch overall {
