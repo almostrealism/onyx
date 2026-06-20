@@ -1000,11 +1000,21 @@ private struct SimplePipelinePill: View {
     var body: some View {
         // Sized for at-a-glance reading from across the room (~50% larger
         // than the inline badges in the full PIPELINES list).
+        //
+        // Triage to at most two counts: the single most-relevant "active"
+        // bucket (running, else queued, else failed) alongside the
+        // completed/passing count. So a healthy finished pipeline shows
+        // just the green check, while a busy one shows what it's doing —
+        // never more than two slots. (The full list keeps every bucket.)
         HStack(spacing: 7) {
             PipelineStatusDot(overall: status.overall, size: 9)
             if status.inProgress > 0 {
                 miniBadge("arrow.triangle.2.circlepath", status.inProgress,
                           color: Color(hex: "66CCFF"))
+            } else if status.queued > 0 {
+                miniBadge("hourglass", status.queued, color: Color(hex: "FFD06B"))
+            } else if status.failed > 0 {
+                miniBadge("xmark", status.failed, color: Color(hex: "FF6B6B"))
             }
             if status.succeeded > 0 {
                 miniBadge("checkmark", status.succeeded, color: Color(hex: "6BFF8E"))
