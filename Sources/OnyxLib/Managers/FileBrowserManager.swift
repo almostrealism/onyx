@@ -735,13 +735,11 @@ public class FileBrowserManager: ObservableObject {
         searchResults.clear()
 
         let escaped = escapeForShell(basePath)
-        // Use find with -iname for case-insensitive name matching, limit output.
-        // Single-quote-safe: remoteScript wraps the script and feeds it via
-        // stdin to an interactive ssh shell, no command-line escaping needed.
-        let safeQuery = query
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let script = "find \(escaped) -maxdepth 10 -name \".*\" -prune -o -iname \"*\(safeQuery)*\" -print 2>/dev/null | head -\(searchResults.maxResults)"
+        let script = Self.fileNameSearchScript(
+            escapedBase: escaped,
+            query: query,
+            extensions: appState.appearance.searchExtensions,
+            maxResults: searchResults.maxResults)
         let (cmd, args, stdinScript) = appState.remoteScript(script)
 
         let process = Process()
@@ -829,6 +827,38 @@ public class FileBrowserManager: ObservableObject {
                 self?.isSearching = false
             }
         }
+    }
+
+    /// Whether a listed entry matches the active search type filter.
+    /// Directories and the no-filter case always match (nothing dimmed);
+    /// files are matched on extension. Used to grey out non-matching files
+    /// in the directory listing.
+    public func matchesSearchFilter(_ entry: RemoteEntry) -> Bool {
+        if entry.isDirectory { return true }
+        let exts = appState.appearance.searchExtensions
+        if exts.isEmpty { return true }
+        return exts.contains((entry.name as NSString).pathExtension.lowercased())
+    }
+
+    /// Build the `find` script for a file-NAME search, optionally restricted
+    /// to a set of file extensions. Factored out (and static) so the command
+    /// shape is unit-testable, and so a future content (grep) search can sit
+    /// alongside this without disturbing it. `extensions` empty = all files.
+    static func fileNameSearchScript(escapedBase: String, query: String,
+                                     extensions: [String], maxResults: Int) -> String {
+        let safeQuery = query
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        var matchClause = "-iname \"*\(safeQuery)*\""
+        if !extensions.isEmpty {
+            // \( -iname "*.java" -o -iname "*.kt" \) -iname "*query*"
+            let group = extensions
+                .map { "-iname \"*.\($0)\"" }
+                .joined(separator: " -o ")
+            matchClause = "-type f \\( \(group) \\) \(matchClause)"
+        }
+        return "find \(escapedBase) -maxdepth 10 -name \".*\" -prune -o "
+            + "\(matchClause) -print 2>/dev/null | head -\(maxResults)"
     }
 
     /// Cancel search.

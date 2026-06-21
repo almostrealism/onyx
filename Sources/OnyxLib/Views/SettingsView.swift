@@ -389,6 +389,7 @@ struct SettingsView: View {
                                 }
                         }
 
+                        SearchFilterSettingsSection(appState: appState)
                         GitHubSettingsSection()
                         GitLabSettingsSection()
                     }
@@ -861,6 +862,49 @@ private struct MineOnlyToggle: View {
         .controlSize(.mini)
         .tint(Color(hex: "66CCFF"))
         .padding(.top, 2)
+    }
+}
+
+private struct SearchFilterSettingsSection: View {
+    @ObservedObject var appState: AppState
+
+    private func toggle(_ id: String) {
+        var ids = appState.appearance.searchFileTypeIDs
+        if let i = ids.firstIndex(of: id) { ids.remove(at: i) } else { ids.append(id) }
+        appState.appearance.searchFileTypeIDs = ids
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("SEARCH FILTER")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                .tracking(2)
+                .padding(.top, 12)
+
+            Text("Restrict file search to these types (none = all files)")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(SearchFileType.presets) { type in
+                        let on = appState.appearance.searchFileTypeIDs.contains(type.id)
+                        Button(action: { toggle(type.id) }) {
+                            Text(type.label)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(on ? .white : .gray.opacity(0.5))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(on ? Color(hex: appState.appearance.accentHex).opacity(0.3)
+                                              : Color.white.opacity(0.06))
+                                .cornerRadius(4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
     }
 }
 

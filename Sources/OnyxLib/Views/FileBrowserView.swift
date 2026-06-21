@@ -625,6 +625,9 @@ struct DirectoryListView: View {
             LazyVStack(spacing: 0) {
                 ForEach(displayEntries) { entry in
                     EntryRow(entry: entry, accentColor: appState.accentColor)
+                        // Dim files that fall outside the active search type
+                        // filter (still shown, just de-emphasized).
+                        .opacity(browser.matchesSearchFilter(entry) ? 1 : 0.3)
                         .onTapGesture {
                             if entry.isDirectory {
                                 // Navigate to the full resolved path

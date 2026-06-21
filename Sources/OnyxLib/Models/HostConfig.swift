@@ -95,6 +95,17 @@ public struct AppearanceConfig: Codable {
     /// it's visually noisy in normal use.
     public var showFocusOutline: Bool = false
 
+    /// Selected file-type preset ids for the file-browser search filter
+    /// (see SearchFileType). Empty = no filter (all files). Searches are
+    /// restricted to these extensions and non-matching files are dimmed.
+    public var searchFileTypeIDs: [String] = []
+
+    /// The union of file extensions implied by `searchFileTypeIDs`.
+    /// Empty when no preset is selected (meaning "all files").
+    public var searchExtensions: [String] {
+        SearchFileType.extensions(forSelectedIDs: searchFileTypeIDs)
+    }
+
     /// Effective terminal font size.
     public var effectiveTerminalFontSize: Double {
         terminalFontSize ?? fontSize
@@ -162,6 +173,7 @@ public struct AppearanceConfig: Codable {
         case remindersList, remindersLists, lastSessionByWindow
         case extraTimezones, use12HourClock
         case claudeHooksGatePermissions, showFocusOutline
+        case searchFileTypeIDs
     }
 
     public init(from decoder: Decoder) throws {
@@ -181,5 +193,6 @@ public struct AppearanceConfig: Codable {
         self.use12HourClock             = try c.decodeIfPresent(Bool.self,           forKey: .use12HourClock)             ?? false
         self.claudeHooksGatePermissions = try c.decodeIfPresent(Bool.self,           forKey: .claudeHooksGatePermissions) ?? false
         self.showFocusOutline           = try c.decodeIfPresent(Bool.self,           forKey: .showFocusOutline)           ?? false
+        self.searchFileTypeIDs          = try c.decodeIfPresent([String].self,       forKey: .searchFileTypeIDs)          ?? []
     }
 }

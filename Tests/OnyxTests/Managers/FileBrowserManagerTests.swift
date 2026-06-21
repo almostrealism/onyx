@@ -273,6 +273,44 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(b.searchResults.resultCount, 0, "results cleared on directory navigation")
     }
 
+    // MARK: - search type filter
+
+    func testSearchScript_noFilter_matchesAnyName() {
+        let s = FileBrowserManager.fileNameSearchScript(
+            escapedBase: "\"/repo\"", query: "Foo", extensions: [], maxResults: 100)
+        XCTAssertTrue(s.contains("-iname \"*Foo*\""))
+        XCTAssertFalse(s.contains("-type f"), "no filter → no type restriction")
+        XCTAssertTrue(s.contains("head -100"))
+    }
+
+    func testSearchScript_withExtensions_restrictsByType() {
+        let s = FileBrowserManager.fileNameSearchScript(
+            escapedBase: "\"/repo\"", query: "Foo", extensions: ["java", "kt"], maxResults: 50)
+        XCTAssertTrue(s.contains("-type f"))
+        XCTAssertTrue(s.contains("-iname \"*.java\""))
+        XCTAssertTrue(s.contains("-iname \"*.kt\""))
+        XCTAssertTrue(s.contains("-o"), "extensions are OR'd")
+        XCTAssertTrue(s.contains("-iname \"*Foo*\""), "still also matches the query name")
+    }
+
+    func testSearchScript_escapesQuotesInQuery() {
+        let s = FileBrowserManager.fileNameSearchScript(
+            escapedBase: "\"/repo\"", query: "a\"b", extensions: [], maxResults: 10)
+        XCTAssertTrue(s.contains("a\\\"b"), "double quotes in the query must be escaped")
+    }
+
+    func test_searchFileType_extensionsForSelectedIDs_unionDeduped() {
+        let exts = SearchFileType.extensions(forSelectedIDs: ["java", "c", "java"])
+        XCTAssertTrue(exts.contains("java"))
+        XCTAssertTrue(exts.contains("kt"))
+        XCTAssertTrue(exts.contains("cpp"))
+        XCTAssertEqual(exts.count, Set(exts).count, "no duplicates")
+    }
+
+    func test_searchFileType_unknownID_ignored() {
+        XCTAssertEqual(SearchFileType.extensions(forSelectedIDs: ["nope"]), [])
+    }
+
     // MARK: - escapeForShell
 
     func testEscapeForShell_simplePath() {
