@@ -293,6 +293,16 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(s.contains("-iname \"*Foo*\""), "still also matches the query name")
     }
 
+    func testSearchScript_hasNoShallowDepthCap() {
+        // Regression: -maxdepth 10 hid deep files like
+        // src/main/java/org/.../Foo.java. The script must not cap depth.
+        let s = FileBrowserManager.fileNameSearchScript(
+            escapedBase: "\"/repo\"", query: "Foo", extensions: [], maxResults: 100)
+        XCTAssertFalse(s.contains("-maxdepth"),
+                       "deep package trees must not be excluded by a depth limit")
+        XCTAssertTrue(s.contains("-prune"), "hidden dirs are still pruned")
+    }
+
     func testSearchScript_escapesQuotesInQuery() {
         let s = FileBrowserManager.fileNameSearchScript(
             escapedBase: "\"/repo\"", query: "a\"b", extensions: [], maxResults: 10)

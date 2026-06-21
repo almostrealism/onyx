@@ -885,7 +885,12 @@ public class FileBrowserManager: ObservableObject {
                 .joined(separator: " -o ")
             matchClause = "-type f \\( \(group) \\) \(matchClause)"
         }
-        return "find \(escapedBase) -maxdepth 10 -name \".*\" -prune -o "
+        // No -maxdepth: deep package trees (e.g. Java's
+        // src/main/java/org/.../Foo.java) easily exceed any small cap, and
+        // find doesn't follow symlinks so there's no loop risk. Output is
+        // bounded by `head` and the caller's 30s kill timer instead. Hidden
+        // directories are still pruned.
+        return "find \(escapedBase) -name \".*\" -prune -o "
             + "\(matchClause) -print 2>/dev/null | head -\(maxResults)"
     }
 
