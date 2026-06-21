@@ -823,9 +823,11 @@ struct EntryRow: View {
 /// whatever's selected). Renders the syntax-highlighted attributed string
 /// with no soft wrapping (horizontal scroll), like a code editor.
 struct SelectableCodeView: NSViewRepresentable {
-    let attributed: NSAttributedString
+    let attributed: AttributedString
     let fontSize: CGFloat
     let onSelectionChange: (String) -> Void
+
+    private var plainString: String { String(attributed.characters) }
 
     func makeNSView(context: Context) -> NSScrollView {
         let tv = NSTextView()
@@ -855,7 +857,7 @@ struct SelectableCodeView: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let tv = scroll.documentView as? NSTextView else { return }
-        if tv.string != attributed.string {
+        if tv.string != plainString {
             context.coordinator.apply(attributed, to: tv, fontSize: fontSize)
         }
     }
@@ -868,13 +870,24 @@ struct SelectableCodeView: NSViewRepresentable {
             self.onSelectionChange = onSelectionChange
         }
 
-        /// Set the content, laying the highlighter's colors over a base
-        /// monospaced font (the highlighter sets colors but no font).
-        func apply(_ attributed: NSAttributedString, to tv: NSTextView, fontSize: CGFloat) {
-            let m = NSMutableAttributedString(attributedString: attributed)
+        /// Build the NSAttributedString ourselves: the SwiftUI →
+        /// NSAttributedString bridge drops SwiftUI's `foregroundColor` (it's a
+        /// SwiftUI-scope attribute, not AppKit's), which left the text black
+        /// on the black background. So we lay a base monospaced font + light
+        /// color over the whole string, then map each highlighter run's
+        /// SwiftUI Color to a real NSColor.
+        func apply(_ attributed: AttributedString, to tv: NSTextView, fontSize: CGFloat) {
+            let m = NSMutableAttributedString(string: String(attributed.characters))
+            let full = NSRange(location: 0, length: m.length)
             m.addAttribute(.font,
                            value: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular),
-                           range: NSRange(location: 0, length: m.length))
+                           range: full)
+            m.addAttribute(.foregroundColor, value: NSColor(white: 0.9, alpha: 1), range: full)
+            for run in attributed.runs {
+                guard let color = run.foregroundColor else { continue }
+                m.addAttribute(.foregroundColor, value: NSColor(color),
+                               range: NSRange(run.range, in: attributed))
+            }
             tv.textStorage?.setAttributedString(m)
         }
 
@@ -938,7 +951,7 @@ struct FileContentView: View {
             .background(Color.white.opacity(0.03))
 
             SelectableCodeView(
-                attributed: NSAttributedString(highlightedContent),
+                attributed: highlightedContent,
                 fontSize: 12,
                 onSelectionChange: { onSelectionChange?($0) }
             )
