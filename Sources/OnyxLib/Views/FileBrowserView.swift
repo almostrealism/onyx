@@ -85,7 +85,8 @@ struct FileBrowserView: View {
                             },
                             onViewDiff: browser.gitChangedFileForViewing().map { file in
                                 { browser.gitManager.fetchFileDiff(file) }
-                            }
+                            },
+                            onSelectionChange: { browser.currentSelection = $0 }
                         )
                     } else if browser.gitManager.showLog {
                         GitLogView(gitManager: browser.gitManager, accentColor: appState.accentColor)
@@ -328,6 +329,7 @@ struct FolderSidebar: View {
                             browser.imageData = nil
                             browser.viewingFileName = nil
                             browser.isUnsupportedFile = false
+                            browser.lastSelectedFavoritePath = folder.path
                             browser.currentPath = folder.path
                             browser.navigateTo(folder.path)
                         }
@@ -451,7 +453,7 @@ struct FolderRow: View {
 struct NavigationBar: View {
     @ObservedObject var appState: AppState
     @ObservedObject var browser: FileBrowserManager
-    @State private var searchFieldFocused = false
+    @FocusState private var searchFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -576,6 +578,7 @@ struct NavigationBar: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.white.opacity(0.9))
+                        .focused($searchFieldFocused)
                         .onSubmit {
                             browser.startSearch(browser.searchQuery)
                         }
@@ -605,6 +608,11 @@ struct NavigationBar: View {
             }
         }
         .background(Color.white.opacity(0.03))
+        // The search shortcut bumps this token to pull focus into the field;
+        // async so the field is in the hierarchy first when search just opened.
+        .onChange(of: browser.searchFocusToken) { _, _ in
+            DispatchQueue.main.async { searchFieldFocused = true }
+        }
     }
 }
 
@@ -810,6 +818,75 @@ struct EntryRow: View {
     }
 }
 
+/// Read-only, selectable AppKit code view. Unlike SwiftUI `Text`, it can
+/// report the user's live text selection (so the search shortcut can search
+/// whatever's selected). Renders the syntax-highlighted attributed string
+/// with no soft wrapping (horizontal scroll), like a code editor.
+struct SelectableCodeView: NSViewRepresentable {
+    let attributed: NSAttributedString
+    let fontSize: CGFloat
+    let onSelectionChange: (String) -> Void
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let tv = NSTextView()
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.drawsBackground = false
+        tv.textColor = NSColor(white: 0.9, alpha: 1)
+        tv.textContainerInset = NSSize(width: 12, height: 12)
+        tv.delegate = context.coordinator
+        // No wrap → the text container is unbounded and scrolls horizontally.
+        tv.isHorizontallyResizable = true
+        tv.isVerticallyResizable = true
+        let huge = CGFloat.greatestFiniteMagnitude
+        tv.maxSize = NSSize(width: huge, height: huge)
+        tv.textContainer?.widthTracksTextView = false
+        tv.textContainer?.containerSize = NSSize(width: huge, height: huge)
+        context.coordinator.apply(attributed, to: tv, fontSize: fontSize)
+
+        let scroll = NSScrollView()
+        scroll.documentView = tv
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let tv = scroll.documentView as? NSTextView else { return }
+        if tv.string != attributed.string {
+            context.coordinator.apply(attributed, to: tv, fontSize: fontSize)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(onSelectionChange: onSelectionChange) }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        let onSelectionChange: (String) -> Void
+        init(onSelectionChange: @escaping (String) -> Void) {
+            self.onSelectionChange = onSelectionChange
+        }
+
+        /// Set the content, laying the highlighter's colors over a base
+        /// monospaced font (the highlighter sets colors but no font).
+        func apply(_ attributed: NSAttributedString, to tv: NSTextView, fontSize: CGFloat) {
+            let m = NSMutableAttributedString(attributedString: attributed)
+            m.addAttribute(.font,
+                           value: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular),
+                           range: NSRange(location: 0, length: m.length))
+            tv.textStorage?.setAttributedString(m)
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            let range = tv.selectedRange()
+            let sel = range.length > 0 ? (tv.string as NSString).substring(with: range) : ""
+            onSelectionChange(sel)
+        }
+    }
+}
+
 struct FileContentView: View {
     let fileName: String
     let content: String
@@ -817,6 +894,8 @@ struct FileContentView: View {
     let onClose: () -> Void
     var onDownload: (() -> Void)?
     var onViewDiff: (() -> Void)?
+    /// Reports the user's live text selection up to the manager.
+    var onSelectionChange: ((String) -> Void)?
 
     private var highlightedContent: AttributedString {
         SyntaxHighlighter.highlight(content, fileName: fileName)
@@ -858,14 +937,11 @@ struct FileContentView: View {
             .padding(.vertical, 4)
             .background(Color.white.opacity(0.03))
 
-            ScrollView(.vertical) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Text(highlightedContent)
-                        .font(.system(size: 12, design: .monospaced))
-                        .textSelection(.enabled)
-                        .padding(12)
-                }
-            }
+            SelectableCodeView(
+                attributed: NSAttributedString(highlightedContent),
+                fontSize: 12,
+                onSelectionChange: { onSelectionChange?($0) }
+            )
         }
     }
 }
@@ -1148,7 +1224,8 @@ struct FullFileBrowserView: View {
                                     onDownload: { downloadCurrentFile() },
                                     onViewDiff: browser.gitChangedFileForViewing().map { file in
                                         { browser.gitManager.fetchFileDiff(file) }
-                                    }
+                                    },
+                                    onSelectionChange: { browser.currentSelection = $0 }
                                 )
                             } else if browser.gitManager.showLog {
                                 GitLogView(gitManager: browser.gitManager, accentColor: appState.accentColor)

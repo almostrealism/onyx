@@ -35,6 +35,7 @@ public extension Notification.Name {
     static let toggleTerminalTextMode = Notification.Name("toggleTerminalTextMode")
     static let cyclePanelSize = Notification.Name("cyclePanelSize")
     static let toggleHelp = Notification.Name("toggleHelp")
+    static let searchFiles = Notification.Name("searchFiles")
 }
 
 // MARK: - Window Index
@@ -723,6 +724,31 @@ public class AppState: ObservableObject {
     public lazy var fileBrowserManager: FileBrowserManager = {
         FileBrowserManager(appState: self)
     }()
+
+    /// Jump to file search (Cmd+Shift+F). Opens the file browser in search
+    /// mode at the "search home" (the last-opened favorite). If text is
+    /// selected in the file viewer, run a search for it immediately;
+    /// otherwise just focus the field so the user can type.
+    public func beginFileSearch() {
+        let browser = fileBrowserManager
+        let selection = browser.currentSelection.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !showFullFileBrowser { activeRightPanel = .fileBrowser }
+
+        // Land on the search home so the user searches the project root they
+        // expect (navigateTo clears any prior search first).
+        if let home = browser.searchHomePath, browser.currentPath != home {
+            browser.navigateTo(home)
+        }
+
+        if !selection.isEmpty {
+            browser.searchQuery = selection
+            browser.startSearch(selection)
+        } else {
+            browser.isSearchActive = true
+            browser.requestSearchFocus()
+        }
+    }
 
     /// Open a recognized file path (from the terminal-text overlay) in the
     /// file browser. `selectFile` opens the file itself; otherwise we land

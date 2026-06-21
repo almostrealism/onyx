@@ -42,6 +42,32 @@ public class FileBrowserManager: ObservableObject {
     /// Whether we were in search mode before opening a file
     public private(set) var wasSearchActiveBeforeFile = false
 
+    /// The user's current text selection in the file viewer (the AppKit
+    /// SelectableCodeView reports it here). Read by the search shortcut to
+    /// "search the thing I just selected". Cleared whenever what's viewed
+    /// changes so it can't go stale.
+    public var currentSelection: String = ""
+
+    /// The favorite folder the user most recently opened from the sidebar.
+    /// The search shortcut jumps here so the user lands where they expect.
+    @Published public var lastSelectedFavoritePath: String?
+
+    /// Bumped to ask the search field to take focus (the NavigationBar
+    /// observes it). A token rather than a Bool so repeated requests fire.
+    @Published public var searchFocusToken: Int = 0
+    public func requestSearchFocus() { searchFocusToken += 1 }
+
+    /// Where the search shortcut should run from: the last-opened favorite,
+    /// else the favorite containing the current location, else the current
+    /// path, else the first favorite.
+    public var searchHomePath: String? {
+        let favorites = activeFolders.map(\.path)
+        return lastSelectedFavoritePath
+            ?? Self.narrowestContainingFolder(current: currentPath, folders: favorites)
+            ?? currentPath
+            ?? favorites.first
+    }
+
     /// Folders for the currently active host
     public var activeFolders: [SavedFolder] {
         let hostID = appState.activeHost?.id ?? HostConfig.localhostID
@@ -310,6 +336,7 @@ public class FileBrowserManager: ObservableObject {
         imageData = nil
         viewingFileName = nil
         isUnsupportedFile = false
+        currentSelection = ""
         if wasSearchActiveBeforeFile {
             isSearchActive = true
             wasSearchActiveBeforeFile = false
@@ -525,6 +552,7 @@ public class FileBrowserManager: ObservableObject {
             return
         }
 
+        currentSelection = ""   // new file → drop any prior selection
         trackRecentFile(path: path, name: name)
 
         isLoading = true

@@ -15,8 +15,15 @@ import Foundation
 public enum FilePathDetector {
 
     /// `/seg(/seg)*` with a conservative segment character class.
+    ///
+    /// The leading `(?<![A-Za-z0-9._+@/~-])` rejects a slash that's glued to a
+    /// preceding path/home character, so a RELATIVE path like
+    /// `alpha/beta/gamma/x/y` doesn't get mis-linked from its first inner
+    /// slash as `/beta/gamma/x/y` (which would falsely claim beta lives at
+    /// the root). Only a slash at a real boundary — start of line, after
+    /// whitespace, `(`, `=`, `:`, a quote, etc. — begins an absolute path.
     private static let regex = try! NSRegularExpression(
-        pattern: "/[A-Za-z0-9._+@-]+(?:/[A-Za-z0-9._+@-]+)*")
+        pattern: "(?<![A-Za-z0-9._+@/~-])/[A-Za-z0-9._+@-]+(?:/[A-Za-z0-9._+@-]+)*")
 
     /// Whether a matched `/…` token should be treated as a file path.
     public static func isFilePath(_ token: String, favorites: [String]) -> Bool {

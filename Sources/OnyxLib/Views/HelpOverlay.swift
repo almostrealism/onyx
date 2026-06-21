@@ -22,6 +22,7 @@ struct HelpOverlay: View {
         .init(keys: "⌘,", label: "Settings"),
         .init(keys: "⌘E", label: "Toggle notes  ·  ⇧⌘E new note"),
         .init(keys: "⌘O", label: "File browser  ·  ⇧⌘O full-window"),
+        .init(keys: "⇧⌘F", label: "Search files (or the selected text)"),
         .init(keys: "⌘D", label: "Artifacts panel"),
         .init(keys: "⌘J", label: "Session manager"),
         .init(keys: "⌘;", label: "Edit the active session's note"),

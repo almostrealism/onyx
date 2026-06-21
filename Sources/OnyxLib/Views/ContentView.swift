@@ -626,6 +626,11 @@ private struct ContentViewPanelNotifications: ViewModifier {
                 guard isKeyWindow else { return }
                 appState.showHelp.toggle()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .searchFiles)) { _ in
+                guard isKeyWindow else { return }
+                appState.beginFileSearch()
+                appState.recalculateFocus()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .toggleTerminalTextMode)) { _ in
                 guard isKeyWindow else { return }
                 if appState.showTerminalText {

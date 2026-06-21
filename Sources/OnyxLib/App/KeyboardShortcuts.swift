@@ -49,6 +49,13 @@ public class ShortcutManager {
                 return nil
             }
 
+            // Cmd+Shift+F → jump to file search (focused on the last favorite,
+            // or search the current selection if there is one)
+            if flags.contains([.command, .shift]) && chars.lowercased() == "f" {
+                NotificationCenter.default.post(name: .searchFiles, object: nil)
+                return nil
+            }
+
             // Cmd+E → toggle notes
             if flags == .command && chars == "e" {
                 NotificationCenter.default.post(name: .toggleNotes, object: nil)

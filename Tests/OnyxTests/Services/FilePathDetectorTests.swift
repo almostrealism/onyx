@@ -67,6 +67,23 @@ final class FilePathDetectorTests: XCTestCase {
         XCTAssertEqual(paths(in: "src/main/app.swift here"), [])
     }
 
+    func test_doesNotMisLink_innerSlashOfRelativePath() {
+        // alpha/beta/gamma/delta/sigma/x/y must NOT yield /beta/gamma/...
+        // (its first inner slash). It's relative; we don't know the root.
+        XCTAssertEqual(paths(in: "alpha/beta/gamma/delta/sigma/x/y"), [])
+    }
+
+    func test_doesNotMisLink_homePath() {
+        // ~/foo/bar/baz is home-relative; must not link /foo/bar/baz.
+        XCTAssertEqual(paths(in: "~/foo/bar/baz/qux"), [])
+    }
+
+    func test_stillMatches_absolutePathAfterPunctuation() {
+        // A slash at a real boundary (after '(' or '=') is still a path.
+        XCTAssertEqual(paths(in: "see (/usr/local/bin/tool)"), ["/usr/local/bin/tool"])
+        XCTAssertEqual(paths(in: "PATH=/opt/app/bin/run"), ["/opt/app/bin/run"])
+    }
+
     func test_dotsAndDashesAllowedInSegments() {
         XCTAssertEqual(paths(in: "/var/log/my-app.2024/out.log"),
                        ["/var/log/my-app.2024/out.log"])

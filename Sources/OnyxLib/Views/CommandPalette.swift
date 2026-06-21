@@ -31,6 +31,10 @@ struct CommandPaletteView: View {
                 appState.showCommandPalette = false
                 NotificationCenter.default.post(name: .toggleFullFileBrowser, object: nil)
             },
+            PaletteAction(title: "Search Files", shortcut: "⇧⌘F") {
+                appState.showCommandPalette = false
+                NotificationCenter.default.post(name: .searchFiles, object: nil)
+            },
             PaletteAction(title: "Artifacts", shortcut: "⌘D") {
                 appState.showCommandPalette = false
                 appState.activeRightPanel = appState.activeRightPanel == .artifacts ? nil : .artifacts
