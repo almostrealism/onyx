@@ -1037,12 +1037,24 @@ private struct SimplePipelinePill: View {
         .foregroundColor(color)
     }
 
+    /// Branch from the resolved run, falling back to the branch named in a
+    /// workflow spec's URL.
+    private var branchTag: String? {
+        if let b = status.headBranch, !b.isEmpty { return b }
+        if case .workflow(_, let branch) = status.spec.target,
+           let b = branch, !b.isEmpty { return b }
+        return nil
+    }
+
+    /// "Build — owner/repo · feature-x · #315" (each piece only when known).
     private var tooltip: String {
         let name = status.title?.isEmpty == false
             ? status.title!
             : status.spec.displayName
-        if let b = status.headBranch, !b.isEmpty { return "\(name) · \(b)" }
-        return name
+        var meta = [status.spec.fullName]               // repo
+        if let b = branchTag { meta.append(b) }          // branch
+        if let n = status.runNumber { meta.append("#\(n)") }  // pipeline number
+        return "\(name) — \(meta.joined(separator: " · "))"
     }
 }
 
@@ -1102,8 +1114,8 @@ private struct SimpleSessionActivityPill: View {
                     .padding(.vertical, 7)
                     .background(Color.white.opacity(0.04))
                     .cornerRadius(5)
-                    .help(idle < 15 ? "\(note.text) · producing output"
-                                    : "\(note.text) · quiet for \(Int(idle))s")
+                    .help("\(session.displayLabel) — \(note.text)\n"
+                          + (idle < 15 ? "producing output" : "quiet for \(Int(idle))s"))
             }
         }
     }
