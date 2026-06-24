@@ -15,14 +15,14 @@ struct FileBrowserView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Sidebar: saved folders
-            FolderSidebar(appState: appState, browser: browser)
-                .frame(width: 220)
+        VStack(spacing: 0) {
+            // Favorites as a compact grid across the top (replaces the old
+            // left sidebar) so the full width is free for the browser/viewer.
+            FavoritesGridSection(appState: appState, browser: browser)
 
             Divider().background(Color.white.opacity(0.1))
 
-            // Main content
+            // Main content — full width
             ZStack {
                 VStack(spacing: 0) {
                     // Breadcrumb / navigation bar
@@ -177,12 +177,15 @@ struct FileBrowserView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onDrop(of: [.fileURL], isTargeted: $isDragOver) { providers in
                 guard browser.currentPath != nil else { return false }
                 handleDrop(providers)
                 return true
             }
+
+            // Recent files along the bottom (replaces the sidebar's list).
+            RecentFilesBar(appState: appState, browser: browser)
         }
         .background(Color(nsColor: NSColor(white: 0.06, alpha: 0.95)))
         .onChange(of: appState.allSessions.count) {
@@ -228,6 +231,195 @@ struct FileBrowserView: View {
         group.notify(queue: .main) {
             if !urls.isEmpty {
                 browser.uploadFiles(urls)
+            }
+        }
+    }
+}
+
+/// Favorites as an adaptive grid across the top of the file-browser panel.
+/// Auto-fits 3–4 cells per row at typical panel widths, so a dozen favorites
+/// take a few rows instead of a tall column — leaving the full width for the
+/// browser below. Replaces FolderSidebar's role in the right panel.
+struct FavoritesGridSection: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var browser: FileBrowserManager
+    @State private var newFolderPath = ""
+
+    private var selectedFolderPath: String? {
+        FileBrowserManager.narrowestContainingFolder(
+            current: browser.currentPath,
+            folders: browser.activeFolders.map(\.path))
+    }
+
+    private let columns = [GridItem(.adaptive(minimum: 130), spacing: 6)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("FAVORITES")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(appState.accentColor)
+                    .tracking(2)
+                Spacer()
+                Button(action: { browser.showAddFolder.toggle() }) {
+                    Image(systemName: browser.showAddFolder ? "minus" : "plus")
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.accentColor)
+                }
+                .buttonStyle(.plain)
+                .help("Add a remote folder")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            if browser.showAddFolder {
+                addFolderForm
+            }
+
+            if !browser.activeFolders.isEmpty {
+                ScrollView {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
+                        ForEach(browser.activeFolders) { folder in
+                            favoriteCell(folder)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 8)
+                }
+                .frame(maxHeight: 150)   // a few rows, then scroll
+            } else if !browser.showAddFolder {
+                Text("No favorites yet — tap + to add a folder")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+            }
+        }
+        .background(Color.black.opacity(0.25))
+    }
+
+    private func favoriteCell(_ folder: SavedFolder) -> some View {
+        let selected = folder.path == selectedFolderPath
+        return Button(action: { open(folder) }) {
+            HStack(spacing: 5) {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(selected ? appState.accentColor : .gray.opacity(0.5))
+                Text((folder.path as NSString).lastPathComponent)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(selected ? appState.accentColor : .white.opacity(0.85))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if appState.hosts.count > 1, let host = appState.host(for: folder.hostID)?.label {
+                    Text(host)
+                        .font(.system(size: 7, weight: .medium, design: .monospaced))
+                        .foregroundColor(appState.accentColor.opacity(0.5))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? appState.accentColor.opacity(0.15) : Color.white.opacity(0.05))
+            .cornerRadius(5)
+        }
+        .buttonStyle(.plain)
+        .help(folder.path)
+        .contextMenu {
+            Button("Remove", role: .destructive) { browser.removeFolder(folder) }
+        }
+    }
+
+    private func open(_ folder: SavedFolder) {
+        browser.pathHistory = []
+        browser.fileContent = nil
+        browser.imageData = nil
+        browser.viewingFileName = nil
+        browser.isUnsupportedFile = false
+        browser.lastSelectedFavoritePath = folder.path
+        browser.currentPath = folder.path
+        browser.navigateTo(folder.path)
+    }
+
+    private var addFolderForm: some View {
+        VStack(spacing: 8) {
+            TextField("/home/user/projects", text: $newFolderPath)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.white.opacity(0.9))
+                .padding(6)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(4)
+                .onSubmit(commit)
+
+            HStack(spacing: 8) {
+                Button("Add", action: commit)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(appState.accentColor)
+                Button("Cancel") {
+                    newFolderPath = ""
+                    browser.showAddFolder = false
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.5))
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+        .background(Color.white.opacity(0.03))
+    }
+
+    private func commit() {
+        browser.addFolder(newFolderPath)
+        newFolderPath = ""
+        browser.showAddFolder = false
+    }
+}
+
+/// Recent files as a horizontal strip along the bottom of the panel.
+struct RecentFilesBar: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var browser: FileBrowserManager
+
+    var body: some View {
+        if !browser.activeRecentFiles.isEmpty {
+            VStack(spacing: 0) {
+                Divider().background(Color.white.opacity(0.1))
+                HStack(spacing: 8) {
+                    Text("RECENT")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.4))
+                        .tracking(1)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(browser.activeRecentFiles) { file in
+                                Button(action: { browser.openRecentFile(file) }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: iconForFile(file.name))
+                                            .font(.system(size: 9))
+                                            .foregroundColor(.gray.opacity(0.4))
+                                        Text(file.name)
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.75))
+                                            .lineLimit(1)
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.white.opacity(0.05))
+                                    .cornerRadius(4)
+                                }
+                                .buttonStyle(.plain)
+                                .help(file.path)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.25))
             }
         }
     }
