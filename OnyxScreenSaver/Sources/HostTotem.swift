@@ -24,6 +24,9 @@ final class HostTotem {
     static let cubeSize: CGFloat = 0.25
     static let ringSpacing: CGFloat = 0.3
     static let maxRings = 27
+    /// Max cubes in a ring (highest quantized bucket). Each ring slot
+    /// pre-allocates this many cube nodes; surplus are just hidden.
+    static let maxCubesPerRing = 24
     /// Arc length we aim to keep between adjacent cubes in a ring. The radius
     /// is derived from this so dense rings widen instead of overlapping.
     static let arcSpacing: CGFloat = 0.3
@@ -61,6 +64,17 @@ final class HostTotem {
     /// (cheap) rather than re-allocating thousands of materials.
     private var cubeGeometryCache: [String: SCNGeometry] = [:]
     private var saturnBlockCache: [String: SCNGeometry] = [:]
+
+    /// Fixed pool of scene nodes, created once in `buildPool` and then only
+    /// reconfigured (position / geometry / isHidden) on each update. The old
+    /// code tore down and rebuilt ~430 nodes per host per poll; that
+    /// high-frequency SceneKit node churn was the runaway-memory source that
+    /// the geometry cache + dedup never fully closed. With a static node
+    /// graph there is no per-poll allocation at all.
+    private var ringNodes: [SCNNode] = []        // one container per ring slot
+    private var ringCubes: [[SCNNode]] = []       // [ringSlot][cubeIndex]
+    private var saturnBlocks: [SCNNode] = []      // one per ring slot
+
     private var baseColor: NSColor
     private var lastLabel: String?
     /// Timestamp of the newest sample at last rebuild. Cheap dedup —
@@ -106,6 +120,35 @@ final class HostTotem {
         spin.duration = 45
         spin.repeatCount = .infinity
         stackNode.addAnimation(spin, forKey: "spin")
+
+        buildPool()
+    }
+
+    /// Pre-create the fixed node pool: maxRings ring containers, each holding
+    /// maxCubesPerRing cube nodes, plus maxRings Saturn blocks. All start
+    /// hidden; `update` shows/positions the ones a given snapshot needs.
+    private func buildPool() {
+        for _ in 0..<Self.maxRings {
+            let ring = SCNNode()
+            ring.isHidden = true
+            var cubes: [SCNNode] = []
+            cubes.reserveCapacity(Self.maxCubesPerRing)
+            for _ in 0..<Self.maxCubesPerRing {
+                let cube = SCNNode()
+                cube.isHidden = true
+                ring.addChildNode(cube)
+                cubes.append(cube)
+            }
+            stackNode.addChildNode(ring)
+            ringNodes.append(ring)
+            ringCubes.append(cubes)
+        }
+        for _ in 0..<Self.maxRings {
+            let block = SCNNode()
+            block.isHidden = true
+            saturnNode.addChildNode(block)
+            saturnBlocks.append(block)
+        }
     }
 
     /// Update the host's visible label. Rebuilds the SCNText geometry only
@@ -160,13 +203,9 @@ final class HostTotem {
         // tick without any explicit notification.
         motion.mass = Self.computeMass(from: samples)
 
-        // Skip the (expensive) rebuild if the sample history is the same
-        // as last time — the file-watcher fires on every cpu-stream.json
-        // mtime change, which the publisher writes for ANY field
-        // (weekly hours, project mix, other hosts) not just this host's
-        // samples. The newest-sample timestamp + sample count uniquely
-        // identifies a host's window of history, so equality there means
-        // there's nothing new to render.
+        // Skip the relayout if the sample history is the same as last time —
+        // the file-watcher fires on every cpu-stream.json mtime change, which
+        // the publisher writes for ANY field, not just this host's samples.
         let newestT = samples.last?.t
         if newestT == lastNewestSampleT && samples.count == lastSampleCount {
             return
@@ -174,43 +213,64 @@ final class HostTotem {
         lastNewestSampleT = newestT
         lastSampleCount = samples.count
 
-        // Rebuild stack — but preserve saturnNode (and its blocks) since
-        // it lives on stackNode as a sibling of the ring nodes. We'll
-        // rebuild its contents separately below.
-        stackNode.childNodes.forEach { node in
-            if node !== self.saturnNode { node.removeFromParentNode() }
-        }
-
-        // Take the most recent maxRings samples. Index 0 in `recent` is the
-        // oldest visible sample, last is newest — we render newest-on-top.
+        // Take the most recent maxRings samples. Index 0 is the oldest
+        // visible sample, last is newest — rendered newest-on-top.
         let recent = Array(samples.suffix(Self.maxRings))
-        let n = recent.count
-        guard n > 0 else {
-            rebuildSaturnRing(samples: [])
-            return
-        }
 
-        // Center the stack vertically around y=0 so the camera frames it
-        // without needing per-totem offset math.
-        let totalHeight = CGFloat(Self.maxRings) * Self.ringSpacing
-        let yBase = -totalHeight / 2
-
-        for (i, sample) in recent.enumerated() {
-            let cubeCount = quantizedCubeCount(forCPU: sample.cpu)
-            // ageFraction: 0 = newest (top), 1 = oldest (bottom)
-            let ageFraction = Double(n - 1 - i) / Double(max(Self.maxRings - 1, 1))
-            let yOffset = yBase + CGFloat(i) * Self.ringSpacing
-            let ringNode = makeRing(cubeCount: cubeCount,
-                                    cpu: sample.cpu,
-                                    yOffset: yOffset,
-                                    ageFraction: ageFraction)
-            stackNode.addChildNode(ringNode)
-        }
-
-        rebuildSaturnRing(samples: recent)
+        // Reconfigure the pooled nodes in place, with implicit Core Animation
+        // actions OFF. These nodes already live in the scene, so a bare
+        // position/visibility write would queue an implicit animation that
+        // retains old presentation state — exactly the kind of slow leak the
+        // pooling is meant to eliminate. disableActions makes every write
+        // instant and allocation-free.
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        layoutStack(recent: recent)
+        layoutSaturn(recent: recent)
+        SCNTransaction.commit()
     }
 
     // MARK: - Internals
+
+    /// Position + show the ring/cube nodes a snapshot needs; hide the rest.
+    private func layoutStack(recent: [CPUSample]) {
+        let n = recent.count
+        // Center the stack vertically around y=0 so the camera frames it.
+        let totalHeight = CGFloat(Self.maxRings) * Self.ringSpacing
+        let yBase = -totalHeight / 2
+
+        for slot in 0..<Self.maxRings {
+            let ring = ringNodes[slot]
+            guard slot < n else { ring.isHidden = true; continue }
+
+            let sample = recent[slot]
+            let cubeCount = quantizedCubeCount(forCPU: sample.cpu)
+            // ageFraction: 0 = newest (top), 1 = oldest (bottom)
+            let ageFraction = Double(n - 1 - slot) / Double(max(Self.maxRings - 1, 1))
+            let yOffset = yBase + CGFloat(slot) * Self.ringSpacing
+            // Radius from desired arc-length between adjacent cubes.
+            let radius = max(Self.cubeSize * 1.2,
+                             Self.arcSpacing * CGFloat(cubeCount) / (2 * .pi))
+            let geometry = cubeGeometry(forCPU: sample.cpu, ageFraction: ageFraction)
+
+            ring.position = SCNVector3(0, Float(yOffset), 0)
+            ring.isHidden = false
+
+            let cubes = ringCubes[slot]
+            for c in 0..<Self.maxCubesPerRing {
+                let cube = cubes[c]
+                guard c < cubeCount else { cube.isHidden = true; continue }
+                let angle = 2 * Double.pi * Double(c) / Double(cubeCount)
+                let x = radius * CGFloat(cos(angle))
+                let z = radius * CGFloat(sin(angle))
+                cube.geometry = geometry
+                cube.position = SCNVector3(Float(x), 0, Float(z))
+                // Orient cube so its face points outward.
+                cube.eulerAngles = SCNVector3(0, Float(-angle), 0)
+                cube.isHidden = false
+            }
+        }
+    }
 
     /// Mass derived from recent CPU + GPU activity. Both contributions
     /// are cubic in their average over the most recent ~10 samples, so
@@ -261,37 +321,6 @@ final class HostTotem {
         // 6 buckets × 4 cubes: [0, 16.67) → 4, [16.67, 33.33) → 8, … → 24.
         let bucket = max(1, min(6, Int(ceil((clamped + 0.001) / 16.6667))))
         return bucket * 4
-    }
-
-    private func makeRing(cubeCount: Int, cpu: Double,
-                          yOffset: CGFloat, ageFraction: Double) -> SCNNode {
-        let ringNode = SCNNode()
-        ringNode.position = SCNVector3(0, Float(yOffset), 0)
-
-        // Solve for radius from desired arc-length between adjacent cubes.
-        // Floor below cubeSize so a 4-cube ring is still wider than one cube.
-        let radius = max(Self.cubeSize * 1.2,
-                         Self.arcSpacing * CGFloat(cubeCount) / (2 * .pi))
-
-        // One geometry per ring, shared across all of its cubes. Per-cube
-        // material allocation was the dominant cost during rebuilds —
-        // 24-cube rings now allocate 1 geometry instead of 24.
-        let geometry = cubeGeometry(forCPU: cpu, ageFraction: ageFraction)
-
-        for i in 0..<cubeCount {
-            let angle = 2 * Double.pi * Double(i) / Double(cubeCount)
-            let x = radius * CGFloat(cos(angle))
-            let z = radius * CGFloat(sin(angle))
-
-            let cube = SCNNode(geometry: geometry)
-            cube.position = SCNVector3(Float(x), 0, Float(z))
-            // Orient cube so its face points outward — looks tidier than
-            // axis-aligned cubes whose corners poke randomly toward the camera.
-            cube.eulerAngles = SCNVector3(0, Float(-angle), 0)
-            ringNode.addChildNode(cube)
-        }
-
-        return ringNode
     }
 
     /// Cube color is driven by the CPU level (blue → yellow → red ramp
@@ -390,40 +419,40 @@ final class HostTotem {
     /// samples are simply omitted so the ring's fill pattern reads as
     /// "when did the GPU run?". Hides itself if the host has no GPU
     /// data at all (all samples nil/zero).
-    private func rebuildSaturnRing(samples: [CPUSample]) {
-        saturnNode.childNodes.forEach { $0.removeFromParentNode() }
-
-        let recent = Array(samples.suffix(Self.maxRings))
-        guard !recent.isEmpty else { return }
-        // If no samples carry a meaningful GPU reading, skip the ring
-        // entirely — a host without a GPU should not grow a halo.
+    private func layoutSaturn(recent: [CPUSample]) {
+        // If no samples carry a meaningful GPU reading, hide the whole ring —
+        // a host without a GPU should not grow a halo.
         let hasGPU = recent.contains { ($0.gpu ?? 0) > 0.5 }
-        guard hasGPU else { return }
+        guard hasGPU else {
+            for block in saturnBlocks { block.isHidden = true }
+            return
+        }
 
         let blockW = Self.cubeSize * 0.9   // radial thickness
         let blockH = Self.cubeSize * 1.4   // taller than CPU cubes — distinguishable
         let blockL = Self.cubeSize * 0.9   // tangent span
         let radius = Self.saturnRadius
 
-        for (i, sample) in recent.enumerated() {
-            guard let gpu = sample.gpu, gpu > 0.5 else { continue }
-            // Newest sample at angle 0 (front of totem); older samples
-            // sweep counter-clockwise around. Same direction as the
-            // totem's spin so the freshest sample is briefly in front.
-            let angle = 2 * Double.pi * Double(recent.count - 1 - i)
+        for slot in 0..<Self.maxRings {
+            let block = saturnBlocks[slot]
+            guard slot < recent.count, let gpu = recent[slot].gpu, gpu > 0.5 else {
+                block.isHidden = true
+                continue
+            }
+            // Newest sample at angle 0 (front of totem); older samples sweep
+            // around in the totem's spin direction.
+            let angle = 2 * Double.pi * Double(recent.count - 1 - slot)
                         / Double(Self.maxRings)
             let x = radius * CGFloat(cos(angle))
             let z = radius * CGFloat(sin(angle))
-
-            let geometry = saturnBlockGeometry(forGPU: gpu,
-                                               width: blockW,
-                                               height: blockH,
-                                               length: blockL)
-            let node = SCNNode(geometry: geometry)
-            node.position = SCNVector3(Float(x), 0, Float(z))
+            block.geometry = saturnBlockGeometry(forGPU: gpu,
+                                                 width: blockW,
+                                                 height: blockH,
+                                                 length: blockL)
+            block.position = SCNVector3(Float(x), 0, Float(z))
             // Rotate so blockL is tangent to the ring (block "faces" outward).
-            node.eulerAngles = SCNVector3(0, Float(-angle), 0)
-            saturnNode.addChildNode(node)
+            block.eulerAngles = SCNVector3(0, Float(-angle), 0)
+            block.isHidden = false
         }
     }
 
