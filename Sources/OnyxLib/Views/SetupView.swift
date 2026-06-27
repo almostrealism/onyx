@@ -72,7 +72,7 @@ struct SetupView: View {
                             .foregroundColor(.black)
                             .padding(.horizontal, 32)
                             .padding(.vertical, 8)
-                            .background(Color(hex: "66CCFF"))
+                            .background(Color.onyxBlue)
                             .cornerRadius(4)
                     }
                     .buttonStyle(.plain)
@@ -116,7 +116,7 @@ struct OnyxTextField: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label.uppercased())
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
                 .tracking(2)
 
             TextField(placeholder, text: $text)
@@ -134,20 +134,4 @@ struct OnyxTextField: View {
     }
 }
 
-public extension Color {
-    init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let r, g, b: Double
-        switch hex.count {
-        case 6:
-            r = Double((int >> 16) & 0xFF) / 255
-            g = Double((int >> 8) & 0xFF) / 255
-            b = Double(int & 0xFF) / 255
-        default:
-            r = 1; g = 1; b = 1
-        }
-        self.init(red: r, green: g, blue: b)
-    }
-}
+// Color(hex:) and the Onyx brand palette now live in Palette.swift.

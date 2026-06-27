@@ -27,10 +27,10 @@ public enum GitFileStatus: String {
 
     func color(for area: GitFileArea) -> Color {
         switch (self, area) {
-        case (_, .staged): return Color(hex: "6BFF8E")
-        case (.deleted, _): return Color(hex: "FF6B6B")
+        case (_, .staged): return Color.onyxGreen
+        case (.deleted, _): return Color.onyxRed
         case (.untracked, _): return .gray.opacity(0.5)
-        case (_, .unstaged): return Color(hex: "FFD06B")
+        case (_, .unstaged): return Color.onyxAmber
         default: return .gray
         }
     }

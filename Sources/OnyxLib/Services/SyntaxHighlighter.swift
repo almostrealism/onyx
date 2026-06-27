@@ -4,12 +4,12 @@ import SwiftUI
 
 enum SyntaxHighlighter {
     // Theme colors (dark background friendly)
-    private static let keyword = Color(hex: "C06BFF")     // purple
-    private static let type = Color(hex: "66CCFF")         // blue
-    private static let string = Color(hex: "6BFF8E")       // green
+    private static let keyword = Color.onyxPurple     // purple
+    private static let type = Color.onyxBlue         // blue
+    private static let string = Color.onyxGreen       // green
     private static let comment = Color(hex: "6B7280")      // gray
-    private static let number = Color(hex: "FFD06B")       // yellow
-    private static let annotation = Color(hex: "FFD06B")   // yellow
+    private static let number = Color.onyxAmber       // yellow
+    private static let annotation = Color.onyxAmber   // yellow
     private static let plain = Color.white.opacity(0.85)
 
     /// Supported file extensions → language

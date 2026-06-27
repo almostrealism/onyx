@@ -479,18 +479,7 @@ private struct SpinningCubeView: NSViewRepresentable {
     func updateNSView(_ scnView: SCNView, context: Context) {}
 }
 
-private extension NSColor {
-    convenience init?(hex: String) {
-        let h = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        guard h.count == 6, let int = UInt64(h, radix: 16) else { return nil }
-        self.init(
-            red: CGFloat((int >> 16) & 0xFF) / 255.0,
-            green: CGFloat((int >> 8) & 0xFF) / 255.0,
-            blue: CGFloat(int & 0xFF) / 255.0,
-            alpha: 1.0
-        )
-    }
-}
+// NSColor(hex:) now lives in Palette.swift.
 
 // MARK: - Focus Debug Outline
 
@@ -830,7 +819,7 @@ struct TerminalTextOverlay: View {
                 guard let url = match.url,
                       let swiftRange = Range(match.range, in: unwrapped) else { continue }
                 urlRanges.append(match.range)
-                applyLink(swiftRange, url: url, color: Color(hex: "66CCFF"))
+                applyLink(swiftRange, url: url, color: Color.onyxBlue)
             }
         }
 
@@ -841,7 +830,7 @@ struct TerminalTextOverlay: View {
             guard let swiftRange = Range(pathRange, in: unwrapped),
                   let url = FilePathDetector.linkURL(for: nsUnwrapped.substring(with: pathRange))
             else { continue }
-            applyLink(swiftRange, url: url, color: Color(hex: "FFD06B"))
+            applyLink(swiftRange, url: url, color: Color.onyxAmber)
         }
 
         return result
@@ -945,11 +934,11 @@ struct ConnectionErrorOverlay: View {
             VStack(spacing: 12) {
                 Image(systemName: appState.needsKeySetup ? "key.fill" : "wifi.exclamationmark")
                     .font(.system(size: 28))
-                    .foregroundColor(appState.needsKeySetup ? appState.accentColor : Color(hex: "FF6B6B"))
+                    .foregroundColor(appState.needsKeySetup ? appState.accentColor : Color.onyxRed)
 
                 Text(appState.needsKeySetup ? "SSH KEY REQUIRED" : "CONNECTION FAILED")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(appState.needsKeySetup ? appState.accentColor : Color(hex: "FF6B6B"))
+                    .foregroundColor(appState.needsKeySetup ? appState.accentColor : Color.onyxRed)
                     .tracking(3)
 
                 Text(appState.connectionError ?? "")
@@ -993,7 +982,7 @@ struct ConnectionErrorOverlay: View {
             .cornerRadius(10)
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke((appState.needsKeySetup ? appState.accentColor : Color(hex: "FF6B6B")).opacity(0.3), lineWidth: 1)
+                    .stroke((appState.needsKeySetup ? appState.accentColor : Color.onyxRed).opacity(0.3), lineWidth: 1)
             )
 
             Spacer()
@@ -1036,8 +1025,8 @@ struct FavoritesBar: View {
             // Connection indicator + host
             HStack(spacing: 5) {
                 Circle()
-                    .fill(appState.activeSessionHasError ? Color(hex: "FF6B6B") :
-                          appState.isActiveSessionReconnecting ? Color(hex: "FFD06B") : Color(hex: "6BFF8E"))
+                    .fill(appState.activeSessionHasError ? Color.onyxRed :
+                          appState.isActiveSessionReconnecting ? Color.onyxAmber : Color.onyxGreen)
                     .frame(width: 5, height: 5)
 
                 Text(appState.activeHost?.label ?? "local")
@@ -1138,7 +1127,7 @@ struct ClaudePermissionBanner: View {
         HStack(spacing: 12) {
             Image(systemName: "exclamationmark.shield.fill")
                 .font(.system(size: 16))
-                .foregroundColor(Color(hex: "FFD06B"))
+                .foregroundColor(Color.onyxAmber)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -1161,10 +1150,10 @@ struct ClaudePermissionBanner: View {
             Button(action: onDeny) {
                 Text("Deny")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(Color(hex: "FF6B6B"))
+                    .foregroundColor(Color.onyxRed)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Color(hex: "FF6B6B").opacity(0.15))
+                    .background(Color.onyxRed.opacity(0.15))
                     .cornerRadius(4)
             }
             .buttonStyle(.plain)
@@ -1173,10 +1162,10 @@ struct ClaudePermissionBanner: View {
             Button(action: onAllow) {
                 Text("Allow")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(Color(hex: "6BFF8E"))
+                    .foregroundColor(Color.onyxGreen)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Color(hex: "6BFF8E").opacity(0.15))
+                    .background(Color.onyxGreen.opacity(0.15))
                     .cornerRadius(4)
             }
             .buttonStyle(.plain)
@@ -1189,7 +1178,7 @@ struct ClaudePermissionBanner: View {
                 .fill(Color.black.opacity(0.92))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(hex: "FFD06B").opacity(0.5), lineWidth: 1)
+                        .stroke(Color.onyxAmber.opacity(0.5), lineWidth: 1)
                 )
         )
     }

@@ -242,7 +242,7 @@ struct NoteEditorView: View {
                 if let titleError = titleError {
                     Text(titleError)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
+                        .foregroundColor(Color.onyxRed.opacity(0.8))
                 }
             }
             .padding(.horizontal, 12)

@@ -310,11 +310,11 @@ private struct HostHeader: View {
             if let result = probeInfo.result, result == .unreachable {
                 Image(systemName: "wifi.slash")
                     .font(.system(size: sz(8)))
-                    .foregroundColor(Color(hex: "FF6B6B").opacity(0.7))
+                    .foregroundColor(Color.onyxRed.opacity(0.7))
             } else if let result = probeInfo.result, result == .keyAuthFailed {
                 Image(systemName: "key.slash")
                     .font(.system(size: sz(8)))
-                    .foregroundColor(Color(hex: "FFD06B").opacity(0.7))
+                    .foregroundColor(Color.onyxAmber.opacity(0.7))
             }
 
             Spacer()
@@ -356,7 +356,7 @@ private struct FavoritesHeader: View {
         HStack(spacing: 6) {
             Image(systemName: "star.fill")
                 .font(.system(size: sz(9)))
-                .foregroundColor(Color(hex: "FFD06B").opacity(0.6))
+                .foregroundColor(Color.onyxAmber.opacity(0.6))
 
             Text("FAVORITES")
                 .font(.system(size: sz(9), weight: .medium, design: .monospaced))
@@ -564,7 +564,7 @@ private struct SessionRow: View {
             if session.unavailable {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: sz(9)))
-                    .foregroundColor(Color(hex: "FF6B6B").opacity(0.6))
+                    .foregroundColor(Color.onyxRed.opacity(0.6))
 
                 Text(session.name)
                     .font(.system(size: sz(11), design: .monospaced))
@@ -589,7 +589,7 @@ private struct SessionRow: View {
                 Button(action: { appState.toggleFavorite(session) }) {
                     Image(systemName: isFavorited ? "star.fill" : (isFavoritedAnyWindow ? "star.leadinghalf.filled" : "star"))
                         .font(.system(size: sz(10)))
-                        .foregroundColor(isFavorited ? Color(hex: "FFD06B") : (isFavoritedAnyWindow ? Color(hex: "FFD06B").opacity(0.4) : .gray.opacity(0.3)))
+                        .foregroundColor(isFavorited ? Color.onyxAmber : (isFavoritedAnyWindow ? Color.onyxAmber.opacity(0.4) : .gray.opacity(0.3)))
                 }
                 .buttonStyle(.plain)
             } else {
@@ -605,7 +605,7 @@ private struct SessionRow: View {
                 if sessionConfidence < 0.5 && !isActive {
                     Image(systemName: "clock")
                         .font(.system(size: sz(8)))
-                        .foregroundColor(Color(hex: "FFD06B").opacity(0.5))
+                        .foregroundColor(Color.onyxAmber.opacity(0.5))
                 }
 
                 Spacer()
@@ -613,7 +613,7 @@ private struct SessionRow: View {
                 Button(action: { appState.toggleFavorite(session) }) {
                     Image(systemName: isFavorited ? "star.fill" : (isFavoritedAnyWindow ? "star.leadinghalf.filled" : "star"))
                         .font(.system(size: sz(10)))
-                        .foregroundColor(isFavorited ? Color(hex: "FFD06B") : (isFavoritedAnyWindow ? Color(hex: "FFD06B").opacity(0.4) : .gray.opacity(0.3)))
+                        .foregroundColor(isFavorited ? Color.onyxAmber : (isFavoritedAnyWindow ? Color.onyxAmber.opacity(0.4) : .gray.opacity(0.3)))
                 }
                 .buttonStyle(.plain)
                 .contextMenu {

@@ -31,7 +31,7 @@ struct SettingsView: View {
             VStack(spacing: 24) {
                 Text("SETTINGS")
                     .font(.system(size: 24, weight: .ultraLight, design: .monospaced))
-                    .foregroundColor(Color(hex: "66CCFF"))
+                    .foregroundColor(Color.onyxBlue)
                     .tracking(8)
 
                 ScrollView {
@@ -81,7 +81,7 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("TERMINAL FONT")
                                         .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
                                         .tracking(2)
 
                                     ScrollView(.horizontal, showsIndicators: false) {
@@ -115,12 +115,12 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("WINDOW OPACITY")
                                         .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
                                         .tracking(2)
 
                                     HStack(spacing: 12) {
                                         Slider(value: $appState.appearance.windowOpacity, in: 0.3...1.0, step: 0.05)
-                                            .tint(Color(hex: "66CCFF"))
+                                            .tint(Color.onyxBlue)
 
                                         Text("\(Int(appState.appearance.windowOpacity * 100))%")
                                             .font(.system(size: 12, design: .monospaced))
@@ -133,7 +133,7 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("DEFAULT ACCENT")
                                         .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
                                         .tracking(2)
 
                                     HStack(spacing: 8) {
@@ -156,7 +156,7 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("WINDOW \(appState.windowIndex + 1) ACCENT")
                                         .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
                                         .tracking(2)
 
                                     HStack(spacing: 8) {
@@ -196,7 +196,7 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("EXTRA CLOCKS")
                                         .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
                                         .tracking(2)
 
                                     ForEach(0..<3, id: \.self) { i in
@@ -216,7 +216,7 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("CLAUDE CODE HOOKS")
                                         .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
                                         .tracking(2)
 
                                     Toggle(isOn: Binding(
@@ -242,7 +242,7 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("DEBUG")
                                         .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
                                         .tracking(2)
 
                                     Toggle(isOn: Binding(
@@ -266,7 +266,7 @@ struct SettingsView: View {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text("REMINDERS LISTS")
                                             .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                            .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                            .foregroundColor(Color.onyxBlue.opacity(0.7))
                                             .tracking(2)
 
                                         ScrollView(.horizontal, showsIndicators: false) {
@@ -312,7 +312,7 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("TIMING.APP")
                                         .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
                                         .tracking(2)
 
                                     HStack(spacing: 8) {
@@ -331,7 +331,7 @@ struct SettingsView: View {
                                         if appState.timing.isConfigured {
                                             Image(systemName: "checkmark.circle.fill")
                                                 .font(.system(size: 12))
-                                                .foregroundColor(Color(hex: "6BFF8E"))
+                                                .foregroundColor(Color.onyxGreen)
                                         }
                                     }
 
@@ -557,7 +557,7 @@ private struct HostRow: View {
                         Button(action: onDelete) {
                             Text("Remove")
                                 .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(Color(hex: "FF6B6B"))
+                                .foregroundColor(Color.onyxRed)
                         }
                         .buttonStyle(.plain)
                     }
@@ -733,7 +733,7 @@ private struct GitHubSettingsSection: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("GITHUB")
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
                 .tracking(2)
 
             HStack(spacing: 8) {
@@ -753,7 +753,7 @@ private struct GitHubSettingsSection: View {
                 if !config.token.isEmpty {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 12))
-                        .foregroundColor(Color(hex: "6BFF8E"))
+                        .foregroundColor(Color.onyxGreen)
                 }
             }
 
@@ -860,7 +860,7 @@ private struct MineOnlyToggle: View {
         }
         .toggleStyle(.switch)
         .controlSize(.mini)
-        .tint(Color(hex: "66CCFF"))
+        .tint(Color.onyxBlue)
         .padding(.top, 2)
     }
 }
@@ -878,7 +878,7 @@ private struct SearchFilterSettingsSection: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("SEARCH FILTER")
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundColor(Color(hex: "66CCFF").opacity(0.7))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
                 .tracking(2)
                 .padding(.top, 12)
 
@@ -940,7 +940,7 @@ private struct GitLabSettingsSection: View {
                 if !config.token.isEmpty {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 12))
-                        .foregroundColor(Color(hex: "6BFF8E"))
+                        .foregroundColor(Color.onyxGreen)
                 }
             }
 

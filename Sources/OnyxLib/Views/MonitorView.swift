@@ -356,16 +356,16 @@ struct MonitorView: View {
                     if let sample = monitor.latestSample {
                         HStack(spacing: 12) {
                             if let cpu = sample.cpuUsage {
-                                StatChip(label: "CPU", value: "\(Int(cpu))%", accentColor: Color(hex: "66CCFF"))
+                                StatChip(label: "CPU", value: "\(Int(cpu))%", accentColor: Color.onyxBlue)
                             }
                             if let used = sample.memUsed, let total = sample.memTotal, total > 0 {
-                                StatChip(label: "MEM", value: "\(formatMB(used)) / \(formatMB(total))", accentColor: Color(hex: "FFD06B"))
+                                StatChip(label: "MEM", value: "\(formatMB(used)) / \(formatMB(total))", accentColor: Color.onyxAmber)
                             }
                             if let gpu = sample.gpuUsage {
-                                StatChip(label: "GPU", value: "\(Int(gpu))%", accentColor: Color(hex: "C06BFF"))
+                                StatChip(label: "GPU", value: "\(Int(gpu))%", accentColor: Color.onyxPurple)
                             }
                             if let temp = sample.gpuTemp {
-                                StatChip(label: "TEMP", value: "\(temp)°C", accentColor: Color(hex: "FF6B6B"))
+                                StatChip(label: "TEMP", value: "\(temp)°C", accentColor: Color.onyxRed)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -444,7 +444,7 @@ struct MonitorView: View {
                                     GridChart(
                                         title: "CPU",
                                         values: cpuData,
-                                        accentColor: Color(hex: "66CCFF")
+                                        accentColor: Color.onyxBlue
                                     )
                                 } else {
                                     CPUUnavailableCard(
@@ -462,15 +462,15 @@ struct MonitorView: View {
                                 if hasMem && hasGpu {
                                     let halfHeight = (subChartHeight - 16) / 2
                                     GridChart(title: "MEMORY", values: memData,
-                                              accentColor: Color(hex: "FFD06B"), height: halfHeight)
+                                              accentColor: Color.onyxAmber, height: halfHeight)
                                     GridChart(title: "GPU", values: gpuData,
-                                              accentColor: Color(hex: "C06BFF"), height: halfHeight)
+                                              accentColor: Color.onyxPurple, height: halfHeight)
                                 } else if hasMem {
                                     GridChart(title: "MEMORY", values: memData,
-                                              accentColor: Color(hex: "FFD06B"), height: subChartHeight)
+                                              accentColor: Color.onyxAmber, height: subChartHeight)
                                 } else if hasGpu {
                                     GridChart(title: "GPU", values: gpuData,
-                                              accentColor: Color(hex: "C06BFF"), height: subChartHeight)
+                                              accentColor: Color.onyxPurple, height: subChartHeight)
                                 }
 
                                 if dockerStats.isAvailable {
@@ -493,10 +493,10 @@ struct MonitorView: View {
                         VStack(spacing: 8) {
                             Image(systemName: "exclamationmark.triangle")
                                 .monitorFont(size: 20, design: .default)
-                                .foregroundColor(Color(hex: "FF6B6B"))
+                                .foregroundColor(Color.onyxRed)
                             Text(error)
                                 .monitorFont(size: 12)
-                                .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
+                                .foregroundColor(Color.onyxRed.opacity(0.8))
                                 .multilineTextAlignment(.center)
                                 .frame(maxWidth: 400)
                             Text("Retrying every 5s... (attempt \(monitor.pollCount))")
@@ -745,9 +745,9 @@ struct GridChart: View {
     }
 
     private func colorForLevel(_ pct: Double) -> Color {
-        if pct > 90 { return Color(hex: "FF6B6B").opacity(0.9) }
-        if pct > 70 { return Color(hex: "FFD06B").opacity(0.8) }
-        return Color(hex: "66CCFF").opacity(0.7)
+        if pct > 90 { return Color.onyxRed.opacity(0.9) }
+        if pct > 70 { return Color.onyxAmber.opacity(0.8) }
+        return Color.onyxBlue.opacity(0.7)
     }
 }
 
@@ -759,13 +759,13 @@ struct CPUUnavailableCard: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("CPU")
                 .monitorFont(size: 10, weight: .medium)
-                .foregroundColor(Color(hex: "66CCFF"))
+                .foregroundColor(Color.onyxBlue)
                 .tracking(2)
 
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle")
                     .monitorFont(size: 11, design: .default)
-                    .foregroundColor(Color(hex: "FFD06B").opacity(0.8))
+                    .foregroundColor(Color.onyxAmber.opacity(0.8))
                 Text(message)
                     .monitorFont(size: 11)
                     .foregroundColor(.gray.opacity(0.7))
@@ -821,7 +821,7 @@ struct SimpleMonitorBody: View {
                 let cpuData = monitor.bucketedCPU()
                 if !cpuData.isEmpty {
                     GridChart(title: "CPU", values: cpuData,
-                              accentColor: Color(hex: "66CCFF"),
+                              accentColor: Color.onyxBlue,
                               height: cpuHeight)
                 } else {
                     CPUUnavailableCard(
@@ -841,13 +841,13 @@ struct SimpleMonitorBody: View {
                     HStack(spacing: 12) {
                         if hasMem {
                             GridChart(title: "MEMORY", values: memData,
-                                      accentColor: Color(hex: "FFD06B"),
+                                      accentColor: Color.onyxAmber,
                                       height: subHeight)
                                 .frame(maxWidth: .infinity)
                         }
                         if hasGpu {
                             GridChart(title: "GPU", values: gpuData,
-                                      accentColor: Color(hex: "C06BFF"),
+                                      accentColor: Color.onyxPurple,
                                       height: subHeight)
                                 .frame(maxWidth: .infinity)
                         }
@@ -885,8 +885,8 @@ struct SimpleRemindersScope: View {
     var body: some View {
         if reminders.accessGranted {
             HStack(spacing: 8) {
-                chip(reminders.dueTodayCount, "today", Color(hex: "FF6B6B"))
-                chip(reminders.dueTomorrowCount, "by tmrw", Color(hex: "FFD06B"))
+                chip(reminders.dueTodayCount, "today", Color.onyxRed)
+                chip(reminders.dueTomorrowCount, "by tmrw", Color.onyxAmber)
             }
         } else {
             EmptyView()
@@ -1024,14 +1024,14 @@ private struct SimplePipelinePill: View {
             PipelineStatusDot(overall: status.overall, size: 9)
             if status.inProgress > 0 {
                 miniBadge("arrow.triangle.2.circlepath", status.inProgress,
-                          color: Color(hex: "66CCFF"))
+                          color: Color.onyxBlue)
             } else if status.queued > 0 {
-                miniBadge("hourglass", status.queued, color: Color(hex: "FFD06B"))
+                miniBadge("hourglass", status.queued, color: Color.onyxAmber)
             } else if status.failed > 0 {
-                miniBadge("xmark", status.failed, color: Color(hex: "FF6B6B"))
+                miniBadge("xmark", status.failed, color: Color.onyxRed)
             }
             if status.succeeded > 0 {
-                miniBadge("checkmark", status.succeeded, color: Color(hex: "6BFF8E"))
+                miniBadge("checkmark", status.succeeded, color: Color.onyxGreen)
             }
         }
         .padding(.horizontal, 11)
@@ -1078,8 +1078,8 @@ private struct SimplePipelinePill: View {
 /// session has been quiet long enough to read as idle. Shared by the full
 /// session-notes rows and the simple-mode activity strip.
 func monitorSessionActivityColor(_ idleSeconds: TimeInterval) -> Color {
-    if idleSeconds < 15 { return Color(hex: "6BFF8E") }
-    if idleSeconds < 120 { return Color(hex: "FFD06B") }
+    if idleSeconds < 15 { return Color.onyxGreen }
+    if idleSeconds < 120 { return Color.onyxAmber }
     return .gray.opacity(0.45)
 }
 
@@ -1143,9 +1143,9 @@ private struct SimpleSessionActivityPill: View {
 /// full list interprets saturation.
 fileprivate func monitorCPUBarColor(_ pct: CGFloat, maxPct: CGFloat) -> Color {
     let fraction = pct / max(1, maxPct)
-    if fraction > 0.8 { return Color(hex: "FF6B6B") }
-    if fraction > 0.4 { return Color(hex: "FFD06B") }
-    return Color(hex: "66CCFF")
+    if fraction > 0.8 { return Color.onyxRed }
+    if fraction > 0.4 { return Color.onyxAmber }
+    return Color.onyxBlue
 }
 
 /// Weekly hours + per-day average for the currently-filtered Timing
@@ -1332,9 +1332,9 @@ struct DockerStatsSection: View {
 
     /// Confidence dot color: green >= 0.7, yellow >= 0.3, red < 0.3
     private func confidenceColor(_ confidence: Double) -> Color {
-        if confidence >= 0.7 { return Color(hex: "6BFF8E") }
-        if confidence >= 0.3 { return Color(hex: "FFD06B") }
-        return Color(hex: "FF6B6B")
+        if confidence >= 0.7 { return Color.onyxGreen }
+        if confidence >= 0.3 { return Color.onyxAmber }
+        return Color.onyxRed
     }
 
     /// Shorten "12.34MiB / 7.656GiB" → "12M/7.7G".
@@ -1613,7 +1613,7 @@ struct TimingChartSection: View {
             if let error = timing.lastError {
                 Text(error)
                     .monitorFont(size: 9)
-                    .foregroundColor(Color(hex: "FF6B6B").opacity(0.6))
+                    .foregroundColor(Color.onyxRed.opacity(0.6))
                     .lineLimit(1)
             }
         }
@@ -2107,8 +2107,8 @@ private struct SSHDiagnosticPanel: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(SSHKeeper.shared.enabled
-                                    ? Color(hex: "FF6B6B").opacity(0.2)
-                                    : Color(hex: "6BFF8E").opacity(0.2))
+                                    ? Color.onyxRed.opacity(0.2)
+                                    : Color.onyxGreen.opacity(0.2))
                         .cornerRadius(3)
                 }
                 .buttonStyle(.plain)
@@ -2134,7 +2134,7 @@ private struct SSHDiagnosticPanel: View {
                         .monitorFont(size: 10)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(Color(hex: "FF6B6B").opacity(0.25))
+                        .background(Color.onyxRed.opacity(0.25))
                         .cornerRadius(3)
                 }
                 .buttonStyle(.plain)
@@ -2234,10 +2234,10 @@ struct ClaudeSessionsSection: View {
             HStack {
                 Image(systemName: "brain")
                     .monitorFont(size: 10, design: .default)
-                    .foregroundColor(Color(hex: "C06BFF"))
+                    .foregroundColor(Color.onyxPurple)
                 Text("CLAUDE SESSIONS")
                     .monitorFont(size: 10, weight: .medium)
-                    .foregroundColor(Color(hex: "C06BFF"))
+                    .foregroundColor(Color.onyxPurple)
                     .tracking(2)
 
                 Spacer()
@@ -2252,7 +2252,7 @@ struct ClaudeSessionsSection: View {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.shield")
                         .monitorFont(size: 12, design: .default)
-                        .foregroundColor(Color(hex: "FFD06B"))
+                        .foregroundColor(Color.onyxAmber)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(request.toolName)")
@@ -2269,10 +2269,10 @@ struct ClaudeSessionsSection: View {
                     Button(action: { manager.approvePermission(request.id) }) {
                         Text("Allow")
                             .monitorFont(size: 10, weight: .medium)
-                            .foregroundColor(Color(hex: "6BFF8E"))
+                            .foregroundColor(Color.onyxGreen)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
-                            .background(Color(hex: "6BFF8E").opacity(0.15))
+                            .background(Color.onyxGreen.opacity(0.15))
                             .cornerRadius(4)
                     }
                     .buttonStyle(.plain)
@@ -2280,16 +2280,16 @@ struct ClaudeSessionsSection: View {
                     Button(action: { manager.denyPermission(request.id) }) {
                         Text("Deny")
                             .monitorFont(size: 10, weight: .medium)
-                            .foregroundColor(Color(hex: "FF6B6B"))
+                            .foregroundColor(Color.onyxRed)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
-                            .background(Color(hex: "FF6B6B").opacity(0.15))
+                            .background(Color.onyxRed.opacity(0.15))
                             .cornerRadius(4)
                     }
                     .buttonStyle(.plain)
                 }
                 .padding(8)
-                .background(Color(hex: "FFD06B").opacity(0.06))
+                .background(Color.onyxAmber.opacity(0.06))
                 .cornerRadius(6)
             }
 
@@ -2302,7 +2302,7 @@ struct ClaudeSessionsSection: View {
 
                     Text(shortSessionId(session.id))
                         .monitorFont(size: 10)
-                        .foregroundColor(Color(hex: "C06BFF").opacity(0.7))
+                        .foregroundColor(Color.onyxPurple.opacity(0.7))
                         .frame(width: 50, alignment: .leading)
 
                     switch session.status {
@@ -2319,7 +2319,7 @@ struct ClaudeSessionsSection: View {
                     case .waitingPermission:
                         Text("waiting for permission")
                             .monitorFont(size: 11)
-                            .foregroundColor(Color(hex: "FFD06B"))
+                            .foregroundColor(Color.onyxAmber)
                             .modifier(PulseModifier())
                     case .idle:
                         Text("idle")
@@ -2343,9 +2343,9 @@ struct ClaudeSessionsSection: View {
 
     private func sessionStatusColor(_ status: ClaudeActivity.ClaudeStatus) -> Color {
         switch status {
-        case .running: return Color(hex: "6BFF8E")
-        case .waitingPermission: return Color(hex: "FFD06B")
-        case .idle: return Color(hex: "66CCFF").opacity(0.5)
+        case .running: return Color.onyxGreen
+        case .waitingPermission: return Color.onyxAmber
+        case .idle: return Color.onyxBlue.opacity(0.5)
         case .stopped: return .gray.opacity(0.3)
         }
     }
@@ -2608,11 +2608,11 @@ private struct MergeStatusDot: View {
 
     private var color: Color {
         switch status {
-        case .ready:         return Color(hex: "6BFF8E")    // green
-        case .behind:        return Color(hex: "FFD06B")    // yellow
-        case .checksFailing: return Color(hex: "FFD06B")    // yellow
-        case .blocked:       return Color(hex: "FF6B6B")    // red
-        case .conflicts:     return Color(hex: "FF6B6B")    // red
+        case .ready:         return Color.onyxGreen    // green
+        case .behind:        return Color.onyxAmber    // yellow
+        case .checksFailing: return Color.onyxAmber    // yellow
+        case .blocked:       return Color.onyxRed    // red
+        case .conflicts:     return Color.onyxRed    // red
         case .unknown:       return Color.gray.opacity(0.4)
         }
     }
@@ -2867,17 +2867,17 @@ private struct PipelineRow: View {
     private var countsBadges: some View {
         HStack(spacing: 5) {
             if status.failed > 0 {
-                countBadge("xmark", status.failed, color: Color(hex: "FF6B6B"))
+                countBadge("xmark", status.failed, color: Color.onyxRed)
             }
             if status.inProgress > 0 {
                 countBadge("arrow.triangle.2.circlepath", status.inProgress,
-                           color: Color(hex: "66CCFF"))
+                           color: Color.onyxBlue)
             }
             if status.queued > 0 {
-                countBadge("hourglass", status.queued, color: Color(hex: "FFD06B"))
+                countBadge("hourglass", status.queued, color: Color.onyxAmber)
             }
             if status.succeeded > 0 {
-                countBadge("checkmark", status.succeeded, color: Color(hex: "6BFF8E"))
+                countBadge("checkmark", status.succeeded, color: Color.onyxGreen)
             }
             if status.skipped > 0 {
                 countBadge("forward", status.skipped, color: .gray.opacity(0.5))
@@ -2909,11 +2909,11 @@ private struct PipelineStatusDot: View {
     }
     private var color: Color {
         switch overall {
-        case .running:  return Color(hex: "66CCFF")
-        case .success:  return Color(hex: "6BFF8E")
-        case .failure:  return Color(hex: "FF6B6B")
-        case .mixed:    return Color(hex: "FFD06B")
-        case .queued:   return Color(hex: "FFD06B")
+        case .running:  return Color.onyxBlue
+        case .success:  return Color.onyxGreen
+        case .failure:  return Color.onyxRed
+        case .mixed:    return Color.onyxAmber
+        case .queued:   return Color.onyxAmber
         case .skipped:  return Color.gray.opacity(0.5)
         case .unknown:  return Color.gray.opacity(0.4)
         }
@@ -3076,11 +3076,11 @@ private struct SuggestionRow: View {
 
     private var conclusionColor: Color {
         switch suggestion.mostRecentConclusion {
-        case "success": return Color(hex: "6BFF8E")
+        case "success": return Color.onyxGreen
         case "failure", "timed_out", "cancelled", "action_required":
-            return Color(hex: "FF6B6B")
+            return Color.onyxRed
         case "skipped": return Color.gray.opacity(0.5)
-        case nil: return Color(hex: "66CCFF")   // in progress
+        case nil: return Color.onyxBlue   // in progress
         default: return Color.gray.opacity(0.4)
         }
     }
@@ -3114,9 +3114,9 @@ struct RemindersSection: View {
             if reminders.accessGranted {
                 HStack(spacing: 8) {
                     scopeWidget(count: reminders.dueTodayCount,
-                                label: "today", color: Color(hex: "FF6B6B"))
+                                label: "today", color: Color.onyxRed)
                     scopeWidget(count: reminders.dueTomorrowCount,
-                                label: "by tmrw", color: Color(hex: "FFD06B"))
+                                label: "by tmrw", color: Color.onyxAmber)
                     Spacer(minLength: 0)
                 }
             }
@@ -3238,7 +3238,7 @@ private struct ReminderRow: View {
             if let due = reminder.dueDateComponents, let label = dueLabel(due) {
                 Text(label)
                     .monitorFont(size: 10)
-                    .foregroundColor(isReminderOverdue(due) && !reminder.isCompleted ? Color(hex: "FF6B6B") : .gray.opacity(0.4))
+                    .foregroundColor(isReminderOverdue(due) && !reminder.isCompleted ? Color.onyxRed : .gray.opacity(0.4))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }

@@ -40,10 +40,10 @@ struct GitLandingView: View {
                     if status.isDetachedHead {
                         Text("DETACHED")
                             .font(.system(size: 8, weight: .bold, design: .monospaced))
-                            .foregroundColor(Color(hex: "FFD06B"))
+                            .foregroundColor(Color.onyxAmber)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
-                            .background(Color(hex: "FFD06B").opacity(0.15))
+                            .background(Color.onyxAmber.opacity(0.15))
                             .cornerRadius(2)
                     }
 
@@ -56,12 +56,12 @@ struct GitLandingView: View {
                                 if stats.insertions > 0 {
                                     Text("+\(stats.insertions)")
                                         .font(.system(size: 10, design: .monospaced))
-                                        .foregroundColor(Color(hex: "6BFF8E"))
+                                        .foregroundColor(Color.onyxGreen)
                                 }
                                 if stats.deletions > 0 {
                                     Text("-\(stats.deletions)")
                                         .font(.system(size: 10, design: .monospaced))
-                                        .foregroundColor(Color(hex: "FF6B6B"))
+                                        .foregroundColor(Color.onyxRed)
                                 }
                                 Text("~\(stats.filesChanged)")
                                     .font(.system(size: 10, design: .monospaced))
@@ -98,7 +98,7 @@ struct GitLandingView: View {
                     if status.isClean {
                         Text("clean")
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(Color(hex: "6BFF8E").opacity(0.6))
+                            .foregroundColor(Color.onyxGreen.opacity(0.6))
                     }
                 }
                 .padding(.horizontal, 12)
@@ -121,7 +121,7 @@ struct GitLandingView: View {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 0) {
                                 if !status.stagedFiles.isEmpty {
-                                    GitSectionHeader(title: "STAGED", count: status.stagedFiles.count, color: Color(hex: "6BFF8E"))
+                                    GitSectionHeader(title: "STAGED", count: status.stagedFiles.count, color: Color.onyxGreen)
                                     ForEach(status.stagedFiles) { file in
                                         GitFileRow(file: file, showDiffIcon: true)
                                             .contentShape(Rectangle())
@@ -133,7 +133,7 @@ struct GitLandingView: View {
                                 }
 
                                 if !status.unstagedFiles.isEmpty {
-                                    GitSectionHeader(title: "UNSTAGED", count: status.unstagedFiles.count, color: Color(hex: "FFD06B"))
+                                    GitSectionHeader(title: "UNSTAGED", count: status.unstagedFiles.count, color: Color.onyxAmber)
                                     ForEach(status.unstagedFiles) { file in
                                         GitFileRow(file: file, showDiffIcon: true)
                                             .contentShape(Rectangle())
@@ -289,17 +289,17 @@ struct GitDiffView: View {
         if line.hasPrefix("+++") || line.hasPrefix("---") {
             return .white.opacity(0.6)
         }
-        if line.hasPrefix("+") { return Color(hex: "6BFF8E") }
-        if line.hasPrefix("-") { return Color(hex: "FF6B6B") }
-        if line.hasPrefix("@@") { return Color(hex: "66CCFF") }
+        if line.hasPrefix("+") { return Color.onyxGreen }
+        if line.hasPrefix("-") { return Color.onyxRed }
+        if line.hasPrefix("@@") { return Color.onyxBlue }
         if line.hasPrefix("diff ") || line.hasPrefix("index ") { return .white.opacity(0.4) }
         return .white.opacity(0.7)
     }
 
     private func diffLineBackground(_ line: String) -> Color {
-        if line.hasPrefix("+") && !line.hasPrefix("+++") { return Color(hex: "6BFF8E").opacity(0.06) }
-        if line.hasPrefix("-") && !line.hasPrefix("---") { return Color(hex: "FF6B6B").opacity(0.06) }
-        if line.hasPrefix("@@") { return Color(hex: "66CCFF").opacity(0.04) }
+        if line.hasPrefix("+") && !line.hasPrefix("+++") { return Color.onyxGreen.opacity(0.06) }
+        if line.hasPrefix("-") && !line.hasPrefix("---") { return Color.onyxRed.opacity(0.06) }
+        if line.hasPrefix("@@") { return Color.onyxBlue.opacity(0.04) }
         return .clear
     }
 }

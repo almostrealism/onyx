@@ -44,7 +44,7 @@ struct FileBrowserView: View {
                         Spacer()
                         Text(error)
                             .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
+                            .foregroundColor(Color.onyxRed.opacity(0.8))
                         Spacer()
                     } else if let data = browser.imageData {
                         ImageContentView(
@@ -140,11 +140,11 @@ struct FileBrowserView: View {
                             } else if status.text.contains("failed") || status.text.hasPrefix("Failed") {
                                 Image(systemName: "exclamationmark.triangle")
                                     .font(.system(size: 10))
-                                    .foregroundColor(Color(hex: "FF6B6B"))
+                                    .foregroundColor(Color.onyxRed)
                             } else {
                                 Image(systemName: "checkmark.circle")
                                     .font(.system(size: 10))
-                                    .foregroundColor(Color(hex: "6BFF8E"))
+                                    .foregroundColor(Color.onyxGreen)
                             }
                             Text(status.text)
                                 .font(.system(size: 11, design: .monospaced))
@@ -1354,7 +1354,7 @@ struct FullFileBrowserView: View {
                             Spacer()
                             Text(error)
                                 .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(Color(hex: "FF6B6B").opacity(0.8))
+                                .foregroundColor(Color.onyxRed.opacity(0.8))
                                 .padding()
                             Spacer()
                         } else if browser.isSearchActive || browser.wasSearchActiveBeforeFile {
