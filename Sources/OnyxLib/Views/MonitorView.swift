@@ -557,6 +557,29 @@ struct MonitorView: View {
     }
 }
 
+/// Main-thread-only cache of `DateFormatter`s by (format, time zone). The
+/// clock views re-render every second; allocating a fresh `DateFormatter`
+/// each time — one of Foundation's most expensive objects to create — was
+/// pure churn. Reused across renders after the first.
+enum ClockFormatters {
+    private static var cache: [String: DateFormatter] = [:]
+
+    static func string(_ date: Date, format: String, timeZone: TimeZone? = nil) -> String {
+        let key = "\(format)|\(timeZone?.identifier ?? "_")"
+        let formatter: DateFormatter
+        if let cached = cache[key] {
+            formatter = cached
+        } else {
+            let f = DateFormatter()
+            f.dateFormat = format
+            if let tz = timeZone { f.timeZone = tz }
+            cache[key] = f
+            formatter = f
+        }
+        return formatter.string(from: date)
+    }
+}
+
 struct TimeDisplay: View {
     let accentColor: Color
     var use12Hour: Bool = false
@@ -593,28 +616,20 @@ struct TimeDisplay: View {
     }
 
     private var timeDigits: String {
-        let f = DateFormatter()
-        f.dateFormat = use12Hour ? "h:mm:ss" : "HH:mm:ss"
-        return f.string(from: currentTime)
+        ClockFormatters.string(currentTime, format: use12Hour ? "h:mm:ss" : "HH:mm:ss")
     }
 
     private var ampmSuffix: String {
-        let f = DateFormatter()
-        f.dateFormat = "a"
-        return f.string(from: currentTime)
+        ClockFormatters.string(currentTime, format: "a")
     }
 
     private var dateString: String {
-        let f = DateFormatter()
-        f.dateFormat = "EEEE, MMMM d"
-        return f.string(from: currentTime)
+        ClockFormatters.string(currentTime, format: "EEEE, MMMM d")
     }
 
     private var utcString: String {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        f.timeZone = TimeZone(identifier: "UTC")
-        return "UTC " + f.string(from: currentTime)
+        "UTC " + ClockFormatters.string(currentTime, format: "HH:mm",
+                                        timeZone: TimeZone(identifier: "UTC"))
     }
 }
 
@@ -641,10 +656,9 @@ struct ExtraClockView: View {
     }
 
     private var timeString: String {
-        let f = DateFormatter()
-        f.dateFormat = use12Hour ? "h:mm a" : "HH:mm"
-        f.timeZone = timeZone
-        return f.string(from: currentTime)
+        ClockFormatters.string(currentTime,
+                               format: use12Hour ? "h:mm a" : "HH:mm",
+                               timeZone: timeZone)
     }
 
     private var label: String {
