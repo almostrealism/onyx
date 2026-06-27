@@ -26,7 +26,7 @@ public final class WorkflowMonitor: ObservableObject {
     /// under the 5000/hour limit.
     public static let pollInterval: TimeInterval = 60
 
-    private var timer: Timer?
+    private lazy var poll = PollLoop(interval: Self.pollInterval) { [weak self] in self?.tick() }
     private var inFlight = false
     private let session: URLSession
 
@@ -39,24 +39,11 @@ public final class WorkflowMonitor: ObservableObject {
 
     // MARK: - Lifecycle
 
-    public func startPolling() {
-        if NSClassFromString("XCTest") != nil { return }
-        guard timer == nil else { return }
-        DispatchQueue.main.async { [weak self] in self?.tick() }
-        let t = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
-            self?.tick()
-        }
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
-    }
+    public func startPolling() { poll.start() }
 
-    public func stopPolling() {
-        timer?.invalidate(); timer = nil
-    }
+    public func stopPolling() { poll.stop() }
 
-    public func refresh() {
-        DispatchQueue.main.async { [weak self] in self?.tick() }
-    }
+    public func refresh() { poll.refresh() }
 
     // MARK: - Suggestions (one per workflow per PR)
 
