@@ -251,7 +251,7 @@ struct FavoritesGridSection: View {
             folders: browser.activeFolders.map(\.path))
     }
 
-    private let columns = [GridItem(.adaptive(minimum: 130), spacing: 6)]
+    @State private var gridWidth: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -278,15 +278,20 @@ struct FavoritesGridSection: View {
 
             if !browser.activeFolders.isEmpty {
                 ScrollView {
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
+                    LazyVGrid(columns: cappedGridColumns(width: gridWidth),
+                              alignment: .leading, spacing: 6) {
                         ForEach(browser.activeFolders) { folder in
                             favoriteCell(folder)
                         }
                     }
                     .padding(.horizontal, 10)
                     .padding(.bottom, 8)
+                    .background(GeometryReader { geo in
+                        Color.clear.preference(key: GridWidthKey.self, value: geo.size.width)
+                    })
                 }
                 .frame(maxHeight: 150)   // a few rows, then scroll
+                .onPreferenceChange(GridWidthKey.self) { gridWidth = $0 }
             } else if !browser.showAddFolder {
                 Text("No favorites yet — tap + to add a folder")
                     .font(.system(size: 10, design: .monospaced))

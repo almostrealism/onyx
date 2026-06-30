@@ -66,7 +66,7 @@ struct NotesGridSection: View {
     @ObservedObject var manager: NotesManager
     @State private var searchQuery = ""
 
-    private let columns = [GridItem(.adaptive(minimum: 130), spacing: 6)]
+    @State private var gridWidth: CGFloat = 0
 
     private var gridNotes: [Note] {
         let sorted = manager.notes.sorted {
@@ -119,15 +119,20 @@ struct NotesGridSection: View {
                     .padding(.vertical, 8)
             } else {
                 ScrollView {
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
+                    LazyVGrid(columns: cappedGridColumns(width: gridWidth),
+                              alignment: .leading, spacing: 6) {
                         ForEach(gridNotes) { note in
                             noteCell(note)
                         }
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
+                    .background(GeometryReader { geo in
+                        Color.clear.preference(key: GridWidthKey.self, value: geo.size.width)
+                    })
                 }
                 .frame(maxHeight: 170)   // a few rows, then scroll
+                .onPreferenceChange(GridWidthKey.self) { gridWidth = $0 }
             }
         }
         .background(Color.black.opacity(0.25))
