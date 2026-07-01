@@ -88,6 +88,46 @@ final class LSPManagerIntegrationTests: XCTestCase {
         appState.lsp.shutdownAll()
     }
 
+    func test_callers_findsIncomingCalls() async throws {
+        try requireEnvironment()
+        let appState = AppState()
+        appState.addHost(.localhost)
+        let shape = sampleRoot + "/src/main/java/com/onyx/spike/Shape.java"
+        // area() is declared at line 6; Main.main and describe() call it.
+        await appState.lsp.navigate(.callers, filePath: shape, line: 6, character: 11,
+                                    host: .localhost)
+        guard case let .results(_, _, groups) = appState.lsp.state else {
+            XCTFail("expected caller results, got \(appState.lsp.state)"); return
+        }
+        let files = Set(groups.map(\.fileName))
+        XCTAssertTrue(files.contains("Main.java") || files.contains("Shape.java"),
+                      "callers of area(): \(files)")
+        appState.lsp.shutdownAll()
+    }
+
+    func test_missingJDTLS_diagnosesAndOffersInstall() async throws {
+        // Java 21 + python3 present locally, but point jdtls at a bogus path:
+        // the manager should fail fast, run preflight, and offer to install.
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: sampleRoot + "/pom.xml") else {
+            throw XCTSkip("sample project not found")
+        }
+        let appState = AppState()
+        var host = HostConfig.localhost
+        host.codeIntel.jdtlsPath = "/tmp/onyx-nonexistent/bin/jdtls"
+        appState.addHost(host)
+
+        let shape = sampleRoot + "/src/main/java/com/onyx/spike/Shape.java"
+        await appState.lsp.navigate(.implementation, filePath: shape, line: 4, character: 17,
+                                    host: host)
+
+        guard case let .setupRequired(_, canInstall) = appState.lsp.state else {
+            XCTFail("expected setupRequired, got \(appState.lsp.state)"); return
+        }
+        XCTAssertTrue(canInstall, "java21 + python3 present → install should be offered")
+        appState.lsp.shutdownAll()
+    }
+
     func test_subtypes_findsSubclasses() async throws {
         try requireEnvironment()
 

@@ -52,6 +52,12 @@ public final class LSPManager: ObservableObject {
     /// out at its next async boundary instead of clobbering newer state.
     private var queryToken = 0
 
+    /// The most recent query, kept so "Install language server" can retry it.
+    private struct PendingQuery {
+        let kind: NavKind, filePath: String, line: Int, character: Int, host: HostConfig
+    }
+    private var lastQuery: PendingQuery?
+
     public nonisolated init(appState: AppState) {
         self.appState = appState
     }
@@ -86,6 +92,8 @@ public final class LSPManager: ObservableObject {
                          host: HostConfig) async {
         queryToken += 1
         let token = queryToken
+        lastQuery = PendingQuery(kind: kind, filePath: filePath, line: line,
+                                 character: character, host: host)
         panelVisible = true
         indexingDetail = nil
         state = .running(kind)
@@ -106,7 +114,9 @@ public final class LSPManager: ObservableObject {
         // 2. Start or reuse the jdtls session for this workspace.
         state = .indexing(root: (root as NSString).lastPathComponent)
         guard let entry = await session(for: host, root: root) else {
-            if token == queryToken { state = .unavailable(reason: "Could not start the language server.") }
+            // Start failed — probe the host to say *why* (and offer install).
+            let diagnosed = await diagnose(host: host)
+            if token == queryToken { state = diagnosed }
             return
         }
         guard token == queryToken, appState.activeHost?.id == host.id else { return }
@@ -142,6 +152,48 @@ public final class LSPManager: ObservableObject {
     public func closePanel() {
         panelVisible = false
         state = .idle
+    }
+
+    /// Install jdtls on the last-queried host, then retry the query. Driven by
+    /// the "Install language server" button in the results panel.
+    public func installThenRetry() async {
+        guard let q = lastQuery else { return }
+        state = .installing
+        indexingDetail = nil
+        let dir = JDTLSBootstrap.installDir(forJDTLSPath:
+            q.host.codeIntel.jdtlsPath.isEmpty ? Self.defaultJDTLSPath : q.host.codeIntel.jdtlsPath)
+        let ok = await runRemote(JDTLSBootstrap.installScript(installDir: dir),
+                                 host: q.host, timeout: 240)
+        if let ok, JDTLSBootstrap.installSucceeded(in: ok) {
+            await navigate(q.kind, filePath: q.filePath, line: q.line,
+                           character: q.character, host: q.host)
+        } else {
+            state = .setupRequired(reason: "Install failed. Check the host has network access and try again.",
+                                   canInstall: true)
+        }
+    }
+
+    /// Probe a host to explain why the server couldn't start.
+    private func diagnose(host: HostConfig) async -> CodeNavState {
+        let script = JDTLSBootstrap.preflightScript(jdtlsPath:
+            host.codeIntel.jdtlsPath.isEmpty ? Self.defaultJDTLSPath : host.codeIntel.jdtlsPath)
+        guard let out = await runRemote(script, host: host, timeout: 12) else {
+            return .unavailable(reason: "Couldn't reach the host to check code intelligence.")
+        }
+        let pf = JDTLSBootstrap.parsePreflight(out)
+        if pf.hasJDTLS {
+            return .unavailable(reason: "The language server is installed but failed to start.")
+        }
+        if pf.canInstall {
+            return .setupRequired(reason: "The Java language server (jdtls) isn't installed on this host.",
+                                  canInstall: true)
+        }
+        if !pf.javaOK {
+            let found = pf.javaMajor.map { "found Java \($0)" } ?? "Java not found"
+            return .setupRequired(reason: "Code intelligence needs Java \(JDTLSBootstrap.minJavaMajor)+ (\(found)).",
+                                  canInstall: false)
+        }
+        return .setupRequired(reason: "Installing jdtls needs python3 on the host.", canInstall: false)
     }
 
     /// Shut down every session (app teardown, or when a host is removed).
@@ -246,6 +298,7 @@ public final class LSPManager: ObservableObject {
             "capabilities": [
                 "textDocument": [
                     "typeHierarchy": ["dynamicRegistration": true],
+                    "callHierarchy": ["dynamicRegistration": true],
                     "implementation": ["dynamicRegistration": true],
                     "references": ["dynamicRegistration": true],
                     "definition": ["dynamicRegistration": true],
@@ -302,6 +355,15 @@ public final class LSPManager: ObservableObject {
             let method = kind == .subtypes ? "typeHierarchy/subtypes" : "typeHierarchy/supertypes"
             let r = await entry.session.request(method, ["item": item], timeout: 20)
             return Self.results(fromLocations: r)
+
+        case .callers:
+            let prep = await entry.session.request("textDocument/prepareCallHierarchy", docPos, timeout: 20)
+            guard let items = prep as? [[String: Any]], let item = items.first else { return [] }
+            let r = await entry.session.request("callHierarchy/incomingCalls", ["item": item], timeout: 20)
+            // incomingCalls → [{from: CallHierarchyItem, fromRanges: […]}]
+            guard let calls = r as? [[String: Any]] else { return [] }
+            return calls.compactMap { $0["from"] as? [String: Any] }
+                .compactMap(Self.navResult(from:))
         }
     }
 
@@ -357,14 +419,7 @@ public final class LSPManager: ObservableObject {
     /// Runs one noexec-safe remote script (RemoteScript pattern).
     private func resolveWorkspaceRoot(filePath: String, host: HostConfig) async -> String? {
         let dir = (filePath as NSString).deletingLastPathComponent
-        let script = Self.workspaceResolveScript(startDir: dir)
-        let (cmd, args, stdin) = appState.remoteScript(script, host: host)
-        let out: String? = await withCheckedContinuation { cont in
-            DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: FileBrowserManager.runRemoteScript(
-                    cmd: cmd, args: args, stdin: stdin, timeout: 12))
-            }
-        }
+        let out = await runRemote(Self.workspaceResolveScript(startDir: dir), host: host, timeout: 12)
         let root = out?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let root, !root.isEmpty, root != "/" else { return nil }
         return root
@@ -401,12 +456,19 @@ public final class LSPManager: ObservableObject {
     // MARK: - Remote file content (for didOpen)
 
     private func fetchContent(path: String, host: HostConfig) async -> String? {
-        let script = "cat -- \(Self.shellQuote(path))"
+        await runRemote("cat -- \(Self.shellQuote(path))", host: host, timeout: 15)
+    }
+
+    /// Run a noexec-safe remote script off the main thread, returning cleaned
+    /// output (nil on failure / noexec). The one place LSPManager touches the
+    /// remote shell for data reads (workspace resolution, file content,
+    /// preflight, install).
+    private func runRemote(_ script: String, host: HostConfig, timeout: TimeInterval) async -> String? {
         let (cmd, args, stdin) = appState.remoteScript(script, host: host)
         return await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
                 cont.resume(returning: FileBrowserManager.runRemoteScript(
-                    cmd: cmd, args: args, stdin: stdin, timeout: 15))
+                    cmd: cmd, args: args, stdin: stdin, timeout: timeout))
             }
         }
     }

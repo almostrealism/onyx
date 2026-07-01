@@ -1,7 +1,9 @@
 # LSP Code Navigation — Implementation Plan
 
-Status: proposed · Author: pairing session, 2026-07 · Prereq spike: commits
-`b2c39a5`, `49fd2fd` (`spike/README.md`)
+Status: **M0–M3 implemented** · Author: pairing session, 2026-07 · Transport
+decision recorded in `docs/adr/ADR-007-lsp-no-pty-transport.md`. The original
+proving spike (`Sources/JDTLSSpike`) has been retired; `spike/sample-java`
+remains as the integration-test fixture.
 
 ## Goal
 

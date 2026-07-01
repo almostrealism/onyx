@@ -17,6 +17,7 @@ public enum NavKind: String, CaseIterable, Hashable {
     case implementation     // implementors of an interface, overrides of a method
     case references         // all usages
     case definition         // go to definition
+    case callers            // incoming calls (call hierarchy)
 
     /// Menu / button label.
     public var label: String {
@@ -26,6 +27,7 @@ public enum NavKind: String, CaseIterable, Hashable {
         case .implementation: return "Implementors"
         case .references: return "References"
         case .definition: return "Definition"
+        case .callers: return "Callers"
         }
     }
 
@@ -37,6 +39,7 @@ public enum NavKind: String, CaseIterable, Hashable {
         case .implementation: return "square.stack.3d.up"
         case .references: return "text.magnifyingglass"
         case .definition: return "arrow.right.to.line"
+        case .callers: return "arrow.uturn.left"
         }
     }
 }
@@ -98,5 +101,7 @@ public enum CodeNavState {
     case running(NavKind)
     case results(kind: NavKind, symbol: String?, groups: [NavResultGroup])
     case empty(kind: NavKind)       // query ran, no hits
-    case unavailable(reason: String)  // no project, jdtls missing, error
+    case unavailable(reason: String)  // no project, server error
+    case setupRequired(reason: String, canInstall: Bool)  // jdtls missing/unusable
+    case installing                 // downloading jdtls onto the host
 }

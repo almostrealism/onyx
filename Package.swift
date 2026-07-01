@@ -42,14 +42,6 @@ let package = Package(
             dependencies: [],
             path: "Sources/OnyxMCP"
         ),
-        // jdtls-spike: throwaway harness proving we can drive the Eclipse JDT
-        // language server over a clean byte pipe (local or SSH). Not shipped;
-        // see spike/README.md. Self-contained, no OnyxLib dependency.
-        .executableTarget(
-            name: "jdtls-spike",
-            dependencies: [],
-            path: "Sources/JDTLSSpike"
-        ),
         .testTarget(
             name: "OnyxTests",
             dependencies: ["OnyxLib"],

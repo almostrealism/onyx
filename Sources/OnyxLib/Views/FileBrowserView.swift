@@ -1197,7 +1197,7 @@ struct FileContentView: View {
                 if codeNavAvailable {
                     Menu {
                         ForEach([NavKind.implementation, .subtypes, .supertypes,
-                                 .references, .definition], id: \.self) { kind in
+                                 .references, .callers, .definition], id: \.self) { kind in
                             Button {
                                 onNavigate?(kind, caretLine, caretChar)
                             } label: {

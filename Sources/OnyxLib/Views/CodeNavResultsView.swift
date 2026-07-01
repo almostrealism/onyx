@@ -59,6 +59,8 @@ struct CodeNavResultsView: View {
             return "\(kind.label.uppercased())\(sym) — \(n)"
         case .empty(let kind): return "\(kind.label.uppercased()) — none found"
         case .unavailable: return "CODE NAVIGATION"
+        case .setupRequired: return "CODE INTELLIGENCE — SETUP"
+        case .installing: return "INSTALLING LANGUAGE SERVER…"
         }
     }
 
@@ -68,19 +70,39 @@ struct CodeNavResultsView: View {
     private var content: some View {
         switch lsp.state {
         case .indexing, .running:
-            HStack(spacing: 8) {
-                ProgressView().scaleEffect(0.6).colorScheme(.dark)
-                Text(busyLabel)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.gray)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            busyView(busyLabel)
+
+        case .installing:
+            busyView("Downloading jdtls onto the host — this runs once…")
 
         case .empty:
             message("No results.")
 
         case .unavailable(let reason):
             message(reason)
+
+        case .setupRequired(let reason, let canInstall):
+            VStack(spacing: 12) {
+                Text(reason)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.7))
+                    .multilineTextAlignment(.center)
+                if canInstall {
+                    Button {
+                        Task { await lsp.installThenRetry() }
+                    } label: {
+                        Text("Install language server")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 14).padding(.vertical, 6)
+                            .background(appState.accentColor)
+                            .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding()
 
         case .idle:
             message("Put the cursor on a symbol and choose Navigate.")
@@ -104,6 +126,16 @@ struct CodeNavResultsView: View {
         if let detail = lsp.indexingDetail { return detail }
         if case .indexing = lsp.state { return "Importing the project — first run can take a moment…" }
         return "Searching…"
+    }
+
+    private func busyView(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            ProgressView().scaleEffect(0.6).colorScheme(.dark)
+            Text(text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.gray)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func message(_ text: String) -> some View {
