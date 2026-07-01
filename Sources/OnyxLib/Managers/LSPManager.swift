@@ -32,6 +32,8 @@ public final class LSPManager: ObservableObject {
     @Published public private(set) var state: CodeNavState = .idle
     /// Whether the results panel should be shown.
     @Published public var panelVisible: Bool = false
+    /// Live jdtls import progress (from `$/progress`), shown while indexing.
+    @Published public private(set) var indexingDetail: String?
 
     private let appState: AppState
 
@@ -41,6 +43,9 @@ public final class LSPManager: ObservableObject {
     static let maxSessions = 4
     /// How long to keep polling a query while jdtls finishes importing.
     static let queryDeadline: TimeInterval = 90
+    /// Sessions idle longer than this are shut down (frees the remote JVM).
+    static let idleTimeout: TimeInterval = 600
+    private var idleTimer: Timer?
 
     private var entries: [WorkspaceKey: Entry] = [:]
     /// Monotonic token: each navigate() bumps it so a superseded query bails
@@ -82,7 +87,14 @@ public final class LSPManager: ObservableObject {
         queryToken += 1
         let token = queryToken
         panelVisible = true
+        indexingDetail = nil
         state = .running(kind)
+
+        // 0. Respect the per-host toggle.
+        guard host.codeIntel.enabled else {
+            state = .unavailable(reason: "Code intelligence is off for this host.")
+            return
+        }
 
         // 1. Resolve the workspace (build root) for this file.
         guard let root = await resolveWorkspaceRoot(filePath: filePath, host: host) else {
@@ -114,6 +126,7 @@ public final class LSPManager: ObservableObject {
             let hits = await runQuery(kind, entry: entry, uri: uri, position: pos)
             if !hits.isEmpty {
                 if token == queryToken {
+                    indexingDetail = nil
                     let symbol = hits.first(where: { $0.name != nil })?.name
                     state = .results(kind: kind, symbol: symbol, groups: NavResultGroup.group(hits))
                 }
@@ -122,7 +135,7 @@ public final class LSPManager: ObservableObject {
             if Date() > deadline { break }
             try? await Task.sleep(nanoseconds: 1_500_000_000)
         }
-        if token == queryToken { state = .empty(kind: kind) }
+        if token == queryToken { indexingDetail = nil; state = .empty(kind: kind) }
     }
 
     /// Dismiss the results panel.
@@ -135,6 +148,7 @@ public final class LSPManager: ObservableObject {
     public func shutdownAll() {
         for (_, e) in entries { teardown(e) }
         entries.removeAll()
+        idleTimer?.invalidate(); idleTimer = nil
     }
 
     /// Shut down sessions belonging to a host (call on host removal).
@@ -143,6 +157,27 @@ public final class LSPManager: ObservableObject {
             teardown(e)
             entries.removeValue(forKey: key)
         }
+        if entries.isEmpty { idleTimer?.invalidate(); idleTimer = nil }
+    }
+
+    // MARK: - Idle eviction
+
+    /// Start the periodic idle sweep once we actually have a session. Skipped
+    /// under XCTest (no run loop; mirrors PollLoop's guard).
+    private func ensureIdleSweep() {
+        guard idleTimer == nil, NSClassFromString("XCTest") == nil else { return }
+        idleTimer = Timer.scheduledTimer(withTimeInterval: 120, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sweepIdle() }
+        }
+    }
+
+    private func sweepIdle() {
+        let now = Date()
+        for (key, e) in entries where now.timeIntervalSince(e.lastUsed) > Self.idleTimeout {
+            teardown(e)
+            entries.removeValue(forKey: key)
+        }
+        if entries.isEmpty { idleTimer?.invalidate(); idleTimer = nil }
     }
 
     // MARK: - Session lifecycle
@@ -163,10 +198,13 @@ public final class LSPManager: ObservableObject {
         }
 
         let dataDir = Self.workspaceDataDir(for: key)
-        let launch = "mkdir -p \(dataDir) 2>/dev/null; \(Self.defaultJDTLSPath) -data \(dataDir)"
+        let jdtls = host.codeIntel.jdtlsPath.isEmpty ? Self.defaultJDTLSPath : host.codeIntel.jdtlsPath
+        let heapArg = host.codeIntel.heapMB > 0 ? " --jvm-arg=-Xmx\(host.codeIntel.heapMB)m" : ""
+        let launch = "mkdir -p \(dataDir) 2>/dev/null; \(jdtls)\(heapArg) -data \(dataDir)"
         let (cmd, args) = appState.remoteLSPCommand(host: host, launch: launch)
         let entry = Entry(root: root, session: LSPSession(cmd: cmd, args: args))
         entries[key] = entry
+        ensureIdleSweep()
         return await ensureStarted(entry) ? entry : nil
     }
 
@@ -187,10 +225,17 @@ public final class LSPManager: ObservableObject {
 
     private func doStart(_ entry: Entry) async -> Bool {
         entry.session.onNotification = { [weak self, weak entry] method, params in
-            guard method == "language/status",
-                  let type = params["type"] as? String,
-                  type == "ServiceReady" || type == "Started" else { return }
-            Task { @MainActor in entry?.ready = true; _ = self }
+            switch method {
+            case "language/status":
+                guard let type = params["type"] as? String,
+                      type == "ServiceReady" || type == "Started" else { return }
+                Task { @MainActor in entry?.ready = true }
+            case "$/progress":
+                guard let detail = Self.progressDetail(params) else { return }
+                Task { @MainActor in self?.indexingDetail = detail }
+            default:
+                break
+            }
         }
         do { try entry.session.start() } catch { return false }
 
@@ -287,6 +332,22 @@ public final class LSPManager: ObservableObject {
         return NavResult(path: Self.path(fromURI: uri), line: line, character: character,
                          name: dict["name"] as? String,
                          kindLabel: (kindLabel?.isEmpty == false) ? kindLabel : nil)
+    }
+
+    /// Build a short human label from an LSP `$/progress` notification's value.
+    /// jdtls sends `{value: {kind, title, message, percentage}}` during import.
+    static func progressDetail(_ params: [String: Any]) -> String? {
+        guard let value = params["value"] as? [String: Any] else { return nil }
+        if (value["kind"] as? String) == "end" { return nil }
+        let title = value["title"] as? String
+        let message = value["message"] as? String
+        let text = [title, message].compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " — ")
+        guard !text.isEmpty else { return nil }
+        if let pct = value["percentage"] as? Int { return "\(text) (\(pct)%)" }
+        if let pct = value["percentage"] as? Double { return "\(text) (\(Int(pct))%)" }
+        return text
     }
 
     // MARK: - Workspace resolution (remote walk-up)

@@ -497,6 +497,9 @@ private struct HostRow: View {
     @State private var port: String = ""
     @State private var tmuxSession: String = ""
     @State private var identityFile: String = ""
+    @State private var codeIntelEnabled: Bool = true
+    @State private var jdtlsPath: String = ""
+    @State private var heapMB: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -552,6 +555,8 @@ private struct HostRow: View {
 
                     OnyxTextField(label: "Identity file", text: $identityFile, placeholder: "~/.ssh/id_ed25519")
 
+                    codeIntelFields
+
                     HStack {
                         Spacer()
                         Button(action: onDelete) {
@@ -571,6 +576,9 @@ private struct HostRow: View {
                     port = String(host.ssh.port)
                     tmuxSession = host.ssh.tmuxSession
                     identityFile = host.ssh.identityFile
+                    codeIntelEnabled = host.codeIntel.enabled
+                    jdtlsPath = host.codeIntel.jdtlsPath
+                    heapMB = String(host.codeIntel.heapMB)
                 }
                 .onChange(of: label) { _, v in updateHost { $0.label = v } }
                 .onChange(of: sshHost) { _, v in updateHost { $0.ssh.host = v } }
@@ -578,10 +586,33 @@ private struct HostRow: View {
                 .onChange(of: port) { _, v in updateHost { $0.ssh.port = Int(v) ?? 22 } }
                 .onChange(of: tmuxSession) { _, v in updateHost { $0.ssh.tmuxSession = v } }
                 .onChange(of: identityFile) { _, v in updateHost { $0.ssh.identityFile = v } }
+                .onChange(of: codeIntelEnabled) { _, v in updateHost { $0.codeIntel.enabled = v } }
+                .onChange(of: jdtlsPath) { _, v in updateHost { $0.codeIntel.jdtlsPath = v } }
+                .onChange(of: heapMB) { _, v in updateHost { $0.codeIntel.heapMB = Int(v) ?? 0 } }
             }
         }
         .background(Color.white.opacity(0.04))
         .cornerRadius(6)
+    }
+
+    /// Per-host code-intelligence (jdtls) controls — extracted to keep the
+    /// edit-form body cheap for the type checker.
+    @ViewBuilder
+    private var codeIntelFields: some View {
+        Divider().background(Color.white.opacity(0.08)).padding(.vertical, 2)
+        Toggle(isOn: $codeIntelEnabled) {
+            Text("Code intelligence (Java)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+        }
+        .toggleStyle(.switch)
+        .tint(appState.accentColor)
+        if codeIntelEnabled {
+            OnyxTextField(label: "jdtls path", text: $jdtlsPath,
+                          placeholder: "~/.onyx/jdtls/bin/jdtls")
+            OnyxTextField(label: "Max heap (MB, 0 = default)", text: $heapMB, placeholder: "0")
+                .frame(width: 200)
+        }
     }
 
     private func updateHost(_ transform: (inout HostConfig) -> Void) {

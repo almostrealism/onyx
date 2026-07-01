@@ -101,6 +101,7 @@ struct CodeNavResultsView: View {
     }
 
     private var busyLabel: String {
+        if let detail = lsp.indexingDetail { return detail }
         if case .indexing = lsp.state { return "Importing the project — first run can take a moment…" }
         return "Searching…"
     }

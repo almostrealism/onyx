@@ -284,6 +284,13 @@ public class AppState: ObservableObject {
         lspCancellable = m.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        // Best-effort: stop remote language servers when the app quits. (The
+        // ssh child dying already EOFs jdtls, but this is tidier.)
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak m] _ in
+            MainActor.assumeIsolated { m?.shutdownAll() }
+        }
         return m
     }()
 
@@ -435,6 +442,8 @@ public class AppState: ObservableObject {
             }
         }
         hosts.removeAll { $0.id == hostID }
+        // Stop any language servers for this host (removeHost runs on the main thread).
+        MainActor.assumeIsolated { lsp.shutdown(hostID: hostID) }
         // Remove sessions belonging to this host
         allSessions.removeAll { $0.source.hostID == hostID }
         favoriteEntries.removeAll { entry in

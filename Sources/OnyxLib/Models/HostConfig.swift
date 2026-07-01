@@ -25,6 +25,24 @@ public struct SSHConfig: Codable, Hashable {
     }
 }
 
+/// Per-host code-intelligence (LSP / jdtls) settings.
+public struct CodeIntelConfig: Codable, Hashable {
+    /// Whether code navigation is offered for this host.
+    public var enabled: Bool = true
+    /// Path to the jdtls launcher on the host (`~` expands remotely).
+    public var jdtlsPath: String = "~/.onyx/jdtls/bin/jdtls"
+    /// JVM max heap in MB for jdtls; 0 = let jdtls choose its default.
+    public var heapMB: Int = 0
+
+    public init(enabled: Bool = true,
+                jdtlsPath: String = "~/.onyx/jdtls/bin/jdtls",
+                heapMB: Int = 0) {
+        self.enabled = enabled
+        self.jdtlsPath = jdtlsPath
+        self.heapMB = heapMB
+    }
+}
+
 /// HostConfig.
 public struct HostConfig: Codable, Identifiable, Hashable {
     /// Id.
@@ -33,12 +51,32 @@ public struct HostConfig: Codable, Identifiable, Hashable {
     public var label: String
     /// Ssh.
     public var ssh: SSHConfig
+    /// Code-intelligence settings.
+    public var codeIntel: CodeIntelConfig
 
     /// Create a new instance.
-    public init(id: UUID = UUID(), label: String, ssh: SSHConfig = SSHConfig()) {
+    public init(id: UUID = UUID(), label: String, ssh: SSHConfig = SSHConfig(),
+                codeIntel: CodeIntelConfig = CodeIntelConfig()) {
         self.id = id
         self.label = label
         self.ssh = ssh
+        self.codeIntel = codeIntel
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, label, ssh, codeIntel
+    }
+
+    /// Tolerant decode: `codeIntel` was added later, so existing hosts.json
+    /// won't have it. Missing → default. (Hosts decode with `try?`, so a throw
+    /// here would silently wipe the user's entire host list — never regress.)
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(UUID.self, forKey: .id)
+        self.label = try c.decode(String.self, forKey: .label)
+        self.ssh = try c.decode(SSHConfig.self, forKey: .ssh)
+        self.codeIntel = try c.decodeIfPresent(CodeIntelConfig.self, forKey: .codeIntel)
+            ?? CodeIntelConfig()
     }
 
     /// Is local.
