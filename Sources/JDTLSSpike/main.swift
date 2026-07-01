@@ -58,7 +58,10 @@ let host = args["host"]                                   // nil / "local" → r
 let user = args["user"] ?? ""
 let port = args["port"].flatMap { Int($0) } ?? 22
 let identity = args["identity"]
-let isRemote = (host != nil && host != "local" && host != "localhost")
+// Any --host means "use the SSH transport" — including localhost/127.0.0.1,
+// which is a perfectly good loopback way to exercise the real ssh path.
+// Only omitting --host (or --host local) runs jdtls as a direct child.
+let isRemote = (host != nil && host != "local")
 
 // Default local jdtls launcher; on remote the user should pass an absolute path.
 let jdtlsCmd = args["jdtls"] ?? (NSHomeDirectory() + "/.onyx/jdtls/bin/jdtls")

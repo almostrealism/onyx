@@ -8,17 +8,61 @@ a production `LSPManager`. It links no OnyxLib types so it stays disposable.
 
 ## What it proved (run 2026-07, macOS, JDK 21, jdtls snapshot)
 
-Against `spike/sample-java` (a 6-class inheritance graph), local transport:
+Against `spike/sample-java` (a 6-class inheritance graph):
 
-| Query | Command `--symbol / --query` | Result |
-|---|---|---|
-| Subclasses | `AbstractShape` / `subtypes` | `Circle`, `Square` |
-| Implementors | `Shape` / `implementation` | `AbstractShape`, `Circle`, `Rectangle`, `Square` |
-| Overrides | `area` / `implementation` | `Circle:13`, `Rectangle:15`, `Square:13` |
-| References | `area` / `references` | decl + `describe()` + `Main:15` + 3 overrides (6 total) |
+| Query | Command `--symbol / --query` | Result | local | SSH |
+|---|---|---|:--:|:--:|
+| Subclasses | `AbstractShape` / `subtypes` | `Circle`, `Square` | ✅ | ✅ |
+| Implementors | `Shape` / `implementation` | `AbstractShape`, `Circle`, `Rectangle`, `Square` | ✅ | ✅ |
+| Overrides | `area` / `implementation` | `Circle:13`, `Rectangle:15`, `Square:13` | ✅ | ✅ |
+| References | `area` / `references` | decl + `describe()` + `Main:15` + 3 overrides (6 total) | ✅ | ✅ |
 
-Cold project import ~12s; warm queries ~4s (dominated by jdtls JVM startup per
-run — the real manager keeps one server alive, so steady-state is sub-second).
+Both transports verified. Cold project import ~12s; warm queries ~4s
+(dominated by jdtls JVM startup per run — the real manager keeps one server
+alive, so steady-state is sub-second).
+
+### SSH transport, validated on loopback
+
+The SSH path was proven against a **user-run sshd on `127.0.0.1:2222`** (no
+root, no changes to system Remote Login). Two macOS gotchas surfaced, both
+worth knowing for real hosts:
+
+- **sshd `StrictModes`** rejects `authorized_keys` if `$HOME` is group/other
+  writable. Our home was `770`; `chmod g-w ~` (→ `750`) fixed it.
+- **`com.apple.access_ssh` SACL** — the system sshd only admits users in that
+  group. Sidestepped by running our own sshd with `UsePAM no` + pubkey auth.
+
+Bring the loopback sshd up (one time):
+
+```sh
+mkdir -p ~/.onyx/sshd && ssh-keygen -t ed25519 -N '' -f ~/.onyx/sshd/ssh_host_ed25519_key
+cat > ~/.onyx/sshd/sshd_config <<'EOF'
+Port 2222
+ListenAddress 127.0.0.1
+HostKey /Users/worker/.onyx/sshd/ssh_host_ed25519_key
+PidFile /Users/worker/.onyx/sshd/sshd.pid
+UsePAM no
+PasswordAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile /Users/worker/.ssh/authorized_keys
+StrictModes yes
+EOF
+ssh-keygen -t ed25519 -N '' -f ~/.ssh/onyx_spike
+cat ~/.ssh/onyx_spike.pub >> ~/.ssh/authorized_keys
+/usr/sbin/sshd -f ~/.onyx/sshd/sshd_config          # start
+# stop later:  kill "$(cat ~/.onyx/sshd/sshd.pid)"
+```
+
+Then run the spike against it (use `127.0.0.1`, not `localhost`):
+
+```sh
+swift run jdtls-spike \
+  --host 127.0.0.1 --user "$USER" --port 2222 --identity ~/.ssh/onyx_spike \
+  --jdtls "$HOME/.onyx/jdtls/bin/jdtls" \
+  --project "$PWD/spike/sample-java" \
+  --file src/main/java/com/onyx/spike/AbstractShape.java \
+  --symbol AbstractShape --query subtypes --data /tmp/jdtls-ws-remote
+```
 
 ## Run it
 
@@ -78,7 +122,10 @@ curl -fsSL https://download.eclipse.org/jdtls/snapshots/jdt-language-server-late
    subtypes|supertypes`; `textDocument/implementation` for implementors and
    overrides; `textDocument/references` with `includeDeclaration`.
 7. **One jdtls per workspace/host**, keyed by project root; the `-data`
-   workspace dir caches the import so restarts are cheaper.
+   workspace dir caches the import so restarts are cheaper. The `-data` dir is
+   **locked** — launching a second jdtls against the same dir fails silently
+   (observed as empty output during the spike). The manager must serialize on
+   the workspace and never double-spawn.
 
 ## Files
 
