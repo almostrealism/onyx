@@ -345,6 +345,52 @@ final class AppStateTests: XCTestCase {
                       "dockerTmuxCommand must allocate a TTY; got: \(args)")
     }
 
+    // MARK: - remoteLSPCommand (language server transport)
+
+    // The LSP launch is the ONE remote command that must NOT allocate a TTY:
+    // LSP is Content-Length-framed bytes and a PTY corrupts the stream. These
+    // tests are the guardrail against someone "fixing" it to match the
+    // interactive sshCommand/dockerTmuxCommand shape (which correctly use -t).
+
+    func testRemoteLSPCommand_remote_usesCleanPipeNoTTY() {
+        let state = AppState()
+        var host = HostConfig.localhost
+        host.id = UUID()
+        host.ssh.host = "example.com"
+        host.ssh.user = "tester"
+        let (cmd, args) = state.remoteLSPCommand(host: host, launch: "jdtls -data /tmp/ws")
+        XCTAssertEqual(cmd, "/usr/bin/ssh")
+        XCTAssertFalse(args.contains("-t"),
+                       "LSP transport must be a clean byte pipe — no -t; got: \(args)")
+        XCTAssertFalse(args.contains("-tt"),
+                       "LSP transport must be a clean byte pipe — no -tt; got: \(args)")
+    }
+
+    func testRemoteLSPCommand_remote_launchIsLastArgAfterUserHost() {
+        let state = AppState()
+        var host = HostConfig.localhost
+        host.id = UUID()
+        host.ssh.host = "example.com"
+        host.ssh.user = "tester"
+        let (_, args) = state.remoteLSPCommand(host: host, launch: "jdtls -data /tmp/ws")
+        // user@host immediately precedes the exec launch string.
+        guard let hostIdx = args.firstIndex(of: "tester@example.com") else {
+            XCTFail("user@host missing; got: \(args)"); return
+        }
+        XCTAssertEqual(hostIdx, args.count - 2, "launch string must follow user@host")
+        XCTAssertTrue(args.last!.contains("jdtls -data /tmp/ws"),
+                      "launch must be carried in the final arg; got: \(args.last!)")
+        XCTAssertTrue(args.last!.contains("exec $SHELL -lc"),
+                      "should exec a login shell for PATH; got: \(args.last!)")
+    }
+
+    func testRemoteLSPCommand_local_noSSH() {
+        let state = AppState()
+        let (cmd, args) = state.remoteLSPCommand(host: .localhost, launch: "jdtls -data /tmp/ws")
+        XCTAssertNotEqual(cmd, "/usr/bin/ssh", "local host must not shell out to ssh")
+        XCTAssertTrue(args.joined(separator: " ").contains("jdtls -data /tmp/ws"))
+    }
+
     // MARK: - Monitor view modes
 
     func testShowSimpleMonitor_defaultsOff() {

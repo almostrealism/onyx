@@ -1735,6 +1735,30 @@ public class AppState: ObservableObject {
         return ("/usr/bin/ssh", args)
     }
 
+    /// Build the command to launch a language server (jdtls) over a CLEAN byte
+    /// pipe for LSP `Content-Length` framing.
+    ///
+    /// **This is deliberately NOT like `sshCommand`/`dockerTmuxCommand`.** LSP
+    /// is a raw framed-byte stream; a pseudo-TTY would echo our stdin and
+    /// translate newlines and corrupt the framing — so there is **no `-t`**,
+    /// and no MCP port forwarding. Safe from the noexec trap because the server
+    /// is a real `exec`, not a shell command the outer shell must interpret.
+    /// See docs/lsp-code-navigation-plan.md and the jdtls spike.
+    ///
+    /// `launch` is the server invocation, e.g. `~/.onyx/jdtls/bin/jdtls -data <dir>`.
+    public func remoteLSPCommand(host h: HostConfig, launch: String) -> (String, [String]) {
+        if h.isLocal {
+            let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+            return (shell, ["-lc", "export \(extraPath); \(launch)"])
+        }
+
+        var args = sshSessionArgs(for: h)   // long-lived, independent (no mux)
+        // NO "-t": an LSP stream must stay a clean byte pipe.
+        args.append(sshUserHost(for: h))
+        args.append("exec $SHELL -lc 'export \(extraPath); \(launch)'")
+        return ("/usr/bin/ssh", args)
+    }
+
     /// Build the command + args to run a one-off stats collection.
     /// When `stdin` is non-nil the caller must feed it to the spawned
     /// process's standard input. We use this for remote hosts to drive
