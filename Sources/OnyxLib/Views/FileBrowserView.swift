@@ -86,7 +86,18 @@ struct FileBrowserView: View {
                             onViewDiff: browser.gitChangedFileForViewing().map { file in
                                 { browser.gitManager.fetchFileDiff(file) }
                             },
-                            onSelectionChange: { browser.currentSelection = $0 }
+                            onSelectionChange: { browser.currentSelection = $0 },
+                            scrollToLine: browser.targetLine,
+                            onNavigate: { kind, line, char in
+                                guard let path = browser.currentPath,
+                                      let name = browser.viewingFileName,
+                                      let host = appState.activeHost else { return }
+                                let full = path.hasSuffix("/") ? "\(path)\(name)" : "\(path)/\(name)"
+                                Task {
+                                    await appState.lsp.navigate(kind, filePath: full,
+                                                                line: line, character: char, host: host)
+                                }
+                            }
                         )
                     } else if browser.gitManager.showLog {
                         GitLogView(gitManager: browser.gitManager, accentColor: appState.accentColor)
@@ -188,6 +199,12 @@ struct FileBrowserView: View {
             RecentFilesBar(appState: appState, browser: browser)
         }
         .background(Color(nsColor: NSColor(white: 0.06, alpha: 0.95)))
+        .overlay(alignment: .bottom) {
+            if appState.lsp.panelVisible {
+                CodeNavResultsView(appState: appState, browser: browser)
+                    .transition(.move(edge: .bottom))
+            }
+        }
         .onChange(of: appState.allSessions.count) {
             // Auto-retry if we had a connectivity error and sessions just appeared
             if let error = browser.error,
@@ -1023,6 +1040,11 @@ struct SelectableCodeView: NSViewRepresentable {
     let attributed: AttributedString
     let fontSize: CGFloat
     let onSelectionChange: (String) -> Void
+    /// Reports the caret's (1-based line, 0-based UTF-16 char) as it moves —
+    /// the position a code-navigation query runs at.
+    var onPosition: ((Int, Int) -> Void)?
+    /// When set, scroll to and highlight this 1-based line (a nav result).
+    var scrollToLine: Int?
 
     private var plainString: String { String(attributed.characters) }
 
@@ -1056,15 +1078,50 @@ struct SelectableCodeView: NSViewRepresentable {
         guard let tv = scroll.documentView as? NSTextView else { return }
         if tv.string != plainString {
             context.coordinator.apply(attributed, to: tv, fontSize: fontSize)
+            context.coordinator.lastScrolledLine = nil   // new content → allow re-scroll
+        }
+        // Jump to a nav-result line once per distinct request.
+        if let line = scrollToLine, line != context.coordinator.lastScrolledLine {
+            context.coordinator.lastScrolledLine = line
+            // Defer so layout is complete before we compute/scroll the range.
+            DispatchQueue.main.async { context.coordinator.scroll(to: line, in: tv) }
         }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(onSelectionChange: onSelectionChange) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onSelectionChange: onSelectionChange, onPosition: onPosition)
+    }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         let onSelectionChange: (String) -> Void
-        init(onSelectionChange: @escaping (String) -> Void) {
+        let onPosition: ((Int, Int) -> Void)?
+        var lastScrolledLine: Int?
+        init(onSelectionChange: @escaping (String) -> Void, onPosition: ((Int, Int) -> Void)?) {
             self.onSelectionChange = onSelectionChange
+            self.onPosition = onPosition
+        }
+
+        /// Scroll to and select a 1-based line.
+        func scroll(to line: Int, in tv: NSTextView) {
+            let range = Self.rangeForLine(line, in: tv.string as NSString)
+            tv.setSelectedRange(range)
+            tv.scrollRangeToVisible(range)
+            tv.showFindIndicator(for: range)   // brief highlight so it's findable
+        }
+
+        /// Character range of a 1-based line (excluding its trailing newline).
+        static func rangeForLine(_ line: Int, in s: NSString) -> NSRange {
+            let len = s.length
+            var idx = 0, current = 1
+            while current < line && idx < len {
+                let nl = s.range(of: "\n", options: [], range: NSRange(location: idx, length: len - idx))
+                if nl.location == NSNotFound { idx = len; break }
+                idx = nl.location + 1; current += 1
+            }
+            let start = min(idx, len)
+            let nl = s.range(of: "\n", options: [], range: NSRange(location: start, length: len - start))
+            let end = nl.location == NSNotFound ? len : nl.location
+            return NSRange(location: start, length: max(0, end - start))
         }
 
         /// Build the NSAttributedString ourselves: the SwiftUI →
@@ -1093,6 +1150,18 @@ struct SelectableCodeView: NSViewRepresentable {
             let range = tv.selectedRange()
             let sel = range.length > 0 ? (tv.string as NSString).substring(with: range) : ""
             onSelectionChange(sel)
+
+            // Report the caret's line/char so a nav query knows where to look.
+            let s = tv.string as NSString
+            let loc = min(range.location, s.length)
+            var line = 1, lineStart = 0, i = 0
+            while i < loc {
+                if s.character(at: i) == 0x0A { line += 1; lineStart = i + 1 }
+                i += 1
+            }
+            // UTF-16 offset within the line (LSP's `character` unit).
+            let character = loc - lineStart
+            onPosition?(line, character)
         }
     }
 }
@@ -1106,6 +1175,16 @@ struct FileContentView: View {
     var onViewDiff: (() -> Void)?
     /// Reports the user's live text selection up to the manager.
     var onSelectionChange: ((String) -> Void)?
+    /// Scroll to this 1-based line when it changes (a nav-result jump).
+    var scrollToLine: Int?
+    /// Run a code-navigation query at the caret (kind, 1-based line, 0-based char).
+    var onNavigate: ((NavKind, Int, Int) -> Void)?
+
+    @State private var caretLine = 1
+    @State private var caretChar = 0
+
+    /// Code intelligence is Java-only for now.
+    private var codeNavAvailable: Bool { fileName.hasSuffix(".java") && onNavigate != nil }
 
     private var highlightedContent: AttributedString {
         SyntaxHighlighter.highlight(content, fileName: fileName)
@@ -1115,6 +1194,32 @@ struct FileContentView: View {
         VStack(spacing: 0) {
             // Action bar
             HStack {
+                if codeNavAvailable {
+                    Menu {
+                        ForEach([NavKind.implementation, .subtypes, .supertypes,
+                                 .references, .definition], id: \.self) { kind in
+                            Button {
+                                onNavigate?(kind, caretLine, caretChar)
+                            } label: {
+                                Label(kind.label, systemImage: kind.systemImage)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "point.3.filled.connected.trianglepath.dotted")
+                                .font(.system(size: 10))
+                            Text("Navigate")
+                                .font(.system(size: 10, design: .monospaced))
+                        }
+                        .foregroundColor(accentColor.opacity(0.8))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("Code navigation at the cursor (subclasses, implementors, references…)")
+
+                    Divider().frame(height: 12)
+                }
+
                 if let viewDiff = onViewDiff {
                     Button(action: viewDiff) {
                         HStack(spacing: 4) {
@@ -1150,7 +1255,9 @@ struct FileContentView: View {
             SelectableCodeView(
                 attributed: highlightedContent,
                 fontSize: 12,
-                onSelectionChange: { onSelectionChange?($0) }
+                onSelectionChange: { onSelectionChange?($0) },
+                onPosition: { line, char in caretLine = line; caretChar = char },
+                scrollToLine: scrollToLine
             )
         }
     }

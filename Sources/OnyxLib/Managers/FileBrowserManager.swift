@@ -31,6 +31,9 @@ public class FileBrowserManager: ObservableObject {
     @Published public var viewingFileName: String?
     /// True when the file can't be previewed (binary, unknown format)
     @Published public var isUnsupportedFile = false
+    /// When set, the file viewer scrolls to (and highlights) this 1-based line
+    /// after the content loads. Used to land on a code-navigation result.
+    @Published public var targetLine: Int?
     @Published public var isLoading = false
     @Published public var error: String?
     @Published public var showAddFolder = false
@@ -325,6 +328,7 @@ public class FileBrowserManager: ObservableObject {
         if entry.isDirectory {
             navigateTo(fullPath)
         } else {
+            targetLine = nil   // manual open — don't jump to a stale nav line
             readFile(fullPath, name: entry.name)
         }
     }
@@ -337,6 +341,7 @@ public class FileBrowserManager: ObservableObject {
         viewingFileName = nil
         isUnsupportedFile = false
         currentSelection = ""
+        targetLine = nil
         if wasSearchActiveBeforeFile {
             isSearchActive = true
             wasSearchActiveBeforeFile = false
@@ -348,6 +353,16 @@ public class FileBrowserManager: ObservableObject {
     /// back-to-search behaviour is unit-testable without remote I/O.
     public func readFileFromSearch(_ path: String, name: String) {
         beginOpenFromSearch(parentOf: path)
+        readFile(path, name: name)
+    }
+
+    /// Open a file by full path and scroll to a specific 1-based line — used
+    /// by code-navigation results ("go to this implementor / reference").
+    /// Reuses the search-open bookkeeping so closing returns you where you were.
+    public func openAtLocation(path: String, line: Int) {
+        let name = (path as NSString).lastPathComponent
+        beginOpenFromSearch(parentOf: path)
+        targetLine = line
         readFile(path, name: name)
     }
 
