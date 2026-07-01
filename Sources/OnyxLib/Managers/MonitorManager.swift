@@ -98,28 +98,65 @@ public class MonitorManager: ObservableObject {
         useShortInterval.toggle()
     }
 
+    // Bucketing is O(60 × samples) and SwiftUI calls these every redraw. The
+    // inputs only change when a new sample arrives (every poll) or, in
+    // 1-minute mode, when the wall-clock minute rolls over — so memoize on a
+    // cheap key and skip the rebuild on the many redraws in between. All access
+    // is on the main thread (samples are appended via DispatchQueue.main.async),
+    // so the cache needs no locking.
+    private struct BucketKey: Equatable {
+        let host: UUID?
+        let lastSampleTS: TimeInterval
+        let count: Int
+        let shortInterval: Bool
+        let minute: Int          // 0 in short-interval mode (time-independent)
+    }
+    private var bucketCache: [String: (key: BucketKey, value: [Double])] = [:]
+
+    private func bucketKey() -> BucketKey {
+        BucketKey(host: appState.activeHost?.id,
+                  lastSampleTS: samples.last?.timestamp.timeIntervalSince1970 ?? 0,
+                  count: samples.count,
+                  shortInterval: useShortInterval,
+                  minute: useShortInterval ? 0 : Int(Date().timeIntervalSince1970 / 60))
+    }
+
+    private func cachedBucket(_ label: String, _ compute: () -> [Double]) -> [Double] {
+        let key = bucketKey()
+        if let hit = bucketCache[label], hit.key == key { return hit.value }
+        let value = compute()
+        bucketCache[label] = (key, value)
+        return value
+    }
+
     /// Get bucketed values for the grid chart. Returns up to 60 buckets.
     public func bucketedCPU() -> [Double] {
-        return bucket(samples.map { ($0.timestamp, $0.cpuUsage) }, for: "cpu")
+        cachedBucket("cpu") {
+            self.bucket(self.samples.map { ($0.timestamp, $0.cpuUsage) }, for: "cpu")
+        }
     }
 
     /// Bucketed memory.
     public func bucketedMemory() -> [Double] {
-        return bucket(samples.map { s -> (Date, Double?) in
-            guard let u = s.memUsed, let t = s.memTotal, t > 0 else { return (s.timestamp, nil) }
-            return (s.timestamp, (u / t) * 100)
-        }, for: "mem")
+        cachedBucket("mem") {
+            self.bucket(self.samples.map { s -> (Date, Double?) in
+                guard let u = s.memUsed, let t = s.memTotal, t > 0 else { return (s.timestamp, nil) }
+                return (s.timestamp, (u / t) * 100)
+            }, for: "mem")
+        }
     }
 
     /// Bucketed gpu.
     public func bucketedGPU() -> [Double] {
-        let data = bucket(samples.map { ($0.timestamp, $0.gpuUsage) }, for: "gpu")
-        // If GPU was ever seen but current data is empty (transient failure),
-        // return zeros to keep the chart visible
-        if data.isEmpty && gpuEverSeen {
-            return Array(repeating: 0.0, count: 60)
+        cachedBucket("gpu") {
+            let data = self.bucket(self.samples.map { ($0.timestamp, $0.gpuUsage) }, for: "gpu")
+            // If GPU was ever seen but current data is empty (transient
+            // failure), return zeros to keep the chart visible.
+            if data.isEmpty && self.gpuEverSeen {
+                return Array(repeating: 0.0, count: 60)
+            }
+            return data
         }
-        return data
     }
 
     private func bucket(_ data: [(Date, Double?)], for label: String) -> [Double] {

@@ -37,6 +37,26 @@ final class MonitorBucketTests: XCTestCase {
         XCTAssertEqual(buckets[0], 0.0, accuracy: 0.01, "Oldest bucket with no data should be 0")
     }
 
+    func testBucketedCPU_memoization_invalidatesWhenSamplesChange() {
+        let state = AppState()
+        let monitor = MonitorManager(appState: state)
+        monitor.useShortInterval = true
+
+        monitor.injectSamples([MonitorSample(timestamp: Date(), cpuUsage: 10.0)])
+        let first = monitor.bucketedCPU()
+        // Cache hit: identical inputs → identical output.
+        XCTAssertEqual(monitor.bucketedCPU(), first, "repeated call must match (memoized)")
+        XCTAssertEqual(first.last ?? -1, 10.0, accuracy: 0.01)
+
+        // A new sample (new last-timestamp) must invalidate the cache.
+        monitor.injectSamples([
+            MonitorSample(timestamp: Date(), cpuUsage: 10.0),
+            MonitorSample(timestamp: Date().addingTimeInterval(5), cpuUsage: 80.0),
+        ])
+        XCTAssertEqual(monitor.bucketedCPU().last ?? -1, 80.0, accuracy: 0.01,
+                       "cache must refresh when samples change")
+    }
+
     func testBucketedCPU_shortInterval_usesDirectValues() {
         let state = AppState()
         let monitor = MonitorManager(appState: state)
