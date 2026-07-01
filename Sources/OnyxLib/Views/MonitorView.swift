@@ -299,11 +299,13 @@ struct MonitorView: View {
         }
         .onAppear {
             dockerStats.startPolling()
+            monitor.setOverlayVisible(true)   // fast 5s cadence while on screen
             // Trigger an immediate pool status publish via notification
             NotificationCenter.default.post(name: .refreshPoolStatus, object: nil)
         }
         .onDisappear {
             dockerStats.stopPolling()
+            monitor.setOverlayVisible(false)  // drop to slow background cadence
         }
         // Scale every `.monitorFont(...)` in this view tree by the user's
         // UI font size preference. Default (uiFontSize == 12) → 1.0.

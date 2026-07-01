@@ -76,14 +76,18 @@ public class MonitorManager: ObservableObject {
         self.appState = appState
     }
 
+    /// Fast cadence while the overlay is on screen; slow cadence when it's
+    /// hidden (keeps a little history warm so the chart isn't empty on reopen,
+    /// without spawning a stats subprocess every 5s in the background).
+    static let activeInterval: TimeInterval = 5
+    static let idleInterval: TimeInterval = 30
+    private var overlayVisible = false
+
     /// Start polling.
     public func startPolling() {
         guard !isPolling else { return }
         isPolling = true
-        poll() // immediate first poll
-        timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            self?.poll()
-        }
+        rescheduleTimer(pollNow: true)
     }
 
     /// Stop polling.
@@ -91,6 +95,24 @@ public class MonitorManager: ObservableObject {
         isPolling = false
         timer?.invalidate()
         timer = nil
+    }
+
+    /// Tell the manager whether the monitor overlay is currently visible so it
+    /// can poll at the fast cadence only when someone's looking. Called from
+    /// MonitorView.onAppear/onDisappear.
+    public func setOverlayVisible(_ visible: Bool) {
+        guard visible != overlayVisible else { return }
+        overlayVisible = visible
+        if isPolling { rescheduleTimer(pollNow: visible) }
+    }
+
+    private func rescheduleTimer(pollNow: Bool) {
+        timer?.invalidate()
+        if pollNow { poll() }
+        let interval = overlayVisible ? Self.activeInterval : Self.idleInterval
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.poll()
+        }
     }
 
     /// Toggle interval.
