@@ -119,8 +119,7 @@ map for requests, auto-answers server→client requests, surfaces notifications
   **serialize start** per workspace (the `-data` lock, finding #6); await
   readiness (`ServiceReady`), then `didOpen` the target file with the exact
   bytes the viewer renders; run the query with the poll-until-nonempty fallback.
-- **Workspace root detection:** walk up from the file to the nearest `pom.xml`
-  / `build.gradle[.kts]`; fall back to the browsed folder.
+- **Workspace root detection:** see "Workspaces vs. favorites" below.
 - **Teardown:** idle-evict (timer, e.g. 10 min no queries → shutdown+exit); on
   host switch, window close, and sleep — hook the existing cleanup points
   (`cleanupStaleMuxSockets`, terminal teardown). Cap concurrent servers
@@ -128,6 +127,42 @@ map for requests, auto-answers server→client requests, surfaces notifications
 - **Threading:** reader off-main; results marshalled to main; **re-verify the
   active host/workspace at every async boundary** before mutating published
   state (ADR-001 pattern, as `TerminalSessionManager.reconnect()` does).
+
+### Workspaces vs. favorites
+
+**A favorite is not a workspace, and neither derives from the other.** A
+favorite (`SavedFolder`) is a UI bookmark — navigation only, can sit anywhere
+(a whole repo, a deep `src/main/java/...` subdir, or a dir holding several
+unrelated projects). A **workspace** is a *build/project root* that jdtls
+imports, defined by the code's structure. Conflating them is the trap; keeping
+them orthogonal dissolves the nesting/overlap questions.
+
+**Resolution** — on a nav query for a file, walk *up* from the file:
+
+1. **`.git` is the hard ceiling** — a workspace never spans more than one repo,
+   and we never ascend past the repo root.
+2. Workspace root = the **highest** dir (up to the git root) containing a build
+   file (`pom.xml` / `settings.gradle[.kts]` / `build.gradle[.kts]`). *Highest,
+   not nearest*, so a **multi-module aggregator wins over a leaf module** and
+   jdtls resolves cross-module. (Nearest would silently break that.)
+3. No build file up to the git root → workspace = git root (looser mode). No
+   `.git` → fall back to the enclosing favorite/browsed dir, capped at a max
+   ascent so we never wander to `/`.
+
+**Consequences (the answers to the obvious questions):**
+
+- **Not** one workspace per favorite. Workspaces are **discovered lazily** from
+  the first query in a project — we never pre-spin a JVM per favorite.
+- A **favorite nested in another favorite** is a non-issue: both resolve *up* to
+  the same root → **one workspace, one jdtls**, deduped by resolved root path.
+- Existing browser concepts (`SavedFolder`, `activeFolders`, `currentPath`) are
+  **unchanged and navigation-only**. "Workspace" is an internal grouping keyed
+  `(hostID, resolvedRoot)`; the user at most sees an "indexing *root*…" hint.
+- A **monorepo favorite** holding several projects correctly yields several
+  scoped workspaces (different files → different roots); the concurrent-server
+  cap + idle-evict keep it bounded.
+- A file that resolves to **no project** → nav degrades gracefully (disabled /
+  "no project" state), never a spurious server.
 
 ### UI
 
