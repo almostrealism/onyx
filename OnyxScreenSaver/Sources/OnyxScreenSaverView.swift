@@ -43,7 +43,13 @@ public final class OnyxScreenSaverView: ScreenSaverView {
         // and orbit motion, low enough that we stay inside the per-frame
         // budget on integrated GPUs and avoid visible stuttering.
         sceneView.preferredFramesPerSecond = 24
-        sceneView.isPlaying = true
+        // Do NOT start rendering here. macOS instantiates this view for the
+        // System Settings preview and for thumbnail generation, and in those
+        // cases it may NEVER call startAnimation(). If we start the SceneKit
+        // render loop (and the scene's data-driver timers) in init, they run
+        // forever off-screen — that's the `legacyScreenSaver` idle-CPU bug.
+        // Rendering + data drivers are gated on startAnimation()/stopAnimation().
+        sceneView.isPlaying = false
         addSubview(sceneView)
 
         let scene = SculptureScene(isPreview: isPreview)
@@ -57,12 +63,14 @@ public final class OnyxScreenSaverView: ScreenSaverView {
 
     public override func startAnimation() {
         super.startAnimation()
-        sceneView.isPlaying = true
+        sceneView.isPlaying = true      // resume the SceneKit render loop
+        sculpture?.start()              // resume live/mock data drivers
     }
 
     public override func stopAnimation() {
         super.stopAnimation()
-        sceneView.isPlaying = false
+        sceneView.isPlaying = false     // pause rendering (halts per-frame physics)
+        sculpture?.stop()               // stop the reader + mock timers
     }
 
     public override func animateOneFrame() {

@@ -51,6 +51,8 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
 
     private let reader = CPUStreamReader()
     private var liveDataActive = false
+    /// True between start() and stop(). Data drivers only run while animating.
+    private var running = false
 
     // Mock driver state — used when live data isn't available.
     private var mockBuffers: [String: [CPUSample]] = [:]
@@ -68,25 +70,43 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
         // by syncBalls when a stream snapshot arrives. Until then, no
         // balls in the scene — the totems fly freely.
 
-        // Live reader runs everywhere — the System Settings preview also
-        // benefits if Onyx is running and broadcasting real data.
+        // Wire the reader callbacks, but DON'T start any timers here — the
+        // data drivers are started by start(), which the screensaver view
+        // calls from startAnimation(). Starting them in init would spin the
+        // reader + mock timers forever for a preview/thumbnail instance that
+        // never animates (the idle-CPU bug).
         reader.onUpdate = { [weak self] hosts, weeklyHours, weeklyProjects in
             self?.handleLiveUpdate(hosts: hosts,
                                    weeklyHours: weeklyHours,
                                    weeklyProjects: weeklyProjects)
         }
         reader.onIdle = { [weak self] in self?.handleIdle() }
-        reader.start()
-
-        // Mock driver starts immediately so we have something on screen
-        // during the first 500ms before the reader has fired its first tick.
-        // It pauses the moment live data arrives.
-        startMockDriver()
     }
 
     deinit {
         mockTimer?.invalidate()
         reader.stop()
+    }
+
+    // MARK: - Lifecycle (driven by the screensaver's start/stopAnimation)
+
+    /// Begin the live reader + mock fallback. Idempotent.
+    func start() {
+        guard !running else { return }
+        running = true
+        reader.start()
+        // Show something immediately until the first live tick; pauses the
+        // moment real data arrives.
+        if !liveDataActive { startMockDriver() }
+    }
+
+    /// Stop all data drivers so nothing runs while the saver is inactive.
+    /// (Rendering itself is paused by the view via SCNView.isPlaying = false.)
+    func stop() {
+        guard running else { return }
+        running = false
+        reader.stop()
+        stopMockDriver()
     }
 
     // MARK: - Data source coordination
@@ -126,9 +146,7 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
             liveDataActive = false
             removeAllTotems()
         }
-        if mockTimer == nil {
-            startMockDriver()
-        }
+        if running { startMockDriver() }   // don't spin a timer while stopped
     }
 
     // MARK: - Update / layout
@@ -492,6 +510,7 @@ final class SculptureScene: NSObject, SCNSceneRendererDelegate {
     ]
 
     private func startMockDriver() {
+        guard mockTimer == nil else { return }   // never stack two mock timers
         mockStartTime = Date().timeIntervalSince1970
         mockBuffers.removeAll()
 
