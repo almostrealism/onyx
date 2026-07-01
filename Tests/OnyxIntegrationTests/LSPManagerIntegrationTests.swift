@@ -53,6 +53,41 @@ final class LSPManagerIntegrationTests: XCTestCase {
         appState.lsp.shutdownAll()
     }
 
+    /// Exercises the REMOTE path (remoteLSPCommand ssh launch + remoteScript
+    /// workspace resolution) — the production transport. Gated on env pointing
+    /// at a reachable ssh host with jdtls installed, e.g. the loopback sshd:
+    ///   ONYX_LSP_SSH_HOST=127.0.0.1 ONYX_LSP_SSH_USER=$USER \
+    ///   ONYX_LSP_SSH_PORT=2222 ONYX_LSP_SSH_IDENTITY=~/.ssh/onyx_spike \
+    ///   swift test --filter test_implementation_overSSH
+    func test_implementation_overSSH() async throws {
+        try requireEnvironment()
+        let env = ProcessInfo.processInfo.environment
+        guard let sshHost = env["ONYX_LSP_SSH_HOST"] else {
+            throw XCTSkip("set ONYX_LSP_SSH_HOST (+ USER/PORT/IDENTITY) to run the SSH path")
+        }
+        var host = HostConfig.localhost
+        host.id = UUID()                 // a real (non-local) host
+        host.label = "loopback"
+        host.ssh.host = sshHost
+        host.ssh.user = env["ONYX_LSP_SSH_USER"] ?? NSUserName()
+        host.ssh.port = Int(env["ONYX_LSP_SSH_PORT"] ?? "22") ?? 22
+        host.ssh.identityFile = (env["ONYX_LSP_SSH_IDENTITY"] ?? "") as String
+
+        let appState = AppState()
+        appState.addHost(host)
+
+        let shape = sampleRoot + "/src/main/java/com/onyx/spike/Shape.java"
+        await appState.lsp.navigate(.implementation, filePath: shape, line: 4, character: 17,
+                                    host: host)
+
+        guard case let .results(_, _, groups) = appState.lsp.state else {
+            XCTFail("expected results over SSH, got \(appState.lsp.state)"); return
+        }
+        let files = Set(groups.map(\.fileName))
+        XCTAssertTrue(files.contains("Circle.java"), "implementors over SSH: \(files)")
+        appState.lsp.shutdownAll()
+    }
+
     func test_subtypes_findsSubclasses() async throws {
         try requireEnvironment()
 
