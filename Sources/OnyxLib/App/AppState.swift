@@ -264,17 +264,16 @@ public class AppState: ObservableObject {
     // Host being edited for key setup
     @Published public var keySetupHostID: UUID?
 
-    private var monitorCancellable: AnyCancellable?
     private var favoritesCancellable: AnyCancellable?
     private var appearanceCancellable: AnyCancellable?
     private var topologyCancellable: AnyCancellable?
-    /// Monitor.
+    /// Monitor. NOTE: intentionally does NOT forward objectWillChange into
+    /// AppState — it publishes every ~5s and forwarding re-rendered the whole
+    /// app tree each tick. Views that show monitor data (MonitorView,
+    /// MonitorSimpleView) @ObservedObject it directly, scoping redraws to the
+    /// overlay subtree.
     public lazy var monitor: MonitorManager = {
-        let m = MonitorManager(appState: self)
-        monitorCancellable = m.objectWillChange.sink { [weak self] _ in
-            self?.objectWillChange.send()
-        }
-        return m
+        MonitorManager(appState: self)
     }()
 
     private var lspCancellable: AnyCancellable?
@@ -350,14 +349,11 @@ public class AppState: ObservableObject {
         saveLocalSessions()
     }
 
-    private var dockerStatsCancellable: AnyCancellable?
-    /// Docker stats.
+    /// Docker stats. Like `monitor`, does NOT forward objectWillChange into
+    /// AppState (it polls every ~5s while the overlay is open). Its views
+    /// (MonitorStatsView, MonitorSimpleView) @ObservedObject it directly.
     public lazy var dockerStats: DockerStatsManager = {
-        let d = DockerStatsManager(appState: self)
-        dockerStatsCancellable = d.objectWillChange.sink { [weak self] _ in
-            self?.objectWillChange.send()
-        }
-        return d
+        DockerStatsManager(appState: self)
     }()
 
     private var artifactCancellable: AnyCancellable?

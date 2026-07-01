@@ -56,9 +56,20 @@ private func formatMB(_ mb: Double) -> String {
 
 struct MonitorView: View {
     @ObservedObject var appState: AppState
+    // Observe these high-frequency managers DIRECTLY rather than through
+    // appState. They publish every ~5s; if their change forwarded into
+    // appState.objectWillChange it would re-render the entire app tree
+    // (terminal, file browser, notes…) every tick. Observing them here scopes
+    // the 5s redraw to the monitor overlay subtree. See the perf work and the
+    // removed forwarding sinks in AppState.
+    @ObservedObject private var monitor: MonitorManager
+    @ObservedObject private var dockerStats: DockerStatsManager
 
-    private var monitor: MonitorManager { appState.monitor }
-    private var dockerStats: DockerStatsManager { appState.dockerStats }
+    init(appState: AppState) {
+        self.appState = appState
+        self.monitor = appState.monitor
+        self.dockerStats = appState.dockerStats
+    }
 
     var body: some View {
         ZStack {
