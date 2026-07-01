@@ -277,6 +277,16 @@ public class AppState: ObservableObject {
         return m
     }()
 
+    private var lspCancellable: AnyCancellable?
+    /// Code navigation (LSP / jdtls). Per-workspace language servers.
+    public lazy var lsp: LSPManager = {
+        let m = LSPManager(appState: self)
+        lspCancellable = m.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        return m
+    }()
+
     private var claudeSessionCancellable: AnyCancellable?
     /// Claude sessions.
     public lazy var claudeSessions: ClaudeSessionManager = {
