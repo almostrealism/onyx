@@ -14,9 +14,17 @@ final class JDTLSBootstrapTests: XCTestCase {
         XCTAssertEqual(JDTLSBootstrap.parseJavaMajor(#"java version "1.8.0_401""#), 8)
     }
 
+    func test_parseJavaMajor_unquotedDoubleDashFormat() {
+        // `java --version` output has no quotes.
+        XCTAssertEqual(JDTLSBootstrap.parseJavaMajor("java 21.0.2 2024-01-16 LTS"), 21)
+        XCTAssertEqual(JDTLSBootstrap.parseJavaMajor("openjdk 17.0.9 2023-10-17"), 17)
+    }
+
     func test_parseJavaMajor_garbage() {
         XCTAssertNil(JDTLSBootstrap.parseJavaMajor("command not found: java"))
         XCTAssertNil(JDTLSBootstrap.parseJavaMajor(""))
+        // The conda "Picked up" noise line must NOT parse as a version.
+        XCTAssertNil(JDTLSBootstrap.parseJavaMajor("Picked up JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8"))
     }
 
     // MARK: preflight parsing + derived flags
@@ -68,6 +76,10 @@ final class JDTLSBootstrapTests: XCTestCase {
         XCTAssertTrue(s.contains("java -version"))
         XCTAssertTrue(s.contains("python3"))
         XCTAssertTrue(s.contains("~/.onyx/jdtls/bin/jdtls"), "jdtls path unquoted so ~ expands")
+        // Must skip the JAVA_TOOL_OPTIONS "Picked up" noise and grab the real
+        // version line, not blindly take head -1.
+        XCTAssertTrue(s.contains("picked up"), "should filter the Picked up noise line")
+        XCTAssertTrue(s.contains("grep -i 'version'"), "should extract the version line")
     }
 
     func test_installDir_derivedFromLauncherPath() {

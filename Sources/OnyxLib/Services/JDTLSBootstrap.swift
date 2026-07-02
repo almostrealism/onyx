@@ -34,12 +34,18 @@ public enum JDTLSBootstrap {
         public var canInstall: Bool { !hasJDTLS && javaOK && hasPython }
     }
 
-    /// Script that prints three parseable lines: the raw `java -version` line,
+    /// Script that prints three parseable lines: the java version line,
     /// python3 presence, and whether the jdtls launcher exists.
     /// `jdtlsPath` is used unquoted so a leading `~` expands on the remote.
+    ///
+    /// The java line is extracted with `grep -i version` (skipping any leading
+    /// `Picked up JAVA_TOOL_OPTIONS: …` line that JDKs emit to stderr when
+    /// `JAVA_TOOL_OPTIONS`/`_JAVA_OPTIONS` is set — common in conda/venv
+    /// environments). A naive `head -1` grabbed that noise line and wrongly
+    /// concluded Java was absent.
     public static func preflightScript(jdtlsPath: String) -> String {
         """
-        echo "JAVA_LINE=$(java -version 2>&1 | head -1)"
+        echo "JAVA_LINE=$(java -version 2>&1 | grep -iv 'picked up' | grep -i 'version' | head -1)"
         command -v python3 >/dev/null 2>&1 && echo "PY=yes" || echo "PY=no"
         [ -f \(jdtlsPath) ] && echo "JDTLS=yes" || echo "JDTLS=no"
         """
@@ -63,14 +69,25 @@ public enum JDTLSBootstrap {
         return Preflight(javaMajor: javaMajor, hasPython: hasPython, hasJDTLS: hasJDTLS)
     }
 
-    /// Extract the major version from a `java -version` first line such as
-    /// `openjdk version "21.0.2" 2024-01-16 LTS` (→ 21) or the legacy
-    /// `java version "1.8.0_401"` (→ 8).
+    /// Extract the major version from a java version line. Handles the quoted
+    /// `-version` form (`openjdk version "21.0.2" …` → 21, `java version
+    /// "1.8.0_401"` → 8) and the unquoted `--version` form (`java 21.0.2 …`,
+    /// `openjdk 21.0.2` → 21).
     static func parseJavaMajor(_ line: String) -> Int? {
-        guard let open = line.firstIndex(of: "\""),
-              let close = line[line.index(after: open)...].firstIndex(of: "\"") else { return nil }
-        let version = String(line[line.index(after: open)..<close])
-        let parts = version.split(separator: ".")
+        // Prefer a quoted version token; fall back to the first dotted/number
+        // token that isn't a word (handles the unquoted --version format).
+        let versionString: String
+        if let open = line.firstIndex(of: "\""),
+           let close = line[line.index(after: open)...].firstIndex(of: "\"") {
+            versionString = String(line[line.index(after: open)..<close])
+        } else if let token = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .map(String.init)
+            .first(where: { $0.first?.isNumber == true }) {
+            versionString = token
+        } else {
+            return nil
+        }
+        let parts = versionString.split(separator: ".")
         guard let first = parts.first, let firstNum = Int(first) else { return nil }
         if firstNum == 1, parts.count >= 2 { return Int(parts[1]) }  // 1.8 → 8
         return firstNum
