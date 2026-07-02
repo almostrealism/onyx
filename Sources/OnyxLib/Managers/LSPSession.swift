@@ -16,7 +16,10 @@
 
 import Foundation
 
-final class LSPSession {
+// @unchecked Sendable: all mutable state (buffer, pending, nextId, stopped) is
+// guarded by `lock`; the pipes/process are configured once in start(). We
+// synchronize manually, so we opt out of the compiler's automatic checking.
+final class LSPSession: @unchecked Sendable {
     private let cmd: String
     private let args: [String]
 
@@ -155,14 +158,19 @@ final class LSPSession {
         send(["jsonrpc": "2.0", "method": method, "params": params])
     }
 
+    /// Allocate the next request id under the lock. Synchronous (NSLock is
+    /// unavailable from async contexts, and we never hold it across an await).
+    private func allocateId() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        let id = nextId; nextId += 1
+        return id
+    }
+
     /// Send a request and await its result (or nil on timeout / server death).
     /// The continuation is resolved exactly once — by the response or the
     /// timeout, whichever comes first.
     func request(_ method: String, _ params: Any, timeout: TimeInterval) async -> Any? {
-        lock.lock()
-        let id = nextId; nextId += 1
-        lock.unlock()
-
+        let id = allocateId()
         return await withCheckedContinuation { (cont: CheckedContinuation<Any?, Never>) in
             lock.lock()
             if stopped {

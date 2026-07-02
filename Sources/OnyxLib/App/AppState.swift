@@ -279,18 +279,22 @@ public class AppState: ObservableObject {
     private var lspCancellable: AnyCancellable?
     /// Code navigation (LSP / jdtls). Per-workspace language servers.
     public lazy var lsp: LSPManager = {
-        let m = LSPManager(appState: self)
-        lspCancellable = m.objectWillChange.sink { [weak self] _ in
-            self?.objectWillChange.send()
+        // LSPManager is @MainActor and `lsp` is only ever first accessed on the
+        // main thread (Views, host removal), so assume main isolation here.
+        MainActor.assumeIsolated {
+            let m = LSPManager(appState: self)
+            lspCancellable = m.objectWillChange.sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            // Best-effort: stop remote language servers when the app quits. (The
+            // ssh child dying already EOFs jdtls, but this is tidier.)
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+            ) { [weak m] _ in
+                MainActor.assumeIsolated { m?.shutdownAll() }
+            }
+            return m
         }
-        // Best-effort: stop remote language servers when the app quits. (The
-        // ssh child dying already EOFs jdtls, but this is tidier.)
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
-        ) { [weak m] _ in
-            MainActor.assumeIsolated { m?.shutdownAll() }
-        }
-        return m
     }()
 
     private var claudeSessionCancellable: AnyCancellable?

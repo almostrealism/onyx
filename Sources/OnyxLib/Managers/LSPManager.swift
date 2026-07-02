@@ -58,7 +58,10 @@ public final class LSPManager: ObservableObject {
     }
     private var lastQuery: PendingQuery?
 
-    public nonisolated init(appState: AppState) {
+    // @MainActor init (the class is @MainActor). AppState constructs this via
+    // MainActor.assumeIsolated in its lazy var — `lsp` is only ever first
+    // accessed on the main thread.
+    public init(appState: AppState) {
         self.appState = appState
     }
 
