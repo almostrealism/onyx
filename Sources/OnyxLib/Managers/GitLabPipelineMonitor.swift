@@ -88,8 +88,16 @@ public final class GitLabPipelineMonitor: ObservableObject {
             self.inFlight = false
             self.isLoading = false
             self.lastError = firstError
-            // Preserve the user's configured order.
-            self.pipelines = specs.compactMap { collected[$0.id] }
+            // Preserve the user's configured order, deduping by id. `collected`
+            // (a dictionary) already can't trap on duplicate fetches, but two
+            // specs with the same id would still yield two rows sharing an
+            // Identifiable id, which breaks SwiftUI ForEach. (Mirrors
+            // WorkflowMonitor.ordered.)
+            var seen = Set<String>()
+            self.pipelines = specs.compactMap { spec -> PipelineStatus? in
+                guard seen.insert(spec.id).inserted else { return nil }
+                return collected[spec.id]
+            }
         }
     }
 
