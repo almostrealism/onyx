@@ -107,7 +107,10 @@ public class SessionNotesStore: ObservableObject {
     /// removed don't appear in the monitor view but the underlying note
     /// is preserved on disk for when the session comes back.
     public func activeNotes(in allSessions: [TmuxSession]) -> [(session: TmuxSession, note: SessionNote)] {
-        let byID = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
+        // uniquingKeysWith, not uniqueKeysWithValues: the latter TRAPS on a
+        // duplicate session id. Duplicates shouldn't happen, but a crash from
+        // transient session-list state isn't worth the risk — keep the first.
+        let byID = Dictionary(allSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return notes.values
             .compactMap { note in byID[note.sessionID].map { (session: $0, note: note) } }
             .sorted { $0.note.updated > $1.note.updated }

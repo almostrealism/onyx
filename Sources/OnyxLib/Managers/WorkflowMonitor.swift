@@ -199,8 +199,29 @@ public final class WorkflowMonitor: ObservableObject {
             self.isLoading = false
             self.lastError = firstError
             // Preserve user-facing order (the order in pipelineURLs).
-            let byId = Dictionary(uniqueKeysWithValues: collected.map { ($0.id, $0) })
-            self.pipelines = specs.compactMap { byId[$0.id] }
+            // Use uniquingKeysWith (NOT uniqueKeysWithValues) — two tracked
+            // URLs can parse to the same pipeline id (e.g. the same run added
+            // twice, or equivalent URL variants), and uniqueKeysWithValues
+            // TRAPS on a duplicate key, which crashed the app on every launch
+            // once such a URL was persisted. Keep the first status per id.
+            self.pipelines = Self.ordered(specs: specs, collected: collected)
+        }
+    }
+
+    /// Order fetched statuses by the user's `specs` order and dedup by id.
+    ///
+    /// Two tracked URLs can parse to the same pipeline id (the same run added
+    /// twice, or equivalent URL variants), so `collected` may hold duplicate
+    /// ids. `Dictionary(uniquingKeysWith:)` tolerates that — the old
+    /// `uniqueKeysWithValues` TRAPPED, crashing the app on every launch once
+    /// such a URL was persisted. We also dedup the output so no two rows share
+    /// an Identifiable id (which breaks SwiftUI ForEach).
+    static func ordered(specs: [PipelineSpec], collected: [PipelineStatus]) -> [PipelineStatus] {
+        let byId = Dictionary(collected.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var seen = Set<String>()
+        return specs.compactMap { spec -> PipelineStatus? in
+            guard seen.insert(spec.id).inserted else { return nil }
+            return byId[spec.id]
         }
     }
 

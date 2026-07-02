@@ -189,9 +189,13 @@ struct PipelinesSection: View {
         guard let spec = PipelineSpec.parse(url) else { return }
         switch spec.provider {
         case .github:
+            // Skip if an equivalent URL (same parsed id) is already tracked —
+            // duplicates produce colliding ids downstream.
+            guard !ghConfig.pipelineURLs.contains(where: { PipelineSpec.parse($0)?.id == spec.id }) else { return }
             ghConfig.pipelineURLs.append(url)
             WorkflowMonitor.shared.refresh()
         case .gitlab:
+            guard !glConfig.pipelineURLs.contains(where: { PipelineSpec.parse($0)?.id == spec.id }) else { return }
             glConfig.pipelineURLs.append(url)
             GitLabPipelineMonitor.shared.refresh()
         }
