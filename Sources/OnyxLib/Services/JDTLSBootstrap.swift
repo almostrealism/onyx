@@ -28,6 +28,9 @@ public enum JDTLSBootstrap {
         public var javaMajor: Int?      // nil = java not found / unparseable
         public var hasPython: Bool
         public var hasJDTLS: Bool
+        /// The raw java version line we captured (nil = nothing found on the
+        /// host). Surfaced in the error so failures are self-diagnosing.
+        public var javaLine: String?
 
         public var javaOK: Bool { (javaMajor ?? 0) >= JDTLSBootstrap.minJavaMajor }
         /// jdtls missing but everything needed to install + run it is present.
@@ -45,7 +48,13 @@ public enum JDTLSBootstrap {
     /// concluded Java was absent.
     public static func preflightScript(jdtlsPath: String) -> String {
         """
-        echo "JAVA_LINE=$(java -version 2>&1 | grep -iv 'picked up' | grep -i 'version' | head -1)"
+        _jv() { "$1" -version 2>&1 | grep -iv 'picked up' | grep -i 'version' | head -1; }
+        VER=""
+        JB="$(command -v java 2>/dev/null || true)"
+        [ -n "$JB" ] && VER="$(_jv "$JB")"
+        if [ -z "$VER" ] && [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ]; then VER="$(_jv "$JAVA_HOME/bin/java")"; fi
+        if [ -z "$VER" ] && [ -x /usr/libexec/java_home ]; then JH="$(/usr/libexec/java_home 2>/dev/null || true)"; [ -n "$JH" ] && VER="$(_jv "$JH/bin/java")"; fi
+        echo "JAVA_LINE=$VER"
         command -v python3 >/dev/null 2>&1 && echo "PY=yes" || echo "PY=no"
         [ -f \(jdtlsPath) ] && echo "JDTLS=yes" || echo "JDTLS=no"
         """
@@ -53,20 +62,22 @@ public enum JDTLSBootstrap {
 
     /// Parse the preflight probe output.
     public static func parsePreflight(_ output: String) -> Preflight {
-        var javaMajor: Int?
+        var javaLine: String?
         var hasPython = false
         var hasJDTLS = false
         for raw in output.components(separatedBy: "\n") {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("JAVA_LINE=") {
-                javaMajor = parseJavaMajor(String(line.dropFirst("JAVA_LINE=".count)))
+                let value = String(line.dropFirst("JAVA_LINE=".count)).trimmingCharacters(in: .whitespaces)
+                javaLine = value.isEmpty ? nil : value
             } else if line == "PY=yes" {
                 hasPython = true
             } else if line == "JDTLS=yes" {
                 hasJDTLS = true
             }
         }
-        return Preflight(javaMajor: javaMajor, hasPython: hasPython, hasJDTLS: hasJDTLS)
+        return Preflight(javaMajor: javaLine.flatMap(parseJavaMajor),
+                         hasPython: hasPython, hasJDTLS: hasJDTLS, javaLine: javaLine)
     }
 
     /// Extract the major version from a java version line. Handles the quoted

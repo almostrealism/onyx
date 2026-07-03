@@ -192,8 +192,13 @@ public final class LSPManager: ObservableObject {
                                   canInstall: true)
         }
         if !pf.javaOK {
-            let found = pf.javaMajor.map { "found Java \($0)" } ?? "Java not found"
-            return .setupRequired(reason: "Code intelligence needs Java \(JDTLSBootstrap.minJavaMajor)+ (\(found)).",
+            // Surface exactly what the host reported so a mis-detection is
+            // self-diagnosing rather than a flat "needs Java" dead end.
+            let found: String
+            if let major = pf.javaMajor { found = "found Java \(major)" }
+            else if let line = pf.javaLine { found = "saw: \(line)" }
+            else { found = "no java on the host's PATH / JAVA_HOME" }
+            return .setupRequired(reason: "Code intelligence needs Java \(JDTLSBootstrap.minJavaMajor)+ — \(found).",
                                   canInstall: false)
         }
         return .setupRequired(reason: "Installing jdtls needs python3 on the host.", canInstall: false)

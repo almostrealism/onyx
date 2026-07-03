@@ -73,13 +73,30 @@ final class JDTLSBootstrapTests: XCTestCase {
 
     func test_preflightScript_probesAllThree() {
         let s = JDTLSBootstrap.preflightScript(jdtlsPath: "~/.onyx/jdtls/bin/jdtls")
-        XCTAssertTrue(s.contains("java -version"))
+        XCTAssertTrue(s.contains("-version"))
         XCTAssertTrue(s.contains("python3"))
         XCTAssertTrue(s.contains("~/.onyx/jdtls/bin/jdtls"), "jdtls path unquoted so ~ expands")
         // Must skip the JAVA_TOOL_OPTIONS "Picked up" noise and grab the real
         // version line, not blindly take head -1.
         XCTAssertTrue(s.contains("picked up"), "should filter the Picked up noise line")
         XCTAssertTrue(s.contains("grep -i 'version'"), "should extract the version line")
+        // Robust java resolution: PATH, then JAVA_HOME, then macOS java_home.
+        XCTAssertTrue(s.contains("JAVA_HOME"), "should fall back to JAVA_HOME")
+        XCTAssertTrue(s.contains("java_home"), "should fall back to macOS java_home")
+    }
+
+    func test_parsePreflight_capturesRawJavaLine() {
+        let out = "JAVA_LINE=openjdk version \"21.0.2\"\nPY=yes\nJDTLS=no"
+        let p = JDTLSBootstrap.parsePreflight(out)
+        XCTAssertEqual(p.javaLine, "openjdk version \"21.0.2\"")
+        XCTAssertEqual(p.javaMajor, 21)
+    }
+
+    func test_parsePreflight_emptyJavaLine_isNil() {
+        // No java anywhere → empty JAVA_LINE → nil (not an empty string).
+        let p = JDTLSBootstrap.parsePreflight("JAVA_LINE=\nPY=yes\nJDTLS=no")
+        XCTAssertNil(p.javaLine)
+        XCTAssertNil(p.javaMajor)
     }
 
     func test_installDir_derivedFromLauncherPath() {
