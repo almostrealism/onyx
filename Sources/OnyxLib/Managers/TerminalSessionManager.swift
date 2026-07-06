@@ -834,7 +834,15 @@ class OnyxTerminalView: NSView {
                 if let target = targetSession {
                     self.appState.activeSession = target
                 }
-                self.connectToActiveSession()
+                // Re-grab keyboard focus after a reload if the terminal had it —
+                // otherwise the freshly-created terminal view isn't first
+                // responder and the user has to switch tabs to type again.
+                // restoreFocus() schedules staggered retries because a single
+                // makeFirstResponder can race the new view's layout/process
+                // start and silently fail.
+                let shouldFocus = self.appState.focusedComponent == .terminal
+                self.connectToActiveSession(grabFocus: shouldFocus)
+                if shouldFocus { self.restoreFocus() }
             }
         }
     }
@@ -1558,7 +1566,12 @@ class OnyxTerminalView: NSView {
                     return // user switched — don't reconnect the old session
                 }
             }
-            self.connectToActiveSession(isReconnect: true)
+            // Restore focus to the reconnected terminal if it was focused
+            // before the drop (same as reload/tab-switch), with staggered
+            // retries to survive the new view's layout/process-start race.
+            let shouldFocus = self.appState.focusedComponent == .terminal
+            self.connectToActiveSession(grabFocus: shouldFocus, isReconnect: true)
+            if shouldFocus { self.restoreFocus() }
         }
     }
 }
