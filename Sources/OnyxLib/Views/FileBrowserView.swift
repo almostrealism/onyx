@@ -768,6 +768,9 @@ struct NavigationBar: View {
                         if browser.isSearchActive {
                             browser.clearSearch()
                         } else {
+                            // Dispose any open file so the results show immediately
+                            // (the file view otherwise layers on top of search).
+                            browser.closeFile()
                             browser.isSearchActive = true
                         }
                     }) {

@@ -273,6 +273,24 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertEqual(b.searchResults.resultCount, 0, "results cleared on directory navigation")
     }
 
+    func testBeginFileSearch_disposesOpenFile() {
+        // Cmd+Shift+F while a file is open must dispose it so the results are
+        // immediately visible — otherwise the file view (rendered on top of
+        // search) traps the user, who has to hit Back repeatedly to escape.
+        let state = AppState()
+        state.hosts = [.localhost]
+        let b = state.fileBrowserManager
+        b.fileContent = "class Foo {}"
+        b.viewingFileName = "Foo.java"
+        b.currentSelection = ""   // no selection → no remote search spawned
+
+        state.beginFileSearch()
+
+        XCTAssertNil(b.fileContent, "starting a search must dispose the open file")
+        XCTAssertNil(b.viewingFileName)
+        XCTAssertTrue(b.isSearchActive, "search should be active after Cmd+Shift+F")
+    }
+
     // MARK: - search type filter
 
     func testSearchScript_noFilter_matchesAnyName() {

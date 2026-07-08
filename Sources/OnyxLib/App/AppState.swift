@@ -752,6 +752,12 @@ public class AppState: ObservableObject {
         let browser = fileBrowserManager
         let selection = browser.currentSelection.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Dispose any open file so the search results are immediately visible.
+        // The browser renders the file view on top of search, so leaving a file
+        // open traps the user — they'd have to hit Back repeatedly to reach the
+        // results. (selection was captured above, before closeFile clears it.)
+        browser.closeFile()
+
         if !showFullFileBrowser { activeRightPanel = .fileBrowser }
 
         // Land on the search home so the user searches the project root they
