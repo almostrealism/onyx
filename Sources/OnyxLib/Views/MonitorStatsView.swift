@@ -303,7 +303,11 @@ struct WeeklyTimeRatioBar: View {
 
 // MARK: - Timing.app Chart
 
-struct TimingChartSection: View {
+/// The weekly bar chart + stats half of the Timing.app data. Lives in the
+/// left-most overlay column; the heatmap (TimingHeatmapSection) sits in the
+/// middle column, since bar+stats is taller than the heatmap and pairing them
+/// side-by-side wasted vertical space.
+struct TimingBarSection: View {
     @ObservedObject var timing: TimingManager
     let accentColor: Color
 
@@ -354,14 +358,11 @@ struct TimingChartSection: View {
                 }
             }
 
-            // Top row: week bar chart (left) + 26-week heatmap (right).
-            // Wider gap pushes the bars narrower, countering the stubby
-            // over-wide look at common window sizes.
-            HStack(alignment: .top, spacing: 28) {
-                // Left group: the weekly project-ratio bar, then the daily
-                // bars. The ratio bar is exactly barAreaHeight tall and
-                // top-aligned, so its bottom lines up with the bars' bottom.
-                HStack(alignment: .top, spacing: 8) {
+            // Week bar chart: the weekly project-ratio bar, then the daily
+            // bars. The ratio bar is exactly barAreaHeight tall and
+            // top-aligned, so its bottom lines up with the bars' bottom.
+            // (The 26-week heatmap moved to its own middle-column section.)
+            HStack(alignment: .top, spacing: 8) {
                     if timing.projectTotals.count > 1 {
                         WeeklyTimeRatioBar(totals: timing.projectTotals,
                                            axis: .vertical,
@@ -403,13 +404,7 @@ struct TimingChartSection: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                }  // end left group (ratio bar + daily bars)
-
-                // 26-week heatmap, forced square cells
-                if !timing.heatmap.isEmpty {
-                    TimingHeatmapGrid(weeks: timing.heatmap, anchorMonday: timing.heatmapAnchorMonday)
-                }
-            }
+            }  // end bar row (ratio bar + daily bars)
 
             // Project totals legend
             if timing.projectTotals.count > 1 {
@@ -482,6 +477,28 @@ struct TimingChartSection: View {
                     .lineLimit(1)
             }
         }
+    }
+}
+
+/// The 26-week activity heatmap, centered in the middle overlay column. Split
+/// out of the timing section so it can sit next to (rather than under) the
+/// taller bar chart + stats, cutting wasted vertical space.
+struct TimingHeatmapSection: View {
+    @ObservedObject var timing: TimingManager
+    let accentColor: Color
+
+    var body: some View {
+        VStack(alignment: .center, spacing: 8) {
+            Text("LAST 26 WEEKS")
+                .monitorFont(size: 10, weight: .medium)
+                .foregroundColor(accentColor)
+                .tracking(2)
+
+            if !timing.heatmap.isEmpty {
+                TimingHeatmapGrid(weeks: timing.heatmap, anchorMonday: timing.heatmapAnchorMonday)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 

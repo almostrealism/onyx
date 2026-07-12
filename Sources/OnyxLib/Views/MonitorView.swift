@@ -71,6 +71,20 @@ struct MonitorView: View {
         self.dockerStats = appState.dockerStats
     }
 
+    /// One scrollable overlay column. Indicators are hidden — scrolling works
+    /// via trackpad/wheel, and the user asked for the cleanest possible chrome.
+    /// The caller sets the column's width (equal-split or fixed) via a frame.
+    @ViewBuilder
+    private func monitorColumn<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 16) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.bottom, 8)   // a little slack at the scroll end
+        }
+    }
+
     var body: some View {
         ZStack {
             // The overlay's tint. Driven by the opacity setting (via
@@ -155,36 +169,39 @@ struct MonitorView: View {
                         )
                         .padding(.horizontal, 40)
                     } else {
-                    // Main region: vertical split. Left ~65% holds timing,
-                    // CPU/MEM/GPU charts, then reminders directly underneath.
-                    // Right ~35% holds containers then connections.
+                    // Main region: three independently-scrollable columns.
+                    // Two columns left of the divider (timing bar+stats +
+                    // reminders | heatmap + work-tracking widgets) and one to
+                    // the right (~35%: CPU/MEM/GPU charts, containers,
+                    // connections). Each scrolls on its own so a long list
+                    // never pushes content off the bottom of the screen.
                     GeometryReader { geo in
                         let rightWidth = max(280, geo.size.width * 0.35)
                         HStack(alignment: .top, spacing: 0) {
-                            VStack(alignment: .leading, spacing: 16) {
-                                if appState.timing.isConfigured {
-                                    TimingChartSection(timing: appState.timing, accentColor: appState.accentColor)
-                                }
-                                // Two-column layout below the timing chart:
-                                // - Left:  reminders (often long; gets
-                                //          a column to itself)
-                                // - Right: session notes → PRs → pipelines
-                                //          (the work-tracking column,
-                                //          ordered the way work flows:
-                                //          jot a note, work on it, open
-                                //          a PR, watch the pipeline)
-                                HStack(alignment: .top, spacing: 16) {
-                                    VStack(alignment: .leading, spacing: 16) {
-                                        RemindersSection(appState: appState)
+                            // Column 1 + Column 2, left of the divider.
+                            HStack(alignment: .top, spacing: 16) {
+                                // Column 1: timing bar chart + stats (the tall
+                                // half), then reminders beneath it.
+                                monitorColumn {
+                                    if appState.timing.isConfigured {
+                                        TimingBarSection(timing: appState.timing, accentColor: appState.accentColor)
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                                    VStack(alignment: .leading, spacing: 16) {
-                                        SessionNotesSection(appState: appState)
-                                        PullRequestsSection(appState: appState)
-                                        PipelinesSection(appState: appState)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                                    RemindersSection(appState: appState)
                                 }
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                                // Column 2: the (shorter) heatmap centered up
+                                // top, then the work-tracking widgets in the
+                                // order work flows: note → PR → pipeline.
+                                monitorColumn {
+                                    if appState.timing.isConfigured {
+                                        TimingHeatmapSection(timing: appState.timing, accentColor: appState.accentColor)
+                                    }
+                                    SessionNotesSection(appState: appState)
+                                    PullRequestsSection(appState: appState)
+                                    PipelinesSection(appState: appState)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
                             }
                             .frame(maxWidth: .infinity, alignment: .topLeading)
                             .padding(.trailing, 20)
@@ -192,7 +209,8 @@ struct MonitorView: View {
                             Divider()
                                 .background(Color.white.opacity(0.1))
 
-                            VStack(alignment: .leading, spacing: 16) {
+                            // Column 3: CPU/MEM/GPU charts, containers, connections.
+                            monitorColumn {
                                 let cpuData = monitor.bucketedCPU()
                                 if !cpuData.isEmpty {
                                     GridChart(
