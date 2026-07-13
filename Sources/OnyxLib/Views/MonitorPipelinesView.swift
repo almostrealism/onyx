@@ -340,20 +340,25 @@ private struct PipelineRow: View {
             }
             .buttonStyle(.plain)
 
-            if hovering {
-                Button(action: onRemove) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.gray.opacity(0.8))
-                        .padding(4)
-                        .background(Color.black.opacity(0.4))
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .help("Stop tracking this pipeline")
-                .padding(.top, 4)
-                .padding(.trailing, 6)
+            // Always in the hierarchy (opacity-gated, NOT a conditional) so
+            // moving the pointer onto it doesn't insert a new view and flip the
+            // row's .onHover off — the bug that made the × show only where it
+            // couldn't be clicked. Hit-testing is gated so an invisible × never
+            // eats a click meant for the row itself.
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.gray.opacity(0.8))
+                    .padding(4)
+                    .background(Color.black.opacity(0.4))
+                    .clipShape(Circle())
             }
+            .buttonStyle(.plain)
+            .help("Stop tracking this pipeline")
+            .padding(.top, 4)
+            .padding(.trailing, 6)
+            .opacity(hovering ? 1 : 0)
+            .allowsHitTesting(hovering)
         }
         .onHover { hovering = $0 }
     }
