@@ -262,6 +262,7 @@ public class RemindersManager: ObservableObject {
 struct RemindersSection: View {
     @ObservedObject var appState: AppState
     @StateObject private var reminders = RemindersManager()
+    @ObservedObject private var flowtree = FlowtreeManager.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -279,6 +280,15 @@ struct RemindersSection: View {
                         .monitorFont(size: 10)
                         .foregroundColor(.gray.opacity(0.4))
                 }
+            }
+
+            // Transient result of a flowtree submit (auto-clears).
+            if let status = flowtree.submitStatus {
+                Text(status.message)
+                    .monitorFont(size: 10)
+                    .foregroundColor(status.isError ? Color.onyxRed : Color.onyxGreen)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             // Scope indicator — totals across ALL lists regardless of
@@ -390,6 +400,11 @@ private struct ReminderRow: View {
     let reminder: EKReminder
     @ObservedObject var appState: AppState
     let manager: RemindersManager
+    @ObservedObject private var flowtree = FlowtreeManager.shared
+    @ObservedObject private var flowtreeConfig = FlowtreeConfigStore.shared
+    @State private var isHovering = false
+
+    private var showSubmit: Bool { isHovering && !reminder.isCompleted }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -408,6 +423,13 @@ private struct ReminderRow: View {
 
             Spacer()
 
+            // Submit-to-flowtree affordance, revealed on hover. Opacity (not a
+            // conditional) so the row layout doesn't jump and the menu isn't
+            // dismissed when the label fades as the pointer moves onto it.
+            submitMenu
+                .opacity(showSubmit ? 1 : 0)
+                .allowsHitTesting(showSubmit)
+
             if let due = reminder.dueDateComponents, let label = dueLabel(due) {
                 Text(label)
                     .monitorFont(size: 10)
@@ -417,6 +439,48 @@ private struct ReminderRow: View {
             }
         }
         .padding(.vertical, 2)
+        .onHover { hovering in
+            isHovering = hovering
+            if hovering { flowtree.ensureLoaded() }   // warm the picker
+        }
+    }
+
+    /// Paper-plane menu: pick a workstream to submit this reminder to, or a
+    /// prompt to configure the endpoint when none is set.
+    @ViewBuilder
+    private var submitMenu: some View {
+        Menu {
+            if !flowtreeConfig.isConfigured {
+                Button("Configure Flowtree endpoint…") { appState.showSettings = true }
+            } else if flowtree.workstreams.isEmpty {
+                if flowtree.isLoading {
+                    Text("Loading workstreams…")
+                } else if let err = flowtree.lastError {
+                    Text(err)
+                    Button("Retry") { flowtree.refresh() }
+                } else {
+                    Text("No workstreams found")
+                    Button("Refresh") { flowtree.refresh() }
+                }
+            } else {
+                Text("Submit “\(reminder.title ?? "reminder")” to…")
+                ForEach(flowtree.workstreams) { ws in
+                    Button {
+                        Task { await flowtree.submit(reminder: reminder, to: ws) }
+                    } label: {
+                        Text(ws.subtitle.map { "\(ws.displayName)  —  \($0)" } ?? ws.displayName)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "paperplane")
+                .monitorFont(size: 11, design: .default)
+                .foregroundColor(appState.accentColor.opacity(0.75))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Submit this reminder to a flowtree workstream")
     }
 
     /// Compact due-date string for the trailing slot. Shows the time when

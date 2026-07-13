@@ -392,6 +392,7 @@ struct SettingsView: View {
                         SearchFilterSettingsSection(appState: appState)
                         GitHubSettingsSection()
                         GitLabSettingsSection()
+                        FlowtreeSettingsSection()
                     }
                 }
                 .frame(maxHeight: 500)
@@ -747,6 +748,60 @@ private struct TimezoneField: View {
         // Remove trailing empty entries
         while appState.appearance.extraTimezones.last?.isEmpty == true {
             appState.appearance.extraTimezones.removeLast()
+        }
+    }
+}
+
+/// Flowtree controller settings — endpoint URL + optional Cloudflare Access
+/// service-token (client id/secret). Once a URL is set, reminders can be
+/// submitted to a workstream from the monitor overlay.
+private struct FlowtreeSettingsSection: View {
+    @ObservedObject private var config = FlowtreeConfigStore.shared
+
+    private func field(_ placeholder: String, get: @escaping () -> String, set: @escaping (String) -> Void, secure: Bool = false) -> some View {
+        let binding = Binding(get: get, set: set).sanitizingStylizedText()
+        return Group {
+            if secure {
+                SecureField(placeholder, text: binding)
+            } else {
+                TextField(placeholder, text: binding)
+            }
+        }
+        .textFieldStyle(.plain)
+        .font(.system(size: 11, design: .monospaced))
+        .foregroundColor(.white.opacity(0.8))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Color.white.opacity(0.06))
+        .cornerRadius(3)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("FLOWTREE")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            HStack(spacing: 8) {
+                field("Controller URL (e.g. https://flowtree.example.com)",
+                      get: { config.controllerURL }, set: { config.controllerURL = $0 })
+                if config.isConfigured {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color.onyxGreen)
+                }
+            }
+
+            Text("Cloudflare Access service token — optional; needed for the cloud instance, not for a local one")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.3))
+                .padding(.top, 6)
+
+            field("CF-Access-Client-Id",
+                  get: { config.clientId }, set: { config.clientId = $0 })
+            field("CF-Access-Client-Secret",
+                  get: { config.clientSecret }, set: { config.clientSecret = $0 }, secure: true)
         }
     }
 }
