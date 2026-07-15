@@ -275,7 +275,6 @@ private struct PipelineRow: View {
     let status: PipelineStatus
     let accentColor: Color
     let onRemove: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -326,9 +325,8 @@ private struct PipelineRow: View {
                                 .truncationMode(.tail)
                             Spacer(minLength: 0)
                             countsBadges
-                                // Reserve room so the badges don't jump
-                                // when the × button slides in on hover.
-                                .padding(.trailing, hovering ? 16 : 0)
+                                // Always reserve room for the always-visible ×.
+                                .padding(.trailing, 16)
                         }
                     }
                     Spacer(minLength: 0)
@@ -340,27 +338,25 @@ private struct PipelineRow: View {
             }
             .buttonStyle(.plain)
 
-            // Always in the hierarchy (opacity-gated, NOT a conditional) so
-            // moving the pointer onto it doesn't insert a new view and flip the
-            // row's .onHover off — the bug that made the × show only where it
-            // couldn't be clicked. Hit-testing is gated so an invisible × never
-            // eats a click meant for the row itself.
+            // ALWAYS visible and ALWAYS clickable — deliberately NOT gated on
+            // hover. The row's hover-trigger region (the left-aligned button
+            // content) has zero overlap with this top-right corner where the ×
+            // renders, so any hover-gated × is impossible to click: the moment
+            // the pointer reaches the ×, it's outside the trigger area and the
+            // × disappears. So it simply always shows.
             Button(action: onRemove) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(.gray.opacity(0.8))
+                    .foregroundColor(.gray.opacity(0.85))
                     .padding(4)
-                    .background(Color.black.opacity(0.4))
+                    .background(Color.black.opacity(0.45))
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
             .help("Stop tracking this pipeline")
             .padding(.top, 4)
             .padding(.trailing, 6)
-            .opacity(hovering ? 1 : 0)
-            .allowsHitTesting(hovering)
         }
-        .onHover { hovering = $0 }
     }
 
     /// Workflow name without any branch suffix — the branch lives in
