@@ -291,6 +291,50 @@ final class FileBrowserTests: XCTestCase {
         XCTAssertTrue(b.isSearchActive, "search should be active after Cmd+Shift+F")
     }
 
+    // MARK: - search result path relativization (no-doubling regression)
+
+    func testRelativeSearchPath_stripsBase() {
+        XCTAssertEqual(
+            FileBrowserManager.relativeSearchPath(result: "/a/b/c.txt", base: "/a/b"),
+            "c.txt")
+        XCTAssertEqual(
+            FileBrowserManager.relativeSearchPath(result: "/a/b/sub/c.txt", base: "/a/b"),
+            "sub/c.txt")
+    }
+
+    func testRelativeSearchPath_handlesTrailingAndDoubleSlashes() {
+        XCTAssertEqual(
+            FileBrowserManager.relativeSearchPath(result: "/a/b//c.txt", base: "/a/b"),
+            "c.txt")
+        XCTAssertEqual(
+            FileBrowserManager.relativeSearchPath(result: "/a/b/c.txt", base: "/a/b/"),
+            "c.txt")
+    }
+
+    func testRelativeSearchPath_skipsBaseItselfAndOutsiders() {
+        // The base directory itself → nil (skip).
+        XCTAssertNil(FileBrowserManager.relativeSearchPath(result: "/a/b", base: "/a/b"))
+        // A result NOT under the base → nil (skip). Previously this was passed
+        // through as "relative" and doubled onto the base into /a/b/x/y/z.txt.
+        XCTAssertNil(FileBrowserManager.relativeSearchPath(result: "/x/y/z.txt", base: "/a/b"))
+    }
+
+    func testRelativeSearchPath_thenInsertPath_producesCorrectFullPath() {
+        // End-to-end: relativize a find result, insert it, and confirm the
+        // node's fullPath is the ORIGINAL absolute path — not a doubled one.
+        let tree = SearchResultTree()
+        let base = "/repo/src"
+        let result = "/repo/src/app/Main.java"
+        let relative = FileBrowserManager.relativeSearchPath(result: result, base: base)
+        XCTAssertEqual(relative, "app/Main.java")
+        tree.insertPath(relative!, basePath: base)
+        // Walk to the leaf and check its fullPath.
+        let app = tree.roots.first { $0.name == "app" }
+        let main = app?.children.first { $0.name == "Main.java" }
+        XCTAssertEqual(main?.fullPath, "/repo/src/app/Main.java",
+                       "fullPath must equal the real path, not a doubled one")
+    }
+
     // MARK: - search type filter
 
     func testSearchScript_noFilter_matchesAnyName() {

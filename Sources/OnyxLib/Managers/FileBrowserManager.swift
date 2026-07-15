@@ -763,6 +763,20 @@ public class FileBrowserManager: ObservableObject {
     // MARK: - Search
 
     /// Start search.
+    /// Convert an absolute `find` result into a path relative to the search
+    /// `base` for the results tree. Returns nil to SKIP: the base directory
+    /// itself, or any result not under `base`. Skipping (rather than passing an
+    /// absolute path through) is critical — `SearchResultTree.insertPath` joins
+    /// its argument onto `base`, so an absolute path would double the segments
+    /// (base "/a/b" + "/a/b/c.txt" → "/a/b/a/b/c.txt"), which then corrupted
+    /// navigation ("back" landing on nonsensical paths).
+    static func relativeSearchPath(result: String, base: String) -> String? {
+        guard result.hasPrefix(base) else { return nil }
+        var relative = String(result.dropFirst(base.count))
+        while relative.hasPrefix("/") { relative.removeFirst() }
+        return relative.isEmpty ? nil : relative
+    }
+
     public func startSearch(_ query: String) {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty,
               let basePath = currentPath ?? activeFolders.first?.path else { return }
@@ -797,8 +811,6 @@ public class FileBrowserManager: ObservableObject {
             process.standardInput = inputPipe
         }
 
-        let baseForStripping = basePath.hasSuffix("/") ? basePath : basePath + "/"
-
         // Read output progressively line by line
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
@@ -824,16 +836,13 @@ public class FileBrowserManager: ObservableObject {
                     // results panel with garbage.
                     guard trimmed.hasPrefix("/") else { continue }
 
-                    // Strip base path prefix to get relative path
-                    let relative: String
-                    if trimmed.hasPrefix(baseForStripping) {
-                        relative = String(trimmed.dropFirst(baseForStripping.count))
-                    } else if trimmed == basePath.trimmingCharacters(in: CharacterSet(charactersIn: "/")) || trimmed == basePath {
-                        continue // skip the base directory itself
-                    } else {
-                        relative = trimmed
-                    }
-                    guard !relative.isEmpty else { continue }
+                    // Convert the absolute result into a path relative to the
+                    // search base. If it isn't under the base (or IS the base),
+                    // skip it — never hand an absolute path to insertPath, which
+                    // joins it onto basePath and would DOUBLE the segments
+                    // (/a/b + /a/b/c → /a/b/a/b/c): the source of the nonsensical
+                    // paths "back" navigated into.
+                    guard let relative = Self.relativeSearchPath(result: trimmed, base: basePath) else { continue }
 
                     DispatchQueue.main.async {
                         self.searchResults.insertPath(relative, basePath: basePath)
