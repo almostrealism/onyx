@@ -537,6 +537,7 @@ struct FolderSidebar: View {
                             isSelected: folder.path == selectedFolderPath,
                             accentColor: appState.accentColor
                         )
+                        .contentShape(Rectangle())   // whole-row tap target, not just the text
                         .onTapGesture {
                             browser.pathHistory = []
                             browser.fileContent = nil

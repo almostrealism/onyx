@@ -222,6 +222,7 @@ private struct SessionNoteRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(isActive ? Color.white.opacity(0.04) : Color.clear)
             .cornerRadius(3)
+            .contentShape(Rectangle())   // whole row is the tap target
         }
         .buttonStyle(.plain)
     }

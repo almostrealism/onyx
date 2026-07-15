@@ -439,6 +439,10 @@ private struct ReminderRow: View {
             }
         }
         .padding(.vertical, 2)
+        // Whole-row hit region so hover fires anywhere on the row — including
+        // the trailing area where the submit button renders. Without this the
+        // trigger is only the title glyphs, which don't overlap the button.
+        .contentShape(Rectangle())
         .onHover { hovering in
             isHovering = hovering
             if hovering { flowtree.ensureLoaded() }   // warm the picker

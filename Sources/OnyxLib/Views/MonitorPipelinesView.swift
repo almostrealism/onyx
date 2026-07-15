@@ -115,6 +115,7 @@ private struct PullRequestRow: View {
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .cornerRadius(3)
+            .contentShape(Rectangle())   // whole row is the tap target
         }
         .buttonStyle(.plain)
     }
@@ -275,6 +276,7 @@ private struct PipelineRow: View {
     let status: PipelineStatus
     let accentColor: Color
     let onRemove: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -335,15 +337,15 @@ private struct PipelineRow: View {
                 .padding(.vertical, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .cornerRadius(3)
+                .contentShape(Rectangle())   // whole row is the tap target
             }
             .buttonStyle(.plain)
 
-            // ALWAYS visible and ALWAYS clickable — deliberately NOT gated on
-            // hover. The row's hover-trigger region (the left-aligned button
-            // content) has zero overlap with this top-right corner where the ×
-            // renders, so any hover-gated × is impossible to click: the moment
-            // the pointer reaches the ×, it's outside the trigger area and the
-            // × disappears. So it simply always shows.
+            // Hover-revealed ×. This works only because the .contentShape +
+            // .onHover below make the ENTIRE row rectangle the hover-trigger
+            // region — so it overlaps this corner where the × renders. (Without
+            // contentShape the trigger is just the left-aligned button text,
+            // which never overlaps the ×, making it impossible to click.)
             Button(action: onRemove) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .medium))
@@ -356,7 +358,11 @@ private struct PipelineRow: View {
             .help("Stop tracking this pipeline")
             .padding(.top, 4)
             .padding(.trailing, 6)
+            .opacity(hovering ? 1 : 0)
+            .allowsHitTesting(hovering)
         }
+        .contentShape(Rectangle())   // whole-row hit region for hover
+        .onHover { hovering = $0 }
     }
 
     /// Workflow name without any branch suffix — the branch lives in
