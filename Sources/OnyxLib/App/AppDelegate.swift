@@ -54,8 +54,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     /// connections open. Without this, the leaks documented in
     /// docs/ssh-connection-leak.md keep accumulating on the remote.
     public func applicationWillTerminate(_ notification: Notification) {
-        OnyxLog.ssh.notice("applicationWillTerminate — shutting down SSHKeeper")
-        SSHKeeper.shared.shutdown()
+        OnyxLog.ssh.notice("applicationWillTerminate — shutting down connection pairs")
+        ConnectionPairRegistry.shared.shutdown()
     }
 
     /// Style window.

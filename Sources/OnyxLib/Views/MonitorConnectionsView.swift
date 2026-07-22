@@ -2,14 +2,14 @@ import SwiftUI
 
 struct ConnectionPoolSection: View {
     @ObservedObject var appState: AppState
-    /// Observe the keeper directly — `stateGeneration` bumps on every
-    /// per-host slot mutation. SwiftUI re-renders this whole view tree
-    /// (column + expanded panel) in the same pass, so they CAN'T get
-    /// out of sync the way they did under the old cached-dict + 10s
+    /// Observe the pair registry directly — `stateGeneration` bumps on
+    /// every per-host slot mutation. SwiftUI re-renders this whole view
+    /// tree (column + expanded panel) in the same pass, so they CAN'T
+    /// get out of sync the way they did under the old cached-dict + 10s
     /// timer approach (where the column showed "no mux" but the
     /// expanded panel showed "alive" because they sampled the state
     /// at different times).
-    @ObservedObject private var keeper = SSHKeeper.shared
+    @ObservedObject private var registry = ConnectionPairRegistry.shared
     /// Which hostID currently has its diagnostic panel expanded inline.
     @State private var expandedDiagHost: UUID?
     /// Cached diagnostics indexed by hostID. Re-fetched when the row is
@@ -121,13 +121,13 @@ struct ConnectionPoolSection: View {
                     .foregroundColor(.gray.opacity(0.4))
 
                     ForEach(remoteHosts) { host in
-                        // Read directly from the keeper. Both this and
+                        // Read directly from the registry. Both this and
                         // the expanded panel below source from the same
                         // call, in the same SwiftUI pass — divergence is
                         // structurally impossible. SwiftUI re-renders
-                        // on any keeper.stateGeneration bump because
-                        // we @ObservedObject the keeper above.
-                        let alive = SSHKeeper.shared.isMuxAlive(for: host)
+                        // on any registry.stateGeneration bump because
+                        // we @ObservedObject the registry above.
+                        let alive = ConnectionPairRegistry.shared.isMuxAlive(for: host)
                         let expanded = expandedDiagHost == host.id
                         VStack(alignment: .leading, spacing: 4) {
                             Button(action: { toggleDiagnostic(for: host) }) {
@@ -177,10 +177,10 @@ struct ConnectionPoolSection: View {
         // cycle of when the keeper observed them.
     }
 
-    // refreshMuxStatus / muxStatus have been removed — the keeper's
+    // refreshMuxStatus / muxStatus have been removed — the registry's
     // ObservableObject + stateGeneration is now the single source the
     // view binds to. Per-row alive flags are read directly from
-    // SSHKeeper.shared.isMuxAlive at render time.
+    // ConnectionPairRegistry.shared.isMuxAlive at render time.
 
     private func toggleDiagnostic(for host: HostConfig) {
         if expandedDiagHost == host.id {
@@ -239,28 +239,29 @@ private struct SSHDiagnosticPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Supervisor (SSHKeeper) state. Goes first because this is
-            // what the user actually wants to know — "is the supervisor
+            // Supervisor (ConnectionPair) state. Goes first because this
+            // is what the user actually wants to know — "is the supervisor
             // keeping things alive for me?" The legacy point-in-time
             // diagnostic still appears below.
-            if let keeper = SSHKeeper.shared.state(for: host) {
+            if let diag = ConnectionPairRegistry.shared.pairDiagnostics(for: host) {
+                let active = diag.slots[diag.activeIndex]
+                let standby = diag.slots[1 - diag.activeIndex]
                 row("ACTIVE",
-                    slotSummary(keeper.primary,
-                                label: keeper.primarySlot == 0 ? "A" : "B"),
-                    color: keeper.primary.alive ? "6BFF8E" : "FF6B6B")
-                row("SPARE",
-                    slotSummary(keeper.spare,
-                                label: keeper.primarySlot == 0 ? "B" : "A"),
-                    color: keeper.spare.alive ? "6BFF8E"
-                          : (keeper.spare.establishing ? "FFD06B" : "FF6B6B"))
-                if let rot = keeper.lastRotationAt {
+                    slotSummary(active, label: diag.activeIndex == 0 ? "A" : "B"),
+                    color: active.phase == .alive ? "6BFF8E" : "FF6B6B")
+                row("STANDBY",
+                    slotSummary(standby, label: diag.activeIndex == 0 ? "B" : "A"),
+                    color: standby.phase == .alive ? "6BFF8E"
+                          : (standby.phase == .establishing ? "FFD06B" : "FF6B6B"))
+                row("STATE", "\(diag.state)", color: nil)
+                if let rot = diag.lastRotationAt {
                     row("ROTATE",
                         "last \(formatAge(Date().timeIntervalSince(rot))) ago · "
-                          + "next in \(formatAge(max(0, SSHKeeper.rotationInterval - Date().timeIntervalSince(rot))))",
+                          + "next in \(formatAge(max(0, ConnectionPair.rotationInterval - Date().timeIntervalSince(rot))))",
                         color: nil)
                 }
             } else {
-                row("KEEPER", "not yet observed", color: nil)
+                row("PAIR", "not yet observed", color: nil)
             }
             Divider().background(Color.white.opacity(0.06)).padding(.vertical, 2)
             if let d = diagnostic {
@@ -344,13 +345,13 @@ private struct SSHDiagnosticPanel: View {
                 // user suspects it's misbehaving. Stops all new SSH
                 // calls, freezes existing slot state for the UI.
                 Button(action: {
-                    SSHKeeper.shared.setEnabled(!SSHKeeper.shared.enabled)
+                    ConnectionPairRegistry.shared.setEnabled(!ConnectionPairRegistry.shared.enabled)
                 }) {
-                    Text(SSHKeeper.shared.enabled ? "Disable keeper" : "Enable keeper")
+                    Text(ConnectionPairRegistry.shared.enabled ? "Disable keeper" : "Enable keeper")
                         .monitorFont(size: 10)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(SSHKeeper.shared.enabled
+                        .background(ConnectionPairRegistry.shared.enabled
                                     ? Color.onyxRed.opacity(0.2)
                                     : Color.onyxGreen.opacity(0.2))
                         .cornerRadius(3)
@@ -368,7 +369,7 @@ private struct SSHDiagnosticPanel: View {
             HStack(spacing: 8) {
                 Button(action: {
                     DispatchQueue.global(qos: .userInitiated).async {
-                        let result = SSHKeeper.shared.reapAll()
+                        let result = ConnectionPairRegistry.shared.reapAll()
                         DispatchQueue.main.async {
                             lastReapResult = "Killed \(result.killed), refused \(result.refused)"
                         }
@@ -383,7 +384,7 @@ private struct SSHDiagnosticPanel: View {
                 }
                 .buttonStyle(.plain)
                 Button(action: {
-                    let dump = SSHKeeper.shared.inventoryDump()
+                    let dump = ConnectionPairRegistry.shared.inventoryDump()
                     // Drop on the pasteboard so the user can share it.
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(dump, forType: .string)
@@ -435,19 +436,19 @@ private struct SSHDiagnosticPanel: View {
         return "\(Int(s / 3600))h"
     }
 
-    /// Compact one-line summary of a slot for the keeper rows. Shows
-    /// liveness, smoke-test status, and age since establish.
-    private func slotSummary(_ slot: SSHKeeper.SlotState, label: String) -> String {
-        let aliveTag: String
-        if slot.alive {
-            aliveTag = slot.lastSmokeTestFailed ? "alive (smoke fail)" : "alive"
-        } else if slot.establishing {
-            aliveTag = "establishing…"
-        } else {
-            aliveTag = "DEAD"
+    /// Compact one-line summary of a slot for the pair rows. Shows
+    /// phase and age since establish.
+    private func slotSummary(_ slot: ConnectionPair.Slot, label: String) -> String {
+        let phaseTag: String
+        switch slot.phase {
+        case .alive: phaseTag = "alive"
+        case .suspect: phaseTag = "alive (suspect)"
+        case .establishing: phaseTag = "establishing…"
+        case .dead: phaseTag = "DEAD"
+        case .absent: phaseTag = "absent"
         }
-        var parts = ["slot \(label)", aliveTag]
-        if let est = slot.establishedAt, slot.alive {
+        var parts = ["slot \(label)", phaseTag]
+        if let est = slot.establishedAt, slot.phase == .alive {
             parts.append("age \(formatAge(Date().timeIntervalSince(est)))")
         }
         return parts.joined(separator: " · ")

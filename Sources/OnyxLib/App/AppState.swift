@@ -1155,9 +1155,10 @@ public class AppState: ObservableObject {
             // is merged with GitHub's in the monitor overlay.
             GitLabMergeRequestManager.shared.startPolling()
             GitLabPipelineMonitor.shared.startPolling()
-            // SSH mux supervisor — maintains two warm-spare mux masters
-            // per host so a single mux failure is instantly recoverable.
-            SSHKeeper.shared.start(appState: self)
+            // SSH connection supervisor — maintains the two-connection
+            // pair (active + standby) per host so a single connection
+            // failure is instantly recoverable via promotion.
+            ConnectionPairRegistry.shared.start(appState: self)
         }
     }
 
@@ -1238,13 +1239,13 @@ public class AppState: ObservableObject {
         return dir
     }
 
-    /// ControlPath pattern for SSH multiplexing. Consults the SSHKeeper
-    /// supervisor, which maintains two warm-spare mux masters and
-    /// returns whichever slot is currently primary. Falls back to the
-    /// legacy single-slot path when the keeper hasn't observed this
-    /// host yet (e.g. before its first tick).
+    /// ControlPath pattern for SSH multiplexing. Consults the pair
+    /// registry, which maintains an active + standby master per host and
+    /// returns whichever slot is currently active. Falls back to the
+    /// legacy single-slot path when the pair hasn't been created yet
+    /// (e.g. before its first tick).
     func sshControlPath(for host: HostConfig) -> String {
-        SSHKeeper.shared.controlPath(for: host)
+        ConnectionPairRegistry.shared.controlPath(for: host)
     }
 
     /// SSH multiplexing args for SHORT-LIVED utility commands only.
@@ -1503,41 +1504,40 @@ public class AppState: ObservableObject {
         return result
     }
 
-    /// Tear down both keeper slots for a host. The next supervisor
+    /// Tear down both pair slots for a host. The next supervisor
     /// tick re-establishes them from scratch — typically within ≈4s.
     public func resetSSHMux(for host: HostConfig) {
         OnyxLog.ssh.notice("user reset: host=\(host.label, privacy: .public)")
-        SSHKeeper.shared.reset(for: host)
+        ConnectionPairRegistry.shared.reset(for: host)
         muxNeedsCleanup.remove(host.id)
     }
 
-    /// Check if the SSH mux master is alive for a host. Now delegates
-    /// to the SSHKeeper supervisor for an instant cached answer — the
-    /// keeper polls every 2s anyway, so callers don't need to pay for
-    /// a fresh `ssh -O check` themselves.
+    /// Check if the SSH mux master is alive for a host. Delegates to
+    /// the pair registry for an instant cached answer — the supervisor
+    /// polls every 2s anyway, so callers don't need to pay for a fresh
+    /// `ssh -O check` themselves.
     ///
-    /// Returns true for localhost (no mux needed) and for any host the
-    /// keeper has confirmed alive on its current primary slot.
+    /// Returns true for localhost (no mux needed) and for any host
+    /// whose active slot is confirmed alive.
     public func sshMuxAlive(for host: HostConfig) -> Bool {
         guard !host.isLocal else { return true }
-        return SSHKeeper.shared.isMuxAlive(for: host)
+        return ConnectionPairRegistry.shared.isMuxAlive(for: host)
     }
 
     /// Tear down the SSH mux master(s) for a host — *definitively*.
     /// `ssh -O exit` first (clean), then SIGKILL the owning process
     /// via lsof if the clean exit didn't kill it, then remove the
-    /// socket file. Covers both keeper-managed slots and any legacy
-    /// single-slot path. Bounded; never hangs.
+    /// socket file. Covers both pair slots and any legacy single-slot
+    /// path. Bounded; never hangs.
     public func sshMuxStop(for host: HostConfig) {
         guard !host.isLocal else { return }
+        ConnectionPairRegistry.shared.removePair(for: host.id)
+        // Belt-and-braces: sweep both slot paths directly in case the
+        // pair was never created (legacy sockets from a prior run).
         let userHost = sshUserHost(for: host)
-        // Both slot paths the keeper manages, plus the legacy single-
-        // slot path (which is the same as slot 0 by construction but
-        // we list explicitly for clarity).
         let paths = Set([
-            SSHKeeper.defaultSlotPath(for: host.id, slot: 0),
-            SSHKeeper.defaultSlotPath(for: host.id, slot: 1),
-            sshControlPath(for: host)
+            ConnectionPair.slotPath(for: host.id, slot: 0),
+            ConnectionPair.slotPath(for: host.id, slot: 1),
         ])
         for path in paths {
             SSHProcess.killMaster(at: path, userHost: userHost)
