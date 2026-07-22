@@ -2,6 +2,11 @@ import XCTest
 @testable import OnyxLib
 
 // MARK: - Session Independence Tests
+//
+// Connection truth is per-session (`AppState.sessionConnectionStates`),
+// written only by the terminal session manager. These tests lock the
+// invariant that one session's state never bleeds into another's overlay,
+// and that unknown sessions read as connected (no spurious overlay).
 
 final class SessionIndependenceTests: XCTestCase {
 
@@ -13,62 +18,55 @@ final class SessionIndependenceTests: XCTestCase {
     private let hostA = UUID()
     private let hostB = UUID()
 
-    func testReconnectingOverlay_onlyAffectsActiveHost() {
+    func testReconnectingOverlay_onlyAffectsThatSession() {
         let state = AppState()
         let sessionA = TmuxSession(name: "dev", source: .host(hostID: hostA))
         let sessionB = TmuxSession(name: "dev", source: .host(hostID: hostB))
         state.allSessions = [sessionA, sessionB]
 
-        // Reconnecting on host A
-        state.isReconnecting = true
-        state.reconnectingHostID = hostA
+        state.sessionConnectionStates[sessionA.id] = .reattaching(reason: "test", since: Date())
 
-        // When session A is active, should show reconnecting
         state.activeSession = sessionA
         XCTAssertTrue(state.isActiveSessionReconnecting)
 
-        // When session B is active, should NOT show reconnecting
         state.activeSession = sessionB
         XCTAssertFalse(state.isActiveSessionReconnecting)
     }
 
-    func testConnectionError_onlyAffectsActiveHost() {
+    func testConnectionError_onlyAffectsThatSession() {
         let state = AppState()
         let sessionA = TmuxSession(name: "dev", source: .host(hostID: hostA))
         let sessionB = TmuxSession(name: "dev", source: .host(hostID: hostB))
         state.allSessions = [sessionA, sessionB]
 
-        // Error on host A
-        state.connectionErrorHostID = hostA
-        state.connectionError = "Connection failed"
+        state.sessionConnectionStates[sessionA.id] = .failed(error: "Connection failed")
 
-        // When session A is active, should show error
         state.activeSession = sessionA
         XCTAssertTrue(state.activeSessionHasError)
+        XCTAssertEqual(state.activeSessionErrorMessage, "Connection failed")
 
-        // When session B is active, should NOT show error
         state.activeSession = sessionB
+        XCTAssertFalse(state.activeSessionHasError)
+        XCTAssertNil(state.activeSessionErrorMessage)
+    }
+
+    func testUnknownSession_readsAsConnected() {
+        let state = AppState()
+        let session = TmuxSession(name: "fresh", source: .host(hostID: hostA))
+        state.activeSession = session
+
+        // No entry in sessionConnectionStates — must NOT show any overlay.
+        XCTAssertEqual(state.activeSessionConnectionState, .connected)
+        XCTAssertFalse(state.isActiveSessionReconnecting)
         XCTAssertFalse(state.activeSessionHasError)
     }
 
-    func testClearingConnectionError_clearsHostID() {
+    func testNoActiveSession_readsAsConnected() {
         let state = AppState()
-        state.connectionErrorHostID = hostA
-        state.connectionError = "Connection failed"
-        XCTAssertNotNil(state.connectionErrorHostID)
-
-        state.connectionError = nil
-        XCTAssertNil(state.connectionErrorHostID)
-    }
-
-    func testClearingReconnecting_clearsHostID() {
-        let state = AppState()
-        state.reconnectingHostID = hostA
-        state.isReconnecting = true
-        XCTAssertNotNil(state.reconnectingHostID)
-
-        state.isReconnecting = false
-        XCTAssertNil(state.reconnectingHostID)
+        state.activeSession = nil
+        XCTAssertEqual(state.activeSessionConnectionState, .connected)
+        XCTAssertFalse(state.isActiveSessionReconnecting)
+        XCTAssertFalse(state.activeSessionHasError)
     }
 
     func testBrowserSession_notAffectedBySSHReconnect() {
@@ -77,35 +75,24 @@ final class SessionIndependenceTests: XCTestCase {
         let browser = TmuxSession(name: "github.com", source: .browser(url: "https://github.com"))
         state.allSessions = [terminal, browser]
 
-        state.isReconnecting = true
-        state.reconnectingHostID = hostA
+        state.sessionConnectionStates[terminal.id] = .reattaching(reason: "test", since: Date())
 
-        // Browser session should not show reconnecting
         state.activeSession = browser
         XCTAssertFalse(state.isActiveSessionReconnecting)
     }
 
-    func testBrowserSession_notAffectedByConnectionError() {
-        let state = AppState()
-        let browser = TmuxSession(name: "github.com", source: .browser(url: "https://github.com"))
-        state.allSessions = [browser]
-
-        state.connectionErrorHostID = hostA
-        state.connectionError = "SSH failed"
-
-        state.activeSession = browser
-        // Browser hostID is localhostID, not hostA
-        XCTAssertFalse(state.activeSessionHasError)
-    }
-
-    func testNoReconnecting_whenNoHostIDSet() {
+    func testClearingState_returnsToConnected() {
         let state = AppState()
         let session = TmuxSession(name: "dev", source: .host(hostID: hostA))
+        state.allSessions = [session]
         state.activeSession = session
 
-        state.isReconnecting = true
-        // reconnectingHostID not set
-        XCTAssertFalse(state.isActiveSessionReconnecting)
+        state.sessionConnectionStates[session.id] = .failed(error: "boom")
+        XCTAssertTrue(state.activeSessionHasError)
+
+        state.sessionConnectionStates[session.id] = nil
+        XCTAssertFalse(state.activeSessionHasError)
+        XCTAssertEqual(state.activeSessionConnectionState, .connected)
     }
 }
 
@@ -126,127 +113,87 @@ final class ReconnectionSafetyTests: XCTestCase {
         let sessionB = TmuxSession(name: "work", source: .host(hostID: hostB))
         state.allSessions = [sessionA, sessionB]
 
-        // Host A is reconnecting
-        state.reconnectingHostID = hostA
-        state.isReconnecting = true
+        state.sessionConnectionStates[sessionA.id] = .reattaching(reason: "lost", since: Date())
 
-        // Active session is on host B — should NOT show reconnecting
         state.activeSession = sessionB
         XCTAssertFalse(state.isActiveSessionReconnecting)
 
-        // Switch to host A — should show reconnecting
         state.activeSession = sessionA
         XCTAssertTrue(state.isActiveSessionReconnecting)
     }
 
-    func testConnectionError_doesNotAffectDifferentHostSession() {
-        let state = AppState()
-        let sessionA = TmuxSession(name: "dev", source: .host(hostID: hostA))
-        let sessionB = TmuxSession(name: "work", source: .host(hostID: hostB))
-        state.allSessions = [sessionA, sessionB]
-
-        // Host A has error
-        state.connectionErrorHostID = hostA
-        state.connectionError = "Failed"
-
-        // Active on host B — no error shown
-        state.activeSession = sessionB
-        XCTAssertFalse(state.activeSessionHasError)
-
-        // Active on host A — error shown
-        state.activeSession = sessionA
-        XCTAssertTrue(state.activeSessionHasError)
-    }
-
-    func testSwitchingSession_clearsReconnectingForOldHost() {
+    func testSwitchingSession_overlayFollowsActiveSession() {
         let state = AppState()
         let sessionA = TmuxSession(name: "dev", source: .host(hostID: hostA))
         let sessionB = TmuxSession(name: "work", source: .host(hostID: hostB))
         state.allSessions = [sessionA, sessionB]
         state.activeSession = sessionA
 
-        // Start reconnecting for host A
-        state.reconnectingHostID = hostA
-        state.isReconnecting = true
+        state.sessionConnectionStates[sessionA.id] = .reattaching(reason: "lost", since: Date())
         XCTAssertTrue(state.isActiveSessionReconnecting)
 
-        // User switches to session B — overlay should disappear
+        // User switches to session B — overlay disappears, but session A's
+        // truth is untouched (it IS still reattaching).
         state.activeSession = sessionB
         XCTAssertFalse(state.isActiveSessionReconnecting)
-        // But isReconnecting is still true (host A is still reconnecting)
-        XCTAssertTrue(state.isReconnecting)
+        XCTAssertEqual(
+            state.sessionConnectionStates[sessionA.id],
+            state.sessionConnectionStates[sessionA.id] // still present
+        )
+        if case .reattaching = state.sessionConnectionStates[sessionA.id] ?? .connected {
+            // expected
+        } else {
+            XCTFail("session A state should remain .reattaching")
+        }
     }
 
-    func testReconnecting_noOverlayWithoutHostID() {
-        let state = AppState()
-        let session = TmuxSession(name: "dev", source: .host(hostID: hostA))
-        state.activeSession = session
-
-        // isReconnecting but no hostID — should not show overlay
-        state.isReconnecting = true
-        XCTAssertFalse(state.isActiveSessionReconnecting)
-    }
-
-    func testConnectionError_noOverlayWithoutHostID() {
-        let state = AppState()
-        let session = TmuxSession(name: "dev", source: .host(hostID: hostA))
-        state.activeSession = session
-
-        state.connectionError = "Error"
-        // No connectionErrorHostID set
-        XCTAssertFalse(state.activeSessionHasError)
-    }
-
-    func testBrowserSession_neverShowsReconnecting() {
-        let state = AppState()
-        let browser = TmuxSession(name: "test", source: .browser(url: "https://example.com"))
-        state.activeSession = browser
-        state.reconnectingHostID = hostA
-        state.isReconnecting = true
-
-        // Browser is on localhostID, reconnecting is for hostA
-        XCTAssertFalse(state.isActiveSessionReconnecting)
-    }
-
-    func testMultipleHosts_independentErrors() {
+    func testMultipleSessions_independentErrors() {
         let state = AppState()
         let sessionA = TmuxSession(name: "dev", source: .host(hostID: hostA))
         let sessionB = TmuxSession(name: "work", source: .host(hostID: hostB))
         state.allSessions = [sessionA, sessionB]
 
-        // Error on host A
-        state.connectionErrorHostID = hostA
-        state.connectionError = "Host A failed"
+        state.sessionConnectionStates[sessionA.id] = .failed(error: "Host A failed")
 
-        // Session A sees error
         state.activeSession = sessionA
         XCTAssertTrue(state.activeSessionHasError)
-        XCTAssertEqual(state.connectionError, "Host A failed")
+        XCTAssertEqual(state.activeSessionErrorMessage, "Host A failed")
 
-        // Session B does NOT see error
         state.activeSession = sessionB
         XCTAssertFalse(state.activeSessionHasError)
     }
 
-    func testClearError_alsoResetsHostID() {
+    func testErrorAndReattaching_areMutuallyExclusivePerSession() {
+        // One dict, one value per session — a session can't be both
+        // "reconnecting" and "failed" (the old two-flag system could).
         let state = AppState()
-        state.connectionErrorHostID = hostA
-        state.connectionError = "Failed"
-        XCTAssertNotNil(state.connectionErrorHostID)
+        let session = TmuxSession(name: "dev", source: .host(hostID: hostA))
+        state.allSessions = [session]
+        state.activeSession = session
 
-        state.connectionError = nil
-        XCTAssertNil(state.connectionErrorHostID)
-        XCTAssertNil(state.connectionError)
+        state.sessionConnectionStates[session.id] = .reattaching(reason: "lost", since: Date())
+        state.sessionConnectionStates[session.id] = .failed(error: "gave up")
+
+        XCTAssertFalse(state.isActiveSessionReconnecting)
+        XCTAssertTrue(state.activeSessionHasError)
     }
 
-    func testClearReconnecting_alsoResetsHostID() {
+    func testRemoveHost_dropsThatHostsSessionStates() {
         let state = AppState()
-        state.reconnectingHostID = hostA
-        state.isReconnecting = true
-        XCTAssertNotNil(state.reconnectingHostID)
+        let host = HostConfig(
+            label: "test-host",
+            ssh: SSHConfig(host: "h", user: "u", port: 22, tmuxSession: "main")
+        )
+        state.hosts.append(host)
+        let session = TmuxSession(name: "dev", source: .host(hostID: host.id))
+        let other = TmuxSession(name: "work", source: .host(hostID: hostB))
+        state.allSessions = [session, other]
+        state.sessionConnectionStates[session.id] = .failed(error: "x")
+        state.sessionConnectionStates[other.id] = .failed(error: "y")
 
-        state.isReconnecting = false
-        XCTAssertNil(state.reconnectingHostID)
-        XCTAssertFalse(state.isReconnecting)
+        state.removeHost(host.id)
+
+        XCTAssertNil(state.sessionConnectionStates[session.id])
+        XCTAssertNotNil(state.sessionConnectionStates[other.id])
     }
 }

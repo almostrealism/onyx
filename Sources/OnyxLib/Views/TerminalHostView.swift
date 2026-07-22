@@ -17,9 +17,9 @@ struct TerminalHostView: NSViewRepresentable {
         if appState.reconnectRequested {
             DispatchQueue.main.async {
                 appState.reconnectRequested = false
-                appState.connectionError = nil
                 appState.needsKeySetup = false
             }
+            // forceReconnect clears sessionConnectionStates itself
             nsView.forceReconnect()
         }
         if appState.refreshSessionList {

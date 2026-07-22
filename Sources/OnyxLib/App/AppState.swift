@@ -163,47 +163,40 @@ public class AppState: ObservableObject {
     /// When true, show the small text-field overlay for editing the
     /// note attached to the active session. Toggled by Cmd+;.
     @Published public var showSessionNoteEditor = false
-    @Published public var reconnectingHostID: UUID?
-    /// Is reconnecting.
-    public var isReconnecting: Bool {
-        get { _isReconnecting }
-        set {
-            _isReconnecting = newValue
-            if !newValue { reconnectingHostID = nil }
-            objectWillChange.send()
-        }
-    }
-    @Published private var _isReconnecting = false
     @Published public var reconnectRequested = false
     @Published public var refreshSessionList = false
     @Published public var createNoteRequested = false
     @Published public var showWindowRename = false
-    @Published public var connectionErrorHostID: UUID?  // which host has the error
-    /// Connection error message — setting to nil also clears the hostID
-    public var connectionError: String? {
-        get { _connectionError }
-        set {
-            _connectionError = newValue
-            if newValue == nil { connectionErrorHostID = nil }
-            objectWillChange.send()
-        }
-    }
-    @Published private var _connectionError: String?
     @Published public var needsKeySetup = false
     @Published public var keySetupInProgress = false
     @Published public var showSessionManager = false
     @Published public var showTerminalText = false
     @Published public var terminalTextContent: String = ""
-    /// Whether the reconnecting state applies to the active session's host
-    public var isActiveSessionReconnecting: Bool {
-        guard isReconnecting, let hostID = reconnectingHostID else { return false }
-        return activeSession?.source.hostID == hostID
+
+    /// Per-session connection truth. Single writer: OnyxTerminalView.
+    /// Absent key == `.connected` (no spurious overlay for sessions the
+    /// manager hasn't touched). Views and computed properties only read.
+    @Published public var sessionConnectionStates: [String: SessionConnectionState] = [:]
+
+    /// Connection state of the currently active session.
+    public var activeSessionConnectionState: SessionConnectionState {
+        guard let id = activeSession?.id else { return .connected }
+        return sessionConnectionStates[id] ?? .connected
     }
 
-    /// Whether the connection error applies to the active session's host
+    /// Whether the "Reconnecting…" overlay applies to the active session.
+    public var isActiveSessionReconnecting: Bool {
+        activeSessionConnectionState.showReconnectingOverlay
+    }
+
+    /// Whether the connection-error overlay applies to the active session.
     public var activeSessionHasError: Bool {
-        guard connectionError != nil, let hostID = connectionErrorHostID else { return false }
-        return activeSession?.source.hostID == hostID
+        activeSessionConnectionState.showErrorOverlay
+    }
+
+    /// Error text for the active session's error overlay, if any.
+    public var activeSessionErrorMessage: String? {
+        activeSessionConnectionState.errorMessage
     }
 
     @Published public var showFullFileBrowser = false
@@ -444,7 +437,9 @@ public class AppState: ObservableObject {
         hosts.removeAll { $0.id == hostID }
         // Stop any language servers for this host (removeHost runs on the main thread).
         MainActor.assumeIsolated { lsp.shutdown(hostID: hostID) }
-        // Remove sessions belonging to this host
+        // Remove sessions belonging to this host (and their connection state)
+        let removedSessionIDs = Set(allSessions.filter { $0.source.hostID == hostID }.map { $0.id })
+        sessionConnectionStates = sessionConnectionStates.filter { !removedSessionIDs.contains($0.key) }
         allSessions.removeAll { $0.source.hostID == hostID }
         favoriteEntries.removeAll { entry in
             allSessions.first(where: { $0.id == entry.sessionID }) == nil
@@ -454,7 +449,6 @@ public class AppState: ObservableObject {
             needsKeySetup = false
             keySetupInProgress = false
             keySetupHostID = nil
-            connectionError = nil
         }
         // If the active session belonged to this host, clear it
         if activeSession?.source.hostID == hostID {

@@ -394,6 +394,55 @@ class OnyxTerminalView: NSView {
         window.makeFirstResponder(tv)
     }
 
+    // MARK: - Connection Truth (single writer)
+
+    /// Publish a session's connection state. This is the ONLY writer of
+    /// `AppState.sessionConnectionStates` — every transition is tied to an
+    /// event that actually changes process liveness (spawn, process death,
+    /// give-up), never a timer or a flag that can linger.
+    ///
+    /// Also enforces input gating for the active session: a dead terminal
+    /// must not silently swallow keystrokes, and a live one gets focus back.
+    private func setSessionState(_ state: SessionConnectionState, for sessionID: String) {
+        DispatchQueue.main.async {
+            let old = self.appState.sessionConnectionStates[sessionID] ?? .connected
+            guard old != state else { return }
+            self.appState.sessionConnectionStates[sessionID] = state
+            guard sessionID == self.appState.activeSession?.id else { return }
+            if state.shouldGateInput {
+                // Route keystrokes away from the dead terminal so typing is
+                // visibly blocked instead of vanishing into a dead PTY.
+                if let tv = self.terminalView, tv.window?.firstResponder === tv {
+                    tv.window?.makeFirstResponder(nil)
+                }
+            } else if old.shouldGateInput {
+                // Terminal came back — reclaim focus if the terminal owns it.
+                self.restoreFocus()
+            }
+        }
+    }
+
+    /// Remove a session's connection state (absent key reads as `.connected`).
+    /// Used when a session is abandoned or about to get a fresh start.
+    private func clearSessionState(for sessionID: String) {
+        DispatchQueue.main.async {
+            self.appState.sessionConnectionStates[sessionID] = nil
+        }
+    }
+
+    /// Apply a host-level failure (key auth, reconnect give-up) to every
+    /// session on that host — per-session truth stays the single source.
+    private func setHostState(_ state: SessionConnectionState, hostID: UUID) {
+        DispatchQueue.main.async {
+            let ids = self.appState.allSessions
+                .filter { $0.source.hostID == hostID }
+                .map { $0.id }
+            for id in ids {
+                self.setSessionState(state, for: id)
+            }
+        }
+    }
+
     // MARK: - Pool Management
 
     /// Activate a session: hide current view, show (or create) the target view
@@ -585,7 +634,7 @@ class OnyxTerminalView: NSView {
                     self.destroyPoolEntry(id)
                     return
                 }
-                guard self.appState.connectionError == nil else { return }
+                guard !self.appState.activeSessionConnectionState.showErrorOverlay else { return }
                 self.reconnect()
             }
         }
@@ -796,7 +845,7 @@ class OnyxTerminalView: NSView {
         lastStartTime = Date()
 
         DispatchQueue.main.async {
-            self.appState.connectionError = nil
+            self.appState.sessionConnectionStates.removeAll()
             self.appState.startupStatus = "Discovering sessions..."
         }
         setPendingStatus(.enumerating)
@@ -822,7 +871,7 @@ class OnyxTerminalView: NSView {
         }
 
         DispatchQueue.main.async {
-            self.appState.connectionError = nil
+            self.appState.sessionConnectionStates.removeAll()
             self.appState.needsKeySetup = false
         }
 
@@ -883,6 +932,9 @@ class OnyxTerminalView: NSView {
         tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
         self.pool[session.id]?.processRunning = true
         TerminalActivityStore.shared.markConnected(sessionID: session.id)
+        // Process is running again — publish the truth (clears any
+        // reattaching overlay and un-gates keyboard input).
+        setSessionState(.connected, for: session.id)
         // Register the interactive ssh PID in the central executor's
         // long-lived registry so the orphan reaper / inventory dump
         // sees it. Unregistered in `destroyPoolEntry` and
@@ -973,7 +1025,7 @@ class OnyxTerminalView: NSView {
         activeSessionID = setupKey
 
         DispatchQueue.main.async {
-            self.appState.connectionError = nil
+            self.appState.sessionConnectionStates.removeAll()
             self.appState.needsKeySetup = false
         }
         let (cmd, args) = appState.keySetupCommand(host: host)
@@ -1170,7 +1222,10 @@ class OnyxTerminalView: NSView {
                     guard self.appState.hosts.contains(where: { $0.id == hostID }) else { return }
                     self.appState.needsKeySetup = true
                     self.appState.keySetupHostID = hostID
-                    self.appState.connectionError = "Key authentication failed for \(label).\nInstall your SSH key to connect."
+                    self.setHostState(
+                        .needsKeySetup(error: "Key authentication failed for \(label).\nInstall your SSH key to connect."),
+                        hostID: hostID
+                    )
                 }
                 completion([], probeStatus)
                 return
@@ -1318,8 +1373,10 @@ class OnyxTerminalView: NSView {
 
         DispatchQueue.main.async {
             self.appState.activeSession = session
-            self.appState.connectionError = nil
         }
+        // Fresh chance for this session — its state is re-derived from the
+        // spawn below (or stays live if the pooled process is running).
+        clearSessionState(for: session.id)
 
         // If the pooled view already has a running process, instant switch
         if let entry = pool[session.id], entry.processRunning {
@@ -1337,6 +1394,7 @@ class OnyxTerminalView: NSView {
             tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
             self.pool[session.id]?.processRunning = true
             TerminalActivityStore.shared.markConnected(sessionID: session.id)
+            self.setSessionState(.connected, for: session.id)
             self.clearPendingStatus(for: session.id)
             self.publishPoolStatus()
         }
@@ -1357,8 +1415,8 @@ class OnyxTerminalView: NSView {
         DispatchQueue.main.async {
             self.appState.allSessions.append(session)
             self.appState.activeSession = session
-            self.appState.connectionError = nil
         }
+        clearSessionState(for: session.id)
 
         let tv = activateSession(session)
         let (cmd, args) = appState.commandForSession(session)
@@ -1366,6 +1424,7 @@ class OnyxTerminalView: NSView {
             tv.startProcess(executable: cmd, args: args, environment: nil, execName: nil)
             self.pool[session.id]?.processRunning = true
             TerminalActivityStore.shared.markConnected(sessionID: session.id)
+            self.setSessionState(.connected, for: session.id)
         }
     }
 
@@ -1389,9 +1448,8 @@ class OnyxTerminalView: NSView {
             activeSessionID = nil
         }
 
-        DispatchQueue.main.async {
-            self.appState.connectionError = nil
-            self.appState.isReconnecting = false
+        if let target = targetSession {
+            clearSessionState(for: target.id)
         }
 
         enumerateAllSessions {
@@ -1451,16 +1509,24 @@ class OnyxTerminalView: NSView {
 
     private func reconnect() {
         let targetSession = appState.activeSession
+        let hostID = targetSession?.source.hostID
+
+        // The target session's process is dead — publish that truth
+        // immediately, before any gating/backoff decisions below. This is
+        // what gates keyboard input and shows the overlay, so it must be
+        // tied to actual process death, not to scheduling details.
+        if let tid = targetSession?.id {
+            setSessionState(.reattaching(reason: "connection lost", since: Date()), for: tid)
+        }
 
         // Stop auto-reconnecting after too many consecutive failures
-        let hostID = targetSession?.source.hostID
         if reconnectAttempt >= maxReconnectAttempts {
             let hostLabel = targetSession.flatMap { appState.host(for: $0.source.hostID)?.label } ?? "remote host"
-            DispatchQueue.main.async { [weak self] in
-                self?.appState.isReconnecting = false
-                self?.appState.reconnectingHostID = nil
-                self?.appState.connectionError = "Connection to \(hostLabel) failed after \(self?.maxReconnectAttempts ?? 10) attempts.\nUse ⌘K → Reconnect SSH to try again."
-                self?.appState.connectionErrorHostID = hostID
+            let message = "Connection to \(hostLabel) failed after \(maxReconnectAttempts) attempts.\nUse ⌘K → Reconnect SSH to try again."
+            if let hid = hostID {
+                setHostState(.failed(error: message), hostID: hid)
+            } else if let tid = targetSession?.id {
+                setSessionState(.failed(error: message), for: tid)
             }
             if let session = targetSession {
                 clearPendingStatus(for: session.id)
@@ -1490,11 +1556,6 @@ class OnyxTerminalView: NSView {
 
         setPendingStatus(.reconnecting, for: targetSession)
 
-        DispatchQueue.main.async {
-            self.appState.isReconnecting = true
-            self.appState.reconnectingHostID = hostID
-        }
-
         let targetID = targetSession?.id
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self else { return }
@@ -1503,7 +1564,9 @@ class OnyxTerminalView: NSView {
             // abandon this reconnect — don't fight the user's explicit choice.
             if let tid = targetID, self.appState.activeSession?.id != tid {
                 print("reconnect: user switched away from \(tid), abandoning reconnect")
-                self.appState.isReconnecting = false
+                // No longer reattaching this session — drop its state so a
+                // later switch back starts clean.
+                self.clearSessionState(for: tid)
                 if let session = targetSession { self.clearPendingStatus(for: session.id) }
                 if let hid = hostID { self.releaseReconnectGate(hid, reason: "user-switched") }
                 return
@@ -1521,7 +1584,8 @@ class OnyxTerminalView: NSView {
                         if reachable != .ok {
                             // Host not reachable — retry with backoff, don't waste an attempt.
                             // Release the gate so the next attempt can acquire fresh.
-                            self.appState.isReconnecting = false
+                            // (Session state stays .reattaching — we ARE still trying;
+                            // the old flag-flicker here was one source of overlay lies.)
                             if let hid = hostID { self.releaseReconnectGate(hid, reason: "unreachable-retry") }
                             self.reconnect()
                             return
@@ -1541,7 +1605,9 @@ class OnyxTerminalView: NSView {
     /// Directly reconnects the target session without full re-enumeration —
     /// enumeration is slow and itself can fail, making reconnect worse.
     private func performReconnect(targetSession: TmuxSession?) {
-        self.appState.isReconnecting = false
+        // Session state stays .reattaching here — the truth is that the
+        // process is still dead. connectToActiveSession publishes .connected
+        // only after it actually starts the new process.
         self.lastStartTime = Date()
 
         // Destroy the dead entry so we get a fresh terminal view
@@ -1563,6 +1629,8 @@ class OnyxTerminalView: NSView {
                     self.appState.activeSession = target
                 } else {
                     print("performReconnect: user switched to \(currentID ?? "nil"), not restoring \(target.id)")
+                    // Not reattaching this session anymore — drop its state.
+                    self.clearSessionState(for: target.id)
                     return // user switched — don't reconnect the old session
                 }
             }
@@ -1621,8 +1689,13 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
         if wasKeySetup {
             if exitCode != 0 {
                 DispatchQueue.main.async { [weak self] in
-                    self?.appState.connectionError = "SSH key setup failed. Use ⌘K → Reconnect SSH to try again."
-                    self?.appState.isReconnecting = false
+                    guard let self = self else { return }
+                    let message = "SSH key setup failed. Use ⌘K → Reconnect SSH to try again."
+                    if let hid = self.appState.keySetupHostID {
+                        self.setHostState(.failed(error: message), hostID: hid)
+                    } else if let active = self.appState.activeSession {
+                        self.setSessionState(.failed(error: message), for: active.id)
+                    }
                 }
             } else {
                 DispatchQueue.main.async { [weak self] in
@@ -1679,8 +1752,24 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
                 print("processTerminated: session \(deadID) died but user already switched, skipping reconnect")
                 return
             }
-            if self.appState.connectionError != nil {
-                self.appState.isReconnecting = false
+            // A hard error is already displayed for this session — don't
+            // auto-reconnect underneath it.
+            if self.appState.activeSessionConnectionState.showErrorOverlay {
+                return
+            }
+            // The host needs key setup (detected during enumeration, possibly
+            // before this session existed in allSessions) — publish that as
+            // this session's state instead of burning reconnect attempts on
+            // a host that will reject every one of them.
+            if self.appState.needsKeySetup,
+               let hid = self.appState.keySetupHostID,
+               let session = self.appState.activeSession,
+               session.source.hostID == hid {
+                let label = self.appState.host(for: hid)?.label ?? "remote host"
+                self.setSessionState(
+                    .needsKeySetup(error: "Key authentication failed for \(label).\nInstall your SSH key to connect."),
+                    for: session.id
+                )
                 return
             }
             // Don't auto-reconnect docker logs — the container may have stopped

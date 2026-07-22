@@ -941,7 +941,7 @@ struct ConnectionErrorOverlay: View {
                     .foregroundColor(appState.needsKeySetup ? appState.accentColor : Color.onyxRed)
                     .tracking(3)
 
-                Text(appState.connectionError ?? "")
+                Text(appState.activeSessionErrorMessage ?? "")
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundColor(.white.opacity(0.8))
                     .multilineTextAlignment(.center)
@@ -995,6 +995,28 @@ struct FavoritesBar: View {
 
     private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
 
+    private var connectionPillColor: Color {
+        switch appState.activeSessionConnectionState {
+        case .connected: return Color.onyxGreen
+        case .reattaching: return Color.onyxAmber
+        case .failed, .needsKeySetup: return Color.onyxRed
+        }
+    }
+
+    private var connectionPillTooltip: String {
+        switch appState.activeSessionConnectionState {
+        case .connected:
+            return "Connected"
+        case .reattaching(let reason, let since):
+            let secs = Int(Date().timeIntervalSince(since))
+            return "Reconnecting (\(reason), \(secs)s)"
+        case .failed(let error):
+            return error
+        case .needsKeySetup:
+            return "SSH key setup required"
+        }
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             // Session manager toggle
@@ -1022,17 +1044,18 @@ struct FavoritesBar: View {
                     .padding(.trailing, 4)
             }
 
-            // Connection indicator + host
+            // Connection indicator + host — driven by the single per-session
+            // connection truth (never a lingering flag).
             HStack(spacing: 5) {
                 Circle()
-                    .fill(appState.activeSessionHasError ? Color.onyxRed :
-                          appState.isActiveSessionReconnecting ? Color.onyxAmber : Color.onyxGreen)
+                    .fill(connectionPillColor)
                     .frame(width: 5, height: 5)
 
                 Text(appState.activeHost?.label ?? "local")
                     .font(.system(size: sz(10), design: .monospaced))
                     .foregroundColor(.gray.opacity(0.5))
             }
+            .help(connectionPillTooltip)
             .padding(.trailing, 6)
 
             // Favorite session tabs
