@@ -47,6 +47,9 @@ public class GitManager: ObservableObject {
 
     /// Check and load.
     public func checkAndLoad(path: String) {
+        // Pair-health gate: a down/offline host makes every git call a
+        // guaranteed 10-30s timeout — skip and keep whatever we have.
+        guard appState.hostUsable(appState.activeHost) else { return }
         isLoading = true
         currentRepoPath = path
 

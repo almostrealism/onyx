@@ -104,6 +104,12 @@ public class DockerStatsManager: ObservableObject {
     }
 
     private func poll() {
+        // Pair-health gate + channel budget: skip the cycle when the host
+        // is down or the previous docker-stats poll is still in flight.
+        let host = appState.activeHost
+        guard appState.hostUsable(host) else { return }
+        guard let releaseChannel = appState.acquireUtilityChannel(
+            "dockerStats:\(host?.id ?? HostConfig.localhostID)", host: host) else { return }
         // Two docker calls in one ssh round-trip:
         // - `docker stats` for live CPU/mem/io/pids
         // - `docker ps` for the Status field which contains uptime
@@ -120,6 +126,7 @@ public class DockerStatsManager: ObservableObject {
         let hostLabel = appState.activeHost?.label ?? "local"
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
+            defer { releaseChannel() }
             // Route through the central executor for bounded execution +
             // PID tracking. Previously this was a raw Process with a
             // SIGTERM-only kill timer.

@@ -222,10 +222,19 @@ public class MonitorManager: ObservableObject {
     }
 
     private func poll() {
-        let hostID = appState.activeHost?.id ?? HostConfig.localhostID
-        let hostLabel = appState.activeHost?.label ?? "local"
+        let host = appState.activeHost
+        let hostID = host?.id ?? HostConfig.localhostID
+        let hostLabel = host?.label ?? "local"
+        // Pair-health gate: while the host is down/offline/sleeping the
+        // poll is a guaranteed failure — skip and keep stale data. The
+        // pair supervisor resumes us automatically once it recovers.
+        guard appState.hostUsable(host) else { return }
+        // Channel budget: dedup + cap. If the previous stats poll is
+        // still in flight (slow network), don't stack another on top.
+        guard let releaseChannel = appState.acquireUtilityChannel("monitor:\(hostID)", host: host) else { return }
         let (cmd, args, stdinScript) = appState.statsCommand()
         DispatchQueue.global(qos: .utility).async { [weak self] in
+            defer { releaseChannel() }
             // Route through the central executor — bounded, tracked,
             // SIGKILL-escalated. Previously this was a raw Process with
             // a SIGTERM-only kill timer that ssh could (and did) ignore.
@@ -242,6 +251,9 @@ public class MonitorManager: ObservableObject {
             DispatchQueue.main.async { self?.pollCount += 1 }
 
             if result.exit == 255 {
+                // Feed the pair supervisor — the active connection may be
+                // silently dead; this triggers immediate standby promotion.
+                self?.appState.reportSSHFailure(host: host)
                 DispatchQueue.main.async {
                     guard let self = self else { return }
                     var data = self.hostData[hostID] ?? HostMonitorData()

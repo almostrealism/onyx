@@ -1248,37 +1248,49 @@ public class AppState: ObservableObject {
         ConnectionPairRegistry.shared.controlPath(for: host)
     }
 
-    /// SSH multiplexing args for SHORT-LIVED utility commands only.
-    /// Interactive terminal sessions must NOT use mux — when the mux master
-    /// dies (sleep, network change), ALL sessions through it die simultaneously
-    /// and create a thundering-herd reconnect loop.
+    /// SSH multiplexing args for SHORT-LIVED utility commands. Rides the
+    /// host's connection pair as a mux channel — `ControlMaster=no` means
+    /// a utility command can NEVER spawn its own master; the pair
+    /// supervisor owns the only TCP connections to a host (two, ever).
     private func sshMuxArgs(for host: HostConfig) -> [String] {
-        let controlPath = sshControlPath(for: host)
-        return [
-            "-o", "ControlMaster=auto",
-            "-o", "ControlPath=\(controlPath)",
-            "-o", "ControlPersist=120",
+        [
+            "-o", "ControlMaster=no",
+            "-o", "ControlPath=\(sshControlPath(for: host))",
         ]
     }
 
-    /// Track hosts that had SSH failures — mux socket will be cleaned up before next use
-    private var muxNeedsCleanup: Set<UUID> = []
+    /// Report an SSH failure (exit 255) against a host — marks the pair's
+    /// active connection suspect so the standby is promoted immediately
+    /// instead of waiting for the next smoke test. Replaces the old
+    /// markMuxStale socket-deletion dance (which raced its own cleanup).
+    public func reportSSHFailure(host: HostConfig?) {
+        guard let host, !host.isLocal else { return }
+        ConnectionPairRegistry.shared.pair(for: host).signalChannelFailure()
+    }
 
-    /// Mark a host's mux as needing cleanup (called when SSH exit code is 255)
-    public func markMuxStale(for hostID: UUID) {
-        muxNeedsCleanup.insert(hostID)
+    /// True when the host's connection pair can carry traffic right now.
+    /// Localhost is always usable. Pollers gate every cycle on this and
+    /// skip while the host is down/offline/sleeping — no blind retries
+    /// hammering an unreachable remote.
+    public func hostUsable(_ host: HostConfig?) -> Bool {
+        guard let host, !host.isLocal else { return true }
+        return ConnectionPairRegistry.shared.health(for: host).state.isUsable
+    }
+
+    /// Claim a utility SSH channel for `host`. Returns a release closure
+    /// (call it in a defer), or nil when this cycle must be skipped: the
+    /// identical poll is still in flight (slow network — the old code
+    /// piled these up 2-3×) or the host is at its concurrent-channel cap.
+    public func acquireUtilityChannel(_ label: String, host: HostConfig?) -> (() -> Void)? {
+        guard let host, !host.isLocal else { return {} }
+        let budget = ConnectionPairRegistry.shared.pair(for: host).channelBudget
+        guard budget.acquire(label) else { return nil }
+        return { budget.release(label) }
     }
 
     /// SSH args for short-lived utility commands (stats, enumeration, file browser).
     /// Uses mux for efficiency — these are ephemeral and can retry if mux dies.
     func sshBaseArgs(for host: HostConfig, batchMode: Bool = true, connectTimeout: Int = 5) -> [String] {
-        // Clean up mux socket if a previous command flagged it as stale
-        let controlPath = sshControlPath(for: host)
-        if muxNeedsCleanup.remove(host.id) != nil {
-            try? FileManager.default.removeItem(atPath: controlPath)
-            print("SSH mux: cleaned up stale socket for \(host.label)")
-        }
-
         var args = sshMuxArgs(for: host)
         if batchMode {
             args.append("-o"); args.append("BatchMode=yes")
@@ -1316,7 +1328,7 @@ public class AppState: ObservableObject {
     func scpBaseArgs(for host: HostConfig) -> [String] {
         let controlPath = sshControlPath(for: host)
         var args: [String] = [
-            "-o", "ControlMaster=auto",
+            "-o", "ControlMaster=no",
             "-o", "ControlPath=\(controlPath)",
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
@@ -1509,7 +1521,6 @@ public class AppState: ObservableObject {
     public func resetSSHMux(for host: HostConfig) {
         OnyxLog.ssh.notice("user reset: host=\(host.label, privacy: .public)")
         ConnectionPairRegistry.shared.reset(for: host)
-        muxNeedsCleanup.remove(host.id)
     }
 
     /// Check if the SSH mux master is alive for a host. Delegates to

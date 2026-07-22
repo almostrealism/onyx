@@ -2,7 +2,8 @@ import XCTest
 import Foundation
 @testable import OnyxLib
 
-/// Regression tests for SSH ControlMaster path handling and stale-mux cleanup.
+/// Regression tests for SSH ControlMaster path handling and the
+/// utility-traffic mux-client discipline.
 ///
 /// See: ADR-005 (SSH ControlMaster paths).
 ///
@@ -10,18 +11,15 @@ import Foundation
 /// locate the `ControlPath=...` value and verify:
 ///   1. The path never contains whitespace (past bug: ~/Library/Application
 ///      Support/ broke ssh arg parsing).
-///   2. `markMuxStale(for:)` followed by `sshBaseArgs(for:)` removes any
-///      existing socket file at that path.
-///   3. The stale flag is per-host — flagging host A does not clean up B.
+///   2. Utility commands are mux CLIENTS only (`ControlMaster=no`) — they
+///      can never spawn their own master/TCP connection. The pair
+///      supervisor owns the only two connections to a host.
 final class SSHMuxTests: XCTestCase {
 
     private func extractControlPath(from args: [String]) -> String? {
-        for (i, a) in args.enumerated() where a.hasPrefix("ControlPath=") {
+        for a in args where a.hasPrefix("ControlPath=") {
             return String(a.dropFirst("ControlPath=".count))
         }
-        // Some args are passed as ["-o", "ControlPath=..."] — the above loop
-        // already handles that because we scan every element.
-        _ = args
         return nil
     }
 
@@ -67,79 +65,40 @@ final class SSHMuxTests: XCTestCase {
         XCTAssertEqual(p1, p2, "Same host must return the same ControlPath across calls")
     }
 
-    // MARK: - markMuxStale behavior
+    // MARK: - Mux-client discipline (the two-connection cap)
 
-    /// Regression: after a broken pipe, `markMuxStale(hostID)` plus the next
-    /// `sshBaseArgs(for:)` call must delete any leftover socket file.
-    /// Failing to do so caused new ssh commands to hang forever on the
-    /// dead master connection.
-    func testMarkMuxStale_removesSocketFileOnNextBaseArgs() throws {
+    /// THE cap regression test: utility ssh commands must be mux clients
+    /// (`ControlMaster=no`), never `auto` — `auto` let every utility call
+    /// spawn its own master when the pair was down, blowing the
+    /// two-connections-per-host cap on flaky networks.
+    func testSshBaseArgs_isMuxClientOnly() {
+        let state = AppState()
+        let host = makeHost(label: "alpha")
+        let args = state.sshBaseArgs(for: host)
+        XCTAssertTrue(args.contains("ControlMaster=no"),
+                      "utility ssh must never spawn its own ControlMaster")
+        XCTAssertFalse(args.contains("ControlMaster=auto"),
+                       "ControlMaster=auto violates the two-connection cap")
+    }
+
+    func testScpBaseArgs_isMuxClientOnly() {
+        let state = AppState()
+        let host = makeHost(label: "alpha")
+        let args = state.scpBaseArgs(for: host)
+        XCTAssertTrue(args.contains("ControlMaster=no"),
+                      "scp must never spawn its own ControlMaster")
+        XCTAssertFalse(args.contains("ControlMaster=auto"))
+    }
+
+    /// The ControlPath handed to utility commands must be one of the
+    /// pair's slot paths — utility traffic rides the pair, nothing else.
+    func testSshBaseArgs_controlPathIsAPairSlotPath() throws {
         let state = AppState()
         let host = makeHost(label: "alpha")
         let path = try XCTUnwrap(extractControlPath(from: state.sshBaseArgs(for: host)))
-
-        // Create a placeholder file at the mux path
-        let fm = FileManager.default
-        let dir = (path as NSString).deletingLastPathComponent
-        try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        fm.createFile(atPath: path, contents: Data("fake socket".utf8))
-        XCTAssertTrue(fm.fileExists(atPath: path), "Fixture file should exist")
-
-        // Mark stale then fetch base args — the flagged host's socket should be gone
-        state.markMuxStale(for: host.id)
-        _ = state.sshBaseArgs(for: host)
-
-        XCTAssertFalse(fm.fileExists(atPath: path),
-                       "sshBaseArgs must delete a stale mux socket after markMuxStale")
-    }
-
-    /// markMuxStale on host A must not affect host B's socket. Earlier a
-    /// global flag was considered — this test guards against reintroducing
-    /// cross-host cleanup.
-    func testMarkMuxStale_isPerHost() throws {
-        let state = AppState()
-        let hostA = makeHost(label: "alpha")
-        let hostB = makeHost(label: "beta")
-        let pathA = try XCTUnwrap(extractControlPath(from: state.sshBaseArgs(for: hostA)))
-        let pathB = try XCTUnwrap(extractControlPath(from: state.sshBaseArgs(for: hostB)))
-
-        let fm = FileManager.default
-        try fm.createDirectory(atPath: (pathA as NSString).deletingLastPathComponent,
-                               withIntermediateDirectories: true)
-        fm.createFile(atPath: pathA, contents: Data("A".utf8))
-        fm.createFile(atPath: pathB, contents: Data("B".utf8))
-
-        state.markMuxStale(for: hostA.id)
-        _ = state.sshBaseArgs(for: hostA)
-        _ = state.sshBaseArgs(for: hostB)
-
-        XCTAssertFalse(fm.fileExists(atPath: pathA), "Host A socket should be cleaned")
-        XCTAssertTrue(fm.fileExists(atPath: pathB), "Host B socket must be untouched")
-
-        // Cleanup
-        try? fm.removeItem(atPath: pathB)
-    }
-
-    /// The stale flag is consumed — calling sshBaseArgs twice must only
-    /// clean up once. (Otherwise a reconnect loop could re-delete a live
-    /// socket on every retry.)
-    func testMarkMuxStale_consumedAfterFirstUse() throws {
-        let state = AppState()
-        let host = makeHost(label: "alpha")
-        let path = try XCTUnwrap(extractControlPath(from: state.sshBaseArgs(for: host)))
-        let fm = FileManager.default
-        try fm.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
-                               withIntermediateDirectories: true)
-
-        state.markMuxStale(for: host.id)
-        _ = state.sshBaseArgs(for: host)  // consumes flag
-
-        // Now create a new socket file and call sshBaseArgs again — the flag
-        // was already consumed, so the new file must survive.
-        fm.createFile(atPath: path, contents: Data("fresh".utf8))
-        _ = state.sshBaseArgs(for: host)
-        XCTAssertTrue(fm.fileExists(atPath: path),
-                      "Stale flag must be consumed after first use, not re-applied")
-        try? fm.removeItem(atPath: path)
+        let slot0 = ConnectionPair.slotPath(for: host.id, slot: 0)
+        let slot1 = ConnectionPair.slotPath(for: host.id, slot: 1)
+        XCTAssertTrue(path == slot0 || path == slot1,
+                      "utility ControlPath must be a pair slot path, got: \(path)")
     }
 }

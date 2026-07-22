@@ -137,12 +137,19 @@ public final class CPUFleetPoller {
     }
 
     private func pollOne(host: HostConfig, appState: AppState, timestamp: TimeInterval) {
-        // For remote hosts: only poll if the mux master is alive. Spinning
-        // up a fresh master here would mean the screensaver background path
-        // could trigger SSH auth prompts — emphatically not what we want.
+        // For remote hosts: only poll if the pair's active connection is
+        // alive. Spinning up a fresh master here would mean the
+        // screensaver background path could trigger SSH auth prompts —
+        // emphatically not what we want.
         if !host.isLocal {
             guard appState.sshMuxAlive(for: host) else { return }
         }
+        // Channel budget: dedup + per-host cap. If this host's previous
+        // fleet poll hasn't returned yet, skip the cycle — don't stack
+        // overlapping ssh calls on a slow network.
+        guard let releaseChannel = appState.acquireUtilityChannel(
+            "fleetPoller:\(host.id)", host: host) else { return }
+        defer { releaseChannel() }
 
         let (cmd, args, stdinScript) = appState.statsCommand(host: host)
 

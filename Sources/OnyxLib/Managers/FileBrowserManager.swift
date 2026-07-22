@@ -397,11 +397,11 @@ public class FileBrowserManager: ObservableObject {
         return nil
     }
 
-    /// Called when an SSH command fails (exit 255). Marks the mux as stale
-    /// so the next command cleans up the socket and gets a fresh connection.
+    /// Called when an SSH command fails (exit 255). Feeds the pair
+    /// supervisor so a silently-dead active connection is promoted away
+    /// from immediately (standby is warm).
     private func handleSSHFailure() {
-        guard let host = appState.activeHost, !host.isLocal else { return }
-        appState.markMuxStale(for: host.id)
+        appState.reportSSHFailure(host: appState.activeHost)
     }
 
     /// Run a remote script and, on a transient failure (exit 255 with no
