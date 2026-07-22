@@ -1306,15 +1306,21 @@ public class AppState: ObservableObject {
         return args
     }
 
-    /// SSH args for long-lived interactive sessions (terminal, docker tmux, logs).
-    /// NO mux — each session gets its own independent SSH connection so they
-    /// survive independently across sleep/wake and network changes.
+    /// SSH args for long-lived interactive sessions (terminal, docker tmux,
+    /// logs, LSP). Rides the host's connection pair as a mux channel —
+    /// `ControlMaster=no` means a terminal can NEVER open its own TCP
+    /// connection. The pair's active master owns the connection and its
+    /// keepalives; when it dies, every channel EOFs together and the
+    /// terminals instantly reattach through the promoted standby (tmux
+    /// preserves all session state). This is the hard two-connections-
+    /// per-host cap.
     func sshSessionArgs(for host: HostConfig, connectTimeout: Int = 10) -> [String] {
-        var args: [String] = []
+        var args: [String] = [
+            "-o", "ControlMaster=no",
+            "-o", "ControlPath=\(sshControlPath(for: host))",
+        ]
         args.append("-o"); args.append("ConnectTimeout=\(connectTimeout)")
         args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
-        args.append("-o"); args.append("ServerAliveInterval=15")
-        args.append("-o"); args.append("ServerAliveCountMax=3")
         if host.ssh.port != 22 {
             args.append("-p"); args.append("\(host.ssh.port)")
         }
@@ -1341,13 +1347,6 @@ public class AppState: ObservableObject {
             args.append("-i"); args.append(host.ssh.identityFile)
         }
         return args
-    }
-
-    /// Clean up stale mux sockets for all hosts (call on wake from sleep)
-    public func cleanupStaleMuxSockets() {
-        for host in hosts where !host.isLocal {
-            sshMuxStop(for: host)
-        }
     }
 
     /// User@host string for SSH commands
@@ -1633,13 +1632,25 @@ public class AppState: ObservableObject {
         return String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : Character("_") })
     }
 
-    /// SSH flags and env export for MCP remote port forwarding.
-    /// Uses `-o ExitOnForwardFailure=no` so the session always connects even if the port is busy.
+    /// MCP `-R` reverse-forwarding flags for the pair's MASTER connection.
+    /// Port forwardings belong to the master, not to channel clients — a
+    /// mux client can't reliably request `-R` at channel-open time. The
+    /// pair registry appends these when establishing each master, so the
+    /// forwarding is available to every channel (terminals included).
+    /// `ExitOnForwardFailure=no` keeps a busy port from failing the master.
+    func mcpMasterForwardingFlags() -> [String] {
+        guard let localPort = mcpServer?.tcpPort else { return [] }
+        let remotePort = MCPSocketServer.defaultRemotePort
+        return ["-o", "ExitOnForwardFailure=no", "-R", "\(remotePort):127.0.0.1:\(localPort)"]
+    }
+
+    /// Env export prefix telling remote shells where the MCP forwarding
+    /// lives (the forwarding itself is established by the pair's master).
     private func mcpForwardingArgs() -> (sshFlags: [String], envExport: String) {
-        guard let localPort = mcpServer?.tcpPort else { return ([], "") }
+        guard mcpServer?.tcpPort != nil else { return ([], "") }
         let remotePort = MCPSocketServer.defaultRemotePort
         return (
-            ["-o", "ExitOnForwardFailure=no", "-R", "\(remotePort):127.0.0.1:\(localPort)"],
+            [],
             "export ONYX_MCP_PORT=\(remotePort); tmux set-environment ONYX_MCP_PORT \(remotePort) 2>/dev/null; "
         )
     }
@@ -1782,7 +1793,7 @@ public class AppState: ObservableObject {
             return (shell, ["-lc", "export \(extraPath); \(launch)"])
         }
 
-        var args = sshSessionArgs(for: h)   // long-lived, independent (no mux)
+        var args = sshSessionArgs(for: h)   // long-lived mux channel on the pair
         // NO "-t": an LSP stream must stay a clean byte pipe.
         args.append(sshUserHost(for: h))
         args.append("exec $SHELL -lc 'export \(extraPath); \(launch)'")

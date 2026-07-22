@@ -18,6 +18,8 @@
 
 import Foundation
 import Darwin
+import Network
+import AppKit
 
 public final class ConnectionPairRegistry: ObservableObject {
 
@@ -39,6 +41,20 @@ public final class ConnectionPairRegistry: ObservableObject {
     /// Kill switch, togglable from the mux diagnostic panel.
     public private(set) var enabled: Bool = true
 
+    /// Running terminal channels per host — published by the terminal
+    /// session manager(s) whenever their pools change. Rotation reads
+    /// this so a planned failover never blips live terminals.
+    private var terminalCounts: [UUID: Int] = [:]
+
+    /// Event-driven network awareness. On path loss the pairs go
+    /// `.offline` immediately (pollers pause, establishes stop) instead
+    /// of burning 45s keepalive timeouts; on restore they validate and
+    /// rebuild at once.
+    private var pathMonitor: NWPathMonitor?
+    private let pathMonitorQueue = DispatchQueue(label: "com.onyx.pair.nwpath", qos: .utility)
+    private var sleepObserver: Any?
+    private var wakeObserver: Any?
+
     private init() {}
 
     // MARK: - Lifecycle
@@ -57,6 +73,69 @@ public final class ConnectionPairRegistry: ObservableObject {
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
+
+        startNetworkMonitor()
+        installSleepWakeObservers()
+    }
+
+    /// NWPathMonitor: push network-path verdicts into every pair the
+    /// moment they change — no waiting for keepalive timeouts.
+    private func startNetworkMonitor() {
+        guard pathMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let self else { return }
+            let satisfied = path.status == .satisfied
+            OnyxLog.ssh.notice("NWPath: \(satisfied ? "satisfied" : "unsatisfied", privacy: .public)")
+            self.lock.lock()
+            let all = Array(self.pairs.values)
+            self.lock.unlock()
+            for pair in all {
+                pair.setNetworkAvailable(satisfied)
+            }
+            if satisfied {
+                // Path restored — validate/rebuild immediately instead of
+                // waiting up to a full tick.
+                DispatchQueue.main.async { [weak self] in self?.tick() }
+            }
+        }
+        monitor.start(queue: pathMonitorQueue)
+        pathMonitor = monitor
+    }
+
+    /// willSleep: cleanly exit both masters per host so the remote sshd
+    /// tears sessions down gracefully BEFORE the network vanishes —
+    /// nothing left to time out, nothing orphaned server-side.
+    /// didWake: clear overrides and rebuild the pairs immediately.
+    private func installSleepWakeObservers() {
+        guard sleepObserver == nil else { return }
+        let nc = NSWorkspace.shared.notificationCenter
+        sleepObserver = nc.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            OnyxLog.ssh.notice("willSleep — quiescing all pairs")
+            self.lock.lock()
+            let all = Array(self.pairs.values)
+            self.lock.unlock()
+            // Quiesce synchronously-ish on a background queue; the OS
+            // gives us a short window before actually sleeping.
+            DispatchQueue.global(qos: .userInitiated).async {
+                for pair in all { pair.quiesce() }
+            }
+        }
+        wakeObserver = nc.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            OnyxLog.ssh.notice("didWake — reactivating all pairs")
+            self.lock.lock()
+            let all = Array(self.pairs.values)
+            self.lock.unlock()
+            for pair in all { pair.reactivate() }
+            // Rebuild immediately — don't wait for the next tick.
+            self.tick()
+        }
     }
 
     public func stop() {
@@ -110,8 +189,39 @@ public final class ConnectionPairRegistry: ObservableObject {
                 self?.stateGeneration &+= 1
             }
         }
+        // Rotation gate: never recycle a connection with live terminals.
+        let hostID = host.id
+        p.terminalChannelCount = { [weak self] in
+            self?.terminalCount(for: hostID) ?? 0
+        }
+        // MCP reverse forwarding is established at the master level so
+        // every channel (terminals included) shares it.
+        p.masterExtraArgs = { [weak self] in
+            self?.appState?.mcpMasterForwardingFlags() ?? []
+        }
         pairs[host.id] = p
         return p
+    }
+
+    // MARK: - Terminal channel accounting
+
+    /// Latest per-host running-terminal counts, per reporting manager
+    /// (one terminal manager per window — counts are summed across them).
+    private var countsByReporter: [ObjectIdentifier: [UUID: Int]] = [:]
+
+    /// Called by a terminal session manager whenever its pool changes.
+    public func updateTerminalCounts(_ counts: [UUID: Int], reporter: AnyObject) {
+        lock.lock()
+        countsByReporter[ObjectIdentifier(reporter)] = counts
+        terminalCounts = countsByReporter.values.reduce(into: [:]) { acc, per in
+            for (hid, n) in per { acc[hid, default: 0] += n }
+        }
+        lock.unlock()
+    }
+
+    private func terminalCount(for hostID: UUID) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return terminalCounts[hostID] ?? 0
     }
 
     /// Synchronous health read. `.initializing` if the pair hasn't been

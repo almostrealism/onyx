@@ -48,13 +48,34 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
-    /// Called when the app is about to quit (normal or via Cmd+Q).
-    /// Shut down the SSH supervisor — definitively closes every mux
-    /// master so we don't leave orphan processes holding remote TCP
-    /// connections open. Without this, the leaks documented in
-    /// docs/ssh-connection-leak.md keep accumulating on the remote.
+    /// Quit path 1: delay termination just long enough to tear the
+    /// connection pairs down cleanly (ssh -O exit → PID SIGKILL per
+    /// master, bounded per call). Killing the masters closes every mux
+    /// channel — terminals included — server-side, so the remote sshd
+    /// ends its sessions instead of holding them until keepalive death.
+    /// A hard 3s deadline guarantees quit is never hostage to a stuck
+    /// ssh; the orphan reaper + willTerminate below are the backstop.
+    public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        OnyxLog.ssh.notice("applicationShouldTerminate — tearing down connection pairs")
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            ConnectionPairRegistry.shared.shutdown()
+            done.signal()
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = done.wait(timeout: .now() + 3)
+            DispatchQueue.main.async {
+                sender.reply(toApplicationShouldTerminate: true)
+            }
+        }
+        return .terminateLater
+    }
+
+    /// Quit path 2 (belt-and-braces): shutdown() is idempotent, so this
+    /// is a no-op after the normal path — but it still runs when
+    /// termination came from somewhere that skipped shouldTerminate.
     public func applicationWillTerminate(_ notification: Notification) {
-        OnyxLog.ssh.notice("applicationWillTerminate — shutting down connection pairs")
+        OnyxLog.ssh.notice("applicationWillTerminate — final pair shutdown")
         ConnectionPairRegistry.shared.shutdown()
     }
 

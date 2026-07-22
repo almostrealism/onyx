@@ -493,10 +493,13 @@ final class MCPForwardingTests: XCTestCase {
         XCTAssertEqual(MCPSocketServer.defaultRemotePort, 19432)
     }
 
-    func testSshCommand_remote_includesForwardingWhenServerRunning() {
-        // When MCP server has a TCP port, SSH commands should include -R flag
+    /// MCP `-R` forwarding belongs to the pair's MASTER connection, not
+    /// to terminal channel clients — a mux client can't reliably request
+    /// remote forwardings at channel-open time. The session command must
+    /// NEVER carry -R; the env export (which just tells the remote shell
+    /// where the master-level forwarding lives) still rides the session.
+    func testSshCommand_remote_neverCarriesRFlag() {
         let state = AppState()
-        // Start the MCP server so tcpPort gets assigned
         state.loadConfig()
 
         // Give the TCP listener a moment to bind
@@ -509,18 +512,40 @@ final class MCPForwardingTests: XCTestCase {
         let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com", user: "admin"))
         let (_, args) = state.sshCommand(host: host, sessionName: "dev")
 
-        let hasForwardFlag = args.contains("-R")
-        let hasEnvExport = args.last?.contains("ONYX_MCP_PORT") ?? false
+        XCTAssertFalse(args.contains("-R"),
+                       "session channels must not request -R; the master owns forwardings")
 
-        // Only check if TCP port was assigned (may not happen in CI)
-        if hasForwardFlag {
-            XCTAssertTrue(hasEnvExport, "Should export ONYX_MCP_PORT in remote command")
-            // Verify the -R value format
-            if let rIdx = args.firstIndex(of: "-R"), rIdx + 1 < args.count {
-                let rValue = args[rIdx + 1]
-                XCTAssertTrue(rValue.contains("19432:127.0.0.1:"), "Should forward remote 19432 to local port")
+        // When the MCP server is running, the master flags carry the -R
+        // and the session command still exports ONYX_MCP_PORT.
+        let masterFlags = state.mcpMasterForwardingFlags()
+        if !masterFlags.isEmpty {
+            XCTAssertTrue(masterFlags.contains("-R"))
+            if let rIdx = masterFlags.firstIndex(of: "-R"), rIdx + 1 < masterFlags.count {
+                XCTAssertTrue(masterFlags[rIdx + 1].contains("19432:127.0.0.1:"),
+                              "Should forward remote 19432 to local port")
             }
+            XCTAssertTrue(args.last?.contains("ONYX_MCP_PORT") ?? false,
+                          "Should export ONYX_MCP_PORT in remote command")
         }
+    }
+
+    /// THE cap regression test for interactive sessions: terminals must be
+    /// mux clients on the pair (ControlMaster=no + a pair slot ControlPath),
+    /// never independent TCP connections. This is the hard two-connections-
+    /// per-host guarantee.
+    func testSshSessionArgs_remote_isMuxClientOnPair() {
+        let state = AppState()
+        let host = HostConfig(label: "server", ssh: SSHConfig(host: "myserver.com", user: "admin"))
+        let args = state.sshSessionArgs(for: host)
+        XCTAssertTrue(args.contains("ControlMaster=no"),
+                      "terminals must never spawn their own ControlMaster")
+        let path = args.first(where: { $0.hasPrefix("ControlPath=") })
+            .map { String($0.dropFirst("ControlPath=".count)) }
+        XCTAssertNotNil(path, "terminals must ride the pair via ControlPath")
+        let slot0 = ConnectionPair.slotPath(for: host.id, slot: 0)
+        let slot1 = ConnectionPair.slotPath(for: host.id, slot: 1)
+        XCTAssertTrue(path == slot0 || path == slot1,
+                      "terminal ControlPath must be a pair slot path")
     }
 
     func testSshCommand_local_noForwarding() {

@@ -13,8 +13,8 @@
 // Invariants:
 //   - activeSessionID, when non-nil, has a corresponding entry in `pool`
 //   - Pooled entries idle beyond evictionTimeout (5 min) are reaped
-//   - reconnectAttempt resets on successful spawn; capped at
-//     maxReconnectAttempts before giving up
+//   - rapidDeaths resets on successful spawn / user-initiated actions;
+//     capped at maxRapidDeaths before surfacing a hard error
 //   - Each pooled terminalView is bound to exactly one session id for life
 //
 // See: ADR-001 (session identity at async boundaries),
@@ -37,9 +37,20 @@ private struct PoolEntry {
 class OnyxTerminalView: NSView {
     let appState: AppState
     var hasStarted = false
-    private var reconnectAttempt = 0
-    private let maxBackoff: TimeInterval = 30.0
-    private let maxReconnectAttempts = 8  // stop auto-reconnecting after this many failures
+    /// Consecutive times the active session's process died within 5s of
+    /// starting WHILE the pair reported usable — the remote is actively
+    /// rejecting the session command (broken tmux, revoked key, …).
+    /// After `maxRapidDeaths` we stop and surface a hard error instead
+    /// of looping. This replaces the old exponential backoff ladder:
+    /// with the connection pair, "host unreachable" is the pair's
+    /// problem (we wait for its recovery signal), and a usable pair
+    /// means attach is instant — there is nothing left to back off for.
+    private var rapidDeaths = 0
+    private let maxRapidDeaths = 3
+    /// How long to wait for the pair to recover before giving up.
+    private let pairRecoveryDeadline: TimeInterval = 120
+    private var recoveryWaitTimer: Timer?
+    private var recoveryWaitStart: Date?
     private var currentFontSize: Double = 13
     private var currentFontName: String = "SF Mono"
     private var lastStartTime: Date?
@@ -125,16 +136,16 @@ class OnyxTerminalView: NSView {
 
         startPeriodicEnumeration()
 
-        // On wake from sleep: clean up stale mux sockets so polling commands
-        // can establish a fresh mux master. Runs on background queue to avoid
-        // blocking the UI — sshMuxStop waits for SSH processes to exit.
+        // On wake from sleep: the pair registry rebuilds the masters
+        // itself (didWake observer there). Here we just check the active
+        // session promptly — if its channel died with the old masters,
+        // healthCheck kicks off the reattach without waiting for the
+        // 10s eviction tick.
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            guard let self = self else { return }
-            print("System woke from sleep — cleaning up stale mux sockets")
-            DispatchQueue.global(qos: .utility).async {
-                self.appState.cleanupStaleMuxSockets()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self?.healthCheck()
             }
         }
     }
@@ -612,6 +623,17 @@ class OnyxTerminalView: NSView {
             // Only clear pending entries that now exist in pool
             self.appState.pendingConnections = pending
         }
+
+        // Report per-host running-terminal counts to the pair registry —
+        // the rotation gate that keeps planned failovers from yanking a
+        // connection out from under live terminals.
+        var counts: [UUID: Int] = [:]
+        for info in infos where info.isRunning {
+            if let source = info.source, !source.isLocal {
+                counts[source.hostID, default: 0] += 1
+            }
+        }
+        ConnectionPairRegistry.shared.updateTerminalCounts(counts, reporter: self)
     }
 
     /// Detect dead processes that didn't trigger processTerminated
@@ -841,7 +863,8 @@ class OnyxTerminalView: NSView {
     func startSSH() {
         guard !appState.showSetup else { return }
         hasStarted = true
-        reconnectAttempt = 0
+        rapidDeaths = 0
+        stopPairRecoveryWait()
         lastStartTime = Date()
 
         DispatchQueue.main.async {
@@ -856,7 +879,8 @@ class OnyxTerminalView: NSView {
     }
 
     func forceReconnect() {
-        reconnectAttempt = 0
+        rapidDeaths = 0
+        stopPairRecoveryWait()
         lastStartTime = Date()
         isKeySetup = false
 
@@ -1009,7 +1033,8 @@ class OnyxTerminalView: NSView {
               let host = appState.host(for: hostID) else { return }
 
         isKeySetup = true
-        reconnectAttempt = 0
+        rapidDeaths = 0
+        stopPairRecoveryWait()
         lastStartTime = Date()
 
         // Use a dedicated non-pooled view for key setup
@@ -1367,7 +1392,8 @@ class OnyxTerminalView: NSView {
     // MARK: - Session Switching
 
     func switchToSession(_ session: TmuxSession) {
-        reconnectAttempt = 0
+        rapidDeaths = 0
+        stopPairRecoveryWait()
         lastStartTime = Date()
         isKeySetup = false
 
@@ -1401,7 +1427,8 @@ class OnyxTerminalView: NSView {
     }
 
     func createNewTmuxSession(_ session: TmuxSession) {
-        reconnectAttempt = 0
+        rapidDeaths = 0
+        stopPairRecoveryWait()
         lastStartTime = Date()
         isKeySetup = false
 
@@ -1436,7 +1463,8 @@ class OnyxTerminalView: NSView {
 
     /// Manual refresh: tear down and reconnect the active session
     func refreshActiveSession() {
-        reconnectAttempt = 0
+        rapidDeaths = 0
+        stopPairRecoveryWait()
         lastStartTime = Date()
         isKeySetup = false
 
@@ -1465,145 +1493,100 @@ class OnyxTerminalView: NSView {
         }
     }
 
-    /// Per-host reconnect gate. Without this, a network blip caused
-    /// every pooled session for a host to reconnect simultaneously
-    /// (each session has its own per-session backoff but they don't
-    /// coordinate), which trips the remote sshd's `MaxStartups 10:30:100`
-    /// default and locks the user out. See docs/ssh-connection-leak.md.
-    /// The Set is keyed by host UUID; an entry being present means a
-    /// reconnect to that host is already scheduled or in-flight.
-    private static var reconnectsInFlight: Set<UUID> = []
-    private static let reconnectGateLock = NSLock()
-
-    /// Hard maximum the gate can stay closed for any one host. Watchdog
-    /// timeout in case a reconnect path forgets to clear. 30s is well
-    /// beyond any legitimate reconnect duration.
-    private static let reconnectGateMaxSeconds: TimeInterval = 30
-
-    private func acquireReconnectGate(_ hostID: UUID) -> Bool {
-        Self.reconnectGateLock.lock()
-        let already = Self.reconnectsInFlight.contains(hostID)
-        if !already {
-            Self.reconnectsInFlight.insert(hostID)
-            // Watchdog — auto-clear if the reconnect path forgets.
-            DispatchQueue.global(qos: .utility)
-                .asyncAfter(deadline: .now() + Self.reconnectGateMaxSeconds) { [weak self] in
-                    self?.releaseReconnectGate(hostID, reason: "watchdog")
-                }
-        }
-        Self.reconnectGateLock.unlock()
-        return !already
-    }
-
-    private func releaseReconnectGate(_ hostID: UUID, reason: String) {
-        Self.reconnectGateLock.lock()
-        let wasHeld = Self.reconnectsInFlight.remove(hostID) != nil
-        Self.reconnectGateLock.unlock()
-        if wasHeld {
-            OnyxLog.session.info("""
-                reconnect gate released: host=\(hostID.uuidString, privacy: .public) \
-                reason=\(reason, privacy: .public)
-                """)
-        }
-    }
-
+    /// Reconnect the active session through the connection pair.
+    ///
+    /// The old design probed the host itself and climbed an exponential
+    /// backoff ladder (0.5s→30s, 8 attempts) — every terminal fighting
+    /// its own private war against the network. Now the pair supervisor
+    /// owns connectivity: if its active connection is usable, attaching
+    /// is one mux channel request (~100ms, already authenticated), so we
+    /// do it IMMEDIATELY with no probe and no backoff. If the pair is
+    /// down, we wait for its recovery signal — the pair is already
+    /// retrying on its own cadence; a terminal retrying on top of that
+    /// was the reconnect storm.
     private func reconnect() {
-        let targetSession = appState.activeSession
-        let hostID = targetSession?.source.hostID
+        guard let target = appState.activeSession else { return }
 
-        // The target session's process is dead — publish that truth
-        // immediately, before any gating/backoff decisions below. This is
-        // what gates keyboard input and shows the overlay, so it must be
-        // tied to actual process death, not to scheduling details.
-        if let tid = targetSession?.id {
-            setSessionState(.reattaching(reason: "connection lost", since: Date()), for: tid)
-        }
+        // The session's process is dead — publish that truth immediately.
+        // This is what gates keyboard input and shows the overlay, so it
+        // is tied to actual process death, never to scheduling details.
+        setSessionState(.reattaching(reason: "connection lost", since: Date()), for: target.id)
 
-        // Stop auto-reconnecting after too many consecutive failures
-        if reconnectAttempt >= maxReconnectAttempts {
-            let hostLabel = targetSession.flatMap { appState.host(for: $0.source.hostID)?.label } ?? "remote host"
-            let message = "Connection to \(hostLabel) failed after \(maxReconnectAttempts) attempts.\nUse ⌘K → Reconnect SSH to try again."
-            if let hid = hostID {
-                setHostState(.failed(error: message), hostID: hid)
-            } else if let tid = targetSession?.id {
-                setSessionState(.failed(error: message), for: tid)
-            }
-            if let session = targetSession {
-                clearPendingStatus(for: session.id)
-            }
-            if let hid = hostID { releaseReconnectGate(hid, reason: "max-attempts") }
+        guard let host = appState.host(for: target.source.hostID), !host.isLocal else {
+            // Local session — nothing to wait for; just respawn.
+            performReconnect(targetSession: target)
             return
         }
 
-        // Gate: at most one in-flight reconnect per host. Subsequent
-        // reconnect() calls for the same host before the gate clears
-        // are dropped — preventing reconnect storms.
-        if let hid = hostID, !acquireReconnectGate(hid) {
-            OnyxLog.session.notice("""
-                reconnect gated: host=\(hid.uuidString, privacy: .public) — \
-                another reconnect already in flight
-                """)
-            return
+        let health = ConnectionPairRegistry.shared.health(for: host)
+        if health.state.isUsable {
+            // The remote is reachable and answering — if the session
+            // still dies instantly over and over, the session command
+            // itself is being rejected. Stop; looping won't fix it.
+            if rapidDeaths >= maxRapidDeaths {
+                setHostState(
+                    .failed(error: "Session on \(host.label) keeps dying right after connect.\nUse ⌘K → Reconnect SSH to try again."),
+                    hostID: host.id
+                )
+                clearPendingStatus(for: target.id)
+                return
+            }
+            setPendingStatus(.connecting, for: target)
+            performReconnect(targetSession: target)
+        } else {
+            // Pair down/offline/sleeping — wait for its recovery.
+            setPendingStatus(.reconnecting, for: target)
+            beginPairRecoveryWait(target: target, host: host)
         }
+    }
 
-        // Backoff with jitter — the jitter spreads any simultaneous
-        // unblock events across hosts so we don't accidentally re-create
-        // the storm at a slightly later moment.
-        let base = min(pow(2.0, Double(reconnectAttempt)) * 0.5, maxBackoff)
-        let jitter = Double.random(in: 0...(base * 0.3))
-        let delay = base + jitter
-        reconnectAttempt += 1
+    /// Poll the pair's health once a second until it recovers (attach),
+    /// the user switches away (abandon), or the deadline passes (fail).
+    /// The pair does all the actual retrying — this just watches.
+    private func beginPairRecoveryWait(target: TmuxSession, host: HostConfig) {
+        guard recoveryWaitTimer == nil else { return }  // already waiting
+        recoveryWaitStart = Date()
+        recoveryWaitTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            guard let self = self else { timer.invalidate(); return }
 
-        setPendingStatus(.reconnecting, for: targetSession)
-
-        let targetID = targetSession?.id
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self = self else { return }
-
-            // If the user switched to a different session during the backoff,
-            // abandon this reconnect — don't fight the user's explicit choice.
-            if let tid = targetID, self.appState.activeSession?.id != tid {
-                print("reconnect: user switched away from \(tid), abandoning reconnect")
-                // No longer reattaching this session — drop its state so a
-                // later switch back starts clean.
-                self.clearSessionState(for: tid)
-                if let session = targetSession { self.clearPendingStatus(for: session.id) }
-                if let hid = hostID { self.releaseReconnectGate(hid, reason: "user-switched") }
+            // User switched away — don't fight their choice.
+            if self.appState.activeSession?.id != target.id {
+                self.stopPairRecoveryWait()
+                self.clearSessionState(for: target.id)
+                self.clearPendingStatus(for: target.id)
                 return
             }
 
-            // Check if the host is actually reachable before attempting reconnect.
-            // This avoids burning through retry attempts on a sleeping/unreachable host.
-            if let session = targetSession,
-               let host = self.appState.host(for: session.source.hostID),
-               !host.isLocal {
-                self.setPendingStatus(.connecting, for: targetSession)
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let reachable = self.probeHost(host)
-                    DispatchQueue.main.async {
-                        if reachable != .ok {
-                            // Host not reachable — retry with backoff, don't waste an attempt.
-                            // Release the gate so the next attempt can acquire fresh.
-                            // (Session state stays .reattaching — we ARE still trying;
-                            // the old flag-flicker here was one source of overlay lies.)
-                            if let hid = hostID { self.releaseReconnectGate(hid, reason: "unreachable-retry") }
-                            self.reconnect()
-                            return
-                        }
-                        if let hid = hostID { self.releaseReconnectGate(hid, reason: "committed") }
-                        self.performReconnect(targetSession: targetSession)
-                    }
-                }
-            } else {
-                if let hid = hostID { self.releaseReconnectGate(hid, reason: "committed-local") }
-                self.performReconnect(targetSession: targetSession)
+            let health = ConnectionPairRegistry.shared.health(for: host)
+            if health.state.isUsable {
+                self.stopPairRecoveryWait()
+                self.rapidDeaths = 0
+                self.performReconnect(targetSession: target)
+                return
+            }
+
+            if let start = self.recoveryWaitStart,
+               Date().timeIntervalSince(start) > self.pairRecoveryDeadline {
+                self.stopPairRecoveryWait()
+                self.setHostState(
+                    .failed(error: "Connection to \(host.label) could not be re-established.\nUse ⌘K → Reconnect SSH to try again."),
+                    hostID: host.id
+                )
+                self.clearPendingStatus(for: target.id)
             }
         }
     }
 
-    /// Actually reconnect once we know the host is reachable.
-    /// Directly reconnects the target session without full re-enumeration —
-    /// enumeration is slow and itself can fail, making reconnect worse.
+    private func stopPairRecoveryWait() {
+        recoveryWaitTimer?.invalidate()
+        recoveryWaitTimer = nil
+        recoveryWaitStart = nil
+    }
+
+    /// Actually reconnect once the pair is usable (or the session is
+    /// local). Directly reconnects the target session without full
+    /// re-enumeration — enumeration is slow and itself can fail, making
+    /// reconnect worse.
     private func performReconnect(targetSession: TmuxSession?) {
         // Session state stays .reattaching here — the truth is that the
         // process is still dead. connectToActiveSession publishes .connected
@@ -1616,10 +1599,10 @@ class OnyxTerminalView: NSView {
             self.activeSessionID = nil
         }
 
-        // Brief delay to let the remote sshd release the connection slot.
-        // Without this, the new connection can arrive before the old one
-        // finishes tearing down, hitting MaxSessions limits.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        // Short beat for SwiftTerm's IO teardown to drain. (The old 1s
+        // "let sshd release the slot" delay is gone — a mux channel
+        // attach doesn't consume a connection slot at all.)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self = self else { return }
             // Only restore the target session if the user hasn't switched away
             // during the delay. Overwriting a user's explicit session switch is wrong.
@@ -1704,7 +1687,7 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
                         self.destroyPoolEntry(id)
                         self.activeSessionID = nil
                     }
-                    self.reconnectAttempt = 0
+                    self.rapidDeaths = 0
                     self.enumerateAllSessions {
                         self.connectToActiveSession()
                         // Re-enumerate after a delay to pick up the tmux session
@@ -1776,11 +1759,13 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
             if let session = self.appState.activeSession, session.source.isDockerLogs {
                 return
             }
-            // If the process died very quickly after starting (<5s), the remote host
-            // is actively rejecting us. Jump ahead in the backoff to avoid hammering
-            // the server with rapid-fire connection attempts.
+            // Track instant deaths: a process dying within 5s of starting
+            // while the pair is usable means the remote is rejecting the
+            // session command itself — reconnect() gives up after a few.
             if let start = self.lastStartTime, Date().timeIntervalSince(start) < 5.0 {
-                self.reconnectAttempt = max(self.reconnectAttempt, 4) // at least 8s backoff
+                self.rapidDeaths += 1
+            } else {
+                self.rapidDeaths = 0
             }
             self.reconnect()
         }
