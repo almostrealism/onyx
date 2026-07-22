@@ -411,12 +411,17 @@ public final class ConnectionPairRegistry: ObservableObject {
     /// SIGKILL any ssh master under ~/.ssh/onyx-mux/ whose ControlPath
     /// isn't one of our current slots.
     private func reapOrphanMasters() {
+        // Snapshot pairs under the registry lock, then read their
+        // diagnostics OUTSIDE it — pair.diagnostics takes the pair lock,
+        // and holding registry→pair while maintain paths could want
+        // pair→registry is a deadlock waiting to happen.
         lock.lock()
+        let snapshot = Array(pairs.values)
+        lock.unlock()
         var current = Set<String>()
-        for pair in pairs.values {
+        for pair in snapshot {
             for slot in pair.diagnostics.slots { current.insert(slot.path) }
         }
-        lock.unlock()
 
         let muxDirPrefix = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".ssh/onyx-mux").path

@@ -46,7 +46,8 @@ Models       ← Pure data types; no dependencies on anything else
 - A new Store should be justified by: cross-window sharing, persistence, or both.
 
 **Managers** — Per-window or per-session stateful `ObservableObject`s that coordinate work for one UI context. One Manager owns a specific responsibility end-to-end.
-- `TerminalSessionManager` (`OnyxTerminalView`) — terminal pool, SSH lifecycle, reconnect, enumeration, health checks
+- `ConnectionPair` / `ConnectionPairRegistry` — THE SSH transport. Exactly two mux masters per host (active + standby), instant standby promotion, single `HostHealth` authority, NWPathMonitor + sleep/wake handling, orphan reaper, airtight shutdown. Everything that talks to a host rides these two connections as mux channels (`ControlMaster=no`); nothing else may open a TCP connection to a host.
+- `TerminalSessionManager` (`OnyxTerminalView`) — terminal pool, session spawn as pair channels, pair-aware instant reattach, enumeration, health checks, single writer of `sessionConnectionStates`
 - `MonitorManager` — per-host CPU/GPU/docker/timing polling
 - `DockerStatsManager` — docker stats sub-polling
 - `GitManager` — git status/diff/log over SSH
@@ -75,7 +76,8 @@ Managers depend on Stores, Services, and Models — not on Views or other Manage
 - Background ZStack layers need `.allowsHitTesting(false)` to pass events through.
 - WKWebView state must NOT be read from `@Published` properties during SwiftUI `updateNSView` — it causes re-entry loops. Use KVO observations instead (`BrowserManager` pattern).
 - SSH ControlMaster paths must live in a directory without spaces — `~/.onyx/` not `~/Library/Application Support/`.
-- Broken pipe recovery: mark the mux stale (`markMuxStale(hostID)`) and clean up in `sshBaseArgs` before next use.
+- Broken pipe recovery: report via `appState.reportSSHFailure(host:)` — the host's `ConnectionPair` marks its active connection suspect and promotes the warm standby immediately. Never delete mux sockets by hand.
+- SSH-driven pollers must gate on `appState.hostUsable(host)` and claim a slot with `appState.acquireUtilityChannel(label:host:)` (in-flight dedup + per-host cap) — this is what prevents poll pileup on slow networks.
 - Topology-based session enumeration never wipes the session list on a single failed `docker ps` — it uses a grace period via `NetworkTopologyStore`.
 
 ## Remote command execution

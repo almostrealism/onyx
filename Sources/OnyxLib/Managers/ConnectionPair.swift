@@ -377,6 +377,11 @@ public final class ConnectionPair {
         }
 
         // Commit check results + promotion + rotation under the lock.
+        // NB: terminalChannelCount is evaluated BEFORE taking the pair
+        // lock — it calls into the registry (its own lock), and the
+        // registry calls pair methods while holding its lock; taking
+        // pair→registry here would be an ABBA deadlock.
+        let attachedTerminals = terminalChannelCount()
         var toEstablish: [Int] = []
         var rotationTeardown: (path: String, pid: pid_t?)? = nil
         lock.lock()
@@ -400,7 +405,7 @@ public final class ConnectionPair {
         //    Rotation is a planned failover; doing it under live terminal
         //    channels would blip every terminal for freshness's sake.
         if slots[0].phase == .alive && slots[1].phase == .alive,
-           terminalChannelCount() == 0 {
+           attachedTerminals == 0 {
             let last = lastRotationAt ?? .distantPast
             if now.timeIntervalSince(last) >= Self.rotationInterval {
                 let oldActive = activeIndex
