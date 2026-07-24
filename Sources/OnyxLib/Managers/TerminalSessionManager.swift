@@ -26,6 +26,7 @@ import SwiftUI
 import AppKit
 import SwiftTerm
 import Foundation
+import Combine
 
 // MARK: - Connection Pool
 
@@ -48,10 +49,14 @@ class OnyxTerminalView: NSView {
     /// means attach is instant — there is nothing left to back off for.
     private var rapidDeaths = 0
     private let maxRapidDeaths = 3
-    /// How long to wait for the pair to recover before giving up.
-    private let pairRecoveryDeadline: TimeInterval = 120
     private var recoveryWaitTimer: Timer?
     private var recoveryWaitStart: Date?
+    /// Pair generation at the moment a host was marked `.failed` — the
+    /// auto-heal observer retries exactly once per NEW generation (a
+    /// fresh connection deserves a fresh try; the same broken one
+    /// doesn't get to spin).
+    private var failedGeneration: [UUID: UInt64] = [:]
+    private var pairHealthObserver: AnyCancellable?
     private var currentFontSize: Double = 13
     private var currentFontName: String = "SF Mono"
     private var lastStartTime: Date?
@@ -148,6 +153,62 @@ class OnyxTerminalView: NSView {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 self?.healthCheck()
             }
+        }
+
+        // Auto-heal: whenever a host's pair recovers (or rolls a fresh
+        // connection), immediately repair anything that was parked on
+        // it. No terminal state may EVER sit waiting for the user to
+        // press ⌘K over a connection-level problem — the user walks up
+        // to their desk, the terminal is working, period.
+        pairHealthObserver = ConnectionPairRegistry.shared.$healthByHost
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] healthMap in
+                self?.autoHealFromPairRecovery(healthMap)
+            }
+    }
+
+    /// If the active session's host pair is usable again and the session
+    /// is dead or parked in `.failed`, reattach — once per pair
+    /// generation for failed states (a fresh connection = a fresh try).
+    private func autoHealFromPairRecovery(_ healthMap: [UUID: HostHealth]) {
+        guard hasStarted, !isKeySetup else { return }
+        guard let active = appState.activeSession, !active.source.isLocal else { return }
+        guard let health = healthMap[active.source.hostID], health.state.isUsable else { return }
+        let hostID = active.source.hostID
+
+        switch appState.sessionConnectionStates[active.id] ?? .connected {
+        case .failed:
+            // Retry once per NEW pair generation.
+            guard failedGeneration[hostID] != health.generation else { return }
+            failedGeneration[hostID] = health.generation
+            OnyxLog.session.notice("""
+                auto-heal: pair recovered (gen \(health.generation, privacy: .public)) — \
+                clearing failed state and reattaching
+                """)
+            rapidDeaths = 0
+            // Clear failed state for every session on this host so tab
+            // switches don't land on stale errors.
+            for session in appState.allSessions
+            where session.source.hostID == hostID {
+                if case .failed = appState.sessionConnectionStates[session.id] ?? .connected {
+                    clearSessionState(for: session.id)
+                }
+            }
+            reconnect()
+        case .connected:
+            // State says connected — verify the process actually runs
+            // (the pair recovering right after a master death can beat
+            // the 10s health poll). If it's dead, reattach NOW so the
+            // user never finds a stale terminal.
+            if let id = activeSessionID, id == active.id,
+               let entry = pool[id], entry.processRunning,
+               !entry.terminalView.process.running {
+                healthCheck()
+            }
+        case .reattaching, .needsKeySetup:
+            // reattaching: the recovery-wait timer handles it.
+            // needsKeySetup: genuinely needs the user.
+            break
         }
     }
 
@@ -758,6 +819,8 @@ class OnyxTerminalView: NSView {
         evictionTimer?.invalidate()
         activityTimer?.invalidate()
         periodicEnumerationTimer?.invalidate()
+        recoveryWaitTimer?.invalidate()
+        pairHealthObserver?.cancel()
         for id in Array(pool.keys) {
             destroyPoolEntry(id)
         }
@@ -1523,10 +1586,14 @@ class OnyxTerminalView: NSView {
         if health.state.isUsable {
             // The remote is reachable and answering — if the session
             // still dies instantly over and over, the session command
-            // itself is being rejected. Stop; looping won't fix it.
+            // itself is being rejected. Surface it, but DON'T dead-end:
+            // the auto-heal observer retries the moment the pair rolls a
+            // fresh connection (generation change). The user should
+            // never have to press ⌘K for a connection-level problem.
             if rapidDeaths >= maxRapidDeaths {
+                failedGeneration[host.id] = health.generation
                 setHostState(
-                    .failed(error: "Session on \(host.label) keeps dying right after connect.\nUse ⌘K → Reconnect SSH to try again."),
+                    .failed(error: "Session on \(host.label) keeps dying right after connect.\nRetrying automatically when the connection recycles — or ⌘K → Reconnect SSH to force it now."),
                     hostID: host.id
                 )
                 clearPendingStatus(for: target.id)
@@ -1541,9 +1608,13 @@ class OnyxTerminalView: NSView {
         }
     }
 
-    /// Poll the pair's health once a second until it recovers (attach),
-    /// the user switches away (abandon), or the deadline passes (fail).
-    /// The pair does all the actual retrying — this just watches.
+    /// Watch the pair's health until it recovers, then attach. The pair
+    /// does all the actual retrying — this just watches, FOREVER. There
+    /// is deliberately no deadline: the old 120s → .failed dead-end
+    /// meant a long outage parked the terminal in a state that waited
+    /// for the user to press ⌘K — the exact opposite of "come to my
+    /// desk and it works". If the host is down for six hours, the
+    /// moment it's back the terminal reattaches on its own.
     private func beginPairRecoveryWait(target: TmuxSession, host: HostConfig) {
         guard recoveryWaitTimer == nil else { return }  // already waiting
         recoveryWaitStart = Date()
@@ -1563,17 +1634,6 @@ class OnyxTerminalView: NSView {
                 self.stopPairRecoveryWait()
                 self.rapidDeaths = 0
                 self.performReconnect(targetSession: target)
-                return
-            }
-
-            if let start = self.recoveryWaitStart,
-               Date().timeIntervalSince(start) > self.pairRecoveryDeadline {
-                self.stopPairRecoveryWait()
-                self.setHostState(
-                    .failed(error: "Connection to \(host.label) could not be re-established.\nUse ⌘K → Reconnect SSH to try again."),
-                    hostID: host.id
-                )
-                self.clearPendingStatus(for: target.id)
             }
         }
     }

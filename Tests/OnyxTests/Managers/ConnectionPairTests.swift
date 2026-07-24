@@ -18,6 +18,11 @@ final class ConnectionPairTests: XCTestCase {
         var establishSucceeds = true
         var establishCount = 0
         var stoppedPaths: [String] = []
+        // PID simulation: each established master gets a fake PID so the
+        // definitive process-exit detector can be exercised.
+        var pidCounter: pid_t = 1000
+        var pathToPID: [String: pid_t] = [:]
+        var deadPIDs: Set<pid_t> = []
 
         private let ok = SSHProcess.RunResult(exit: 0, stderr: "", timedOut: false)
         private let fail = SSHProcess.RunResult(exit: 255, stderr: "", timedOut: false)
@@ -35,6 +40,8 @@ final class ConnectionPairTests: XCTestCase {
                     sockets.insert(path)
                     checkAlive.insert(path)
                     smokeOK.insert(path)
+                    pidCounter += 1
+                    pathToPID[path] = pidCounter
                     return ok
                 }
                 return fail
@@ -55,12 +62,12 @@ final class ConnectionPairTests: XCTestCase {
             return ok
         }
 
-        func findMasterPID(socketPath: String) -> pid_t? { nil }
-        func killAndVerify(pid: pid_t) -> Bool { true }
+        func findMasterPID(socketPath: String) -> pid_t? { pathToPID[socketPath] }
+        func killAndVerify(pid: pid_t) -> Bool { deadPIDs.insert(pid); return true }
         func killMaster(at path: String, userHost: String) {}
         func socketExists(atPath path: String) -> Bool { sockets.contains(path) }
         func removeSocket(atPath path: String) { sockets.remove(path) }
-        func processAlive(pid: pid_t) -> Bool { false }
+        func processAlive(pid: pid_t) -> Bool { !deadPIDs.contains(pid) }
     }
 
     private func makePair() -> (ConnectionPair, StubRunner, HostConfig) {
@@ -106,21 +113,63 @@ final class ConnectionPairTests: XCTestCase {
 
     // MARK: Promotion
 
-    func testActiveDies_standbyPromoted_zeroDowntime() {
+    func testActiveDies_corroborated_standbyPromoted() {
         let (pair, runner, host) = makePair()
         pair.maintain()
         let (slot0, slot1) = slotPaths(for: host)
         XCTAssertEqual(pair.activeControlPath, slot0)
 
-        // Simulate silent death of the active master's TCP connection.
+        // Simulate silent socket-level death of the active master (the
+        // process is somehow still around, so only the advisory checks
+        // see it). Death requires checkFailureThreshold consecutive
+        // failures — never a single sample.
         runner.checkAlive.remove(slot0)
         runner.smokeOK.remove(slot0)
 
-        pair.maintain()
+        for _ in 0..<ConnectionPair.checkFailureThreshold {
+            pair.maintain()
+        }
 
         // Standby promoted; dead slot rebuilt in the same maintain pass.
         XCTAssertEqual(pair.activeControlPath, slot1)
         XCTAssertEqual(pair.health.state, .connected)
+        XCTAssertEqual(pair.health.activeSlotPhase, .alive)
+    }
+
+    /// THE stable-desktop regression test: one failed -O check (load
+    /// spike, slow fork) must NOT kill a working master. Single-sample
+    /// kill authority is what ate healthy connections every few hours.
+    func testSingleCheckFailure_doesNotKillActive() {
+        let (pair, runner, host) = makePair()
+        pair.maintain()
+        let (slot0, _) = slotPaths(for: host)
+
+        // One transient hiccup...
+        runner.checkAlive.remove(slot0)
+        pair.maintain()
+        // ...then the check recovers.
+        runner.checkAlive.insert(slot0)
+        pair.maintain()
+
+        XCTAssertEqual(pair.activeControlPath, slot0, "active master must survive a transient hiccup")
+        XCTAssertEqual(pair.health.state, .connected)
+        XCTAssertEqual(runner.establishCount, 2, "no rebuild may be triggered by a single failed check")
+    }
+
+    /// Definitive evidence path: the master PROCESS exiting (ssh's own
+    /// ServerAlive verdict) kills the slot on the very next maintain —
+    /// no thresholds, because process death is proof.
+    func testMasterProcessExit_diesImmediately_promotes() {
+        let (pair, runner, host) = makePair()
+        pair.maintain()
+        let (slot0, slot1) = slotPaths(for: host)
+
+        // The active master's process exits; its stale socket still
+        // answers -O check (worst case).
+        if let pid = runner.pathToPID[slot0] { runner.deadPIDs.insert(pid) }
+        pair.maintain()
+
+        XCTAssertEqual(pair.activeControlPath, slot1)
         XCTAssertEqual(pair.health.activeSlotPhase, .alive)
     }
 
@@ -132,22 +181,26 @@ final class ConnectionPairTests: XCTestCase {
         runner.checkAlive.remove(slot0)
         runner.smokeOK.remove(slot0)
 
-        pair.maintain()
+        for _ in 0..<ConnectionPair.checkFailureThreshold {
+            pair.maintain()
+        }
 
         XCTAssertGreaterThan(pair.health.generation, genBefore)
     }
 
     func testBothDie_afterConnect_healthDown_thenRecovers() {
-        let (pair, runner, host) = makePair()
+        let (pair, runner, _) = makePair()
         pair.maintain()
-        let (slot0, slot1) = slotPaths(for: host)
 
-        // Kill both and make re-establish fail (host unreachable).
+        // Both master PROCESSES exit (what actually happens when the
+        // network dies: ServerAlive fails and ssh exits) and re-establish
+        // fails (host unreachable). Process death is definitive — .down
+        // on the very next maintain.
         runner.establishSucceeds = false
+        runner.deadPIDs.formUnion(runner.pathToPID.values)
         runner.checkAlive.removeAll()
         runner.smokeOK.removeAll()
         runner.sockets.removeAll()
-        _ = (slot0, slot1)
 
         pair.maintain()
         XCTAssertEqual(pair.health.state, .down)
@@ -160,7 +213,7 @@ final class ConnectionPairTests: XCTestCase {
 
     // MARK: Smoke test & channel-failure signals
 
-    func testSmokeFailure_marksDead_promotes() {
+    func testSmokeFailure_needsCorroboration_thenPromotes() {
         let (pair, runner, host) = makePair()
         pair.maintain()
         let (slot0, slot1) = slotPaths(for: host)
@@ -168,29 +221,66 @@ final class ConnectionPairTests: XCTestCase {
         // Socket answers -O check but real commands hang: silent TCP death.
         runner.smokeOK.remove(slot0)
 
-        // Advance past the smoke-test interval so slot0 is re-tested.
+        // First failure past the smoke cadence: suspect, NOT dead.
         pair.maintain(now: Date().addingTimeInterval(ConnectionPair.smokeTestInterval + 1))
+        XCTAssertEqual(pair.activeControlPath, slot0, "one smoke failure must not kill")
 
+        // Suspect is re-tested immediately on the next maintain; a second
+        // consecutive failure is corroboration -> dead -> promote.
+        pair.maintain(now: Date().addingTimeInterval(ConnectionPair.smokeTestInterval + 2))
         XCTAssertEqual(pair.activeControlPath, slot1)
         XCTAssertEqual(pair.health.activeSlotPhase, .alive)
     }
 
-    func testChannelFailureSignal_promotesImmediately() {
+    /// A single smoke hiccup that recovers must leave the master alone.
+    func testSingleSmokeFailure_recovers_noKill() {
+        let (pair, runner, host) = makePair()
+        pair.maintain()
+        let (slot0, _) = slotPaths(for: host)
+
+        runner.smokeOK.remove(slot0)
+        pair.maintain(now: Date().addingTimeInterval(ConnectionPair.smokeTestInterval + 1))
+        runner.smokeOK.insert(slot0)
+        pair.maintain(now: Date().addingTimeInterval(ConnectionPair.smokeTestInterval + 2))
+
+        XCTAssertEqual(pair.activeControlPath, slot0)
+        XCTAssertEqual(pair.health.state, .connected)
+        XCTAssertEqual(runner.establishCount, 2, "no rebuild for a transient smoke failure")
+    }
+
+    func testChannelFailureSignal_withHungCommands_promotes() {
         let (pair, runner, host) = makePair()
         pair.maintain()
         let (slot0, slot1) = slotPaths(for: host)
 
         // The active socket still passes -O check, but a caller's channel
-        // request failed and real commands hang.
+        // request failed AND real commands hang: two independent signals.
         runner.smokeOK.remove(slot0)
         pair.signalChannelFailure()
 
-        // Suspect slots are re-smoke-tested immediately — no waiting for
-        // the smoke cadence.
+        // Suspect is smoke-tested immediately (failure 1/2), then
+        // re-tested next maintain (failure 2/2) -> dead -> promote.
+        pair.maintain()
         pair.maintain()
 
         XCTAssertEqual(pair.activeControlPath, slot1)
         XCTAssertEqual(pair.health.state, .connected)
+    }
+
+    /// An exit-255 report alone (poller failure) against a master whose
+    /// commands actually work must NOT kill anything.
+    func testChannelFailureSignal_aloneWithHealthyMaster_noKill() {
+        let (pair, runner, host) = makePair()
+        pair.maintain()
+        let (slot0, _) = slotPaths(for: host)
+
+        pair.signalChannelFailure()
+        pair.maintain()
+        pair.maintain()
+
+        XCTAssertEqual(pair.activeControlPath, slot0)
+        XCTAssertEqual(pair.health.state, .connected)
+        XCTAssertEqual(runner.establishCount, 2)
     }
 
     // MARK: Rotation
@@ -202,6 +292,12 @@ final class ConnectionPairTests: XCTestCase {
         let (slot0, slot1) = slotPaths(for: host)
         XCTAssertEqual(pair.activeControlPath, slot0)
         _ = runner
+
+        // Second maintain starts the rotation clock (pair fully alive);
+        // rotation fires only after a full interval from THAT point.
+        pair.maintain()
+        XCTAssertEqual(pair.activeControlPath, slot0,
+                       "rotation must not fire at startup — the clock starts when the pair is first fully alive")
 
         pair.maintain(now: Date().addingTimeInterval(ConnectionPair.rotationInterval + 1))
 

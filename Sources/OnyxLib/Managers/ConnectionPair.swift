@@ -119,15 +119,37 @@ public final class ChannelBudget {
 
 public final class ConnectionPair {
 
-    // Cadence/timeout constants — carried over from SSHKeeper unchanged;
-    // they were tuned in production.
-    public static let tickInterval: TimeInterval = 2
-    public static let smokeTestInterval: TimeInterval = 4
+    // Cadence/timeout constants.
+    //
+    // PRIME DIRECTIVE: a working connection is never torn down on
+    // suspicion — only on proof. The original 2s-cadence checks with
+    // single-sample kill authority ran ~43k times a day; on a stable
+    // desktop a false positive was a statistical certainty, and each one
+    // murdered a healthy master with every terminal riding it. Sampling
+    // is now ADVISORY: only corroborated evidence (consecutive failures)
+    // or definitive evidence (the master PROCESS exited — ssh itself
+    // declares the TCP dead via ServerAlive and exits) kills a slot.
+    public static let tickInterval: TimeInterval = 5
+    public static let smokeTestInterval: TimeInterval = 30
     public static let rotationInterval: TimeInterval = 1800
     public static let serverAliveInterval = 10
     public static let serverAliveCountMax = 3
     public static let connectTimeout = 15
-    public static let controlPersist = 600
+    /// Masters never idle-expire (`ControlPersist=0` = forever). Only we
+    /// decide when a master dies. The old 600s let an idle master expire
+    /// underneath a user who stepped away for ten minutes.
+    public static let controlPersist = 0
+    /// Consecutive `-O check` failures required before a slot is declared
+    /// dead. A single failure is a hiccup (load spike, slow fork), not
+    /// evidence.
+    public static let checkFailureThreshold = 3
+    /// Consecutive smoke-test failures required to declare death.
+    public static let smokeFailureThreshold = 2
+    /// After this many consecutive establish failures, retry attempts
+    /// slow to `establishRetryInterval` so an unreachable host isn't
+    /// hammered every tick.
+    public static let establishSlowdownAfter = 3
+    public static let establishRetryInterval: TimeInterval = 30
 
     /// One slot of the pair.
     public struct Slot: Equatable {
@@ -135,6 +157,9 @@ public final class ConnectionPair {
         public let path: String
         public var phase: SlotPhase = .absent
         public var consecutiveFailures: Int = 0
+        public var consecutiveSmokeFailures: Int = 0
+        public var establishFailures: Int = 0
+        public var lastEstablishAttemptAt: Date? = nil
         public var establishedAt: Date? = nil
         public var lastSmokeTestAt: Date? = nil
         public var masterPID: pid_t? = nil
@@ -255,12 +280,20 @@ public final class ConnectionPair {
         publishHealth()
     }
 
-    /// Woke from sleep / network path restored — clear overrides; the
-    /// next maintain re-validates and rebuilds immediately.
+    /// Woke from sleep / network path restored — clear overrides and all
+    /// failure counters (a new network is a clean slate; stale establish
+    /// backoff must not delay the rebuild); the next maintain
+    /// re-validates and rebuilds immediately.
     func reactivate() {
         lock.lock()
         isSleeping = false
         networkAvailable = true
+        for i in slots.indices {
+            slots[i].consecutiveFailures = 0
+            slots[i].consecutiveSmokeFailures = 0
+            slots[i].establishFailures = 0
+            slots[i].lastEstablishAttemptAt = nil
+        }
         lock.unlock()
         publishHealth()
     }
@@ -287,6 +320,10 @@ public final class ConnectionPair {
             slots[i].masterPID = nil
             slots[i].establishedAt = nil
             slots[i].lastSmokeTestAt = nil
+            slots[i].consecutiveFailures = 0
+            slots[i].consecutiveSmokeFailures = 0
+            slots[i].establishFailures = 0
+            slots[i].lastEstablishAttemptAt = nil
         }
         let uh = userHost
         lock.unlock()
@@ -328,51 +365,101 @@ public final class ConnectionPair {
         let uh = userHost
         lock.unlock()
 
-        // 1. Cheap socket-level check on each non-establishing slot.
-        for i in s.indices where s[i].phase != .establishing {
-            let exists = runner.socketExists(atPath: s[i].path)
-            let alive = exists && checkAlive(path: s[i].path, userHost: uh)
-            switch (alive, s[i].phase) {
-            case (true, .alive), (true, .suspect):
-                break // suspect stays suspect until the smoke test clears it below
-            case (true, _):
-                s[i].phase = .alive
-                s[i].consecutiveFailures = 0
-                OnyxLog.ssh.info("slot \(i, privacy: .public) alive: host=\(self.host.label, privacy: .public)")
-            case (false, .alive), (false, .suspect):
-                s[i].phase = exists ? .dead : .absent
-                s[i].consecutiveFailures += 1
-                OnyxLog.ssh.notice("slot \(i, privacy: .public) died: host=\(self.host.label, privacy: .public)")
-            case (false, _):
-                s[i].phase = exists ? .dead : .absent
-                s[i].consecutiveFailures += 1
+        // 1. DEFINITIVE evidence first: is the master PROCESS still
+        //    running? ssh exits on its own when ServerAlive declares the
+        //    TCP dead — process death is proof, not suspicion, and it
+        //    costs one kill(pid, 0), no ssh spawn. This is the primary
+        //    death detector; everything below is advisory.
+        for i in s.indices where s[i].phase == .alive || s[i].phase == .suspect {
+            if let pid = s[i].masterPID, !runner.processAlive(pid: pid) {
+                OnyxLog.ssh.notice("""
+                    master process exited: host=\(self.host.label, privacy: .public) \
+                    slot=\(i, privacy: .public) pid=\(pid, privacy: .public) — definitive death
+                    """)
+                s[i].phase = .dead
+                s[i].masterPID = nil
             }
         }
 
-        // 2. Channel-failure signal → active slot is suspect even if the
+        // 2. ADVISORY: cheap socket-level check on live slots. A single
+        //    failure is a hiccup (load spike, slow fork, busy mux) — it
+        //    is logged and counted, and ONLY a run of
+        //    `checkFailureThreshold` consecutive failures kills the slot.
+        //    The old single-sample kill authority is what murdered
+        //    healthy connections on stable desktops.
+        for i in s.indices where s[i].phase != .establishing {
+            let exists = runner.socketExists(atPath: s[i].path)
+            let alive = exists && checkAlive(path: s[i].path, userHost: uh)
+            switch s[i].phase {
+            case .alive, .suspect:
+                if alive {
+                    s[i].consecutiveFailures = 0
+                } else if !exists && s[i].masterPID == nil {
+                    // Socket gone AND no process — definitively gone.
+                    s[i].phase = .absent
+                } else {
+                    s[i].consecutiveFailures += 1
+                    OnyxLog.ssh.notice("""
+                        check failed (\(s[i].consecutiveFailures, privacy: .public)/\(Self.checkFailureThreshold, privacy: .public)): \
+                        host=\(self.host.label, privacy: .public) slot=\(i, privacy: .public)
+                        """)
+                    if s[i].consecutiveFailures >= Self.checkFailureThreshold {
+                        OnyxLog.ssh.notice("slot \(i, privacy: .public) died (corroborated): host=\(self.host.label, privacy: .public)")
+                        s[i].phase = .dead
+                    }
+                }
+            case .dead, .absent:
+                // A dead slot that answers again (e.g. master survived a
+                // transient stall) is welcomed back — never waste a
+                // working connection. But only with a VERIFIED live
+                // master process: a stale socket answering on behalf of
+                // an exited master must not resurrect the slot.
+                if alive,
+                   let pid = runner.findMasterPID(socketPath: s[i].path),
+                   runner.processAlive(pid: pid) {
+                    s[i].phase = .alive
+                    s[i].masterPID = pid
+                    s[i].consecutiveFailures = 0
+                    s[i].consecutiveSmokeFailures = 0
+                    OnyxLog.ssh.info("slot \(i, privacy: .public) alive: host=\(self.host.label, privacy: .public)")
+                }
+            case .establishing:
+                break
+            }
+        }
+
+        // 3. Channel-failure signal → active slot is suspect even if the
         //    IPC check passed (the socket can answer while TCP is dead).
+        //    Suspect triggers an immediate smoke test below; a 255 alone
+        //    never kills anything.
         if channelFailure, s[activeIndexSnapshot()].phase == .alive {
             s[activeIndexSnapshot()].phase = .suspect
         }
 
-        // 3. Smoke test — real command through each alive/suspect slot on
-        //    its cadence; catches silent TCP death `-O check` can't see.
+        // 4. ADVISORY: smoke test — a real command through each live slot
+        //    on a slow cadence (suspect slots immediately). Needs
+        //    `smokeFailureThreshold` consecutive failures to kill: one
+        //    failure marks suspect, the next maintain re-tests, and only
+        //    a second consecutive failure (corroboration) declares death.
         for i in s.indices where s[i].phase == .alive || s[i].phase == .suspect {
             let last = s[i].lastSmokeTestAt ?? .distantPast
             let due = now.timeIntervalSince(last) >= Self.smokeTestInterval
-            // A suspect slot is always re-tested immediately.
             guard due || s[i].phase == .suspect else { continue }
             s[i].lastSmokeTestAt = now
             if smokeTest(path: s[i].path, userHost: uh) {
                 s[i].phase = .alive
+                s[i].consecutiveSmokeFailures = 0
             } else {
+                s[i].consecutiveSmokeFailures += 1
                 OnyxLog.ssh.notice("""
-                    smoke test FAILED: host=\(self.host.label, privacy: .public) \
-                    slot=\(i, privacy: .public) — socket alive but command hung; \
-                    marking dead for rebuild
+                    smoke test failed (\(s[i].consecutiveSmokeFailures, privacy: .public)/\(Self.smokeFailureThreshold, privacy: .public)): \
+                    host=\(self.host.label, privacy: .public) slot=\(i, privacy: .public)
                     """)
-                s[i].phase = .dead
-                s[i].consecutiveFailures += 1
+                if s[i].consecutiveSmokeFailures >= Self.smokeFailureThreshold {
+                    s[i].phase = .dead
+                } else {
+                    s[i].phase = .suspect
+                }
             }
         }
 
@@ -387,11 +474,14 @@ public final class ConnectionPair {
         lock.lock()
         slots = s
 
-        // 4. Promotion: active unusable, standby alive → swap. This is
-        //    the zero-downtime rotation — the standby is warm, so the
-        //    moment the active dies there is already a working
-        //    authenticated TCP connection to ride.
-        if slots[activeIndex].phase != .alive, slots[1 - activeIndex].phase == .alive {
+        // 5. Promotion: active PROVEN dead (never merely suspect — a
+        //    suspect slot is under investigation, and flapping the
+        //    active path on a single hiccup is exactly the twitchiness
+        //    that wrecked stable desktops), standby alive → swap. The
+        //    standby is warm, so the moment the active is proven dead
+        //    there is already a working authenticated connection to ride.
+        if slots[activeIndex].phase != .alive, slots[activeIndex].phase != .suspect,
+           slots[1 - activeIndex].phase == .alive {
             let old = activeIndex
             activeIndex = 1 - activeIndex
             generation &+= 1
@@ -401,12 +491,16 @@ public final class ConnectionPair {
                 """)
         }
 
-        // 5. Pre-emptive rotation — ONLY when no terminals are attached.
+        // 6. Pre-emptive rotation — ONLY when no terminals are attached.
         //    Rotation is a planned failover; doing it under live terminal
         //    channels would blip every terminal for freshness's sake.
+        //    The clock starts when the pair first becomes fully alive —
+        //    a nil start previously read as .distantPast, which fired a
+        //    pointless rotation (connection recycle) right at startup.
         if slots[0].phase == .alive && slots[1].phase == .alive,
            attachedTerminals == 0 {
-            let last = lastRotationAt ?? .distantPast
+            if lastRotationAt == nil { lastRotationAt = now }
+            let last = lastRotationAt ?? now
             if now.timeIntervalSince(last) >= Self.rotationInterval {
                 let oldActive = activeIndex
                 activeIndex = 1 - activeIndex
@@ -426,8 +520,16 @@ public final class ConnectionPair {
 
         if slots.contains(where: { $0.phase == .alive }) { hasEverConnected = true }
 
-        // 6. Collect rebuild targets.
+        // 7. Collect rebuild targets — with backoff. After
+        //    `establishSlowdownAfter` consecutive failed establishes,
+        //    retry at most every `establishRetryInterval` so an
+        //    unreachable host isn't hammered every tick.
         for i in slots.indices where slots[i].phase == .dead || slots[i].phase == .absent {
+            if slots[i].establishFailures >= Self.establishSlowdownAfter,
+               let lastAttempt = slots[i].lastEstablishAttemptAt,
+               now.timeIntervalSince(lastAttempt) < Self.establishRetryInterval {
+                continue
+            }
             toEstablish.append(i)
         }
         lock.unlock()
@@ -469,6 +571,7 @@ public final class ConnectionPair {
             return
         }
         slots[index].phase = .establishing
+        slots[index].lastEstablishAttemptAt = Date()
         let path = slots[index].path
         let oldPID = slots[index].masterPID
         slots[index].masterPID = nil
@@ -540,8 +643,13 @@ public final class ConnectionPair {
         slots[index].masterPID = capturedPID
         slots[index].lastSmokeTestAt = nil
         if success {
+            slots[index].establishFailures = 0
+            slots[index].consecutiveFailures = 0
+            slots[index].consecutiveSmokeFailures = 0
             hasEverConnected = true
             generation &+= 1
+        } else {
+            slots[index].establishFailures += 1
         }
         lock.unlock()
         publishHealth()

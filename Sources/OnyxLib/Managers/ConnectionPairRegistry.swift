@@ -55,6 +55,15 @@ public final class ConnectionPairRegistry: ObservableObject {
     private var sleepObserver: Any?
     private var wakeObserver: Any?
 
+    /// App Nap defeat. macOS throttles an occluded app's main-thread
+    /// timers to a crawl — which meant connection supervision slowed
+    /// down precisely when the user was away, and repair happened in a
+    /// scramble when they came back ("ten seconds before the terminal
+    /// works"). This activity assertion keeps the supervisor ticking at
+    /// full rate while the user is away, WITHOUT preventing system
+    /// sleep (`.userInitiatedAllowingIdleSystemSleep`).
+    private var appNapActivity: NSObjectProtocol?
+
     private init() {}
 
     // MARK: - Lifecycle
@@ -76,6 +85,11 @@ public final class ConnectionPairRegistry: ObservableObject {
 
         startNetworkMonitor()
         installSleepWakeObservers()
+
+        appNapActivity = ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep,
+            reason: "SSH connection supervision must not be App Napped"
+        )
     }
 
     /// NWPathMonitor: push network-path verdicts into every pair the
@@ -153,6 +167,10 @@ public final class ConnectionPairRegistry: ObservableObject {
         setEnabled(false)
         timer?.invalidate()
         timer = nil
+        if let activity = appNapActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            appNapActivity = nil
+        }
 
         lock.lock()
         let all = Array(pairs.values)
