@@ -10,6 +10,12 @@ struct ConnectionPoolSection: View {
     /// expanded panel showed "alive" because they sampled the state
     /// at different times).
     @ObservedObject private var registry = ConnectionPairRegistry.shared
+    /// Text scales with the user's UI font size — the fixed column
+    /// widths must scale by the SAME factor, or at larger sizes words
+    /// like "connected" stop fitting their column and SwiftUI wraps
+    /// them onto two lines, wrecking the table. Every cell is also
+    /// hard-limited to one line (truncate, never wrap) as a backstop.
+    @Environment(\.monitorFontScale) private var fontScale
     /// Which hostID currently has its diagnostic panel expanded inline.
     @State private var expandedDiagHost: UUID?
     /// Cached diagnostics indexed by hostID. Re-fetched when the row is
@@ -59,6 +65,12 @@ struct ConnectionPoolSection: View {
                     .monitorFont(size: 11)
                     .foregroundColor(.gray.opacity(0.3))
             } else {
+                // Column widths scale with the UI font size, exactly like
+                // the text they hold — otherwise larger fonts overflow the
+                // fixed columns and wrap ("connected" on two lines).
+                let hostColWidth = 80 * fontScale
+                let statusColWidth = 90 * fontScale
+
                 // Header
                 HStack(spacing: 0) {
                     Text("")
@@ -66,10 +78,11 @@ struct ConnectionPoolSection: View {
                     Text("SESSION")
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text("HOST")
-                        .frame(width: 80, alignment: .trailing)
+                        .frame(width: hostColWidth, alignment: .trailing)
                     Text("STATUS")
-                        .frame(width: 85, alignment: .trailing)
+                        .frame(width: statusColWidth, alignment: .trailing)
                 }
+                .lineLimit(1)
                 .monitorFont(size: 9, weight: .medium)
                 .foregroundColor(.gray.opacity(0.4))
 
@@ -91,15 +104,16 @@ struct ConnectionPoolSection: View {
                         }
                         Text(conn.label)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
                         Text(conn.hostLabel)
-                            .frame(width: 80, alignment: .trailing)
-                            .lineLimit(1)
+                            .frame(width: hostColWidth, alignment: .trailing)
                         Text(conn.status)
-                            .frame(width: 85, alignment: .trailing)
+                            .frame(width: statusColWidth, alignment: .trailing)
                             .foregroundColor(Color(hex: conn.statusColor).opacity(0.8))
                     }
+                    // One line, truncate — a cell may NEVER wrap; a wrapped
+                    // status word breaks every row height in the table.
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                     .monitorFont(size: 11)
                     .foregroundColor(.white.opacity(conn.connectionStatus.isTransient ? 0.5 : 0.7))
                 }
@@ -109,14 +123,16 @@ struct ConnectionPoolSection: View {
                 if !remoteHosts.isEmpty {
                     Divider().background(Color.white.opacity(0.06)).padding(.vertical, 4)
 
+                    let muxStatusColWidth = 100 * fontScale
                     HStack(spacing: 0) {
                         Text("")
                             .frame(width: 8)
                         Text("SSH MUX")
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Text("STATUS")
-                            .frame(width: 96, alignment: .trailing)
+                            .frame(width: muxStatusColWidth, alignment: .trailing)
                     }
+                    .lineLimit(1)
                     .monitorFont(size: 9, weight: .medium)
                     .foregroundColor(.gray.opacity(0.4))
 
@@ -138,18 +154,17 @@ struct ConnectionPoolSection: View {
                                         .padding(.trailing, 3)
                                     Text(host.label)
                                         .frame(maxWidth: .infinity, alignment: .leading)
-                                        .lineLimit(1)
                                     Image(systemName: expanded
                                           ? "chevron.down" : "chevron.right")
                                         .font(.system(size: 8))
                                         .foregroundColor(.gray.opacity(0.4))
                                         .padding(.trailing, 6)
                                     Text(alive ? "multiplexed" : "no mux")
-                                        .lineLimit(1)
-                                        .fixedSize(horizontal: true, vertical: false)
-                                        .frame(width: 96, alignment: .trailing)
+                                        .frame(width: muxStatusColWidth, alignment: .trailing)
                                         .foregroundColor(Color(hex: alive ? "6BFF8E" : "FF6B6B").opacity(0.8))
                                 }
+                                .lineLimit(1)
+                                .truncationMode(.tail)
                                 .monitorFont(size: 11)
                                 .foregroundColor(.white.opacity(0.7))
                                 .contentShape(Rectangle())
@@ -235,6 +250,7 @@ private struct SSHDiagnosticPanel: View {
     let isTesting: Bool
     let onReset: () -> Void
     let onTestConnect: () -> Void
+    @Environment(\.monitorFontScale) private var fontScale
     @State private var lastReapResult: String? = nil
 
     var body: some View {
@@ -419,7 +435,10 @@ private struct SSHDiagnosticPanel: View {
                 .monitorFont(size: 9, weight: .medium)
                 .foregroundColor(.gray.opacity(0.5))
                 .tracking(1)
-                .frame(width: 50, alignment: .leading)
+                .lineLimit(1)
+                // Scales with the UI font size like the text it holds —
+                // "STANDBY" must never wrap at large sizes.
+                .frame(width: 58 * fontScale, alignment: .leading)
             Text(value)
                 .monitorFont(size: 10)
                 .foregroundColor(color.map { Color(hex: $0) } ?? .white.opacity(0.7))
