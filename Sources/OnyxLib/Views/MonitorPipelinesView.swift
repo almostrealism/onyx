@@ -172,6 +172,8 @@ struct PipelinesSection: View {
     @ObservedObject private var ghConfig = GitHubConfigStore.shared
     @ObservedObject private var glConfig = GitLabConfigStore.shared
     @State private var showSuggestions = false
+    @State private var hoveringAdd = false
+    @Environment(\.monitorFontScale) private var fontScale
 
     private var merged: [PipelineStatus] { monitor.pipelines + glMonitor.pipelines }
     private var anyToken: Bool { !ghConfig.token.isEmpty || !glConfig.token.isEmpty }
@@ -228,12 +230,26 @@ struct PipelinesSection: View {
                             .foregroundColor(.gray.opacity(0.4))
                     }
                     Button(action: { showSuggestions = true }) {
+                        // A bare Image hit-tests only its glyph box (~10pt
+                        // square) and .padding around it is NOT hit-testable —
+                        // that is what made this button feel like it had to be
+                        // hit dead-center. Give it a real square target, scale
+                        // it with the UI font like everything else in the
+                        // overlay, and make the whole square the hit region.
                         Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .medium))
+                            .monitorFont(size: 11, weight: .semibold, design: .default)
                             .foregroundColor(appState.accentColor)
-                            .padding(.horizontal, 4)
+                            .frame(width: 22 * fontScale, height: 22 * fontScale)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(hoveringAdd
+                                          ? appState.accentColor.opacity(0.18)
+                                          : Color.white.opacity(0.06))
+                            )
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .onHover { hoveringAdd = $0 }
                     .help("Add a pipeline from your open PRs, or paste a URL")
                     .popover(isPresented: $showSuggestions) {
                         PipelineSuggestionsPopover(
