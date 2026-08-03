@@ -235,13 +235,23 @@ private struct SessionNoteRow: View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
             if let last = TerminalActivityStore.shared.lastOutput(for: session.id) {
                 let idle = context.date.timeIntervalSince(last)
-                HStack(spacing: 3) {
+                let color = monitorSessionActivityColor(idle)
+                // Deliberately larger than everything else in the overlay:
+                // whether a session is still churning or has gone quiet is
+                // the one thing worth reading across the room. Sizes scale
+                // with the UI font like the rest of the monitor.
+                HStack(spacing: 4) {
                     Image(systemName: monitorSessionActivityIcon(idle))
-                        .font(.system(size: 8))
+                        .monitorFont(size: 15, weight: .semibold, design: .default)
                     Text(last, style: .relative)
-                        .monitorFont(size: 9)
+                        .monitorFont(size: 11, weight: .medium)
+                        .lineLimit(1)
                 }
-                .foregroundColor(monitorSessionActivityColor(idle))
+                .foregroundColor(color)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(color.opacity(0.12))
+                .cornerRadius(4)
                 .help(idle < 15 ? "Producing output now"
                                 : "Quiet for \(Int(idle))s — likely idle")
             }
