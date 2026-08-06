@@ -141,14 +141,59 @@ struct ClaudeSessionsSection: View {
 }
 
 /// Lists the user-supplied status notes attached to currently-existing
-/// sessions, sorted by recency. Hides itself entirely when there are
-/// no notes so the monitor doesn't carry a dead heading.
+/// sessions, ordered like the favorites bar. Hides itself entirely when
+/// there are no notes so the monitor doesn't carry a dead heading.
 struct SessionNotesSection: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var store = SessionNotesStore.shared
 
+    /// One rendered row: the note plus the ⌘N that actually reaches it.
+    private struct Entry {
+        let session: TmuxSession
+        let note: SessionNote
+        /// Favorites-bar position (1-based) — nil when this session isn't a
+        /// favorite of this window and therefore has no ⌘N shortcut.
+        let shortcut: Int?
+    }
+
+    /// Ordered to match the favorites bar at the bottom of the window:
+    /// this window's favorites first in bar order, then any other noted
+    /// session by most recent terminal output.
+    ///
+    /// The shortcut number is the session's position in the FAVORITES bar,
+    /// never its position in this list. A favorite with no note is skipped
+    /// here but still owns its number — that mismatch (press ⌘4, land on
+    /// the 5th favorite) is exactly what the badges exist to prevent.
+    private var orderedEntries: [Entry] {
+        let noted = store.activeNotes(in: appState.allSessions)
+        let byID = Dictionary(noted.map { ($0.session.id, $0) },
+                              uniquingKeysWith: { first, _ in first })
+        var rows: [Entry] = []
+        var placed = Set<String>()
+        for (idx, fav) in appState.favoriteSessions.enumerated() {
+            guard let hit = byID[fav.id] else { continue }
+            rows.append(Entry(session: hit.session,
+                              note: hit.note,
+                              shortcut: idx < 9 ? idx + 1 : nil))
+            placed.insert(fav.id)
+        }
+        let rest = noted
+            .filter { !placed.contains($0.session.id) }
+            .sorted { lastActivity($0) > lastActivity($1) }
+        rows.append(contentsOf: rest.map {
+            Entry(session: $0.session, note: $0.note, shortcut: nil)
+        })
+        return rows
+    }
+
+    /// Most recent terminal output, falling back to when the note itself was
+    /// touched for a session that hasn't printed anything yet.
+    private func lastActivity(_ entry: (session: TmuxSession, note: SessionNote)) -> Date {
+        TerminalActivityStore.shared.lastOutput(for: entry.session.id) ?? entry.note.updated
+    }
+
     var body: some View {
-        let entries = store.activeNotes(in: appState.allSessions)
+        let entries = orderedEntries
         if !entries.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
@@ -165,6 +210,7 @@ struct SessionNotesSection: View {
                     SessionNoteRow(
                         session: entry.session,
                         note: entry.note,
+                        shortcut: entry.shortcut,
                         isActive: appState.activeSession?.id == entry.session.id,
                         accentColor: appState.accentColor,
                         // Route through switchToSession (like the favorites
@@ -192,28 +238,39 @@ struct SessionNotesSection: View {
 private struct SessionNoteRow: View {
     let session: TmuxSession
     let note: SessionNote
+    /// Favorites-bar position, when this session has a ⌘N shortcut.
+    let shortcut: Int?
     let isActive: Bool
     let accentColor: Color
     let onTap: () -> Void
+    @Environment(\.monitorFontScale) private var fontScale
 
     var body: some View {
         Button(action: onTap) {
             HStack(alignment: .top, spacing: 8) {
-                Circle()
-                    .fill(isActive ? accentColor : Color.gray.opacity(0.4))
-                    .frame(width: 5, height: 5)
-                    .padding(.top, 6)
+                // Selected marker: a full-height accent bar. The old 5pt dot
+                // was easy to miss on a list of similar-looking rows.
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(isActive ? accentColor : Color.clear)
+                    .frame(width: 3)
+                // ⌘N badge, same number as the favorites bar. Reserve the
+                // slot even for non-favorites so note text stays aligned.
+                Text(shortcut.map { "⌘\($0)" } ?? "")
+                    .monitorFont(size: 10, weight: .medium)
+                    .foregroundColor(isActive ? accentColor : .gray.opacity(0.45))
+                    .frame(width: 22 * fontScale, alignment: .leading)
+                    .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(note.text)
-                        .monitorFont(size: 12)
-                        .foregroundColor(.white.opacity(0.85))
+                        .monitorFont(size: 12, weight: isActive ? .medium : .regular)
+                        .foregroundColor(isActive ? .white : .white.opacity(0.85))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 6) {
                         Text(session.displayLabel)
                             .monitorFont(size: 10)
-                            .foregroundColor(accentColor.opacity(0.7))
+                            .foregroundColor(isActive ? accentColor : accentColor.opacity(0.7))
                         Text(note.updated, style: .relative)
                             .monitorFont(size: 9)
                             .foregroundColor(.gray.opacity(0.4))
@@ -230,8 +287,15 @@ private struct SessionNoteRow: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isActive ? Color.white.opacity(0.04) : Color.clear)
-            .cornerRadius(3)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(isActive ? accentColor.opacity(0.14) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(isActive ? accentColor.opacity(0.5) : Color.clear,
+                            lineWidth: 1)
+            )
             .contentShape(Rectangle())   // whole row is the tap target
         }
         .buttonStyle(.plain)
