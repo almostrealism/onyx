@@ -145,11 +145,19 @@ struct ConnectionPoolSection: View {
                         // we @ObservedObject the registry above.
                         let alive = ConnectionPairRegistry.shared.isMuxAlive(for: host)
                         let expanded = expandedDiagHost == host.id
+                        // A paused host has no mux BY DESIGN — showing it
+                        // red next to a genuinely broken host would train
+                        // the user to ignore red.
+                        let dotColor: Color = host.paused
+                            ? Color.onyxAmber
+                            : Color(hex: alive ? "6BFF8E" : "FF6B6B")
+                        let statusText = host.paused
+                            ? "paused" : (alive ? "multiplexed" : "no mux")
                         VStack(alignment: .leading, spacing: 4) {
                             Button(action: { toggleDiagnostic(for: host) }) {
                                 HStack(spacing: 0) {
                                     Circle()
-                                        .fill(Color(hex: alive ? "6BFF8E" : "FF6B6B"))
+                                        .fill(dotColor)
                                         .frame(width: 5, height: 5)
                                         .padding(.trailing, 3)
                                     Text(host.label)
@@ -159,9 +167,9 @@ struct ConnectionPoolSection: View {
                                         .font(.system(size: 8))
                                         .foregroundColor(.gray.opacity(0.4))
                                         .padding(.trailing, 6)
-                                    Text(alive ? "multiplexed" : "no mux")
+                                    Text(statusText)
                                         .frame(width: muxStatusColWidth, alignment: .trailing)
-                                        .foregroundColor(Color(hex: alive ? "6BFF8E" : "FF6B6B").opacity(0.8))
+                                        .foregroundColor(dotColor.opacity(0.8))
                                 }
                                 .lineLimit(1)
                                 .truncationMode(.tail)

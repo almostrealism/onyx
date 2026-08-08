@@ -306,8 +306,19 @@ private struct HostHeader: View {
                 .foregroundColor(appState.accentColor.opacity(0.7))
                 .tracking(1)
 
-            // Probe status icon
-            if let result = probeInfo.result, result == .unreachable {
+            // Paused wins over probe status: the host isn't unreachable,
+            // we're deliberately not reaching for it.
+            if hostGroup.host.paused {
+                Text("PAUSED")
+                    .font(.system(size: sz(8), weight: .bold, design: .monospaced))
+                    .foregroundColor(Color.onyxAmber)
+                    .tracking(1)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.onyxAmber.opacity(0.15))
+                    .cornerRadius(3)
+                    .help("Paused in Settings — no connection attempts are being made")
+            } else if let result = probeInfo.result, result == .unreachable {
                 Image(systemName: "wifi.slash")
                     .font(.system(size: sz(8)))
                     .foregroundColor(Color.onyxRed.opacity(0.7))

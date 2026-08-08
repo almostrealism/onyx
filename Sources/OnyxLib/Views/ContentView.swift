@@ -928,18 +928,40 @@ struct ReconnectingOverlay: View {
 struct ConnectionErrorOverlay: View {
     @ObservedObject var appState: AppState
 
+    /// A paused host isn't a failure — it's the user's own setting, so the
+    /// overlay explains rather than alarms, and offers Settings instead of
+    /// a retry that would be pointless.
+    private var isPaused: Bool {
+        appState.activeSessionConnectionState.isHostPaused
+    }
+
+    private var tint: Color {
+        if isPaused { return Color.onyxAmber }
+        return appState.needsKeySetup ? appState.accentColor : Color.onyxRed
+    }
+
+    private var symbol: String {
+        if isPaused { return "pause.circle.fill" }
+        return appState.needsKeySetup ? "key.fill" : "wifi.exclamationmark"
+    }
+
+    private var title: String {
+        if isPaused { return "HOST PAUSED" }
+        return appState.needsKeySetup ? "SSH KEY REQUIRED" : "CONNECTION FAILED"
+    }
+
     var body: some View {
         VStack(spacing: 16) {
             Spacer()
 
             VStack(spacing: 12) {
-                Image(systemName: appState.needsKeySetup ? "key.fill" : "wifi.exclamationmark")
+                Image(systemName: symbol)
                     .font(.system(size: 28))
-                    .foregroundColor(appState.needsKeySetup ? appState.accentColor : Color.onyxRed)
+                    .foregroundColor(tint)
 
-                Text(appState.needsKeySetup ? "SSH KEY REQUIRED" : "CONNECTION FAILED")
+                Text(title)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(appState.needsKeySetup ? appState.accentColor : Color.onyxRed)
+                    .foregroundColor(tint)
                     .tracking(3)
 
                 Text(appState.activeSessionErrorMessage ?? "")
@@ -949,7 +971,23 @@ struct ConnectionErrorOverlay: View {
                     .lineSpacing(4)
                     .frame(maxWidth: 460)
 
-                if appState.needsKeySetup {
+                if isPaused {
+                    Button(action: { appState.showSettings = true }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 12))
+                            Text("Open Settings")
+                                .font(.system(.body, design: .monospaced))
+                        }
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(Color.onyxAmber)
+                        .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 8)
+                } else if appState.needsKeySetup {
                     Button(action: {
                         appState.keySetupInProgress = true
                     }) {
@@ -973,7 +1011,9 @@ struct ConnectionErrorOverlay: View {
                         .foregroundColor(.gray.opacity(0.5))
                 }
 
-                Text("⌘K → Reconnect SSH  |  ⌘, → Edit Settings")
+                Text(isPaused
+                     ? "⌘, → Settings → HOSTS"
+                     : "⌘K → Reconnect SSH  |  ⌘, → Edit Settings")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(appState.accentColor.opacity(0.5))
                     .padding(.top, 4)
@@ -983,7 +1023,7 @@ struct ConnectionErrorOverlay: View {
             .cornerRadius(10)
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke((appState.needsKeySetup ? appState.accentColor : Color.onyxRed).opacity(0.3), lineWidth: 1)
+                    .stroke(tint.opacity(0.3), lineWidth: 1)
             )
 
             Spacer()
@@ -1001,6 +1041,8 @@ struct FavoritesBar: View {
         case .connected: return Color.onyxGreen
         case .reattaching: return Color.onyxAmber
         case .failed, .needsKeySetup: return Color.onyxRed
+        // Paused is a deliberate state, not a fault — grey, not red.
+        case .hostPaused: return .gray.opacity(0.6)
         }
     }
 
@@ -1015,6 +1057,8 @@ struct FavoritesBar: View {
             return error
         case .needsKeySetup:
             return "SSH key setup required"
+        case .hostPaused(let label):
+            return "\(label) is paused — un-pause it in Settings to connect"
         }
     }
 

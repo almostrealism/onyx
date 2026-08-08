@@ -78,6 +78,7 @@ Managers depend on Stores, Services, and Models — not on Views or other Manage
 - SSH ControlMaster paths must live in a directory without spaces — `~/.onyx/` not `~/Library/Application Support/`.
 - Broken pipe recovery: report via `appState.reportSSHFailure(host:)` — the host's `ConnectionPair` marks its active connection suspect and promotes the warm standby immediately. Never delete mux sockets by hand.
 - SSH-driven pollers must gate on `appState.hostUsable(host)` and claim a slot with `appState.acquireUtilityChannel(label:host:)` (in-flight dedup + per-host cap) — this is what prevents poll pileup on slow networks.
+- `HostConfig.paused` is the user's "leave this host alone" switch (Settings → HOSTS). A paused host reports `HostConnectionState.paused` (never usable), its pair tears both masters down and then costs zero ssh calls per tick, enumeration skips it, and terminals show `SessionConnectionState.hostPaused` instead of retrying. Any new remote feature must respect it — `hostUsable` and `acquireUtilityChannel` both refuse paused hosts, so gate on those.
 - Topology-based session enumeration never wipes the session list on a single failed `docker ps` — it uses a grace period via `NetworkTopologyStore`.
 
 ## Remote command execution

@@ -362,6 +362,85 @@ final class ConnectionPairTests: XCTestCase {
         XCTAssertEqual(pair.health.state, .connected)
     }
 
+    // MARK: Paused hosts
+
+    /// Pausing must close both masters and then cost NOTHING per tick —
+    /// the whole point is to stop touching a host that's making the
+    /// network worse.
+    func testPaused_closesMastersAndNeverReconnects() {
+        let (pair, runner, host) = makePair()
+        pair.maintain()
+        XCTAssertEqual(pair.health.state, .connected)
+        let (slot0, slot1) = slotPaths(for: host)
+
+        var paused = host
+        paused.paused = true
+        pair.configure(host: paused)
+        pair.maintain()
+
+        XCTAssertEqual(pair.health.state, .paused)
+        XCTAssertFalse(pair.health.state.isUsable)
+        XCTAssertTrue(runner.stoppedPaths.contains(slot0))
+        XCTAssertTrue(runner.stoppedPaths.contains(slot1))
+        XCTAssertTrue(runner.sockets.isEmpty)
+
+        // Subsequent ticks are free: no establish, no further stop calls.
+        let establishes = runner.establishCount
+        let stops = runner.stoppedPaths.count
+        pair.maintain()
+        pair.maintain()
+        XCTAssertEqual(runner.establishCount, establishes,
+                       "a paused host must never be reconnected")
+        XCTAssertEqual(runner.stoppedPaths.count, stops,
+                       "teardown must happen once, not every tick")
+        XCTAssertEqual(pair.health.state, .paused)
+    }
+
+    /// A host paused before the first tick never connects at all.
+    func testPausedFromTheStart_neverEstablishes() {
+        let host = HostConfig(
+            label: "test",
+            ssh: SSHConfig(host: "example.com", user: "u", port: 22, tmuxSession: "main"),
+            paused: true
+        )
+        let runner = StubRunner()
+        let pair = ConnectionPair(host: host, runner: runner)
+
+        pair.maintain()
+        pair.maintain()
+
+        XCTAssertEqual(runner.establishCount, 0)
+        XCTAssertEqual(pair.health.state, .paused)
+    }
+
+    func testUnpause_reconnectsOnNextMaintain() {
+        let (pair, runner, host) = makePair()
+        var paused = host
+        paused.paused = true
+        pair.configure(host: paused)
+        pair.maintain()
+        XCTAssertEqual(pair.health.state, .paused)
+
+        pair.configure(host: host)   // un-paused
+        pair.maintain()
+
+        XCTAssertEqual(pair.health.state, .connected)
+        XCTAssertEqual(runner.establishCount, 2)
+    }
+
+    /// Pause outranks sleep/offline in the reported state: the user set it,
+    /// and "sleeping" would imply it comes back on its own.
+    func testPaused_outranksOfflineAndSleeping() {
+        let (pair, _, host) = makePair()
+        var paused = host
+        paused.paused = true
+        pair.configure(host: paused)
+        pair.setNetworkAvailable(false)
+        pair.quiesce()
+
+        XCTAssertEqual(pair.health.state, .paused)
+    }
+
     // MARK: Shutdown
 
     func testShutdown_stopsBothMasters() {

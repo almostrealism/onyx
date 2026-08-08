@@ -56,13 +56,18 @@ public enum HostConnectionState: Equatable, Sendable {
     case offline
     /// System is asleep (willSleep received); masters quiesced.
     case sleeping
+    /// The user paused this host in Settings. Masters are torn down and
+    /// nothing reconnects — not the supervisor, not pollers, not
+    /// terminals — until the user un-pauses. This is the one state the
+    /// app never leaves on its own.
+    case paused
 
     /// Whether traffic (terminal attach, utility commands) can be sent
     /// through the pair right now.
     public var isUsable: Bool {
         switch self {
         case .connected, .degraded, .failing: return true
-        case .initializing, .connecting, .down, .offline, .sleeping: return false
+        case .initializing, .connecting, .down, .offline, .sleeping, .paused: return false
         }
     }
 }
@@ -117,12 +122,16 @@ public enum SessionConnectionState: Equatable {
     case failed(error: String)
     /// Key auth failed; user must install their SSH key.
     case needsKeySetup(error: String)
+    /// The session's host is paused in Settings. Not a failure and not
+    /// something to retry — the app is deliberately not connecting, and
+    /// only the user can change that.
+    case hostPaused(hostLabel: String)
 
     /// Keystrokes must not silently go into a dead terminal.
     public var shouldGateInput: Bool {
         switch self {
         case .connected: return false
-        case .reattaching, .failed, .needsKeySetup: return true
+        case .reattaching, .failed, .needsKeySetup, .hostPaused: return true
         }
     }
 
@@ -135,16 +144,31 @@ public enum SessionConnectionState: Equatable {
     /// Show the connection-error overlay.
     public var showErrorOverlay: Bool {
         switch self {
-        case .failed, .needsKeySetup: return true
+        case .failed, .needsKeySetup, .hostPaused: return true
         case .connected, .reattaching: return false
         }
+    }
+
+    /// True when the overlay is explaining a paused host rather than a
+    /// fault — it reads differently and offers Settings, not a retry.
+    public var isHostPaused: Bool {
+        if case .hostPaused = self { return true }
+        return false
     }
 
     /// User-facing message for the error overlay, if any.
     public var errorMessage: String? {
         switch self {
-        case .failed(let error), .needsKeySetup(let error): return error
-        case .connected, .reattaching: return nil
+        case .failed(let error), .needsKeySetup(let error):
+            return error
+        case .hostPaused(let label):
+            return """
+                \(label) is paused, so Onyx isn't connecting to it.
+                Nothing is lost — favorites, notes and sessions are all kept.
+                Open Settings → HOSTS and un-pause \(label) to reconnect.
+                """
+        case .connected, .reattaching:
+            return nil
         }
     }
 }

@@ -53,18 +53,27 @@ public struct HostConfig: Codable, Identifiable, Hashable {
     public var ssh: SSHConfig
     /// Code-intelligence settings.
     public var codeIntel: CodeIntelConfig
+    /// User has paused this host: keep every bit of its configuration
+    /// (favorites, notes, sessions) but stop connecting to it entirely —
+    /// no masters, no pollers, no terminals. For a host that's down or on
+    /// a bad link, repeated connection attempts make the network worse for
+    /// everything else. Nothing about pausing is automatic: only the user
+    /// sets and clears it, in Settings.
+    public var paused: Bool
 
     /// Create a new instance.
     public init(id: UUID = UUID(), label: String, ssh: SSHConfig = SSHConfig(),
-                codeIntel: CodeIntelConfig = CodeIntelConfig()) {
+                codeIntel: CodeIntelConfig = CodeIntelConfig(),
+                paused: Bool = false) {
         self.id = id
         self.label = label
         self.ssh = ssh
         self.codeIntel = codeIntel
+        self.paused = paused
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, label, ssh, codeIntel
+        case id, label, ssh, codeIntel, paused
     }
 
     /// Tolerant decode: `codeIntel` was added later, so existing hosts.json
@@ -77,6 +86,7 @@ public struct HostConfig: Codable, Identifiable, Hashable {
         self.ssh = try c.decode(SSHConfig.self, forKey: .ssh)
         self.codeIntel = try c.decodeIfPresent(CodeIntelConfig.self, forKey: .codeIntel)
             ?? CodeIntelConfig()
+        self.paused = try c.decodeIfPresent(Bool.self, forKey: .paused) ?? false
     }
 
     /// Is local.

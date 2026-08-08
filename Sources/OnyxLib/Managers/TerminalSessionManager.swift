@@ -205,6 +205,18 @@ class OnyxTerminalView: NSView {
                !entry.terminalView.process.running {
                 healthCheck()
             }
+        case .hostPaused:
+            // The host was un-paused (health can only be usable again once
+            // the pause is lifted) — reconnect without the user asking.
+            OnyxLog.session.notice("auto-heal: host un-paused — reattaching")
+            rapidDeaths = 0
+            for session in appState.allSessions
+            where session.source.hostID == hostID {
+                if case .hostPaused = appState.sessionConnectionStates[session.id] ?? .connected {
+                    clearSessionState(for: session.id)
+                }
+            }
+            reconnect()
         case .reattaching, .needsKeySetup:
             // reattaching: the recovery-wait timer handles it.
             // needsKeySetup: genuinely needs the user.
@@ -994,6 +1006,17 @@ class OnyxTerminalView: NSView {
         let hostLabel = self.appState.host(for: session.source.hostID)?.label ?? "unknown"
         print("connectToActiveSession: \(session.displayLabel) on \(hostLabel) [id: \(session.id)] reconnect=\(isReconnect)")
 
+        // Paused host: don't spawn anything. The overlay tells the user
+        // where to un-pause it; nothing here retries in the meantime.
+        if let host = self.appState.host(for: session.source.hostID), host.paused {
+            setSessionState(.hostPaused(hostLabel: host.label), for: session.id)
+            clearPendingStatus(for: session.id)
+            DispatchQueue.main.async {
+                self.appState.startupStatus = "\(host.label) is paused"
+            }
+            return
+        }
+
         DispatchQueue.main.async {
             self.appState.startupStatus = "Connecting to \(hostLabel)..."
         }
@@ -1290,6 +1313,13 @@ class OnyxTerminalView: NSView {
     }
 
     private func enumerateHostSessions(_ host: HostConfig, completion: @escaping ([TmuxSession], ProbeStatus) -> Void) {
+        // Paused: no probe, no tmux ls, no docker ps. `.unreachable` leaves
+        // the topology store's session entries untouched, so the host's
+        // sessions stay listed exactly as they were.
+        if host.paused {
+            completion([], .unreachable)
+            return
+        }
         DispatchQueue.main.async {
             self.appState.startupStatus = "Probing \(host.label)..."
         }
@@ -1474,6 +1504,15 @@ class OnyxTerminalView: NSView {
             return
         }
 
+        // Paused host — show the reminder instead of spawning ssh.
+        if let host = appState.host(for: session.source.hostID), host.paused {
+            setSessionState(.hostPaused(hostLabel: host.label), for: session.id)
+            clearPendingStatus(for: session.id)
+            destroyPoolEntry(session.id)
+            activateSession(session)
+            return
+        }
+
         // Dead or missing session — destroy stale entry so we get a fresh terminal
         setPendingStatus(.connecting, for: session)
         destroyPoolEntry(session.id)
@@ -1495,6 +1534,17 @@ class OnyxTerminalView: NSView {
         stopPairRecoveryWait()
         lastStartTime = Date()
         isKeySetup = false
+
+        // Can't create a session on a host we're not allowed to talk to.
+        if let host = appState.host(for: session.source.hostID), host.paused {
+            DispatchQueue.main.async {
+                self.appState.allSessions.append(session)
+                self.appState.activeSession = session
+            }
+            setSessionState(.hostPaused(hostLabel: host.label), for: session.id)
+            activateSession(session)
+            return
+        }
 
         // Register in topology store immediately so it survives re-enumeration
         NetworkTopologyStore.shared.mergeEnumeration(
@@ -1571,6 +1621,15 @@ class OnyxTerminalView: NSView {
     private func reconnect() {
         guard let target = appState.activeSession else { return }
 
+        // Paused host: there is nothing to reconnect to, by the user's own
+        // instruction. Say so and stop — no recovery wait, no retries.
+        if let host = appState.host(for: target.source.hostID), host.paused {
+            stopPairRecoveryWait()
+            setSessionState(.hostPaused(hostLabel: host.label), for: target.id)
+            clearPendingStatus(for: target.id)
+            return
+        }
+
         // The session's process is dead — publish that truth immediately.
         // This is what gates keyboard input and shows the overlay, so it
         // is tied to actual process death, never to scheduling details.
@@ -1625,6 +1684,14 @@ class OnyxTerminalView: NSView {
             if self.appState.activeSession?.id != target.id {
                 self.stopPairRecoveryWait()
                 self.clearSessionState(for: target.id)
+                self.clearPendingStatus(for: target.id)
+                return
+            }
+
+            // Host paused mid-wait — stop watching and say why.
+            if self.appState.hostIsPaused(host.id) {
+                self.stopPairRecoveryWait()
+                self.setSessionState(.hostPaused(hostLabel: host.label), for: target.id)
                 self.clearPendingStatus(for: target.id)
                 return
             }

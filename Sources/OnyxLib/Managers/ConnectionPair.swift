@@ -183,6 +183,9 @@ public final class ConnectionPair {
     // Overrides set by the registry (sleep/wake + NWPathMonitor).
     private var networkAvailable = true
     private var isSleeping = false
+    /// Mirrors `host.paused` — refreshed by `configure(host:)` on every
+    /// registry access, so a Settings toggle takes effect on the next tick.
+    private var isPaused = false
 
     /// Number of terminal channels currently attached — rotation must
     /// never recycle a connection with live terminals on it. Wired by
@@ -199,6 +202,7 @@ public final class ConnectionPair {
     public init(host: HostConfig, runner: PairSSHRunner = LiveSSHRunner()) {
         self.hostID = host.id
         self.host = host
+        self.isPaused = host.paused
         self.runner = runner
         self.slots = [
             Slot(index: 0, path: Self.slotPath(for: host.id, slot: 0)),
@@ -211,6 +215,7 @@ public final class ConnectionPair {
     func configure(host: HostConfig) {
         lock.lock(); defer { lock.unlock() }
         self.host = host
+        self.isPaused = host.paused
     }
 
     // MARK: Public reads (thread-safe snapshots)
@@ -354,6 +359,43 @@ public final class ConnectionPair {
 
     func maintain(now: Date = Date()) {
         lock.lock()
+        // 0. PAUSED: the user asked us to leave this host alone. Tear down
+        //    anything still up — once — then do nothing at all. After the
+        //    first pass every slot is .absent with no socket, so `toStop`
+        //    is empty and a paused host costs zero ssh invocations per
+        //    tick. (The socket check also catches masters that outlived a
+        //    previous run of the app.)
+        if isPaused {
+            var toStop: [(String, pid_t?)] = []
+            for i in slots.indices {
+                let hasState = slots[i].phase != .absent || slots[i].masterPID != nil
+                if hasState || runner.socketExists(atPath: slots[i].path) {
+                    toStop.append((slots[i].path, slots[i].masterPID))
+                }
+                slots[i].phase = .absent
+                slots[i].masterPID = nil
+                slots[i].establishedAt = nil
+                slots[i].lastSmokeTestAt = nil
+                slots[i].consecutiveFailures = 0
+                slots[i].consecutiveSmokeFailures = 0
+                slots[i].establishFailures = 0
+                slots[i].lastEstablishAttemptAt = nil
+            }
+            let uh = userHost
+            lock.unlock()
+            if !toStop.isEmpty {
+                OnyxLog.ssh.notice("""
+                    host paused: \(self.host.label, privacy: .public) — \
+                    closing \(toStop.count, privacy: .public) master(s), no reconnects
+                    """)
+            }
+            for (path, pid) in toStop {
+                stopMaster(at: path, knownPID: pid, userHost: uh)
+                runner.removeSocket(atPath: path)
+            }
+            publishHealth()
+            return
+        }
         if isSleeping || !networkAvailable {
             lock.unlock()
             publishHealth()
@@ -694,7 +736,11 @@ public final class ConnectionPair {
 
     private func deriveHealthLocked() -> HostHealth {
         let state: HostConnectionState
-        if isSleeping {
+        // Paused outranks everything: it's the user's explicit instruction,
+        // and it must read as "paused" even while asleep or off-network.
+        if isPaused {
+            state = .paused
+        } else if isSleeping {
             state = .sleeping
         } else if !networkAvailable {
             state = .offline

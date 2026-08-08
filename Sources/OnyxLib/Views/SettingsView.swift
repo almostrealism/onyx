@@ -511,9 +511,22 @@ private struct HostRow: View {
                     .foregroundColor(appState.accentColor.opacity(0.6))
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(host.label)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.9))
+                    HStack(spacing: 6) {
+                        Text(host.label)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(host.paused ? 0.5 : 0.9))
+
+                        if host.paused {
+                            Text("PAUSED")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color.onyxAmber)
+                                .tracking(1)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.onyxAmber.opacity(0.15))
+                                .cornerRadius(3)
+                        }
+                    }
 
                     if host.id != HostConfig.localhostID {
                         let display = host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
@@ -524,6 +537,23 @@ private struct HostRow: View {
                 }
 
                 Spacer()
+
+                // Pause / resume. Deliberately on the summary row, not
+                // buried in the edit form — it's the control you reach for
+                // when a host is misbehaving right now.
+                if host.id != HostConfig.localhostID {
+                    Button(action: { appState.setHostPaused(host.id, paused: !host.paused) }) {
+                        Image(systemName: host.paused ? "play.circle" : "pause.circle")
+                            .font(.system(size: 14))
+                            .foregroundColor(host.paused ? Color.onyxAmber : .gray.opacity(0.5))
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(host.paused
+                          ? "Resume \(host.label) — Onyx will reconnect"
+                          : "Pause \(host.label) — stop all connection attempts, keep everything else")
+                }
 
                 if host.id != HostConfig.localhostID {
                     Button(action: onToggleEdit) {

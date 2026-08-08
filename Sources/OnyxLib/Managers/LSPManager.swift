@@ -101,7 +101,12 @@ public final class LSPManager: ObservableObject {
         indexingDetail = nil
         state = .running(kind)
 
-        // 0. Respect the per-host toggle.
+        // 0. Respect the per-host toggles. A paused host is off-limits for
+        //    everything, jdtls included — it holds a long-lived channel.
+        guard !host.paused else {
+            state = .unavailable(reason: "\(host.label) is paused. Un-pause it in Settings to use code navigation.")
+            return
+        }
         guard host.codeIntel.enabled else {
             state = .unavailable(reason: "Code intelligence is off for this host.")
             return

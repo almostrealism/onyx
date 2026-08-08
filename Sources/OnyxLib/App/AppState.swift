@@ -1317,7 +1317,24 @@ public class AppState: ObservableObject {
     /// hammering an unreachable remote.
     public func hostUsable(_ host: HostConfig?) -> Bool {
         guard let host, !host.isLocal else { return true }
+        // Read the flag directly as well as the published health: a pause
+        // toggled in Settings must take effect on the spot, not on the
+        // supervisor's next tick.
+        guard !host.paused else { return false }
         return ConnectionPairRegistry.shared.health(for: host).state.isUsable
+    }
+
+    /// Whether the host owning `hostID` is paused by the user.
+    public func hostIsPaused(_ hostID: UUID) -> Bool {
+        host(for: hostID)?.paused ?? false
+    }
+
+    /// Pause / un-pause a host. Everything else about it is preserved —
+    /// this only decides whether Onyx may open connections to it.
+    public func setHostPaused(_ hostID: UUID, paused: Bool) {
+        guard var host = host(for: hostID), host.paused != paused else { return }
+        host.paused = paused
+        updateHost(host)
     }
 
     /// Claim a utility SSH channel for `host`. Returns a release closure
@@ -1326,6 +1343,9 @@ public class AppState: ObservableObject {
     /// piled these up 2-3×) or the host is at its concurrent-channel cap.
     public func acquireUtilityChannel(_ label: String, host: HostConfig?) -> (() -> Void)? {
         guard let host, !host.isLocal else { return {} }
+        // Backstop for any caller that forgot the hostUsable gate: a paused
+        // host must never see an ssh invocation.
+        guard !host.paused else { return nil }
         let budget = ConnectionPairRegistry.shared.pair(for: host).channelBudget
         guard budget.acquire(label) else { return nil }
         return { budget.release(label) }
