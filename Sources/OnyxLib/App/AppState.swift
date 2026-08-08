@@ -149,7 +149,14 @@ public class AppState: ObservableObject {
     @Published public var showCommandPalette = false
     /// Full-screen help / keyboard-shortcut reference overlay (Cmd+/).
     @Published public var showHelp = false
-    @Published public var showMonitor = false
+    @Published public var showMonitor = false {
+        didSet {
+            // The session sidebar and the monitor are both overlays on top
+            // of the terminal; raising the monitor shouldn't leave the
+            // session list stacked over it.
+            if showMonitor && showSessionManager { showSessionManager = false }
+        }
+    }
     /// When true, the monitor renders the "simple" layout: same headline
     /// row, but giant CPU/MEM/GPU charts below, a compact strip of the
     /// top-CPU containers along the bottom, and a small weekly Timing
@@ -649,13 +656,49 @@ public class AppState: ObservableObject {
         saveFavorites()
     }
 
-    /// Move a favorite up or down within the full entries list by session ID
+    /// Move a favorite up or down by one *visible* position.
+    ///
+    /// The stored list also carries entries belonging to other windows and
+    /// entries whose session isn't currently reachable — neither of which
+    /// this window renders. Swapping with one of those moved the favorite
+    /// in the file while nothing changed on screen, so the button read as
+    /// broken and you had to click it repeatedly to crawl past rows you
+    /// can't see. Skip straight to the nearest neighbour the user can
+    /// actually see, which is also the one the ⌘N numbering counts.
     public func moveFavoriteByID(_ sessionID: String, direction: Int) {
+        guard direction != 0 else { return }
         guard let fromIdx = favoriteEntries.firstIndex(where: { $0.sessionID == sessionID }) else { return }
-        let toIdx = fromIdx + direction
-        guard toIdx >= 0 && toIdx < favoriteEntries.count else { return }
+        let visibleIDs = Set(favoriteSessions.map(\.id))
+        var toIdx = fromIdx + direction
+        while toIdx >= 0, toIdx < favoriteEntries.count,
+              !visibleIDs.contains(favoriteEntries[toIdx].sessionID) {
+            toIdx += direction
+        }
+        guard toIdx >= 0, toIdx < favoriteEntries.count else { return }
         favoriteEntries.swapAt(fromIdx, toIdx)
         saveFavorites()
+    }
+
+    /// Switch to a session from anywhere *except* the session sidebar list.
+    ///
+    /// Any deliberate jump — ⌘-number, ⇧⇥, the favorites bar, a monitor
+    /// row — means "show me that terminal", so the overlays covering it get
+    /// out of the way. The sidebar's own rows set `switchToSession`
+    /// directly instead: flipping between sessions in that list should
+    /// leave it open.
+    ///
+    /// `dismissIfAlreadyActive: false` is for list rows where a click on the
+    /// row you're already on is more likely a mis-aim than a request —
+    /// closing the overlay under that click feels random.
+    public func jumpToSession(_ session: TmuxSession,
+                              dismissIfAlreadyActive: Bool = true) {
+        let alreadyActive = activeSession?.id == session.id
+        if !alreadyActive {
+            switchToSession = session
+        }
+        guard !alreadyActive || dismissIfAlreadyActive else { return }
+        showMonitor = false
+        showSessionManager = false
     }
 
     // MARK: - Window Title

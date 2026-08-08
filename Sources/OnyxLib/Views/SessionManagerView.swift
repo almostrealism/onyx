@@ -375,6 +375,39 @@ private struct FavoritesHeader: View {
     }
 }
 
+/// One of the reorder chevrons on a favorite row. Split out so each gets a
+/// hover state — and a hit target you can hit. The old inline version was a
+/// 7pt glyph in a fixed 16x12 box that never scaled with the UI font, which
+/// made reordering a game of pixel-hunting.
+private struct FavoriteMoveButton: View {
+    let symbol: String
+    let enabled: Bool
+    @ObservedObject var appState: AppState
+    let action: () -> Void
+    @State private var hovering = false
+
+    private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: sz(8), weight: .bold))
+                .foregroundColor(enabled ? .gray.opacity(hovering ? 0.9 : 0.45)
+                                         : .gray.opacity(0.1))
+                .frame(width: sz(22), height: sz(14))
+                .background(
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(hovering && enabled ? Color.white.opacity(0.1)
+                                                  : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .onHover { hovering = $0 }
+    }
+}
+
 private struct FavoriteRow: View {
     let session: TmuxSession
     let index: Int
@@ -390,30 +423,17 @@ private struct FavoriteRow: View {
     var body: some View {
         HStack(spacing: 5) {
             // Move up/down
-            VStack(spacing: 0) {
-                Button(action: {
+            VStack(spacing: 1) {
+                FavoriteMoveButton(symbol: "chevron.up",
+                                   enabled: index > 0,
+                                   appState: appState) {
                     appState.moveFavoriteByID(session.id, direction: -1)
-                }) {
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: sz(7), weight: .bold))
-                        .foregroundColor(index > 0 ? .gray.opacity(0.4) : .gray.opacity(0.1))
-                        .frame(width: 16, height: 12)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .disabled(index == 0)
-
-                Button(action: {
+                FavoriteMoveButton(symbol: "chevron.down",
+                                   enabled: index < total - 1,
+                                   appState: appState) {
                     appState.moveFavoriteByID(session.id, direction: 1)
-                }) {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: sz(7), weight: .bold))
-                        .foregroundColor(index < total - 1 ? .gray.opacity(0.4) : .gray.opacity(0.1))
-                        .frame(width: 16, height: 12)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .disabled(index >= total - 1)
             }
 
             // Tappable session label area

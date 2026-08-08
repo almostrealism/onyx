@@ -213,21 +213,12 @@ struct SessionNotesSection: View {
                         shortcut: entry.shortcut,
                         isActive: appState.activeSession?.id == entry.session.id,
                         accentColor: appState.accentColor,
-                        // Route through switchToSession (like the favorites
-                        // bar) so the terminal pool actually activates this
-                        // session's view — setting activeSession alone only
-                        // moved the indicator while the old terminal stayed up.
-                        //
-                        // Clicking a note means "take me to that session", so
-                        // get out of the way and close the overlay. Only on an
-                        // actual change: clicking the session you're already
-                        // looking at shouldn't yank the monitor out from under
-                        // you (that click is usually just a mis-aim).
-                        onTap: {
-                            let alreadyActive = appState.activeSession?.id == entry.session.id
-                            appState.switchToSession = entry.session
-                            if !alreadyActive { appState.showMonitor = false }
-                        }
+                        // jumpToSession, not switchToSession: it routes through
+                        // the terminal pool (so the session's view actually
+                        // activates) and drops the overlays covering it —
+                        // clicking a note always means "take me there".
+                        onTap: { appState.jumpToSession(entry.session,
+                                                        dismissIfAlreadyActive: false) }
                     )
                 }
             }

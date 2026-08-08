@@ -177,6 +177,52 @@ final class SessionModelTests: XCTestCase {
         XCTAssertTrue(state.favoritedSessionIDs.contains(s1.id))
     }
 
+    /// The stored list keeps favorites whose session is currently gone (a
+    /// stopped container, an unreachable host). Those rows aren't rendered,
+    /// so a move must step over them — swapping with an invisible neighbour
+    /// looks like the up/down button did nothing at all.
+    func testMoveFavoriteByID_skipsSessionsNotCurrentlyVisible() {
+        let state = AppState()
+        let s1 = TmuxSession(name: "a", source: .host(hostID: HostConfig.localhostID))
+        let gone = TmuxSession(name: "gone", source: .host(hostID: HostConfig.localhostID))
+        let s2 = TmuxSession(name: "b", source: .host(hostID: HostConfig.localhostID))
+        state.allSessions = [s1, gone, s2]
+        state.toggleFavorite(s1)
+        state.toggleFavorite(gone)
+        state.toggleFavorite(s2)
+
+        // The middle favorite's session vanishes — it's stored but not shown.
+        state.allSessions = [s1, s2]
+        XCTAssertEqual(state.favoriteSessions.map(\.id), [s1.id, s2.id])
+
+        // ONE press must reorder what the user can see.
+        state.moveFavoriteByID(s2.id, direction: -1)
+        XCTAssertEqual(state.favoriteSessions.map(\.id), [s2.id, s1.id])
+
+        // And back again.
+        state.moveFavoriteByID(s2.id, direction: 1)
+        XCTAssertEqual(state.favoriteSessions.map(\.id), [s1.id, s2.id])
+
+        // The hidden favorite is preserved, not dropped.
+        XCTAssertTrue(state.favoritedSessionIDs.contains(gone.id))
+    }
+
+    /// Moving past the ends is a no-op even when hidden entries sit beyond
+    /// the last visible row.
+    func testMoveFavoriteByID_atVisibleEdgeDoesNothing() {
+        let state = AppState()
+        let s1 = TmuxSession(name: "a", source: .host(hostID: HostConfig.localhostID))
+        let gone = TmuxSession(name: "gone", source: .host(hostID: HostConfig.localhostID))
+        state.allSessions = [s1, gone]
+        state.toggleFavorite(s1)
+        state.toggleFavorite(gone)
+        state.allSessions = [s1]
+
+        state.moveFavoriteByID(s1.id, direction: 1)
+        XCTAssertEqual(state.favoriteSessions.map(\.id), [s1.id])
+        XCTAssertEqual(state.favoritedSessionIDs, [s1.id, gone.id])
+    }
+
     // MARK: - session filtering
 
     func testAllSessions_filtersBySource() {

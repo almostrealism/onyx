@@ -704,7 +704,7 @@ private struct ContentViewSessionNotifications: ViewModifier {
                 guard favorites.count > 1, let current = appState.activeSession else { return }
                 if let idx = favorites.firstIndex(where: { $0.id == current.id }) {
                     let next = favorites[(idx + 1) % favorites.count]
-                    appState.switchToSession = next
+                    appState.jumpToSession(next)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .createTmuxSession)) { _ in
@@ -722,9 +722,10 @@ private struct ContentViewSessionNotifications: ViewModifier {
                 let favorites = appState.favoriteSessions
                 guard index <= favorites.count else { return }
                 let session = favorites[index - 1]
-                if appState.activeSession?.id != session.id {
-                    appState.switchToSession = session
-                }
+                // Pressing ⌘N names a destination — take the user there and
+                // drop the overlays, even if that session is already active
+                // (they're asking to *see* it, not just select it).
+                appState.jumpToSession(session)
             }
     }
 }
@@ -1061,11 +1062,7 @@ struct FavoritesBar: View {
             // Favorite session tabs
             ForEach(Array(appState.favoriteSessions.enumerated()), id: \.element.id) { index, session in
                 let isActive = appState.activeSession?.id == session.id
-                Button(action: {
-                    if !isActive {
-                        appState.switchToSession = session
-                    }
-                }) {
+                Button(action: { appState.jumpToSession(session) }) {
                     HStack(spacing: 4) {
                         if index < 9 {
                             Text("⌘\(index + 1)")
