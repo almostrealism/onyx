@@ -387,6 +387,71 @@ final class MonitorCPUDiagnosticTests: XCTestCase {
         XCTAssertEqual(sample?.npuBusy, true)
     }
 
+    /// Residency: the cumulative runtime-active counter differenced across
+    /// two samples. This is the only real activity number the NPU has.
+    func testNpuActivePercent_fromCounterDelta() {
+        let t0 = Date()
+        let a = MonitorSample(timestamp: t0, npuActiveMs: 10_000)
+        let b = MonitorSample(timestamp: t0.addingTimeInterval(10), npuActiveMs: 12_500)
+        // 2.5s active out of a 10s interval.
+        XCTAssertEqual(MonitorManager.npuActivePercent(previous: a, current: b) ?? -1,
+                       25, accuracy: 0.001)
+    }
+
+    func testNpuActivePercent_fullyBusyAndFullyIdle() {
+        let t0 = Date()
+        let a = MonitorSample(timestamp: t0, npuActiveMs: 1_000)
+        let busy = MonitorSample(timestamp: t0.addingTimeInterval(5), npuActiveMs: 6_000)
+        let idle = MonitorSample(timestamp: t0.addingTimeInterval(5), npuActiveMs: 1_000)
+        XCTAssertEqual(MonitorManager.npuActivePercent(previous: a, current: busy) ?? -1,
+                       100, accuracy: 0.001)
+        XCTAssertEqual(MonitorManager.npuActivePercent(previous: a, current: idle) ?? -1,
+                       0, accuracy: 0.001)
+    }
+
+    /// A reboot or driver reload zeroes the counter. That must read as
+    /// "unknown", never as a negative or a wrapped-around percentage.
+    func testNpuActivePercent_counterResetIsNil() {
+        let t0 = Date()
+        let a = MonitorSample(timestamp: t0, npuActiveMs: 900_000)
+        let b = MonitorSample(timestamp: t0.addingTimeInterval(10), npuActiveMs: 120)
+        XCTAssertNil(MonitorManager.npuActivePercent(previous: a, current: b))
+    }
+
+    func testNpuActivePercent_needsBothSamplesAndElapsedTime() {
+        let t0 = Date()
+        let a = MonitorSample(timestamp: t0, npuActiveMs: 1_000)
+        let noCounter = MonitorSample(timestamp: t0.addingTimeInterval(5))
+        XCTAssertNil(MonitorManager.npuActivePercent(previous: nil, current: a),
+                     "first sample of a host has nothing to difference against")
+        XCTAssertNil(MonitorManager.npuActivePercent(previous: a, current: noCounter))
+        XCTAssertNil(MonitorManager.npuActivePercent(
+            previous: a, current: MonitorSample(timestamp: t0, npuActiveMs: 1_500)),
+                     "zero elapsed time can't yield a rate")
+    }
+
+    /// Clamp: a slightly stale timestamp pair can make the counter delta
+    /// exceed the wall interval. Report 100%, not 137%.
+    func testNpuActivePercent_clampsAbove100() {
+        let t0 = Date()
+        let a = MonitorSample(timestamp: t0, npuActiveMs: 0)
+        let b = MonitorSample(timestamp: t0.addingTimeInterval(5), npuActiveMs: 6_800)
+        XCTAssertEqual(MonitorManager.npuActivePercent(previous: a, current: b) ?? -1,
+                       100, accuracy: 0.001)
+    }
+
+    func testParse_npuActiveMsField() {
+        let sample = MonitorManager.parse(output: "---NPU---\nRyzenAI-npu5|suspended|1.5.5.391|482913")
+        XCTAssertEqual(sample?.npuActiveMs ?? -1, 482913, accuracy: 0.001)
+        XCTAssertEqual(sample?.npuName, "RyzenAI-npu5")
+    }
+
+    func testParse_npuWithoutActiveTimeCounter() {
+        let sample = MonitorManager.parse(output: "---NPU---\nRyzenAI-npu5|suspended|1.5.5.391|")
+        XCTAssertNil(sample?.npuActiveMs, "absent counter must not become 0")
+        XCTAssertEqual(sample?.npuState, "suspended")
+    }
+
     func testParse_npuSuspendedIsNotBusy() {
         let sample = MonitorManager.parse(output: "---NPU---\nRyzenAI-npu4|suspended|")
         XCTAssertEqual(sample?.npuBusy, false)

@@ -30,6 +30,17 @@ public struct MonitorSample: Identifiable {
     public var npuState: String?
     /// NPU firmware version, when the driver reports one.
     public var npuFirmware: String?
+    /// Cumulative milliseconds the NPU has spent runtime-active since boot
+    /// (`power/runtime_active_time`). Only useful as a delta between two
+    /// samples — see `npuActivePercent`.
+    public var npuActiveMs: Double?
+    /// Share of the interval since the previous sample that the NPU was
+    /// powered up, 0-100. This is *residency*, not utilization: it says
+    /// how much of the time something was holding the accelerator, not how
+    /// hard it worked. Filled in by MonitorManager, which owns the
+    /// previous sample; nil for the first sample of a host, or if the
+    /// counter went backwards (reboot / driver reload).
+    public var npuActivePercent: Double?
     /// Load avg1.
     public var loadAvg1: Double?
     /// Load avg5.
@@ -48,7 +59,7 @@ public struct MonitorSample: Identifiable {
     }
 
     /// Create a new instance.
-    public init(timestamp: Date, cpuUsage: Double? = nil, memUsed: Double? = nil, memTotal: Double? = nil, gpuUsage: Double? = nil, gpuMemUsage: Double? = nil, gpuTemp: Int? = nil, gpuName: String? = nil, npuName: String? = nil, npuState: String? = nil, npuFirmware: String? = nil, loadAvg1: Double? = nil, loadAvg5: Double? = nil, loadAvg15: Double? = nil) {
+    public init(timestamp: Date, cpuUsage: Double? = nil, memUsed: Double? = nil, memTotal: Double? = nil, gpuUsage: Double? = nil, gpuMemUsage: Double? = nil, gpuTemp: Int? = nil, gpuName: String? = nil, npuName: String? = nil, npuState: String? = nil, npuFirmware: String? = nil, npuActiveMs: Double? = nil, npuActivePercent: Double? = nil, loadAvg1: Double? = nil, loadAvg5: Double? = nil, loadAvg15: Double? = nil) {
         self.timestamp = timestamp
         self.cpuUsage = cpuUsage
         self.memUsed = memUsed
@@ -60,6 +71,8 @@ public struct MonitorSample: Identifiable {
         self.npuName = npuName
         self.npuState = npuState
         self.npuFirmware = npuFirmware
+        self.npuActiveMs = npuActiveMs
+        self.npuActivePercent = npuActivePercent
         self.loadAvg1 = loadAvg1
         self.loadAvg5 = loadAvg5
         self.loadAvg15 = loadAvg15

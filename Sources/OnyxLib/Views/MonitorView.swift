@@ -47,12 +47,19 @@ private struct MonitorFontModifier: ViewModifier {
     }
 }
 
-/// NPU chip text. `active`/`suspended` come from the accelerator's
-/// runtime-PM state; anything else means the kernel isn't power-managing
-/// the device, so its state tells us nothing and we say so rather than
-/// inventing "idle".
-private func npuChipValue(_ state: String) -> String {
-    switch state {
+/// NPU chip text. Prefer active-time residency over the interval — it
+/// catches bursts that begin and end between polls. Fall back to the
+/// point-in-time runtime-PM state (`active`/`suspended`); anything else
+/// means the kernel isn't power-managing the device, so its state tells
+/// us nothing and we say so rather than inventing "idle".
+private func npuChipValue(_ sample: MonitorSample) -> String {
+    if let pct = sample.npuActivePercent {
+        // Sub-1% is real activity, just brief — don't round it to "0%"
+        // and imply the NPU was untouched.
+        if pct > 0 && pct < 1 { return "<1%" }
+        return "\(Int(pct.rounded()))%"
+    }
+    switch sample.npuState {
     case "active":    return "busy"
     case "suspended": return "idle"
     default:          return "—"
@@ -61,13 +68,17 @@ private func npuChipValue(_ state: String) -> String {
 
 private func npuTooltip(_ sample: MonitorSample) -> String {
     var lines = [sample.npuName ?? "NPU"]
-    switch sample.npuBusy {
-    case true?:  lines.append("Powered up — a client is using it")
-    case false?: lines.append("Runtime-suspended — nothing is using it")
-    default:     lines.append("Runtime power management is off, so busy/idle can't be read")
+    if sample.npuActivePercent != nil {
+        lines.append("Share of the last interval the NPU was powered up")
+        lines.append("(residency, not utilization — the driver exposes no % busy)")
+    } else {
+        switch sample.npuBusy {
+        case true?:  lines.append("Powered up — a client is using it")
+        case false?: lines.append("Runtime-suspended — nothing is using it")
+        default:     lines.append("Runtime power management is off, so busy/idle can't be read")
+        }
     }
     if let fw = sample.npuFirmware { lines.append("Firmware \(fw)") }
-    lines.append("(the driver exposes no utilization %)")
     return lines.joined(separator: "\n")
 }
 
@@ -160,10 +171,12 @@ struct MonitorView: View {
                             // so this reports what it does know — whether the
                             // accelerator is powered up for a client or
                             // runtime-suspended.
-                            if let state = sample.npuState {
+                            if sample.npuState != nil {
+                                let live = (sample.npuActivePercent ?? 0) > 0
+                                    || sample.npuBusy == true
                                 StatChip(label: "NPU",
-                                         value: npuChipValue(state),
-                                         accentColor: sample.npuBusy == true
+                                         value: npuChipValue(sample),
+                                         accentColor: live
                                              ? Color.onyxGreen : Color.onyxPurple)
                                     .help(npuTooltip(sample))
                             }

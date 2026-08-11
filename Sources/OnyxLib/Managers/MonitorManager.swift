@@ -279,6 +279,15 @@ public class MonitorManager: ObservableObject {
                 DispatchQueue.main.async {
                     guard let self = self else { return }
                     var data = self.hostData[hostID] ?? HostMonitorData()
+                    var sample = sample
+                    // The NPU has no utilization counter, but runtime PM
+                    // keeps a cumulative active-time counter. Differencing
+                    // it against the previous sample gives real activity
+                    // over the interval — including bursts that started and
+                    // finished between two polls, which the point-in-time
+                    // runtime_status would miss entirely.
+                    sample.npuActivePercent = Self.npuActivePercent(
+                        previous: data.latestSample, current: sample)
                     data.lastError = nil
                     data.latestSample = sample
                     data.samples.append(sample)
@@ -300,6 +309,26 @@ public class MonitorManager: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Share of the wall-clock interval between two samples that the NPU
+    /// spent powered up, from the runtime-PM active-time counter.
+    ///
+    /// nil when we can't say honestly: no counter on either side, no
+    /// elapsed time, or the counter went backwards (reboot / driver
+    /// reload resets it to 0). Clamped to 0-100 — a slow poll response
+    /// can make the sample timestamps slightly tighter than the interval
+    /// the counters actually cover.
+    public static func npuActivePercent(previous: MonitorSample?,
+                                        current: MonitorSample) -> Double? {
+        guard let previous,
+              let prevMs = previous.npuActiveMs,
+              let curMs = current.npuActiveMs else { return nil }
+        let deltaMs = curMs - prevMs
+        guard deltaMs >= 0 else { return nil }
+        let elapsedMs = current.timestamp.timeIntervalSince(previous.timestamp) * 1000
+        guard elapsedMs > 0 else { return nil }
+        return min(100, max(0, deltaMs / elapsedMs * 100))
     }
 
     /// Parse a size string like "127G", "121M", "4096K" into MB
@@ -413,7 +442,7 @@ public class MonitorManager: ObservableObject {
         var cpuUsage: Double?
         var memUsed: Double?, memTotal: Double?
         var gpuUsage: Double?, gpuMemUsage: Double?, gpuTemp: Int?, gpuName: String?
-        var npuName: String?, npuState: String?, npuFirmware: String?
+        var npuName: String?, npuState: String?, npuFirmware: String?, npuActiveMs: Double?
 
         for i in stride(from: 0, to: sections.count, by: 1) {
             let section = sections[i].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -505,6 +534,7 @@ public class MonitorManager: ObservableObject {
                         npuName = parts[0].isEmpty ? "NPU" : parts[0]
                         npuState = parts[1].isEmpty ? "unknown" : parts[1]
                         if parts.count >= 3, !parts[2].isEmpty { npuFirmware = parts[2] }
+                        if parts.count >= 4, let ms = Double(parts[3]) { npuActiveMs = ms }
                     }
                 }
             }
@@ -530,6 +560,7 @@ public class MonitorManager: ObservableObject {
             npuName: npuName,
             npuState: npuState,
             npuFirmware: npuFirmware,
+            npuActiveMs: npuActiveMs,
             loadAvg1: loadAvg1,
             loadAvg5: loadAvg5,
             loadAvg15: loadAvg15

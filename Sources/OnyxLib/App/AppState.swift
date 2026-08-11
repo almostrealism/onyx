@@ -1899,7 +1899,8 @@ public class AppState: ObservableObject {
         [ -n "$N" ] || N=$(basename "$(readlink -f "$a/driver" 2>/dev/null)" 2>/dev/null); [ -n "$N" ] || N="NPU"; \
         CTL=$(cat "$a/power/control" 2>/dev/null | head -1); ST=$(cat "$a/power/runtime_status" 2>/dev/null | head -1); \
         [ "$CTL" = "on" ] && ST="unknown"; [ -n "$ST" ] || ST="unknown"; FW=$(cat "$a/fw_version" 2>/dev/null | head -1); \
-        NPUOUT="$(printf '%s' "$N" | tr '|,' '  ')|$ST|$(printf '%s' "$FW" | tr '|,' '  ')"; break; done; \
+        AT=$(cat "$a/power/runtime_active_time" 2>/dev/null | head -1); case "$AT" in ''|*[!0-9]*) AT="";; esac; \
+        NPUOUT="$(printf '%s' "$N" | tr '|,' '  ')|$ST|$(printf '%s' "$FW" | tr '|,' '  ')|$AT"; break; done; \
         [ -n "$NPUOUT" ] && echo "$NPUOUT" || echo "N/A"; \
         echo "---DOCKER---"; docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}" 2>/dev/null || true
         """
