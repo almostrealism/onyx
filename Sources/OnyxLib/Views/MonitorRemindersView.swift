@@ -272,6 +272,22 @@ public class RemindersManager: ObservableObject {
         return date <= endOfTomorrow
     }
 
+    /// Due by the end of today — i.e. actually today's problem. Overdue
+    /// counts; anything later does not. Used to hold the eye on today's
+    /// work while tomorrow's stays visible but quiet.
+    public static func isDueToday(_ reminder: EKReminder, now: Date = Date()) -> Bool {
+        isDueToday(due: reminder.dueDateComponents, now: now)
+    }
+
+    public static func isDueToday(due comps: DateComponents?, now: Date = Date()) -> Bool {
+        guard let comps else { return false }
+        let cal = Calendar.current
+        guard let date = cal.date(from: comps) else { return false }
+        let endOfToday = cal.date(byAdding: DateComponents(day: 1, second: -1),
+                                  to: cal.startOfDay(for: now))!
+        return date <= endOfToday
+    }
+
     public func toggleComplete(_ reminder: EKReminder) {
         reminder.isCompleted.toggle()
         try? store.save(reminder, commit: true)
@@ -373,7 +389,9 @@ struct RemindersSection: View {
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(nonEmpty, id: \.id) { group in
-                            ReminderListColumn(group: group, appState: appState, reminders: reminders)
+                            ReminderListColumn(group: group, appState: appState,
+                                               reminders: reminders,
+                                               dimNotToday: dueSoonOnly)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -386,7 +404,11 @@ struct RemindersSection: View {
                 // Single list or Today: flat display
                 let shown = visible(reminders.reminders)
                 ForEach(Array(shown.prefix(14)), id: \.calendarItemIdentifier) { reminder in
-                    ReminderRow(reminder: reminder, appState: appState, manager: reminders)
+                    ReminderRow(reminder: reminder, appState: appState, manager: reminders,
+                                // In due-soon mode, tomorrow's work stays
+                                // visible but recedes — today is the point.
+                                deemphasized: dueSoonOnly
+                                    && !RemindersManager.isDueToday(reminder))
                 }
                 if shown.count > 14 {
                     Text("+\(shown.count - 14) more")
@@ -426,6 +448,8 @@ private struct ReminderListColumn: View {
     let group: ReminderListGroup
     @ObservedObject var appState: AppState
     let reminders: RemindersManager
+    /// Fade anything that isn't today's problem (due-soon mode only).
+    var dimNotToday: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -436,7 +460,9 @@ private struct ReminderListColumn: View {
 
             let visible = Array(group.reminders.prefix(14))
             ForEach(visible, id: \.calendarItemIdentifier) { reminder in
-                ReminderRow(reminder: reminder, appState: appState, manager: reminders)
+                ReminderRow(reminder: reminder, appState: appState, manager: reminders,
+                            deemphasized: dimNotToday
+                                && !RemindersManager.isDueToday(reminder))
             }
             if group.reminders.count > 14 {
                 Text("+\(group.reminders.count - 14) more")
@@ -451,24 +477,48 @@ private struct ReminderRow: View {
     let reminder: EKReminder
     @ObservedObject var appState: AppState
     let manager: RemindersManager
+    /// Due later than today while the due-soon filter is on: keep it
+    /// readable, but stop it competing with what's due now.
+    var deemphasized: Bool = false
     @ObservedObject private var flowtree = FlowtreeManager.shared
     @ObservedObject private var flowtreeConfig = FlowtreeConfigStore.shared
     @State private var isHovering = false
 
     private var showSubmit: Bool { isHovering && !reminder.isCompleted }
 
+    /// Tomorrow's items are context, not today's work: legible, but a
+    /// clear step back from the rows you're meant to be looking at.
+    /// Hovering restores full strength, so reading one is never a fight.
+    private var titleColor: Color {
+        if reminder.isCompleted { return .gray.opacity(0.3) }
+        if deemphasized && !isHovering { return .white.opacity(0.4) }
+        return .white.opacity(0.8)
+    }
+
+    private func dueColor(_ due: DateComponents) -> Color {
+        if isReminderOverdue(due) && !reminder.isCompleted { return Color.onyxRed }
+        if deemphasized && !isHovering { return .gray.opacity(0.22) }
+        return .gray.opacity(0.4)
+    }
+
+    private var checkboxColor: Color {
+        if reminder.isCompleted { return appState.accentColor }
+        if deemphasized && !isHovering { return .gray.opacity(0.22) }
+        return .gray.opacity(0.4)
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Button(action: { manager.toggleComplete(reminder) }) {
                 Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
                     .monitorFont(size: 12, design: .default)
-                    .foregroundColor(reminder.isCompleted ? appState.accentColor : .gray.opacity(0.4))
+                    .foregroundColor(checkboxColor)
             }
             .buttonStyle(.plain)
 
             Text(reminder.title ?? "Untitled")
                 .monitorFont(size: 12)
-                .foregroundColor(reminder.isCompleted ? .gray.opacity(0.3) : .white.opacity(0.8))
+                .foregroundColor(titleColor)
                 .strikethrough(reminder.isCompleted)
                 .lineLimit(1)
 
@@ -484,7 +534,7 @@ private struct ReminderRow: View {
             if let due = reminder.dueDateComponents, let label = dueLabel(due) {
                 Text(label)
                     .monitorFont(size: 10)
-                    .foregroundColor(isReminderOverdue(due) && !reminder.isCompleted ? Color.onyxRed : .gray.opacity(0.4))
+                    .foregroundColor(dueColor(due))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }

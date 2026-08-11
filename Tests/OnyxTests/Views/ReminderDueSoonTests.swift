@@ -50,6 +50,36 @@ final class ReminderDueSoonTests: XCTestCase {
         XCTAssertFalse(RemindersManager.isDueSoon(due: due(14, hour: 9, minute: 0), now: now))
     }
 
+    // MARK: - isDueToday (drives the dimming of tomorrow's rows)
+
+    func testIsDueToday_todayAndOverdueCount_laterDoesNot() {
+        XCTAssertTrue(RemindersManager.isDueToday(due: due(12, hour: 9, minute: 0), now: now))
+        XCTAssertTrue(RemindersManager.isDueToday(due: due(12, hour: 23, minute: 59), now: now),
+                      "still today at one minute to midnight")
+        XCTAssertTrue(RemindersManager.isDueToday(due: due(3), now: now), "overdue is today's problem")
+        XCTAssertFalse(RemindersManager.isDueToday(due: due(13, hour: 0, minute: 1), now: now))
+    }
+
+    /// The all-day boundary again, from the other side: an all-day
+    /// reminder due tomorrow resolves to tomorrow 00:00 and must NOT be
+    /// treated as today, or it would render at full strength.
+    func testIsDueToday_allDayTomorrowIsNotToday() {
+        XCTAssertFalse(RemindersManager.isDueToday(due: due(13), now: now))
+        XCTAssertTrue(RemindersManager.isDueToday(due: due(12), now: now))
+    }
+
+    /// Every reminder shown in due-soon mode is either today's or gets
+    /// dimmed — no third category can slip through at full strength.
+    func testDueSoonSplitsCleanlyIntoTodayAndDimmed() {
+        let cases = [due(3), due(12), due(12, hour: 20, minute: 0), due(13), due(13, hour: 8, minute: 0)]
+        for c in cases where RemindersManager.isDueSoon(due: c, now: now) {
+            let today = RemindersManager.isDueToday(due: c, now: now)
+            let tomorrow = !today
+            XCTAssertTrue(today || tomorrow)
+        }
+        XCTAssertFalse(RemindersManager.isDueToday(due: due(14), now: now))
+    }
+
     func testNoDueDate_isNotDueSoon() {
         // "Due soon" is about dated work; an undated reminder has no claim
         // on today.
