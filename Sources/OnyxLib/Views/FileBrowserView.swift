@@ -268,6 +268,11 @@ struct FavoritesGridSection: View {
             folders: browser.activeFolders.map(\.path))
     }
 
+    /// Vertical space the favorites section may occupy before it scrolls.
+    /// The layout fills it even when it needs less, spending the slack on
+    /// wider cells rather than leaving a dead band.
+    static let heightBudget: CGFloat = 190
+
     /// Seeded with a typical panel width: the treemap's height is derived
     /// from its width, and starting at 0 would size the first frame for a
     /// 1pt-wide column and then visibly snap.
@@ -303,7 +308,11 @@ struct FavoritesGridSection: View {
                 // by a path the cell has no room to show.
                 let tree = FavoriteTree.build(paths: browser.activeFolders.map(\.path))
                 let width = max(gridWidth, 1)
-                let height = FavoriteTreemapLayout.fittingHeight(for: tree, width: width)
+                // Take the whole budget when the layout would fit in less:
+                // the spare height is what buys wider, calmer cells (see
+                // `bestComfort`). Beyond the budget it scrolls.
+                let height = max(Self.heightBudget,
+                                 FavoriteTreemapLayout.preferredHeight(for: tree, width: width))
                 ScrollView {
                     FavoritesTreemap(
                         nodes: tree,
@@ -319,7 +328,7 @@ struct FavoritesGridSection: View {
                         Color.clear.preference(key: GridWidthKey.self, value: geo.size.width)
                     })
                 }
-                .frame(maxHeight: 190)
+                .frame(maxHeight: Self.heightBudget)
                 .onPreferenceChange(GridWidthKey.self) { gridWidth = $0 }
             } else if !browser.showAddFolder {
                 Text("No favorites yet — tap + to add a folder")

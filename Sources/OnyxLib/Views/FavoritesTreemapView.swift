@@ -15,10 +15,10 @@ struct FavoritesTreemap: View {
 
     var body: some View {
         GeometryReader { geo in
-            let placement = FavoriteTreemapLayout.place(
+            let boxes = FavoriteTreemapLayout.place(
                 nodes, in: CGRect(origin: .zero, size: geo.size))
             ZStack(alignment: .topLeading) {
-                ForEach(placement.boxes) { box in
+                ForEach(boxes) { box in
                     cell(box)
                         .frame(width: max(0, box.rect.width),
                                height: max(0, box.rect.height))
