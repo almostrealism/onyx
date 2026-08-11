@@ -514,6 +514,26 @@ private struct ContentViewAnimations: ViewModifier {
     }
 }
 
+/// Monitor-overlay display toggles that persist in AppearanceConfig.
+/// Kept in its own modifier because ContentViewNotifications' chain is
+/// already at the limit of what the type checker will do in reasonable
+/// time — adding one more `onReceive` there tips it over.
+private struct ContentViewMonitorNotifications: ViewModifier {
+    @ObservedObject var appState: AppState
+    var hostWindow: NSWindow?
+
+    private var isKeyWindow: Bool { hostWindow?.isKeyWindow == true }
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .toggleRemindersDueSoon)) { _ in
+                guard isKeyWindow, appState.showMonitor else { return }
+                appState.appearance.remindersDueSoonOnly.toggle()
+                appState.saveAppearance()
+            }
+    }
+}
+
 private struct ContentViewNotifications: ViewModifier {
     @ObservedObject var appState: AppState
     let updateWindowTitle: () -> Void
@@ -553,6 +573,7 @@ private struct ContentViewNotifications: ViewModifier {
                 guard isKeyWindow, appState.activeSession != nil else { return }
                 appState.showSessionNoteEditor = true
             }
+            .modifier(ContentViewMonitorNotifications(appState: appState, hostWindow: hostWindow))
             .modifier(ContentViewPanelNotifications(appState: appState, hostWindow: hostWindow))
             .modifier(ContentViewOverlayNotifications(appState: appState, hostWindow: hostWindow))
             .modifier(ContentViewSessionNotifications(appState: appState, hostWindow: hostWindow))

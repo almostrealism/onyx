@@ -270,6 +270,18 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(script.contains("IOAccelerator"), "Apple ioreg path missing")
     }
 
+    /// The NPU probe reads the accel device's runtime-PM state — the only
+    /// activity signal amdxdna exposes without root or XRT installed.
+    func testStatsCommand_includesNpuProbe() {
+        let state = AppState()
+        let (_, args, _) = state.statsCommand(host: HostConfig.localhost)
+        let script = args.joined(separator: " ")
+        XCTAssertTrue(script.contains("---NPU---"), "NPU section marker missing")
+        XCTAssertTrue(script.contains("/sys/class/accel"), "accel device probe missing")
+        XCTAssertTrue(script.contains("runtime_status"),
+                      "NPU activity comes from runtime PM state")
+    }
+
     func testStatsCommand_local_doesNotUseStdin() {
         // Local invocation has no noexec problem and uses -c directly.
         let state = AppState()

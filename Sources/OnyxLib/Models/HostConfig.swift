@@ -137,6 +137,11 @@ public struct AppearanceConfig: Codable {
     /// approve/deny a tool call from the Onyx UI. Off by default — when off,
     /// Claude's normal in-terminal permission prompt is used.
     public var claudeHooksGatePermissions: Bool = false
+    /// When true, the monitor's reminders section shows only what's due by
+    /// the end of tomorrow (still grouped by list). Toggled with `R` while
+    /// the overlay is up; persisted because it's a standing preference for
+    /// how you want to read the list, not a transient peek.
+    public var remindersDueSoonOnly: Bool = false
     /// When true, draws a 2px orange outline around whichever component
     /// currently holds keyboard focus (terminal / right panel / overlay).
     /// Useful when debugging focus-routing issues; off by default because
@@ -221,7 +226,7 @@ public struct AppearanceConfig: Codable {
         case remindersList, remindersLists, lastSessionByWindow
         case extraTimezones, use12HourClock
         case claudeHooksGatePermissions, showFocusOutline
-        case searchFileTypeIDs
+        case searchFileTypeIDs, remindersDueSoonOnly
     }
 
     public init(from decoder: Decoder) throws {
@@ -242,5 +247,6 @@ public struct AppearanceConfig: Codable {
         self.claudeHooksGatePermissions = try c.decodeIfPresent(Bool.self,           forKey: .claudeHooksGatePermissions) ?? false
         self.showFocusOutline           = try c.decodeIfPresent(Bool.self,           forKey: .showFocusOutline)           ?? false
         self.searchFileTypeIDs          = try c.decodeIfPresent([String].self,       forKey: .searchFileTypeIDs)          ?? []
+        self.remindersDueSoonOnly       = try c.decodeIfPresent(Bool.self,           forKey: .remindersDueSoonOnly)       ?? false
     }
 }

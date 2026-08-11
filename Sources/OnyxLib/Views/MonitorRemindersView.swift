@@ -251,6 +251,27 @@ public class RemindersManager: ObservableObject {
         }
     }
 
+    /// Is this reminder due by the end of tomorrow (overdue included)?
+    ///
+    /// Uses the same window as `fetchScopeCounts` so the "today / by tmrw"
+    /// chips and the filtered list can never disagree: the last second of
+    /// tomorrow, because an all-day reminder due the day after tomorrow
+    /// resolves to that day's 00:00 and must stay out. Reminders with no
+    /// due date are excluded — "due soon" is about dated work.
+    public static func isDueSoon(_ reminder: EKReminder, now: Date = Date()) -> Bool {
+        isDueSoon(due: reminder.dueDateComponents, now: now)
+    }
+
+    /// The date rule on its own, so it's testable without an EventKit store.
+    public static func isDueSoon(due comps: DateComponents?, now: Date = Date()) -> Bool {
+        guard let comps else { return false }
+        let cal = Calendar.current
+        guard let date = cal.date(from: comps) else { return false }
+        let endOfTomorrow = cal.date(byAdding: DateComponents(day: 2, second: -1),
+                                     to: cal.startOfDay(for: now))!
+        return date <= endOfTomorrow
+    }
+
     public func toggleComplete(_ reminder: EKReminder) {
         reminder.isCompleted.toggle()
         try? store.save(reminder, commit: true)
@@ -264,17 +285,42 @@ struct RemindersSection: View {
     @StateObject private var reminders = RemindersManager()
     @ObservedObject private var flowtree = FlowtreeManager.shared
 
+    /// `R` while the overlay is up narrows every list to what's due by end
+    /// of tomorrow. Filtering happens here rather than in the fetch so the
+    /// toggle is instant and the list grouping is untouched.
+    private var dueSoonOnly: Bool { appState.appearance.remindersDueSoonOnly }
+
+    private func visible(_ list: [EKReminder]) -> [EKReminder] {
+        dueSoonOnly ? list.filter { RemindersManager.isDueSoon($0) } : list
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 6) {
                 Text(reminders.displayName)
                     .monitorFont(size: 10, weight: .medium)
                     .foregroundColor(appState.accentColor)
                     .tracking(2)
 
+                // Say WHY the list is short — a silently filtered list
+                // reads as missing reminders.
+                if dueSoonOnly {
+                    Text("DUE ≤ TMRW")
+                        .monitorFont(size: 8, weight: .bold)
+                        .foregroundColor(Color.onyxAmber)
+                        .tracking(1)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.onyxAmber.opacity(0.15))
+                        .cornerRadius(3)
+                        .help("Showing only reminders due today or tomorrow — press R to show all")
+                }
+
                 Spacer()
 
-                let total = reminders.totalCount
+                let total = dueSoonOnly
+                    ? visible(reminders.reminders).count
+                    : reminders.totalCount
                 if total > 0 {
                     Text("\(total)")
                         .monitorFont(size: 10)
@@ -314,9 +360,14 @@ struct RemindersSection: View {
                 // width, but the overlay now reserves the right half
                 // for Open PRs / Pipelines so reminders only get the
                 // left half — not enough room for two columns of titles.
-                let nonEmpty = reminders.groupedReminders.filter { !$0.reminders.isEmpty }
+                // Filter within each list so the grouping the user set up
+                // survives; lists left empty by the filter drop out.
+                let nonEmpty = reminders.groupedReminders
+                    .map { ReminderListGroup(id: $0.id, name: $0.name,
+                                             reminders: visible($0.reminders)) }
+                    .filter { !$0.reminders.isEmpty }
                 if nonEmpty.isEmpty {
-                    Text(reminders.emptyMessage)
+                    Text(dueSoonOnly ? "Nothing due today or tomorrow" : reminders.emptyMessage)
                         .monitorFont(size: 11)
                         .foregroundColor(.gray.opacity(0.3))
                 } else {
@@ -327,18 +378,18 @@ struct RemindersSection: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            } else if reminders.reminders.isEmpty {
-                Text(reminders.emptyMessage)
+            } else if visible(reminders.reminders).isEmpty {
+                Text(dueSoonOnly ? "Nothing due today or tomorrow" : reminders.emptyMessage)
                     .monitorFont(size: 11)
                     .foregroundColor(.gray.opacity(0.3))
             } else {
                 // Single list or Today: flat display
-                let visible = Array(reminders.reminders.prefix(14))
-                ForEach(visible, id: \.calendarItemIdentifier) { reminder in
+                let shown = visible(reminders.reminders)
+                ForEach(Array(shown.prefix(14)), id: \.calendarItemIdentifier) { reminder in
                     ReminderRow(reminder: reminder, appState: appState, manager: reminders)
                 }
-                if reminders.reminders.count > 14 {
-                    Text("+\(reminders.reminders.count - 14) more")
+                if shown.count > 14 {
+                    Text("+\(shown.count - 14) more")
                         .monitorFont(size: 10)
                         .foregroundColor(.gray.opacity(0.3))
                 }

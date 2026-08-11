@@ -47,6 +47,30 @@ private struct MonitorFontModifier: ViewModifier {
     }
 }
 
+/// NPU chip text. `active`/`suspended` come from the accelerator's
+/// runtime-PM state; anything else means the kernel isn't power-managing
+/// the device, so its state tells us nothing and we say so rather than
+/// inventing "idle".
+private func npuChipValue(_ state: String) -> String {
+    switch state {
+    case "active":    return "busy"
+    case "suspended": return "idle"
+    default:          return "—"
+    }
+}
+
+private func npuTooltip(_ sample: MonitorSample) -> String {
+    var lines = [sample.npuName ?? "NPU"]
+    switch sample.npuBusy {
+    case true?:  lines.append("Powered up — a client is using it")
+    case false?: lines.append("Runtime-suspended — nothing is using it")
+    default:     lines.append("Runtime power management is off, so busy/idle can't be read")
+    }
+    if let fw = sample.npuFirmware { lines.append("Firmware \(fw)") }
+    lines.append("(the driver exposes no utilization %)")
+    return lines.joined(separator: "\n")
+}
+
 private func formatMB(_ mb: Double) -> String {
     if mb >= 1024 {
         return String(format: "%.1f GB", mb / 1024)
@@ -132,6 +156,17 @@ struct MonitorView: View {
                             if let gpu = sample.gpuUsage {
                                 StatChip(label: "GPU", value: "\(Int(gpu))%", accentColor: Color.onyxPurple)
                             }
+                            // NPU: the driver exposes no utilization counter,
+                            // so this reports what it does know — whether the
+                            // accelerator is powered up for a client or
+                            // runtime-suspended.
+                            if let state = sample.npuState {
+                                StatChip(label: "NPU",
+                                         value: npuChipValue(state),
+                                         accentColor: sample.npuBusy == true
+                                             ? Color.onyxGreen : Color.onyxPurple)
+                                    .help(npuTooltip(sample))
+                            }
                             if let temp = sample.gpuTemp {
                                 StatChip(label: "TEMP", value: "\(temp)°C", accentColor: Color.onyxRed)
                             }
@@ -147,7 +182,7 @@ struct MonitorView: View {
                         Text(monitor.useShortInterval ? "5s intervals" : "1m intervals")
                             .monitorFont(size: 10)
                             .foregroundColor(.gray.opacity(0.4))
-                        Text("(T interval · M memory · C containers · P 12/24hr · S simple · X peek)")
+                        Text("(T interval · M memory · C containers · P 12/24hr · R due-soon · S simple · X peek)")
                             .monitorFont(size: 10)
                             .foregroundColor(.gray.opacity(0.25))
                     }

@@ -26,6 +26,7 @@ public extension Notification.Name {
     static let toggleClockFormat = Notification.Name("toggleClockFormat")
     static let toggleSimpleMonitor = Notification.Name("toggleSimpleMonitor")
     static let toggleMonitorPeek = Notification.Name("toggleMonitorPeek")
+    static let toggleRemindersDueSoon = Notification.Name("toggleRemindersDueSoon")
     static let editSessionNote = Notification.Name("editSessionNote")
     static let focusURLBar = Notification.Name("focusURLBar")
     static let tmuxResizeUp = Notification.Name("tmuxResizeUp")
@@ -1893,6 +1894,13 @@ public class AppState: ObservableObject {
         if [ -z "$GPUOUT" ]; then GPU_PCT=$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o '"Device Utilization %"=[0-9]*' | head -1 | cut -d= -f2); \
         [ -n "$GPU_PCT" ] && GPUOUT="AGX,$GPU_PCT"; fi; \
         [ -n "$GPUOUT" ] && echo "$GPUOUT" || echo "N/A"; \
+        echo "---NPU---"; NPUOUT=""; for a in /sys/class/accel/accel*/device; do [ -d "$a" ] || continue; \
+        N=$(cat "$a/vbnv" 2>/dev/null | head -1); [ -n "$N" ] || N=$(cat "$a/device_type" 2>/dev/null | head -1); \
+        [ -n "$N" ] || N=$(basename "$(readlink -f "$a/driver" 2>/dev/null)" 2>/dev/null); [ -n "$N" ] || N="NPU"; \
+        CTL=$(cat "$a/power/control" 2>/dev/null | head -1); ST=$(cat "$a/power/runtime_status" 2>/dev/null | head -1); \
+        [ "$CTL" = "on" ] && ST="unknown"; [ -n "$ST" ] || ST="unknown"; FW=$(cat "$a/fw_version" 2>/dev/null | head -1); \
+        NPUOUT="$(printf '%s' "$N" | tr '|,' '  ')|$ST|$(printf '%s' "$FW" | tr '|,' '  ')"; break; done; \
+        [ -n "$NPUOUT" ] && echo "$NPUOUT" || echo "N/A"; \
         echo "---DOCKER---"; docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}" 2>/dev/null || true
         """
         return remoteScript(statsScript, host: host)

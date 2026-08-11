@@ -377,6 +377,36 @@ final class MonitorCPUDiagnosticTests: XCTestCase {
         XCTAssertEqual(sample?.gpuName, "AMD GPU")
     }
 
+    /// NPU section: "name|state|firmware" from the amdxdna accel device.
+    func testParse_npuSection() {
+        let output = "---GPU---\nN/A\n---NPU---\nRyzenAI-npu4|active|1.5.5.391"
+        let sample = MonitorManager.parse(output: output)
+        XCTAssertEqual(sample?.npuName, "RyzenAI-npu4")
+        XCTAssertEqual(sample?.npuState, "active")
+        XCTAssertEqual(sample?.npuFirmware, "1.5.5.391")
+        XCTAssertEqual(sample?.npuBusy, true)
+    }
+
+    func testParse_npuSuspendedIsNotBusy() {
+        let sample = MonitorManager.parse(output: "---NPU---\nRyzenAI-npu4|suspended|")
+        XCTAssertEqual(sample?.npuBusy, false)
+        XCTAssertNil(sample?.npuFirmware, "empty firmware field should stay nil")
+    }
+
+    /// When runtime PM is pinned on, "active" is meaningless — the probe
+    /// reports `unknown` and we must NOT claim the NPU is busy.
+    func testParse_npuUnknownStateIsNotABusyClaim() {
+        let sample = MonitorManager.parse(output: "---NPU---\nNPU|unknown|")
+        XCTAssertEqual(sample?.npuState, "unknown")
+        XCTAssertNil(sample?.npuBusy)
+    }
+
+    func testParse_noNpuLeavesFieldsNil() {
+        let sample = MonitorManager.parse(output: "---GPU---\nN/A\n---NPU---\nN/A")
+        XCTAssertNil(sample?.npuState)
+        XCTAssertNil(sample?.npuName)
+    }
+
     func testParse_unrecognizedTopProducesNilCpuUsage() {
         // This is the actual silent-failure case: parse succeeds with a sample
         // but cpuUsage is nil because no recognized line matched.

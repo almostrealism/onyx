@@ -479,6 +479,7 @@ final class CodableRoundTripTests: XCTestCase {
         config.claudeHooksGatePermissions = true
         config.showFocusOutline = true
         config.searchFileTypeIDs = ["java", "python"]
+        config.remindersDueSoonOnly = true
 
         let data = try JSONEncoder().encode(config)
         let d = try JSONDecoder().decode(AppearanceConfig.self, from: data)
@@ -498,6 +499,7 @@ final class CodableRoundTripTests: XCTestCase {
         XCTAssertTrue(d.claudeHooksGatePermissions)
         XCTAssertTrue(d.showFocusOutline)
         XCTAssertEqual(d.searchFileTypeIDs, ["java", "python"])
+        XCTAssertTrue(d.remindersDueSoonOnly)
     }
 
     /// Tripwire: if you add a stored property to AppearanceConfig, this
@@ -506,9 +508,9 @@ final class CodableRoundTripTests: XCTestCase {
     /// missing one of those steps is wiping every user's settings.
     func testAppearanceConfig_storedPropertyCount_isLocked() {
         let count = Mirror(reflecting: AppearanceConfig()).children.count
-        XCTAssertEqual(count, 16, """
+        XCTAssertEqual(count, 17, """
             AppearanceConfig has \(count) stored properties but the test
-            expects 16. If you ADDED a field, you must also:
+            expects 17. If you ADDED a field, you must also:
               1. Add it to `CodingKeys` in HostConfig.swift
               2. Add a `decodeIfPresent(...) ?? <default>` line in `init(from:)`
               3. Add a non-default mutation to testAppearanceConfig_roundtripsAllStoredFields

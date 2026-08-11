@@ -413,6 +413,7 @@ public class MonitorManager: ObservableObject {
         var cpuUsage: Double?
         var memUsed: Double?, memTotal: Double?
         var gpuUsage: Double?, gpuMemUsage: Double?, gpuTemp: Int?, gpuName: String?
+        var npuName: String?, npuState: String?, npuFirmware: String?
 
         for i in stride(from: 0, to: sections.count, by: 1) {
             let section = sections[i].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -491,6 +492,22 @@ public class MonitorManager: ObservableObject {
                     }
                 }
             }
+
+            // "name|state|firmware" from the amdxdna accel device. Only the
+            // state field is required to be meaningful; name and firmware
+            // are decoration for the tooltip.
+            if section == "NPU", i + 1 < sections.count {
+                let npuStr = sections[i + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                if npuStr != "N/A" && !npuStr.isEmpty && npuStr.contains("|") {
+                    let parts = npuStr.components(separatedBy: "|")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                    if parts.count >= 2 {
+                        npuName = parts[0].isEmpty ? "NPU" : parts[0]
+                        npuState = parts[1].isEmpty ? "unknown" : parts[1]
+                        if parts.count >= 3, !parts[2].isEmpty { npuFirmware = parts[2] }
+                    }
+                }
+            }
         }
 
         // Fallback: if the CPU section was contaminated (e.g. by a remote
@@ -510,6 +527,9 @@ public class MonitorManager: ObservableObject {
             gpuMemUsage: gpuMemUsage,
             gpuTemp: gpuTemp,
             gpuName: gpuName,
+            npuName: npuName,
+            npuState: npuState,
+            npuFirmware: npuFirmware,
             loadAvg1: loadAvg1,
             loadAvg5: loadAvg5,
             loadAvg15: loadAvg15

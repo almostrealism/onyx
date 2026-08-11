@@ -209,6 +209,9 @@ public class ShortcutManager {
                 case 7: // X → peek behind the overlay (drop to 30% opacity)
                     NotificationCenter.default.post(name: .toggleMonitorPeek, object: nil)
                     return nil
+                case 15: // R → reminders: only what's due today/tomorrow
+                    NotificationCenter.default.post(name: .toggleRemindersDueSoon, object: nil)
+                    return nil
                 default:
                     break
                 }
