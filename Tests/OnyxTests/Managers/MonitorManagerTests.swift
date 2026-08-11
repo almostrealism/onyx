@@ -344,6 +344,39 @@ final class MonitorCPUDiagnosticTests: XCTestCase {
         }
     }
 
+    /// amdgpu sysfs path (Ryzen APUs / Radeon cards). The stats script
+    /// emits the same 4-field shape nvidia-smi does so the parser needs no
+    /// vendor knowledge — this test is what keeps that contract honest.
+    func testParse_amdSysfsGpuLine() {
+        let output = """
+        ---UPTIME---
+         12:00:00 up 1 day, load average: 0.10, 0.20, 0.30
+        ---CPU---
+        %Cpu(s):  3.5 us,  1.2 sy,  0.0 ni, 95.3 id,  0.0 wa
+        ---MEM---
+        Mem: 16000 4000 12000
+        ---GPU---
+        37 %, 25 %, 52, AMD Radeon Graphics
+        """
+        let sample = MonitorManager.parse(output: output)
+        XCTAssertEqual(sample?.gpuUsage ?? -1, 37, accuracy: 0.01)
+        XCTAssertEqual(sample?.gpuMemUsage ?? -1, 25, accuracy: 0.01)
+        XCTAssertEqual(sample?.gpuTemp, 52)
+        XCTAssertEqual(sample?.gpuName, "AMD Radeon Graphics")
+    }
+
+    /// An APU may expose busy% but no VRAM counters or hwmon temp. Those
+    /// fields must come back nil, NOT zero — a fake 0°C reading is worse
+    /// than an absent one.
+    func testParse_amdSysfsGpuLine_missingFieldsAreNilNotZero() {
+        let output = "---GPU---\n37 %, N/A %, N/A, AMD GPU"
+        let sample = MonitorManager.parse(output: output)
+        XCTAssertEqual(sample?.gpuUsage ?? -1, 37, accuracy: 0.01)
+        XCTAssertNil(sample?.gpuMemUsage)
+        XCTAssertNil(sample?.gpuTemp)
+        XCTAssertEqual(sample?.gpuName, "AMD GPU")
+    }
+
     func testParse_unrecognizedTopProducesNilCpuUsage() {
         // This is the actual silent-failure case: parse succeeds with a sample
         // but cpuUsage is nil because no recognized line matched.

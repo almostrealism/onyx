@@ -1879,9 +1879,20 @@ public class AppState: ObservableObject {
         if [ -n "$CPU_OUT" ]; then echo "$CPU_OUT"; else top -l1 -s0 2>/dev/null | head -10; fi; \
         echo "---MEM---"; MEM_OUT=$(free -m 2>/dev/null); \
         if [ -n "$MEM_OUT" ]; then echo "$MEM_OUT"; else vm_stat 2>/dev/null; fi; \
-        echo "---GPU---"; timeout 5 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null || \
-        { GPU_PCT=$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o '"Device Utilization %"=[0-9]*' | head -1 | cut -d= -f2); \
-        [ -n "$GPU_PCT" ] && echo "AGX,$GPU_PCT" || echo "N/A"; }; \
+        echo "---GPU---"; GPUOUT=$(timeout 5 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null); \
+        if [ -z "$GPUOUT" ]; then for d in /sys/class/drm/card*/device; do \
+        [ -r "$d/gpu_busy_percent" ] || continue; B=$(cat "$d/gpu_busy_percent" 2>/dev/null); \
+        case "$B" in ''|*[!0-9]*) continue;; esac; \
+        VU=$(cat "$d/mem_info_vram_used" 2>/dev/null); VT=$(cat "$d/mem_info_vram_total" 2>/dev/null); MP="N/A"; \
+        if [ -n "$VU" ] && [ -n "$VT" ] && [ "$VT" -gt 0 ] 2>/dev/null; then MP=$(( VU * 100 / VT )); fi; \
+        T=$(cat "$d"/hwmon/hwmon*/temp1_input 2>/dev/null | head -1); TC="N/A"; \
+        case "$T" in ''|*[!0-9]*) ;; *) TC=$(( T / 1000 ));; esac; \
+        N=$(cat "$d/product_name" 2>/dev/null | head -1); \
+        if [ -z "$N" ] && command -v lspci >/dev/null 2>&1; then N=$(lspci -s "$(basename "$(readlink -f "$d")")" 2>/dev/null | head -1 | sed 's/.*: //' | cut -c1-32); fi; \
+        [ -n "$N" ] || N="AMD GPU"; GPUOUT="$B %, $MP %, $TC, $(printf '%s' "$N" | tr ',' ' ')"; break; done; fi; \
+        if [ -z "$GPUOUT" ]; then GPU_PCT=$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o '"Device Utilization %"=[0-9]*' | head -1 | cut -d= -f2); \
+        [ -n "$GPU_PCT" ] && GPUOUT="AGX,$GPU_PCT"; fi; \
+        [ -n "$GPUOUT" ] && echo "$GPUOUT" || echo "N/A"; \
         echo "---DOCKER---"; docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}" 2>/dev/null || true
         """
         return remoteScript(statsScript, host: host)

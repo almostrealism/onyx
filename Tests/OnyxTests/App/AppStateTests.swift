@@ -255,6 +255,21 @@ final class AppStateTests: XCTestCase {
                       "stats script should include Apple Silicon Homebrew path")
     }
 
+    /// GPU stats must cover all three families we support: NVIDIA via
+    /// nvidia-smi, AMD via amdgpu's sysfs counters (the only zero-dependency
+    /// path on a Ryzen APU — no rocm-smi, no root), Apple via ioreg.
+    func testStatsCommand_gpuSectionCoversNvidiaAmdAndApple() {
+        let state = AppState()
+        let (_, args, _) = state.statsCommand(host: HostConfig.localhost)
+        let script = args.joined(separator: " ")
+        XCTAssertTrue(script.contains("nvidia-smi"), "NVIDIA path missing")
+        XCTAssertTrue(script.contains("gpu_busy_percent"),
+                      "AMD amdgpu sysfs path missing — Ryzen/Radeon hosts would show no GPU")
+        XCTAssertTrue(script.contains("mem_info_vram_used"),
+                      "AMD VRAM usage probe missing")
+        XCTAssertTrue(script.contains("IOAccelerator"), "Apple ioreg path missing")
+    }
+
     func testStatsCommand_local_doesNotUseStdin() {
         // Local invocation has no noexec problem and uses -c directly.
         let state = AppState()
