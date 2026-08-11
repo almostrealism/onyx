@@ -106,6 +106,31 @@ struct MonitorView: View {
         self.dockerStats = appState.dockerStats
     }
 
+    /// "Retrying every 5s · 12 consecutive failures · last good sample 3m ago".
+    /// Says how long this has been broken and whether it was EVER working,
+    /// which is the first question when a host is stuck.
+    private var retryStatus: String {
+        var parts = ["Retrying every \(Int(MonitorManager.activeInterval))s"]
+        let failures = monitor.consecutiveFailures
+        if failures > 0 {
+            parts.append("\(failures) consecutive failure\(failures == 1 ? "" : "s")")
+        }
+        if let last = monitor.lastSuccessAt {
+            let secs = Int(Date().timeIntervalSince(last))
+            let ago = secs < 60 ? "\(secs)s" : (secs < 3600 ? "\(secs / 60)m" : "\(secs / 3600)h")
+            parts.append("last good sample \(ago) ago")
+        } else {
+            parts.append("no successful poll yet")
+        }
+        // A skipped cycle runs no ssh at all, so the message above is
+        // frozen from an older attempt — say so instead of implying we're
+        // still hitting the same wall every 5 seconds.
+        if let skip = monitor.lastSkip {
+            parts.append("paused: \(skip)")
+        }
+        return parts.joined(separator: " · ")
+    }
+
     /// One scrollable overlay column. Indicators are hidden — scrolling works
     /// via trackpad/wheel, and the user asked for the cleanest possible chrome.
     /// The caller sets the column's width (equal-split or fixed) via a frame.
@@ -319,7 +344,11 @@ struct MonitorView: View {
                                 .foregroundColor(Color.onyxRed.opacity(0.8))
                                 .multilineTextAlignment(.center)
                                 .frame(maxWidth: 400)
-                            Text("Retrying every 5s... (attempt \(monitor.pollCount))")
+                            // Failures for THIS host, not the global poll
+                            // counter — that counted every poll since
+                            // launch, so a single stuck host looked like
+                            // hundreds of retries.
+                            Text(retryStatus)
                                 .monitorFont(size: 10)
                                 .foregroundColor(.gray.opacity(0.4))
                         }

@@ -69,6 +69,100 @@ public class MonitorManager: ObservableObject {
         var consecutiveGpuMisses = 0
         var lastError: String?
         var cpuParseFailureReason: String?
+        /// Failures in a row for THIS host. The old UI showed the global
+        /// poll counter as "attempt N", which counts every poll since
+        /// launch across all hosts — a stuck host looked like hundreds of
+        /// retries when most of those were unrelated successes elsewhere.
+        var consecutiveFailures = 0
+        var lastSuccessAt: Date?
+        /// Why the most recent cycle didn't even try, if it didn't.
+        /// Cleared whenever a poll actually completes.
+        var lastSkip: String?
+    }
+
+    /// Consecutive failed polls for the active host.
+    public var consecutiveFailures: Int { activeHostData.consecutiveFailures }
+    /// When this host last returned a usable sample, if ever.
+    public var lastSuccessAt: Date? { activeHostData.lastSuccessAt }
+    /// Why the last cycle was skipped without running anything, if it was.
+    public var lastSkip: String? { activeHostData.lastSkip }
+
+    /// What kind of failure a stats poll hit. Only `.transport` is
+    /// evidence that the SSH connection itself is in trouble — reporting
+    /// the others to the pair supervisor marks a working connection
+    /// suspect and provokes extra smoke tests, i.e. more channels on the
+    /// connection that just told us it had no room.
+    public enum PollFailure: Equatable {
+        /// We killed it ourselves at the timeout.
+        case timedOut
+        /// The remote refused a new session/channel — the connection is
+        /// fine, it's out of room (sshd MaxSessions) or the request was
+        /// administratively refused.
+        case noChannel(String)
+        /// ssh couldn't talk to the host at all.
+        case transport(String)
+        /// Ran, but produced nothing we could use.
+        case noOutput(String)
+
+        public var isTransport: Bool {
+            if case .transport = self { return true }
+            return false
+        }
+    }
+
+    /// Classify a failed run. Pure so the mapping is testable — the
+    /// markers come from OpenSSH's own error strings.
+    public static func classify(exit: Int32, stderr: String, timedOut: Bool) -> PollFailure? {
+        let detail = firstMeaningfulLine(stderr)
+        if timedOut { return .timedOut }
+        guard exit != 0 else { return nil }
+        let lowered = stderr.lowercased()
+        let capacityMarkers = [
+            "session request failed",          // mux_client_request_session
+            "administratively prohibited",     // sshd refused the channel
+            "open failed",
+            "maxsessions",
+            "channel open failure",
+        ]
+        if capacityMarkers.contains(where: { lowered.contains($0) }) {
+            return .noChannel(detail)
+        }
+        return .transport(detail)
+    }
+
+    /// First line of stderr that says something — ssh often leads with
+    /// banner noise or blank lines.
+    static func firstMeaningfulLine(_ stderr: String) -> String {
+        let line = stderr
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty && !$0.hasPrefix("Warning: Permanently added") }
+        guard let line else { return "" }
+        return line.count > 160 ? String(line.prefix(160)) + "…" : line
+    }
+
+    /// User-facing text for a failure, always carrying ssh's own words
+    /// when it gave us any — "code 255" alone is unactionable.
+    static func message(for failure: PollFailure, exit: Int32) -> String {
+        switch failure {
+        case .timedOut:
+            return "Stats command timed out (10s). The host is reachable but slow to answer."
+        case .noChannel(let detail):
+            return """
+                The host refused a new SSH session — the connection is up but out of \
+                session slots (sshd MaxSessions), so existing terminals keep working \
+                while new commands fail.
+                \(detail.isEmpty ? "" : "\n\(detail)")
+                """
+        case .transport(let detail):
+            return detail.isEmpty
+                ? "SSH connection failed (code \(exit))"
+                : "SSH failed (code \(exit)): \(detail)"
+        case .noOutput(let detail):
+            return detail.isEmpty
+                ? "Empty response from remote"
+                : "Empty response from remote: \(detail)"
+        }
     }
 
     /// Create a new instance.
@@ -221,6 +315,20 @@ public class MonitorManager: ObservableObject {
         return buckets.map { $0 < 0 ? 0 : $0 }
     }
 
+    /// Record that a cycle was skipped before any ssh ran. Without this a
+    /// skipped poll leaves the previous error frozen on screen, which
+    /// reads as "the same failure, hundreds of times" when in fact
+    /// nothing has been attempted since.
+    private func noteSkip(_ reason: String, for hostID: UUID) {
+        DispatchQueue.main.async {
+            var data = self.hostData[hostID] ?? HostMonitorData()
+            guard data.lastSkip != reason else { return }
+            data.lastSkip = reason
+            self.hostData[hostID] = data
+            self.objectWillChange.send()
+        }
+    }
+
     private func poll() {
         let host = appState.activeHost
         let hostID = host?.id ?? HostConfig.localhostID
@@ -228,10 +336,16 @@ public class MonitorManager: ObservableObject {
         // Pair-health gate: while the host is down/offline/sleeping the
         // poll is a guaranteed failure — skip and keep stale data. The
         // pair supervisor resumes us automatically once it recovers.
-        guard appState.hostUsable(host) else { return }
+        guard appState.hostUsable(host) else {
+            noteSkip("host connection is not usable right now", for: hostID)
+            return
+        }
         // Channel budget: dedup + cap. If the previous stats poll is
         // still in flight (slow network), don't stack another on top.
-        guard let releaseChannel = appState.acquireUtilityChannel("monitor:\(hostID)", host: host) else { return }
+        guard let releaseChannel = appState.acquireUtilityChannel("monitor:\(hostID)", host: host) else {
+            noteSkip("previous poll still in flight", for: hostID)
+            return
+        }
         let (cmd, args, stdinScript) = appState.statsCommand()
         DispatchQueue.global(qos: .utility).async { [weak self] in
             defer { releaseChannel() }
@@ -250,24 +364,34 @@ public class MonitorManager: ObservableObject {
 
             DispatchQueue.main.async { self?.pollCount += 1 }
 
-            if result.exit == 255 {
-                // Feed the pair supervisor — the active connection may be
-                // silently dead; this triggers immediate standby promotion.
-                self?.appState.reportSSHFailure(host: host)
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    var data = self.hostData[hostID] ?? HostMonitorData()
-                    data.lastError = "SSH connection failed (code 255)"
-                    self.hostData[hostID] = data
-                    self.objectWillChange.send()
+            let failure = Self.classify(exit: result.exit,
+                                        stderr: result.stderr,
+                                        timedOut: result.timedOut)
+                ?? (output.isEmpty ? .noOutput(Self.firstMeaningfulLine(result.stderr)) : nil)
+
+            if let failure {
+                // Only a genuine transport failure is evidence about the
+                // connection. A timeout is our own kill, and "no channel"
+                // means the connection is alive but full — telling the
+                // supervisor either of those marks a healthy master
+                // suspect and triggers extra smoke tests, adding channels
+                // to a connection that just said it had none spare.
+                if failure.isTransport {
+                    self?.appState.reportSSHFailure(host: host)
                 }
-                return
-            }
-            guard !output.isEmpty else {
+                let text = Self.message(for: failure, exit: result.exit)
+                OnyxLog.ssh.notice("""
+                    stats poll failed: host=\(hostLabel, privacy: .public) \
+                    exit=\(result.exit, privacy: .public) \
+                    timedOut=\(result.timedOut, privacy: .public) \
+                    stderr=\(Self.firstMeaningfulLine(result.stderr), privacy: .public)
+                    """)
                 DispatchQueue.main.async {
                     guard let self = self else { return }
                     var data = self.hostData[hostID] ?? HostMonitorData()
-                    data.lastError = "Empty response from remote"
+                    data.lastError = text
+                    data.lastSkip = nil
+                    data.consecutiveFailures += 1
                     self.hostData[hostID] = data
                     self.objectWillChange.send()
                 }
@@ -304,6 +428,25 @@ public class MonitorManager: ObservableObject {
                         }
                     }
                     data.cpuParseFailureReason = cpuDiag
+                    data.lastSkip = nil
+                    data.consecutiveFailures = 0
+                    data.lastSuccessAt = Date()
+                    self.hostData[hostID] = data
+                    self.objectWillChange.send()
+                }
+            } else {
+                // The command ran and said something, but none of it
+                // parsed. Previously this returned silently, leaving
+                // whatever error was on screen frozen there — which reads
+                // as "still failing the same way" when the failure has
+                // actually changed.
+                let diag = Self.cpuDiagnostic(from: output)
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    var data = self.hostData[hostID] ?? HostMonitorData()
+                    data.lastError = "Unparseable stats output. \(diag)"
+                    data.lastSkip = nil
+                    data.consecutiveFailures += 1
                     self.hostData[hostID] = data
                     self.objectWillChange.send()
                 }
