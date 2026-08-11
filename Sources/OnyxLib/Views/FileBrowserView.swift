@@ -268,7 +268,10 @@ struct FavoritesGridSection: View {
             folders: browser.activeFolders.map(\.path))
     }
 
-    @State private var gridWidth: CGFloat = 0
+    /// Seeded with a typical panel width: the treemap's height is derived
+    /// from its width, and starting at 0 would size the first frame for a
+    /// 1pt-wide column and then visibly snap.
+    @State private var gridWidth: CGFloat = 320
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -294,20 +297,29 @@ struct FavoritesGridSection: View {
             }
 
             if !browser.activeFolders.isEmpty {
+                // Treemap, not a flat grid: a favorite inside another
+                // favorite is drawn inside it, and two same-named folders
+                // are told apart by the containers around them rather than
+                // by a path the cell has no room to show.
+                let tree = FavoriteTree.build(paths: browser.activeFolders.map(\.path))
+                let width = max(gridWidth, 1)
+                let height = FavoriteTreemapLayout.fittingHeight(for: tree, width: width)
                 ScrollView {
-                    LazyVGrid(columns: cappedGridColumns(width: gridWidth),
-                              alignment: .leading, spacing: 6) {
-                        ForEach(browser.activeFolders) { folder in
-                            favoriteCell(folder)
-                        }
-                    }
-                    .padding(.horizontal, 10)
+                    FavoritesTreemap(
+                        nodes: tree,
+                        selectedPath: selectedFolderPath.map(FavoriteTree.normalize),
+                        accent: appState.accentColor,
+                        onOpen: { open(path: $0) },
+                        onRemove: { remove(path: $0) }
+                    )
+                    .frame(height: height)
+                    .padding(.horizontal, 8)
                     .padding(.bottom, 8)
                     .background(GeometryReader { geo in
                         Color.clear.preference(key: GridWidthKey.self, value: geo.size.width)
                     })
                 }
-                .frame(maxHeight: 150)   // a few rows, then scroll
+                .frame(maxHeight: 190)
                 .onPreferenceChange(GridWidthKey.self) { gridWidth = $0 }
             } else if !browser.showAddFolder {
                 Text("No favorites yet — tap + to add a folder")
@@ -320,47 +332,23 @@ struct FavoritesGridSection: View {
         .background(Color.black.opacity(0.25))
     }
 
-    private func favoriteCell(_ folder: SavedFolder) -> some View {
-        let selected = folder.path == selectedFolderPath
-        return Button(action: { open(folder) }) {
-            HStack(spacing: 5) {
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 11))
-                    .foregroundColor(selected ? appState.accentColor : .gray.opacity(0.5))
-                Text((folder.path as NSString).lastPathComponent)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(selected ? appState.accentColor : .white.opacity(0.85))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if appState.hosts.count > 1, let host = appState.host(for: folder.hostID)?.label {
-                    Text(host)
-                        .font(.system(size: 7, weight: .medium, design: .monospaced))
-                        .foregroundColor(appState.accentColor.opacity(0.5))
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? appState.accentColor.opacity(0.15) : Color.white.opacity(0.05))
-            .cornerRadius(5)
-        }
-        .buttonStyle(.plain)
-        .help(folder.path)
-        .contextMenu {
-            Button("Remove", role: .destructive) { browser.removeFolder(folder) }
-        }
+    /// Remove the saved folder behind a treemap box. Implicit containers
+    /// never offer this — they were never saved.
+    private func remove(path: String) {
+        guard let folder = browser.activeFolders.first(
+            where: { FavoriteTree.normalize($0.path) == path }) else { return }
+        browser.removeFolder(folder)
     }
 
-    private func open(_ folder: SavedFolder) {
+    private func open(path: String) {
         browser.pathHistory = []
         browser.fileContent = nil
         browser.imageData = nil
         browser.viewingFileName = nil
         browser.isUnsupportedFile = false
-        browser.lastSelectedFavoritePath = folder.path
-        browser.currentPath = folder.path
-        browser.navigateTo(folder.path)
+        browser.lastSelectedFavoritePath = path
+        browser.currentPath = path
+        browser.navigateTo(path)
     }
 
     private var addFolderForm: some View {
