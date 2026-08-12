@@ -180,7 +180,25 @@ struct MonitorView: View {
                     TimeDisplay(accentColor: appState.accentColor, use12Hour: appState.appearance.use12HourClock)
                         .frame(maxWidth: .infinity, alignment: .center)
 
-                    // RIGHT: Stat chips
+                    // RIGHT: Stat chips. With no sample the row would be
+                    // silently empty, which reads as "this host has no
+                    // stats" rather than "stats are failing" — say which.
+                    if monitor.latestSample == nil, let error = monitor.lastError {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .monitorFont(size: 11, design: .default)
+                                .foregroundColor(Color.onyxRed.opacity(0.8))
+                            Text("stats unavailable")
+                                .monitorFont(size: 11)
+                                .foregroundColor(Color.onyxRed.opacity(0.7))
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.onyxRed.opacity(0.08))
+                        .cornerRadius(6)
+                        .help(error)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
                     if let sample = monitor.latestSample {
                         HStack(spacing: 12) {
                             if let cpu = sample.cpuUsage {
@@ -214,7 +232,13 @@ struct MonitorView: View {
                 }
                 .padding(.horizontal, 40)
 
-                if let _ = monitor.latestSample {
+                // Everything below is rendered whether or not stats are
+                // coming in. Reminders, PRs, pipelines and session notes
+                // don't depend on the stats poll, and losing the whole
+                // overlay because one SSH command is failing is a bad
+                // trade — the failure is reported inside the stats column
+                // instead.
+                Group {
                     // Interval label
                     HStack(spacing: 4) {
                         Text(monitor.useShortInterval ? "5s intervals" : "1m intervals")
@@ -283,7 +307,19 @@ struct MonitorView: View {
                                 .background(Color.white.opacity(0.1))
 
                             // Column 3: CPU/MEM/GPU charts, containers, connections.
+                            // This is the only part that needs the stats
+                            // poll, so this is the only part that shows its
+                            // failure. The connection pool below stays put
+                            // either way — it's how you diagnose the failure.
                             monitorColumn {
+                                if monitor.latestSample == nil {
+                                    StatsUnavailableCard(
+                                        error: monitor.lastError,
+                                        status: retryStatus,
+                                        hostLabel: appState.activeHost?.label ?? "host"
+                                    )
+                                }
+
                                 let cpuData = monitor.bucketedCPU()
                                 if !cpuData.isEmpty {
                                     GridChart(
@@ -291,7 +327,9 @@ struct MonitorView: View {
                                         values: cpuData,
                                         accentColor: Color.onyxBlue
                                     )
-                                } else {
+                                } else if monitor.latestSample != nil {
+                                    // We have samples, just no usable CPU
+                                    // line — a parse problem, not a poll one.
                                     CPUUnavailableCard(
                                         message: monitor.cpuDiagnostic
                                             ?? "CPU usage unavailable on this host."
@@ -329,50 +367,6 @@ struct MonitorView: View {
                     }
                     .padding(.horizontal, 40)
                     } // end else (detailed view)
-                } else if let error = monitor.lastError {
-                    // Even when stats failed, surface the connection pool
-                    // so the user can diagnose any host's mux state — that
-                    // diagnostic panel is exactly what's needed to figure
-                    // out *why* the stats aren't coming in.
-                    VStack(spacing: 16) {
-                        VStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .monitorFont(size: 20, design: .default)
-                                .foregroundColor(Color.onyxRed)
-                            Text(error)
-                                .monitorFont(size: 12)
-                                .foregroundColor(Color.onyxRed.opacity(0.8))
-                                .multilineTextAlignment(.center)
-                                .frame(maxWidth: 400)
-                            // Failures for THIS host, not the global poll
-                            // counter — that counted every poll since
-                            // launch, so a single stuck host looked like
-                            // hundreds of retries.
-                            Text(retryStatus)
-                                .monitorFont(size: 10)
-                                .foregroundColor(.gray.opacity(0.4))
-                        }
-                        ConnectionPoolSection(appState: appState)
-                            .frame(maxWidth: 480)
-                    }
-                    .padding(.horizontal, 40)
-                } else {
-                    VStack(spacing: 16) {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                                .colorScheme(.dark)
-                            Text("Fetching stats from \(appState.activeHost?.label ?? "host")...")
-                                .monitorFont(size: 12)
-                                .foregroundColor(.gray.opacity(0.5))
-                        }
-                        // Connection pool is always useful — especially
-                        // while we're stuck waiting for the active host's
-                        // first sample.
-                        ConnectionPoolSection(appState: appState)
-                            .frame(maxWidth: 480)
-                    }
-                    .padding(.horizontal, 40)
                 }
 
                 Spacer()
@@ -599,6 +593,57 @@ struct GridChart: View {
         if pct > 90 { return Color.onyxRed.opacity(0.9) }
         if pct > 70 { return Color.onyxAmber.opacity(0.8) }
         return Color.onyxBlue.opacity(0.7)
+    }
+}
+
+/// Stands in for the charts when the stats poll isn't returning samples.
+/// Carries the actual failure and how long it's been going, so the rest
+/// of the overlay can carry on being useful around it.
+struct StatsUnavailableCard: View {
+    let error: String?
+    let status: String
+    let hostLabel: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("STATS")
+                .monitorFont(size: 10, weight: .medium)
+                .foregroundColor(error == nil ? Color.onyxBlue : Color.onyxRed)
+                .tracking(2)
+
+            VStack(alignment: .leading, spacing: 8) {
+                if let error {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .monitorFont(size: 12, design: .default)
+                            .foregroundColor(Color.onyxRed.opacity(0.9))
+                        Text(error)
+                            .monitorFont(size: 11)
+                            .foregroundColor(Color.onyxRed.opacity(0.85))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                            .colorScheme(.dark)
+                        Text("Fetching stats from \(hostLabel)…")
+                            .monitorFont(size: 11)
+                            .foregroundColor(.gray.opacity(0.6))
+                        Spacer(minLength: 0)
+                    }
+                }
+
+                Text(status)
+                    .monitorFont(size: 9)
+                    .foregroundColor(.gray.opacity(0.4))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(Color.white.opacity(0.03))
+        }
     }
 }
 

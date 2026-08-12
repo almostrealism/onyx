@@ -43,9 +43,13 @@ struct SimpleMonitorBody: View {
                               accentColor: Color.onyxBlue,
                               height: cpuHeight)
                 } else {
+                    // Prefer the actual poll failure: "CPU usage
+                    // unavailable on this host" is misleading when the
+                    // truth is that the stats command never ran.
                     CPUUnavailableCard(
-                        message: monitor.cpuDiagnostic
-                            ?? "CPU usage unavailable on this host.",
+                        message: monitor.latestSample == nil
+                            ? (monitor.lastError ?? "Waiting for the first sample…")
+                            : (monitor.cpuDiagnostic ?? "CPU usage unavailable on this host."),
                         height: cpuHeight
                     )
                 }
