@@ -38,6 +38,22 @@ final class MonitorFailureClassificationTests: XCTestCase {
         XCTAssertFalse(failure?.isTransport ?? true)
     }
 
+    /// The zsh-glob regression: a broken stats script exits non-zero
+    /// through a perfectly healthy connection. ssh reserves 255 for its
+    /// own failures, so anything else is the remote command's status and
+    /// must not be reported as a connection problem.
+    func testRemoteScriptFailureIsNotATransportFailure() {
+        let stderr = "zsh:4: no matches found: /sys/class/drm/card*/device"
+        let failure = MonitorManager.classify(exit: 1, stderr: stderr, timedOut: false)
+        guard case .remoteScript(let detail)? = failure else {
+            return XCTFail("expected .remoteScript, got \(String(describing: failure))")
+        }
+        XCTAssertTrue(detail.contains("no matches found"))
+        XCTAssertFalse(failure?.isTransport ?? true)
+        XCTAssertTrue(MonitorManager.message(for: failure!, exit: 1).contains("no matches found"),
+                      "the shell's own complaint is the whole diagnosis")
+    }
+
     func testRealTransportFailureIsReportedAsSuch() {
         let stderr = "ssh: connect to host example.com port 22: Operation timed out"
         let failure = MonitorManager.classify(exit: 255, stderr: stderr, timedOut: false)

@@ -282,6 +282,26 @@ final class AppStateTests: XCTestCase {
                       "NPU activity comes from runtime PM state")
     }
 
+    /// zsh aborts the WHOLE script when a glob matches nothing (`nomatch`
+    /// is on by default) — unlike sh/bash, which pass the pattern through
+    /// literally. A `/sys/class/drm/card*/device` probe therefore killed
+    /// stats collection outright on every zsh host, local included.
+    /// Iterate a directory listing instead of globbing a path.
+    func testStatsCommand_containsNoPathGlobs() {
+        let state = AppState()
+        let (_, args, _) = state.statsCommand(host: HostConfig.localhost)
+        let script = args.joined(separator: " ")
+        // Only path-position globs matter; `*` inside a quoted regex or a
+        // `case` pattern is fine, so look at whitespace-separated tokens
+        // that name an absolute path.
+        let offenders = script
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { $0.hasPrefix("/") || $0.hasPrefix("\"/") }
+            .filter { $0.contains("*") }
+        XCTAssertTrue(offenders.isEmpty,
+                      "unmatched globs abort the script under zsh: \(offenders)")
+    }
+
     func testStatsCommand_local_doesNotUseStdin() {
         // Local invocation has no noexec problem and uses -c directly.
         let state = AppState()

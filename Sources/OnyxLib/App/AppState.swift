@@ -1881,12 +1881,12 @@ public class AppState: ObservableObject {
         echo "---MEM---"; MEM_OUT=$(free -m 2>/dev/null); \
         if [ -n "$MEM_OUT" ]; then echo "$MEM_OUT"; else vm_stat 2>/dev/null; fi; \
         echo "---GPU---"; GPUOUT=$(timeout 5 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null); \
-        if [ -z "$GPUOUT" ]; then for d in /sys/class/drm/card*/device; do \
+        if [ -z "$GPUOUT" ]; then for c in $(ls /sys/class/drm 2>/dev/null); do d="/sys/class/drm/$c/device"; \
         [ -r "$d/gpu_busy_percent" ] || continue; B=$(cat "$d/gpu_busy_percent" 2>/dev/null); \
         case "$B" in ''|*[!0-9]*) continue;; esac; \
         VU=$(cat "$d/mem_info_vram_used" 2>/dev/null); VT=$(cat "$d/mem_info_vram_total" 2>/dev/null); MP="N/A"; \
         if [ -n "$VU" ] && [ -n "$VT" ] && [ "$VT" -gt 0 ] 2>/dev/null; then MP=$(( VU * 100 / VT )); fi; \
-        T=$(cat "$d"/hwmon/hwmon*/temp1_input 2>/dev/null | head -1); TC="N/A"; \
+        T=""; for hw in $(ls "$d/hwmon" 2>/dev/null); do T=$(cat "$d/hwmon/$hw/temp1_input" 2>/dev/null); [ -n "$T" ] && break; done; TC="N/A"; \
         case "$T" in ''|*[!0-9]*) ;; *) TC=$(( T / 1000 ));; esac; \
         N=$(cat "$d/product_name" 2>/dev/null | head -1); \
         if [ -z "$N" ] && command -v lspci >/dev/null 2>&1; then N=$(lspci -s "$(basename "$(readlink -f "$d")")" 2>/dev/null | head -1 | sed 's/.*: //' | cut -c1-32); fi; \
@@ -1894,7 +1894,7 @@ public class AppState: ObservableObject {
         if [ -z "$GPUOUT" ]; then GPU_PCT=$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o '"Device Utilization %"=[0-9]*' | head -1 | cut -d= -f2); \
         [ -n "$GPU_PCT" ] && GPUOUT="AGX,$GPU_PCT"; fi; \
         [ -n "$GPUOUT" ] && echo "$GPUOUT" || echo "N/A"; \
-        echo "---NPU---"; NPUOUT=""; for a in /sys/class/accel/accel*/device; do [ -d "$a" ] || continue; \
+        echo "---NPU---"; NPUOUT=""; for n in $(ls /sys/class/accel 2>/dev/null); do a="/sys/class/accel/$n/device"; [ -d "$a" ] || continue; \
         N=$(cat "$a/vbnv" 2>/dev/null | head -1); [ -n "$N" ] || N=$(cat "$a/device_type" 2>/dev/null | head -1); \
         [ -n "$N" ] || N=$(basename "$(readlink -f "$a/driver" 2>/dev/null)" 2>/dev/null); [ -n "$N" ] || N="NPU"; \
         CTL=$(cat "$a/power/control" 2>/dev/null | head -1); ST=$(cat "$a/power/runtime_status" 2>/dev/null | head -1); \

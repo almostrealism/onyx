@@ -101,6 +101,11 @@ public class MonitorManager: ObservableObject {
         case noChannel(String)
         /// ssh couldn't talk to the host at all.
         case transport(String)
+        /// The connection was fine and the remote shell ran our script —
+        /// the script itself failed. ssh reserves 255 for its own errors
+        /// and passes anything else through from the remote command, so a
+        /// non-255 exit is never evidence about the link.
+        case remoteScript(String)
         /// Ran, but produced nothing we could use.
         case noOutput(String)
 
@@ -127,7 +132,11 @@ public class MonitorManager: ObservableObject {
         if capacityMarkers.contains(where: { lowered.contains($0) }) {
             return .noChannel(detail)
         }
-        return .transport(detail)
+        // 255 is ssh's own "I failed" code. Every other status came from
+        // the remote command — a broken script, a missing tool — and says
+        // nothing about the connection. (Local runs have no ssh at all,
+        // so they land here too.)
+        return exit == 255 ? .transport(detail) : .remoteScript(detail)
     }
 
     /// First line of stderr that says something — ssh often leads with
@@ -158,6 +167,10 @@ public class MonitorManager: ObservableObject {
             return detail.isEmpty
                 ? "SSH connection failed (code \(exit))"
                 : "SSH failed (code \(exit)): \(detail)"
+        case .remoteScript(let detail):
+            return detail.isEmpty
+                ? "Stats command failed on the host (exit \(exit))"
+                : "Stats command failed on the host (exit \(exit)): \(detail)"
         case .noOutput(let detail):
             return detail.isEmpty
                 ? "Empty response from remote"
