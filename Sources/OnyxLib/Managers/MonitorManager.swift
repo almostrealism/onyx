@@ -78,6 +78,9 @@ public class MonitorManager: ObservableObject {
         /// Why the most recent cycle didn't even try, if it didn't.
         /// Cleared whenever a poll actually completes.
         var lastSkip: String?
+        /// The last good sample arrived only after we'd killed the command
+        /// at its budget — the data is real, the host is just slow.
+        var pollIsSlow = false
     }
 
     /// Consecutive failed polls for the active host.
@@ -86,6 +89,8 @@ public class MonitorManager: ObservableObject {
     public var lastSuccessAt: Date? { activeHostData.lastSuccessAt }
     /// Why the last cycle was skipped without running anything, if it was.
     public var lastSkip: String? { activeHostData.lastSkip }
+    /// True when stats are arriving but the command runs past its budget.
+    public var pollIsSlow: Bool { activeHostData.pollIsSlow }
 
     /// What kind of failure a stats poll hit. Only `.transport` is
     /// evidence that the SSH connection itself is in trouble — reporting
@@ -155,7 +160,7 @@ public class MonitorManager: ObservableObject {
     static func message(for failure: PollFailure, exit: Int32) -> String {
         switch failure {
         case .timedOut:
-            return "Stats command timed out (10s). The host is reachable but slow to answer."
+            return "Stats command produced nothing before its time budget ran out. The host is reachable but very slow to answer."
         case .noChannel(let detail):
             return """
                 The host refused a new SSH session — the connection is up but out of \
@@ -367,7 +372,12 @@ public class MonitorManager: ObservableObject {
             // a SIGTERM-only kill timer that ssh could (and did) ignore.
             let result = RemoteExec.shared.run(
                 cmd, args: args, stdin: stdinScript,
-                softTimeout: 10,
+                // Generous: `docker stats` alone can take seconds on a
+                // busy daemon, and a loaded host's `top` isn't instant.
+                // Overlapping polls can't pile up — the channel budget
+                // dedups them — so a long budget costs nothing but a
+                // skipped cycle.
+                softTimeout: 25,
                 captureStdout: true,
                 captureStderr: true,
                 label: "monitor:\(hostLabel)"
@@ -377,93 +387,109 @@ public class MonitorManager: ObservableObject {
 
             DispatchQueue.main.async { self?.pollCount += 1 }
 
-            let failure = Self.classify(exit: result.exit,
-                                        stderr: result.stderr,
-                                        timedOut: result.timedOut)
-                ?? (output.isEmpty ? .noOutput(Self.firstMeaningfulLine(result.stderr)) : nil)
-
-            if let failure {
-                // Only a genuine transport failure is evidence about the
-                // connection. A timeout is our own kill, and "no channel"
-                // means the connection is alive but full — telling the
-                // supervisor either of those marks a healthy master
-                // suspect and triggers extra smoke tests, adding channels
-                // to a connection that just said it had none spare.
-                if failure.isTransport {
-                    self?.appState.reportSSHFailure(host: host)
+            // DATA FIRST. What came back decides whether this poll worked
+            // — not the exit code, not our own watchdog. A host whose
+            // stats command runs long still sends its numbers before we
+            // kill it, and the previous ordering (classify, then bail)
+            // threw those away and called a working host broken.
+            let sample = Self.parse(output: output)
+            if let sample, Self.isUsable(sample) {
+                if result.timedOut {
+                    OnyxLog.ssh.notice("""
+                        stats poll over budget but usable: host=\(hostLabel, privacy: .public) \
+                        bytes=\(output.count, privacy: .public)
+                        """)
                 }
-                let text = Self.message(for: failure, exit: result.exit)
-                OnyxLog.ssh.notice("""
-                    stats poll failed: host=\(hostLabel, privacy: .public) \
-                    exit=\(result.exit, privacy: .public) \
-                    timedOut=\(result.timedOut, privacy: .public) \
-                    stderr=\(Self.firstMeaningfulLine(result.stderr), privacy: .public)
-                    """)
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    var data = self.hostData[hostID] ?? HostMonitorData()
-                    data.lastError = text
-                    data.lastSkip = nil
-                    data.consecutiveFailures += 1
-                    self.hostData[hostID] = data
-                    self.objectWillChange.send()
-                }
+                self?.publish(sample, hostID: hostID, output: output, slow: result.timedOut)
                 return
             }
 
-            if let sample = Self.parse(output: output) {
-                let cpuDiag = sample.cpuUsage == nil ? Self.cpuDiagnostic(from: output) : nil
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    var data = self.hostData[hostID] ?? HostMonitorData()
-                    var sample = sample
-                    // The NPU has no utilization counter, but runtime PM
-                    // keeps a cumulative active-time counter. Differencing
-                    // it against the previous sample gives real activity
-                    // over the interval — including bursts that started and
-                    // finished between two polls, which the point-in-time
-                    // runtime_status would miss entirely.
-                    sample.npuActivePercent = Self.npuActivePercent(
-                        previous: data.latestSample, current: sample)
-                    data.lastError = nil
-                    data.latestSample = sample
-                    data.samples.append(sample)
-                    if data.samples.count > self.maxSamples {
-                        data.samples.removeFirst(data.samples.count - self.maxSamples)
-                    }
-                    if sample.gpuUsage != nil {
-                        data.gpuEverSeen = true
-                        data.consecutiveGpuMisses = 0
-                    } else if data.gpuEverSeen {
-                        data.consecutiveGpuMisses += 1
-                        if data.consecutiveGpuMisses >= 60 {
-                            data.gpuEverSeen = false
-                        }
-                    }
-                    data.cpuParseFailureReason = cpuDiag
-                    data.lastSkip = nil
-                    data.consecutiveFailures = 0
-                    data.lastSuccessAt = Date()
-                    self.hostData[hostID] = data
-                    self.objectWillChange.send()
-                }
-            } else {
-                // The command ran and said something, but none of it
-                // parsed. Previously this returned silently, leaving
-                // whatever error was on screen frozen there — which reads
-                // as "still failing the same way" when the failure has
-                // actually changed.
-                let diag = Self.cpuDiagnostic(from: output)
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    var data = self.hostData[hostID] ?? HostMonitorData()
-                    data.lastError = "Unparseable stats output. \(diag)"
-                    data.lastSkip = nil
-                    data.consecutiveFailures += 1
-                    self.hostData[hostID] = data
-                    self.objectWillChange.send()
+            let failure = Self.classify(exit: result.exit,
+                                        stderr: result.stderr,
+                                        timedOut: result.timedOut)
+                ?? .noOutput(Self.firstMeaningfulLine(result.stderr))
+
+            // Only a genuine transport failure is evidence about the
+            // connection. A timeout is our own kill, and "no channel"
+            // means the connection is alive but full — telling the
+            // supervisor either of those marks a healthy master suspect
+            // and triggers extra smoke tests, adding channels to a
+            // connection that just said it had none spare.
+            if failure.isTransport {
+                self?.appState.reportSSHFailure(host: host)
+            }
+            let text = Self.message(for: failure, exit: result.exit)
+            // Bytes and the execution marker separate "the script never
+            // ran" from "it ran and the session didn't close" — the two
+            // look identical from the exit code alone.
+            OnyxLog.ssh.notice("""
+                stats poll failed: host=\(hostLabel, privacy: .public) \
+                exit=\(result.exit, privacy: .public) \
+                timedOut=\(result.timedOut, privacy: .public) \
+                bytes=\(output.count, privacy: .public) \
+                ranToCompletion=\(RemoteScript.executionVerified(in: output), privacy: .public) \
+                stderr=\(Self.firstMeaningfulLine(result.stderr), privacy: .public)
+                """)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                var data = self.hostData[hostID] ?? HostMonitorData()
+                data.lastError = text
+                data.lastSkip = nil
+                data.consecutiveFailures += 1
+                self.hostData[hostID] = data
+                self.objectWillChange.send()
+            }
+        }
+    }
+
+    /// Did this sample actually bring back a metric? `parse` always
+    /// returns a sample — an all-nil one just means nothing in the output
+    /// was recognisable, which is a failure however the process exited.
+    static func isUsable(_ sample: MonitorSample) -> Bool {
+        sample.cpuUsage != nil || sample.memUsed != nil
+            || sample.loadAvg1 != nil || sample.gpuUsage != nil
+    }
+
+    /// Commit a sample for a host. `slow` records that the poll ran past
+    /// its budget — the numbers are good, the command is just laboured,
+    /// and the overlay says so rather than pretending everything is fine.
+    private func publish(_ sample: MonitorSample,
+                         hostID: UUID,
+                         output: String,
+                         slow: Bool) {
+        let cpuDiag = sample.cpuUsage == nil ? Self.cpuDiagnostic(from: output) : nil
+        DispatchQueue.main.async {
+            var data = self.hostData[hostID] ?? HostMonitorData()
+            var sample = sample
+            // The NPU has no utilization counter, but runtime PM keeps a
+            // cumulative active-time counter. Differencing it against the
+            // previous sample gives real activity over the interval —
+            // including bursts that start and finish between two polls,
+            // which the point-in-time runtime_status would miss entirely.
+            sample.npuActivePercent = Self.npuActivePercent(
+                previous: data.latestSample, current: sample)
+            data.lastError = nil
+            data.latestSample = sample
+            data.samples.append(sample)
+            if data.samples.count > self.maxSamples {
+                data.samples.removeFirst(data.samples.count - self.maxSamples)
+            }
+            if sample.gpuUsage != nil {
+                data.gpuEverSeen = true
+                data.consecutiveGpuMisses = 0
+            } else if data.gpuEverSeen {
+                data.consecutiveGpuMisses += 1
+                if data.consecutiveGpuMisses >= 60 {
+                    data.gpuEverSeen = false
                 }
             }
+            data.cpuParseFailureReason = cpuDiag
+            data.lastSkip = nil
+            data.consecutiveFailures = 0
+            data.lastSuccessAt = Date()
+            data.pollIsSlow = slow
+            self.hostData[hostID] = data
+            self.objectWillChange.send()
         }
     }
 

@@ -1902,7 +1902,8 @@ public class AppState: ObservableObject {
         AT=$(cat "$a/power/runtime_active_time" 2>/dev/null | head -1); case "$AT" in ''|*[!0-9]*) AT="";; esac; \
         NPUOUT="$(printf '%s' "$N" | tr '|,' '  ')|$ST|$(printf '%s' "$FW" | tr '|,' '  ')|$AT"; break; done; \
         [ -n "$NPUOUT" ] && echo "$NPUOUT" || echo "N/A"; \
-        echo "---DOCKER---"; docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}" 2>/dev/null || true
+        echo "---DOCKER---"; TMO=""; command -v timeout >/dev/null 2>&1 && TMO="timeout 6"; \
+        $TMO docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}" 2>/dev/null || true
         """
         return remoteScript(statsScript, host: host)
     }

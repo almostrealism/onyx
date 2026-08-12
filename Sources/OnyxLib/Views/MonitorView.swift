@@ -244,6 +244,15 @@ struct MonitorView: View {
                         Text(monitor.useShortInterval ? "5s intervals" : "1m intervals")
                             .monitorFont(size: 10)
                             .foregroundColor(.gray.opacity(0.4))
+                        // Numbers are real but the command ran past its
+                        // budget — say so rather than either hiding it or
+                        // calling the host broken.
+                        if monitor.pollIsSlow {
+                            Text("· stats slow")
+                                .monitorFont(size: 10)
+                                .foregroundColor(Color.onyxAmber.opacity(0.6))
+                                .help("The stats command didn't finish within its time budget — the readings below are what it had sent by then.")
+                        }
                         Text("(T interval · M memory · C containers · P 12/24hr · R due-soon · S simple · X peek)")
                             .monitorFont(size: 10)
                             .foregroundColor(.gray.opacity(0.25))

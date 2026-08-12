@@ -83,6 +83,45 @@ final class MonitorFailureClassificationTests: XCTestCase {
                       "must explain the exact thing the user observes")
     }
 
+    // MARK: - Data beats the exit code
+
+    /// The regression this replaced: a host whose stats command runs long
+    /// still sends its numbers before we kill it. Classifying first threw
+    /// those away and called a working host broken. Usability of the
+    /// OUTPUT decides — the exit code only explains a failure, it doesn't
+    /// define one.
+    func testTimedOutRunWithUsableOutputIsStillUsable() {
+        let output = """
+        ---UPTIME---
+         12:00:00 up 3 days, load average: 0.40, 0.30, 0.20
+        ---CPU---
+        %Cpu(s):  4.0 us,  1.0 sy,  0.0 ni, 95.0 id
+        ---MEM---
+        Mem:          16000        4000       12000
+        ---GPU---
+        N/A
+        """
+        let sample = MonitorManager.parse(output: output)
+        XCTAssertNotNil(sample)
+        XCTAssertTrue(MonitorManager.isUsable(sample!),
+                      "CPU and memory came back — this poll worked, whatever the exit code")
+    }
+
+    /// The inverse: output arrived but nothing in it was a metric. That's
+    /// a failure even if the process exited 0.
+    func testOutputWithNoMetricsIsNotUsable() {
+        let sample = MonitorManager.parse(output: "---UPTIME---\n---CPU---\n---MEM---\n---GPU---\nN/A")
+        XCTAssertNotNil(sample, "parse always returns a sample…")
+        XCTAssertFalse(MonitorManager.isUsable(sample!), "…but an empty one is not a success")
+    }
+
+    func testAnySingleMetricCountsAsUsable() {
+        let loadOnly = MonitorManager.parse(
+            output: "---UPTIME---\n 12:00:00 up 1 day, load average: 0.10, 0.20, 0.30")
+        XCTAssertTrue(MonitorManager.isUsable(loadOnly!),
+                      "a host with unparseable top still reports load — don't discard it")
+    }
+
     // MARK: - stderr tidying
 
     func testFirstMeaningfulLineSkipsBlanksAndKnownNoise() {
