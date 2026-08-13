@@ -144,6 +144,61 @@ public class MonitorManager: ObservableObject {
         return exit == 255 ? .transport(detail) : .remoteScript(detail)
     }
 
+    /// What the HOST itself said, out of everything it sent back.
+    ///
+    /// Over `ssh -tt` the remote's errors arrive on the PTY mixed into
+    /// stdout, not stderr — so when a poll comes back with nothing usable
+    /// this is where the actual complaint lives (`zsh: event not found`,
+    /// `command not found`, a sudo prompt…). We were capturing it and
+    /// throwing it away, then reporting a timeout, which told the user
+    /// nothing about what had gone wrong on the other end.
+    ///
+    /// Skips our own scaffolding — section markers, the execution marker,
+    /// prompt escape sequences — and returns the first real line.
+    static func remoteComplaint(in output: String) -> String? {
+        let line = output
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: .newlines)
+            .map { stripControlSequences($0).trimmingCharacters(in: .whitespaces) }
+            .first { candidate in
+                guard !candidate.isEmpty else { return false }
+                // Our own markers say nothing about the host.
+                if candidate.hasPrefix("---") && candidate.hasSuffix("---") { return false }
+                if candidate.contains("ONYX-OK") { return false }
+                // A line with no letters or digits is prompt residue.
+                return candidate.rangeOfCharacter(from: .alphanumerics) != nil
+            }
+        guard let line else { return nil }
+        return line.count > 160 ? String(line.prefix(160)) + "…" : line
+    }
+
+    /// Drop ANSI/terminal escape sequences a PTY sprays into the stream.
+    static func stripControlSequences(_ s: String) -> String {
+        var out = ""
+        var iterator = s.unicodeScalars.makeIterator()
+        while let scalar = iterator.next() {
+            guard scalar == "\u{1B}" else {              // ESC
+                if scalar.value < 0x20 && scalar != "\t" { continue }
+                out.unicodeScalars.append(scalar)
+                continue
+            }
+            guard let intro = iterator.next() else { break }
+            guard intro == "[" || intro == "]" else {
+                // Two-character escape — the intro byte was the whole of
+                // it. (Note `[` itself is in the "final byte" range, so
+                // scanning for a final byte without this check would stop
+                // on the CSI intro and leak "1m" into the text.)
+                continue
+            }
+            // CSI: parameter and intermediate bytes, then a final byte in
+            // @…~ terminates the sequence.
+            while let next = iterator.next() {
+                if next.value >= 0x40 && next.value <= 0x7E { break }
+            }
+        }
+        return out
+    }
+
     /// First line of stderr that says something — ssh often leads with
     /// banner noise or blank lines.
     static func firstMeaningfulLine(_ stderr: String) -> String {
@@ -157,10 +212,17 @@ public class MonitorManager: ObservableObject {
 
     /// User-facing text for a failure, always carrying ssh's own words
     /// when it gave us any — "code 255" alone is unactionable.
-    static func message(for failure: PollFailure, exit: Int32) -> String {
+    static func message(for failure: PollFailure,
+                        exit: Int32,
+                        remoteSaid: String? = nil) -> String {
+        // Whatever the host said outranks any guess we could make about
+        // what went wrong. Lead with it.
+        let heard = remoteSaid.map { "\nThe host sent: \($0)" } ?? ""
         switch failure {
         case .timedOut:
-            return "Stats command produced nothing before its time budget ran out. The host is reachable but very slow to answer."
+            return remoteSaid == nil
+                ? "The stats command sent nothing back before its time budget ran out — the remote shell accepted it and never answered."
+                : "The stats command didn't finish, and nothing it sent could be read.\(heard)"
         case .noChannel(let detail):
             return """
                 The host refused a new SSH session — the connection is up but out of \
@@ -174,12 +236,13 @@ public class MonitorManager: ObservableObject {
                 : "SSH failed (code \(exit)): \(detail)"
         case .remoteScript(let detail):
             return detail.isEmpty
-                ? "Stats command failed on the host (exit \(exit))"
+                ? "Stats command failed on the host (exit \(exit)).\(heard)"
                 : "Stats command failed on the host (exit \(exit)): \(detail)"
         case .noOutput(let detail):
-            return detail.isEmpty
-                ? "Empty response from remote"
-                : "Empty response from remote: \(detail)"
+            if !detail.isEmpty { return "Empty response from remote: \(detail)" }
+            return remoteSaid == nil
+                ? "The host returned nothing usable."
+                : "The host returned nothing usable.\(heard)"
         }
     }
 
@@ -418,7 +481,8 @@ public class MonitorManager: ObservableObject {
             if failure.isTransport {
                 self?.appState.reportSSHFailure(host: host)
             }
-            let text = Self.message(for: failure, exit: result.exit)
+            let remoteSaid = Self.remoteComplaint(in: output)
+            let text = Self.message(for: failure, exit: result.exit, remoteSaid: remoteSaid)
             // Bytes and the execution marker separate "the script never
             // ran" from "it ran and the session didn't close" — the two
             // look identical from the exit code alone.
@@ -428,7 +492,8 @@ public class MonitorManager: ObservableObject {
                 timedOut=\(result.timedOut, privacy: .public) \
                 bytes=\(output.count, privacy: .public) \
                 ranToCompletion=\(RemoteScript.executionVerified(in: output), privacy: .public) \
-                stderr=\(Self.firstMeaningfulLine(result.stderr), privacy: .public)
+                stderr=\(Self.firstMeaningfulLine(result.stderr), privacy: .public) \
+                hostSaid=\(remoteSaid ?? "(nothing)", privacy: .public)
                 """)
             DispatchQueue.main.async {
                 guard let self = self else { return }

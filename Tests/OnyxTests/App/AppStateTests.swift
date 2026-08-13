@@ -302,6 +302,31 @@ final class AppStateTests: XCTestCase {
                       "unmatched globs abort the script under zsh: \(offenders)")
     }
 
+    /// `!` is HISTORY EXPANSION in an interactive shell — and remoteScript
+    /// deliberately drives an *interactive* shell (that's how it defeats
+    /// `set -n`). zsh meets `*[!0-9]*`, tries to expand `!0`, reports
+    /// "event not found" and DISCARDS THE ENTIRE LINE. Our script is one
+    /// line, so the whole poll vanishes: no output, no error, session left
+    /// waiting until we kill it. That is exactly what a `case` pattern
+    /// added for AMD GPU stats did to every zsh host.
+    ///
+    /// Use a numeric test (`[ "$x" -ge 0 ] 2>/dev/null`) instead of a
+    /// negated glob class.
+    func testStatsCommand_containsNoHistoryExpansion() {
+        let state = AppState()
+        var remote = HostConfig.localhost
+        remote.id = UUID()
+        remote.ssh.host = "example.com"
+        for (label, script) in [
+            ("local", state.statsCommand(host: .localhost).args.joined(separator: " ")),
+            ("remote", state.statsCommand(host: remote).stdin ?? ""),
+        ] {
+            XCTAssertFalse(script.contains("!"),
+                           "\(label) stats script contains '!' — an interactive shell will "
+                           + "history-expand it and throw the whole line away")
+        }
+    }
+
     func testStatsCommand_local_doesNotUseStdin() {
         // Local invocation has no noexec problem and uses -c directly.
         let state = AppState()

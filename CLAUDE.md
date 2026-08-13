@@ -117,6 +117,17 @@ let output = FileBrowserManager.runProcess(cmd: cmd, args: args)  // empty/garba
 
 `sshCommand`, `dockerTmuxCommand`, `dockerLogsCommand`, `dockerTopCommand` all open interactive remote sessions (tmux, docker exec -it, streaming `docker logs -f`). The remote shell IS interactive, so `set -n` is ignored. These don't need `remoteScript` and shouldn't be migrated — TTY allocation `-t` is enough.
 
+### The interactive shell cuts both ways
+
+Driving an *interactive* shell is what defeats noexec — but interactive shells also turn on features a script never sees. Two have already cost us working hosts, both silently:
+
+- **`!` is history expansion.** zsh meets `case "$x" in *[!0-9]*)`, tries to expand `!0`, prints `event not found` and **discards the entire line**. The script is one line, so the whole poll vanishes: no output, no exit code worth reading, the session left waiting until we kill it. Never put `!` in a remote script — use `[ "$x" -ge 0 ] 2>/dev/null` instead of a negated glob class.
+- **An unmatched glob is fatal in zsh** (`nomatch` is on by default), where sh/bash pass the pattern through. `for d in /sys/class/drm/card*/device` aborts the script on any host without that path. Iterate a directory listing instead: `for c in $(ls /sys/class/drm 2>/dev/null)`.
+
+`AppStateTests` locks both: the stats script must contain no `!` and no path-position `*`. Add to those tests when you add a new remote script.
+
+**Errors come back on stdout.** With `ssh -tt` the remote's complaints arrive over the PTY mixed into stdout, not stderr — so a failing poll's stderr is often empty while the real message ("zsh: event not found") sits in the output we captured. `MonitorManager.remoteComplaint(in:)` digs it out; surface it rather than reporting a timeout.
+
 ### Detecting noexec failure
 
 `RemoteScript.executionVerified(in: output)` checks for `---ONYX-OK-2---`. The marker uses `$((1+1))` — only an actually-evaluating shell emits the literal `2`; a noexec shell echoes the unevaluated form. `RemoteScript.nonExecutionDiagnostic` is the canonical user-facing message.

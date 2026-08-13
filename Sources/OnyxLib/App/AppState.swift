@@ -1883,11 +1883,11 @@ public class AppState: ObservableObject {
         echo "---GPU---"; GPUOUT=$(timeout 5 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null); \
         if [ -z "$GPUOUT" ]; then for c in $(ls /sys/class/drm 2>/dev/null); do d="/sys/class/drm/$c/device"; \
         [ -r "$d/gpu_busy_percent" ] || continue; B=$(cat "$d/gpu_busy_percent" 2>/dev/null); \
-        case "$B" in ''|*[!0-9]*) continue;; esac; \
+        [ "$B" -ge 0 ] 2>/dev/null || continue; \
         VU=$(cat "$d/mem_info_vram_used" 2>/dev/null); VT=$(cat "$d/mem_info_vram_total" 2>/dev/null); MP="N/A"; \
         if [ -n "$VU" ] && [ -n "$VT" ] && [ "$VT" -gt 0 ] 2>/dev/null; then MP=$(( VU * 100 / VT )); fi; \
         T=""; for hw in $(ls "$d/hwmon" 2>/dev/null); do T=$(cat "$d/hwmon/$hw/temp1_input" 2>/dev/null); [ -n "$T" ] && break; done; TC="N/A"; \
-        case "$T" in ''|*[!0-9]*) ;; *) TC=$(( T / 1000 ));; esac; \
+        [ "$T" -ge 0 ] 2>/dev/null && TC=$(( T / 1000 )); \
         N=$(cat "$d/product_name" 2>/dev/null | head -1); \
         if [ -z "$N" ] && command -v lspci >/dev/null 2>&1; then N=$(lspci -s "$(basename "$(readlink -f "$d")")" 2>/dev/null | head -1 | sed 's/.*: //' | cut -c1-32); fi; \
         [ -n "$N" ] || N="AMD GPU"; GPUOUT="$B %, $MP %, $TC, $(printf '%s' "$N" | tr ',' ' ')"; break; done; fi; \
@@ -1899,7 +1899,7 @@ public class AppState: ObservableObject {
         [ -n "$N" ] || N=$(basename "$(readlink -f "$a/driver" 2>/dev/null)" 2>/dev/null); [ -n "$N" ] || N="NPU"; \
         CTL=$(cat "$a/power/control" 2>/dev/null | head -1); ST=$(cat "$a/power/runtime_status" 2>/dev/null | head -1); \
         [ "$CTL" = "on" ] && ST="unknown"; [ -n "$ST" ] || ST="unknown"; FW=$(cat "$a/fw_version" 2>/dev/null | head -1); \
-        AT=$(cat "$a/power/runtime_active_time" 2>/dev/null | head -1); case "$AT" in ''|*[!0-9]*) AT="";; esac; \
+        AT=$(cat "$a/power/runtime_active_time" 2>/dev/null | head -1); [ "$AT" -ge 0 ] 2>/dev/null || AT=""; \
         NPUOUT="$(printf '%s' "$N" | tr '|,' '  ')|$ST|$(printf '%s' "$FW" | tr '|,' '  ')|$AT"; break; done; \
         [ -n "$NPUOUT" ] && echo "$NPUOUT" || echo "N/A"; \
         echo "---DOCKER---"; TMO=""; command -v timeout >/dev/null 2>&1 && TMO="timeout 6"; \

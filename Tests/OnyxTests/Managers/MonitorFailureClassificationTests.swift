@@ -122,6 +122,59 @@ final class MonitorFailureClassificationTests: XCTestCase {
                       "a host with unparseable top still reports load — don't discard it")
     }
 
+    // MARK: - What the host actually said
+
+    /// The real failure, verbatim: a `!` in the script triggered zsh
+    /// history expansion in the interactive remote shell, which discarded
+    /// the whole line and left the session waiting. The host TOLD us
+    /// this — over the PTY, mixed into stdout — and we reported a timeout
+    /// instead. Whatever else we say, the host's own words must reach the
+    /// user.
+    func testRemoteComplaintFindsTheHostsOwnError() {
+        let output = "\u{1B}[1m\u{1B}[7m%\u{1B}[27m\u{1B}[0m  worker@Mac-Studio ~ % "
+            + "zsh: event not found: 0\r\n"
+        let complaint = MonitorManager.remoteComplaint(in: output)
+        XCTAssertNotNil(complaint)
+        // The prompt the shell echoed stays attached — it's evidence in
+        // its own right (an interactive shell echoing a prompt at us), and
+        // guessing where a prompt ends would mangle real output like
+        // "CPU usage: 13% user".
+        XCTAssertTrue(complaint?.contains("zsh: event not found: 0") ?? false,
+                      "got: \(complaint ?? "nil")")
+        XCTAssertFalse(complaint?.contains("\u{1B}") ?? true, "escape sequences must be stripped")
+        XCTAssertFalse(complaint?.contains("1m7m") ?? true, "escape *bodies* must be stripped too")
+    }
+
+    func testRemoteComplaintIgnoresOurOwnScaffolding() {
+        let output = """
+        ---UPTIME---
+        ---CPU---
+        bash: line 4: /sys/class/drm: No such file or directory
+        ---ONYX-OK-2---
+        """
+        XCTAssertEqual(MonitorManager.remoteComplaint(in: output),
+                       "bash: line 4: /sys/class/drm: No such file or directory")
+    }
+
+    func testRemoteComplaintIsNilWhenTheHostSaidNothing() {
+        XCTAssertNil(MonitorManager.remoteComplaint(in: ""))
+        XCTAssertNil(MonitorManager.remoteComplaint(in: "---UPTIME---\n---CPU---\n---ONYX-OK-2---"))
+        // Prompt residue with no letters or digits isn't a message.
+        XCTAssertNil(MonitorManager.remoteComplaint(in: "\u{1B}[0m%   \r\n"))
+    }
+
+    /// The message must carry it, not summarise it away.
+    func testTimeoutMessageQuotesTheHostWhenItSaidSomething() {
+        let quiet = MonitorManager.message(for: .timedOut, exit: 15, remoteSaid: nil)
+        XCTAssertTrue(quiet.contains("sent nothing back"),
+                      "when the host really was silent, say exactly that")
+
+        let spoke = MonitorManager.message(for: .timedOut, exit: 15,
+                                           remoteSaid: "zsh: event not found: 0")
+        XCTAssertTrue(spoke.contains("zsh: event not found: 0"),
+                      "the host's complaint is the whole diagnosis — it must be in the message")
+    }
+
     // MARK: - stderr tidying
 
     func testFirstMeaningfulLineSkipsBlanksAndKnownNoise() {
