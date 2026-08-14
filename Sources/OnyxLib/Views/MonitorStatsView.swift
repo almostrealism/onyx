@@ -30,9 +30,14 @@ struct WeeklyTimingTile: View {
                 // Horizontal project-ratio bar across the top of the tile,
                 // same visual as the vertical one beside the daily bars.
                 if timing.projectTotals.count > 1 {
+                    // Deliberately chunky. This is the only place the
+                    // week's split across projects is shown in simple
+                    // mode, and at 5pt the colour bands were too fine to
+                    // read at a glance — which is the whole job of a
+                    // simple-mode tile.
                     WeeklyTimeRatioBar(totals: timing.projectTotals,
                                        axis: .horizontal,
-                                       thickness: 5,
+                                       thickness: 10,
                                        length: Self.contentWidth)
                 }
                 Text(formatHours(total))

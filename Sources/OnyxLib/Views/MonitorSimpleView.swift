@@ -14,6 +14,7 @@ struct SimpleMonitorBody: View {
     @ObservedObject var dockerStats: DockerStatsManager
     @ObservedObject var timing: TimingManager
     let accentColor: Color
+    @Environment(\.monitorFontScale) private var fontScale
     /// Own reminders manager just for the due-today / due-tomorrow scope
     /// counts (list-independent, so it needs no selectedLists wiring).
     @StateObject private var reminders = RemindersManager()
@@ -25,12 +26,16 @@ struct SimpleMonitorBody: View {
             // and GPU split the bottom portion of the chart area.
             // Reserve enough height for the TALLEST member of the centered
             // bottom row — the weekly Timing tile (ratio bar + the hours
-            // number + the per-day line + padding is ~60pt). The row is
+            // number + the per-day line + padding is ~65pt). The row is
             // center-aligned, so if the reserve is shorter than a member it
             // overflows symmetrically and the bottom half spills off the
             // window edge. The extra headroom keeps every member fully on
             // screen with a small margin.
-            let bottomStripHeight: CGFloat = 78
+            //
+            // Scaled: the tile's contents are monitorFont-sized, so at a
+            // larger UI font they grow while a fixed reserve would not —
+            // and the row would start clipping.
+            let bottomStripHeight: CGFloat = 84 * fontScale
             let chartArea = max(0, geo.size.height - bottomStripHeight - 16)
             let cpuHeight = chartArea * 0.55
             let subHeight = max(40, chartArea * 0.42)
