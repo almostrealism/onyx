@@ -1879,42 +1879,72 @@ public class AppState: ObservableObject {
         // moon ring. MonitorManager.parse silently ignores unknown
         // sections, so this change is invisible to the existing monitor
         // overlay; only CPUFleetPoller reads the docker output.
-        // Two hard rules for this script, both learned the expensive way.
+        // KEEP THIS SCRIPT SMALL. It is fed to an interactive shell over a
+        // PTY (`-tt`), and a terminal's input queue is ~1KB in total on
+        // macOS — not per line, in total. Overflow it and the remainder is
+        // discarded by the kernel: the shell waits for the rest of a line
+        // that never comes, emits nothing but its login banner, and the
+        // poll dies at the watchdog with no error to show for it.
         //
-        // 1. EVERY LINE UNDER ~1024 BYTES. It's fed to an interactive
-        //    shell over a PTY, and a terminal in canonical mode accepts at
-        //    most MAX_CANON bytes per line — 1024 on macOS, 4096 on Linux.
-        //    A longer line is never delivered: the shell waits for a
-        //    newline that can't arrive, emits nothing but its login
-        //    banner, and the poll dies at our watchdog with no error to
-        //    show. This is what adding the AMD probes did to every Mac —
-        //    736 bytes before, 1657 after.
+        // Pacing our own writes does NOT save you here: they land in ssh's
+        // 64KB stdin buffer and ssh re-bursts them at the far end.
         //
-        // 2. EVERY LINE A COMPLETE STATEMENT. No `for`/`if` spanning
-        //    lines. An interactive shell hands multi-line constructs to
-        //    its line editor, which re-renders the whole buffer per line;
-        //    a loop split over fifteen lines takes tens of seconds and
-        //    blows the poll budget. Keep loops on one (short) line.
-        //
-        // AppStateTests enforces rule 1 — rule 2 you have to hold yourself.
+        // This script was 736 bytes and worked on every host for months.
+        // Adding AMD GPU + NPU probing took it to 2.4KB and killed stats
+        // on every Mac — which is why that probing now lives in
+        // `acceleratorCommand`, sent only to hosts that can answer it.
+        // AppStateTests holds the size line; treat it as a hard budget,
+        // not a guideline.
         let statsScript = """
+        echo "---OS---"; uname -s
         echo "---UPTIME---"; uptime
         echo "---CPU---"; CPU_OUT=$(top -bn1 2>/dev/null | head -5)
         if [ -n "$CPU_OUT" ]; then echo "$CPU_OUT"; else top -l1 -s0 2>/dev/null | head -10; fi
         echo "---MEM---"; MEM_OUT=$(free -m 2>/dev/null)
         if [ -n "$MEM_OUT" ]; then echo "$MEM_OUT"; else vm_stat 2>/dev/null; fi
-        echo "---GPU---"; GPUOUT=$(timeout 5 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null)
-        for c in $(ls /sys/class/drm 2>/dev/null); do d=/sys/class/drm/$c/device; B=$(cat $d/gpu_busy_percent 2>/dev/null); [ "$B" -ge 0 ] 2>/dev/null || continue; VU=$(cat $d/mem_info_vram_used 2>/dev/null); VT=$(cat $d/mem_info_vram_total 2>/dev/null); MP=N/A; [ "$VT" -gt 0 ] 2>/dev/null && MP=$(( VU * 100 / VT )); TC=N/A; for h in $(ls $d/hwmon 2>/dev/null); do T=$(cat $d/hwmon/$h/temp1_input 2>/dev/null); [ "$T" -ge 0 ] 2>/dev/null && TC=$(( T / 1000 )) && break; done; N=$(cat $d/product_name 2>/dev/null | head -1); [ -n "$N" ] || N="AMD GPU"; GPUOUT="$B %, $MP %, $TC, $N"; break; done
-        if [ -z "$GPUOUT" ]; then GPU_PCT=$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o '"Device Utilization %"=[0-9]*' | head -1 | cut -d= -f2); fi
-        [ -z "$GPUOUT" ] && [ -n "$GPU_PCT" ] && GPUOUT="AGX,$GPU_PCT"
-        [ -n "$GPUOUT" ] && echo "$GPUOUT" || echo "N/A"
-        echo "---NPU---"; NPUOUT=""
-        for n in $(ls /sys/class/accel 2>/dev/null); do a=/sys/class/accel/$n/device; [ -d "$a" ] || continue; N=$(cat $a/vbnv 2>/dev/null | head -1); [ -n "$N" ] || N=NPU; CTL=$(cat $a/power/control 2>/dev/null); ST=$(cat $a/power/runtime_status 2>/dev/null); [ "$CTL" = on ] && ST=unknown; [ -n "$ST" ] || ST=unknown; FW=$(cat $a/fw_version 2>/dev/null | head -1); AT=$(cat $a/power/runtime_active_time 2>/dev/null); [ "$AT" -ge 0 ] 2>/dev/null || AT=; NPUOUT="$N|$ST|$FW|$AT"; break; done
-        [ -n "$NPUOUT" ] && echo "$NPUOUT" || echo "N/A"
-        echo "---DOCKER---"; TMO=""; command -v timeout >/dev/null 2>&1 && TMO="timeout 6"
-        $TMO docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}" 2>/dev/null || true
+        echo "---GPU---"; G=$(timeout 5 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null)
+        [ -n "$G" ] || G=$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o 'Utilization %"=[0-9]*' | head -1 | cut -d= -f2 | sed 's/^/AGX,/')
+        [ -n "$G" ] && echo "$G" || echo "N/A"
+        echo "---DOCKER---"; T=""; command -v timeout >/dev/null 2>&1 && T="timeout 6"
+        $T docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}" 2>/dev/null || true
         """
         return remoteScript(statsScript, host: host)
+    }
+
+    /// Which accelerator to ask about. They're separate calls because a
+    /// remote terminal will only swallow about 1KB in one go, and the two
+    /// probes together don't fit — see `statsCommand`'s size note.
+    public enum AcceleratorProbe {
+        case amdGPU
+        case npu
+    }
+
+    /// Accelerator probing (AMD GPU via amdgpu sysfs, XDNA NPU via the
+    /// accel class) as SEPARATE, smaller calls off the hot path.
+    ///
+    /// They ride their own channel on their own slower cadence, and are
+    /// only ever sent to hosts that reported Linux — a Mac can't answer a
+    /// line of this, so spending the stats script's tiny size budget on it
+    /// there bought nothing and cost every Mac its stats.
+    public func acceleratorCommand(_ probe: AcceleratorProbe,
+                                   host h: HostConfig? = nil) -> (cmd: String, args: [String], stdin: String?) {
+        let host = h ?? activeHost ?? .localhost
+        let script: String
+        switch probe {
+        case .amdGPU:
+            script = """
+            D=/sys/class/drm; G=""
+            for c in $(ls $D 2>/dev/null); do p=$D/$c/device; B=$(cat $p/gpu_busy_percent 2>/dev/null); [ "$B" -ge 0 ] 2>/dev/null || continue; U=$(cat $p/mem_info_vram_used 2>/dev/null); T=$(cat $p/mem_info_vram_total 2>/dev/null); M=N/A; [ "$T" -gt 0 ] 2>/dev/null && M=$(( U * 100 / T )); K=N/A; for w in $(ls $p/hwmon 2>/dev/null); do X=$(cat $p/hwmon/$w/temp1_input 2>/dev/null); [ "$X" -ge 0 ] 2>/dev/null && K=$(( X / 1000 )) && break; done; G="$B %, $M %, $K, AMD GPU"; break; done
+            echo "---GPU---"; [ -n "$G" ] && echo "$G" || echo "N/A"
+            """
+        case .npu:
+            script = """
+            E=/sys/class/accel; P=""
+            for n in $(ls $E 2>/dev/null); do a=$E/$n/device; N=$(cat $a/vbnv 2>/dev/null); [ -n "$N" ] || N=NPU; C=$(cat $a/power/control 2>/dev/null); S=$(cat $a/power/runtime_status 2>/dev/null); [ "$C" = on ] && S=unknown; [ -n "$S" ] || S=unknown; F=$(cat $a/fw_version 2>/dev/null); A=$(cat $a/power/runtime_active_time 2>/dev/null); [ "$A" -ge 0 ] 2>/dev/null || A=; P="$N|$S|$F|$A"; break; done
+            echo "---NPU---"; [ -n "$P" ] && echo "$P" || echo "N/A"
+            """
+        }
+        return remoteScript(script, host: host)
     }
 
     /// Build a shell command that generates a key (if needed) and runs ssh-copy-id

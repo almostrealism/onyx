@@ -255,27 +255,29 @@ final class AppStateTests: XCTestCase {
                       "stats script should include Apple Silicon Homebrew path")
     }
 
-    /// GPU stats must cover all three families we support: NVIDIA via
-    /// nvidia-smi, AMD via amdgpu's sysfs counters (the only zero-dependency
-    /// path on a Ryzen APU — no rocm-smi, no root), Apple via ioreg.
-    func testStatsCommand_gpuSectionCoversNvidiaAmdAndApple() {
+    /// GPU coverage spans all three families, but across TWO commands:
+    /// the cheap ones (NVIDIA, Apple) ride the core poll, and AMD's sysfs
+    /// probing rides the separate accelerator call so it can't crowd the
+    /// core script past what a remote terminal accepts.
+    func testGpuCoverageSpansBothCommands() {
         let state = AppState()
-        let (_, args, _) = state.statsCommand(host: HostConfig.localhost)
-        let script = args.joined(separator: " ")
-        XCTAssertTrue(script.contains("nvidia-smi"), "NVIDIA path missing")
-        XCTAssertTrue(script.contains("gpu_busy_percent"),
-                      "AMD amdgpu sysfs path missing — Ryzen/Radeon hosts would show no GPU")
-        XCTAssertTrue(script.contains("mem_info_vram_used"),
-                      "AMD VRAM usage probe missing")
-        XCTAssertTrue(script.contains("IOAccelerator"), "Apple ioreg path missing")
+        let core = state.statsCommand(host: HostConfig.localhost).args.joined(separator: " ")
+        XCTAssertTrue(core.contains("nvidia-smi"), "NVIDIA path missing from the core poll")
+        XCTAssertTrue(core.contains("IOAccelerator"), "Apple ioreg path missing from the core poll")
+
+        let accel = state.acceleratorCommand(.amdGPU, host: HostConfig.localhost).args.joined(separator: " ")
+            + " " + state.acceleratorCommand(.npu, host: HostConfig.localhost).args.joined(separator: " ")
+        XCTAssertTrue(accel.contains("gpu_busy_percent"), "AMD amdgpu sysfs path missing")
+        XCTAssertTrue(accel.contains("mem_info_vram_used"), "AMD VRAM usage probe missing")
     }
 
     /// The NPU probe reads the accel device's runtime-PM state — the only
-    /// activity signal amdxdna exposes without root or XRT installed.
-    func testStatsCommand_includesNpuProbe() {
+    /// activity signal amdxdna exposes without root or XRT installed. It
+    /// lives on the accelerator command, not the core poll.
+    func testAcceleratorCommand_includesNpuProbe() {
         let state = AppState()
-        let (_, args, _) = state.statsCommand(host: HostConfig.localhost)
-        let script = args.joined(separator: " ")
+        let script = state.acceleratorCommand(.amdGPU, host: HostConfig.localhost).args.joined(separator: " ")
+            + " " + state.acceleratorCommand(.npu, host: HostConfig.localhost).args.joined(separator: " ")
         XCTAssertTrue(script.contains("---NPU---"), "NPU section marker missing")
         XCTAssertTrue(script.contains("/sys/class/accel"), "accel device probe missing")
         XCTAssertTrue(script.contains("runtime_status"),
@@ -289,8 +291,9 @@ final class AppStateTests: XCTestCase {
     /// Iterate a directory listing instead of globbing a path.
     func testStatsCommand_containsNoPathGlobs() {
         let state = AppState()
-        let (_, args, _) = state.statsCommand(host: HostConfig.localhost)
-        let script = args.joined(separator: " ")
+        let script = state.statsCommand(host: HostConfig.localhost).args.joined(separator: " ")
+            + " " + state.acceleratorCommand(.amdGPU, host: HostConfig.localhost).args.joined(separator: " ")
+            + " " + state.acceleratorCommand(.npu, host: HostConfig.localhost).args.joined(separator: " ")
         // Only path-position globs matter; `*` inside a quoted regex or a
         // `case` pattern is fine, so look at whitespace-separated tokens
         // that name an absolute path.
@@ -320,11 +323,63 @@ final class AppStateTests: XCTestCase {
         for (label, script) in [
             ("local", state.statsCommand(host: .localhost).args.joined(separator: " ")),
             ("remote", state.statsCommand(host: remote).stdin ?? ""),
+            ("accel-gpu", state.acceleratorCommand(.amdGPU, host: remote).stdin ?? ""),
+            ("accel-npu", state.acceleratorCommand(.npu, host: remote).stdin ?? ""),
         ] {
             XCTAssertFalse(script.contains("!"),
                            "\(label) stats script contains '!' — an interactive shell will "
                            + "history-expand it and throw the whole line away")
         }
+    }
+
+    /// THE size budget. `-tt` puts a terminal on the far end, and a
+    /// terminal's input queue is ~1KB IN TOTAL on macOS — not per line.
+    /// Overflow it and the kernel discards the rest: the remote shell
+    /// waits for a line that never completes, sends nothing but its login
+    /// banner, and the poll dies at the watchdog with no error to show.
+    /// Pacing our writes doesn't save it — they land in ssh's 64KB stdin
+    /// buffer and get re-burst at the far end.
+    ///
+    /// This script was 736 bytes and worked on every host for months;
+    /// adding AMD/NPU probing took it to 2.4KB and killed stats on every
+    /// Mac. That probing now lives in `acceleratorCommand`. If you need
+    /// more than this budget, add another command — don't grow this one.
+    func testStatsCommand_staysUnderTheTerminalInputBudget() {
+        let state = AppState()
+        var remote = HostConfig.localhost
+        remote.id = UUID()
+        remote.ssh.host = "example.com"
+        let payload = state.statsCommand(host: remote).stdin ?? ""
+        XCTAssertLessThan(payload.count, 1024,
+                          "stats payload is \(payload.count)B — a remote terminal will "
+                          + "swallow the tail and the poll will die with no error")
+    }
+
+    func testAcceleratorCommands_alsoStayUnderBudget() {
+        let state = AppState()
+        var remote = HostConfig.localhost
+        remote.id = UUID()
+        remote.ssh.host = "example.com"
+        let gpu = state.acceleratorCommand(.amdGPU, host: remote).stdin ?? ""
+        let npu = state.acceleratorCommand(.npu, host: remote).stdin ?? ""
+        XCTAssertLessThan(gpu.count, 1024, "AMD GPU payload is \(gpu.count)B")
+        XCTAssertLessThan(npu.count, 1024, "NPU payload is \(npu.count)B")
+        XCTAssertTrue(gpu.contains("gpu_busy_percent"), "AMD GPU probe missing")
+        XCTAssertTrue(npu.contains("/sys/class/accel"), "NPU probe missing")
+        for payload in [gpu, npu] {
+            XCTAssertFalse(payload.contains("!"), "history expansion (see the other test)")
+        }
+    }
+
+    /// The core script must NOT carry the Linux-only probes any more —
+    /// that's what blew the budget.
+    func testStatsCommand_leavesAcceleratorProbingToTheOtherCommand() {
+        let state = AppState()
+        let script = state.statsCommand(host: .localhost).args.joined(separator: " ")
+        XCTAssertFalse(script.contains("gpu_busy_percent"))
+        XCTAssertFalse(script.contains("/sys/class/accel"))
+        XCTAssertTrue(script.contains("uname -s"),
+                      "the core poll reports the OS so we know whether to probe at all")
     }
 
     func testStatsCommand_local_doesNotUseStdin() {

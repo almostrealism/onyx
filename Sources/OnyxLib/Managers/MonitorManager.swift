@@ -81,6 +81,10 @@ public class MonitorManager: ObservableObject {
         /// The last good sample arrived only after we'd killed the command
         /// at its budget — the data is real, the host is just slow.
         var pollIsSlow = false
+        /// Last accelerator (AMD GPU / NPU) reading for this host, carried
+        /// forward between its slower probes so the chips don't flicker.
+        var accelerator: MonitorSample?
+        var lastAcceleratorAt: Date?
     }
 
     /// Consecutive failed polls for the active host.
@@ -464,6 +468,7 @@ public class MonitorManager: ObservableObject {
                         """)
                 }
                 self?.publish(sample, hostID: hostID, output: output, slow: result.timedOut)
+                if sample.isLinux { self?.probeAcceleratorIfDue(host: host, hostID: hostID) }
                 return
             }
 
@@ -507,6 +512,74 @@ public class MonitorManager: ObservableObject {
         }
     }
 
+    /// How often to re-read the accelerators. They change slowly and the
+    /// probe costs a whole SSH round trip, so it doesn't belong on the
+    /// 5s path.
+    static let acceleratorInterval: TimeInterval = 20
+
+    /// Probe AMD GPU / NPU on a Linux host, on its own channel and its own
+    /// cadence.
+    ///
+    /// This is deliberately NOT part of the stats script. Folding it in
+    /// took that script from 736 bytes to 2.4KB, past what a remote
+    /// terminal will accept in one go, and cost every Mac its stats —
+    /// while a Mac can't answer a single line of it.
+    private func probeAcceleratorIfDue(host: HostConfig?, hostID: UUID) {
+        DispatchQueue.main.async {
+            let data = self.hostData[hostID] ?? HostMonitorData()
+            let due = data.lastAcceleratorAt.map {
+                Date().timeIntervalSince($0) >= Self.acceleratorInterval
+            } ?? true
+            guard due else { return }
+            var stamped = data
+            stamped.lastAcceleratorAt = Date()      // claim it before the async hop
+            self.hostData[hostID] = stamped
+            guard let release = self.appState.acquireUtilityChannel(
+                "accel:\(hostID)", host: host) else { return }
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                defer { release() }
+                guard let self else { return }
+                // Two small calls rather than one that a remote terminal
+                // would truncate. Both are cheap sysfs reads.
+                var merged = self.hostData[hostID]?.accelerator
+                for probe in [AppState.AcceleratorProbe.amdGPU, .npu] {
+                    let (cmd, args, stdinScript) =
+                        self.appState.acceleratorCommand(probe, host: host)
+                    let result = RemoteExec.shared.run(
+                        cmd, args: args, stdin: stdinScript,
+                        softTimeout: 12, captureStdout: true, captureStderr: true,
+                        label: "accel:\(host?.label ?? "local")")
+                    let output = (result.stdout + result.stderr)
+                        .replacingOccurrences(of: "\r", with: "")
+                    guard let reading = Self.parse(output: output) else { continue }
+                    var acc = merged ?? MonitorSample(timestamp: Date())
+                    switch probe {
+                    case .amdGPU:
+                        guard reading.gpuUsage != nil else { continue }
+                        acc.gpuUsage = reading.gpuUsage
+                        acc.gpuMemUsage = reading.gpuMemUsage
+                        acc.gpuTemp = reading.gpuTemp
+                        acc.gpuName = reading.gpuName
+                    case .npu:
+                        guard reading.npuState != nil else { continue }
+                        acc.npuName = reading.npuName
+                        acc.npuState = reading.npuState
+                        acc.npuFirmware = reading.npuFirmware
+                        acc.npuActiveMs = reading.npuActiveMs
+                    }
+                    merged = acc
+                }
+                guard let merged else { return }
+                DispatchQueue.main.async {
+                    var d = self.hostData[hostID] ?? HostMonitorData()
+                    d.accelerator = merged
+                    self.hostData[hostID] = d
+                    self.objectWillChange.send()
+                }
+            }
+        }
+    }
+
     /// Did this sample actually bring back a metric? `parse` always
     /// returns a sample — an all-nil one just means nothing in the output
     /// was recognisable, which is a failure however the process exited.
@@ -533,6 +606,24 @@ public class MonitorManager: ObservableObject {
             // which the point-in-time runtime_status would miss entirely.
             sample.npuActivePercent = Self.npuActivePercent(
                 previous: data.latestSample, current: sample)
+            // Fold in the accelerator reading. It arrives on its own
+            // slower probe (Linux hosts only), so carry the last one
+            // forward rather than blinking the GPU/NPU chips off between
+            // core polls.
+            if let accel = data.accelerator {
+                if sample.gpuUsage == nil {
+                    sample.gpuUsage = accel.gpuUsage
+                    sample.gpuMemUsage = accel.gpuMemUsage
+                    sample.gpuTemp = accel.gpuTemp
+                    sample.gpuName = accel.gpuName
+                }
+                sample.npuName = accel.npuName
+                sample.npuState = accel.npuState
+                sample.npuFirmware = accel.npuFirmware
+                sample.npuActiveMs = accel.npuActiveMs
+                sample.npuActivePercent = Self.npuActivePercent(
+                    previous: data.latestSample, current: sample)
+            }
             data.lastError = nil
             data.latestSample = sample
             data.samples.append(sample)
@@ -690,9 +781,20 @@ public class MonitorManager: ObservableObject {
         var memUsed: Double?, memTotal: Double?
         var gpuUsage: Double?, gpuMemUsage: Double?, gpuTemp: Int?, gpuName: String?
         var npuName: String?, npuState: String?, npuFirmware: String?, npuActiveMs: Double?
+        var osName: String?
 
         for i in stride(from: 0, to: sections.count, by: 1) {
             let section = sections[i].trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // `uname -s`: decides whether accelerator probing is worth a
+            // second call to this host at all.
+            if section == "OS", i + 1 < sections.count {
+                let value = sections[i + 1]
+                    .components(separatedBy: .newlines)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .first { !$0.isEmpty && !$0.contains("uname") } ?? ""
+                if !value.isEmpty { osName = value }
+            }
 
             if section == "UPTIME", i + 1 < sections.count {
                 let uptimeStr = sections[i + 1]
@@ -714,6 +816,13 @@ public class MonitorManager: ObservableObject {
             // between the literal marker and the runtime one. Overwriting on
             // each match means the runtime section — which is always
             // chronologically later — wins.
+
+            if section == "OS", i + 1 < sections.count {
+                let value = sections[i + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                    .components(separatedBy: .newlines).first?
+                    .trimmingCharacters(in: .whitespaces) ?? ""
+                if !value.isEmpty { osName = value }
+            }
 
             if section == "CPU", i + 1 < sections.count {
                 let cpuStr = sections[i + 1]
@@ -804,6 +913,7 @@ public class MonitorManager: ObservableObject {
             gpuMemUsage: gpuMemUsage,
             gpuTemp: gpuTemp,
             gpuName: gpuName,
+            os: osName,
             npuName: npuName,
             npuState: npuState,
             npuFirmware: npuFirmware,

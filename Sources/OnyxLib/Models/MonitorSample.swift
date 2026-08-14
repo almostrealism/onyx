@@ -20,6 +20,9 @@ public struct MonitorSample: Identifiable {
     public var gpuTemp: Int?
     /// Gpu name.
     public var gpuName: String?
+    /// `uname -s` — "Darwin", "Linux". Decides whether it's worth
+    /// spending a second SSH call on accelerator probing at all.
+    public var os: String?
     /// NPU (AMD XDNA / Ryzen AI) marketing name, e.g. "RyzenAI-npu4".
     public var npuName: String?
     /// NPU runtime-PM state: `active` (a client is driving it), `suspended`
@@ -48,6 +51,9 @@ public struct MonitorSample: Identifiable {
     /// Load avg15.
     public var loadAvg15: Double?
 
+    /// True when this host can answer the accelerator probe.
+    public var isLinux: Bool { os == "Linux" }
+
     /// Whether the NPU is powered up and driving a client right now.
     /// nil when there is no NPU, or when runtime PM can't tell us.
     public var npuBusy: Bool? {
@@ -59,7 +65,7 @@ public struct MonitorSample: Identifiable {
     }
 
     /// Create a new instance.
-    public init(timestamp: Date, cpuUsage: Double? = nil, memUsed: Double? = nil, memTotal: Double? = nil, gpuUsage: Double? = nil, gpuMemUsage: Double? = nil, gpuTemp: Int? = nil, gpuName: String? = nil, npuName: String? = nil, npuState: String? = nil, npuFirmware: String? = nil, npuActiveMs: Double? = nil, npuActivePercent: Double? = nil, loadAvg1: Double? = nil, loadAvg5: Double? = nil, loadAvg15: Double? = nil) {
+    public init(timestamp: Date, cpuUsage: Double? = nil, memUsed: Double? = nil, memTotal: Double? = nil, gpuUsage: Double? = nil, gpuMemUsage: Double? = nil, gpuTemp: Int? = nil, gpuName: String? = nil, os: String? = nil, npuName: String? = nil, npuState: String? = nil, npuFirmware: String? = nil, npuActiveMs: Double? = nil, npuActivePercent: Double? = nil, loadAvg1: Double? = nil, loadAvg5: Double? = nil, loadAvg15: Double? = nil) {
         self.timestamp = timestamp
         self.cpuUsage = cpuUsage
         self.memUsed = memUsed
@@ -68,6 +74,7 @@ public struct MonitorSample: Identifiable {
         self.gpuMemUsage = gpuMemUsage
         self.gpuTemp = gpuTemp
         self.gpuName = gpuName
+        self.os = os
         self.npuName = npuName
         self.npuState = npuState
         self.npuFirmware = npuFirmware
