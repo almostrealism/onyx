@@ -1675,6 +1675,11 @@ public class AppState: ObservableObject {
         var args = sshBaseArgs(for: h)
         args.append("-tt")
         args.append(sshUserHost(for: h))
+        // NB: `-tt` puts a TERMINAL on the far end, and a terminal cannot
+        // be written to at full speed — see RemoteExec's paced stdin
+        // writer, which is what actually gets this script delivered
+        // intact. Keeping lines short (see statsCommand) matters for the
+        // same reason.
         let stdinScript = """
         stty -echo 2>/dev/null
         \(wrapped)
@@ -1874,35 +1879,39 @@ public class AppState: ObservableObject {
         // moon ring. MonitorManager.parse silently ignores unknown
         // sections, so this change is invisible to the existing monitor
         // overlay; only CPUFleetPoller reads the docker output.
+        // Two hard rules for this script, both learned the expensive way.
+        //
+        // 1. EVERY LINE UNDER ~1024 BYTES. It's fed to an interactive
+        //    shell over a PTY, and a terminal in canonical mode accepts at
+        //    most MAX_CANON bytes per line — 1024 on macOS, 4096 on Linux.
+        //    A longer line is never delivered: the shell waits for a
+        //    newline that can't arrive, emits nothing but its login
+        //    banner, and the poll dies at our watchdog with no error to
+        //    show. This is what adding the AMD probes did to every Mac —
+        //    736 bytes before, 1657 after.
+        //
+        // 2. EVERY LINE A COMPLETE STATEMENT. No `for`/`if` spanning
+        //    lines. An interactive shell hands multi-line constructs to
+        //    its line editor, which re-renders the whole buffer per line;
+        //    a loop split over fifteen lines takes tens of seconds and
+        //    blows the poll budget. Keep loops on one (short) line.
+        //
+        // AppStateTests enforces rule 1 — rule 2 you have to hold yourself.
         let statsScript = """
-        echo "---UPTIME---"; uptime; \
-        echo "---CPU---"; CPU_OUT=$(top -bn1 2>/dev/null | head -5); \
-        if [ -n "$CPU_OUT" ]; then echo "$CPU_OUT"; else top -l1 -s0 2>/dev/null | head -10; fi; \
-        echo "---MEM---"; MEM_OUT=$(free -m 2>/dev/null); \
-        if [ -n "$MEM_OUT" ]; then echo "$MEM_OUT"; else vm_stat 2>/dev/null; fi; \
-        echo "---GPU---"; GPUOUT=$(timeout 5 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null); \
-        if [ -z "$GPUOUT" ]; then for c in $(ls /sys/class/drm 2>/dev/null); do d="/sys/class/drm/$c/device"; \
-        [ -r "$d/gpu_busy_percent" ] || continue; B=$(cat "$d/gpu_busy_percent" 2>/dev/null); \
-        [ "$B" -ge 0 ] 2>/dev/null || continue; \
-        VU=$(cat "$d/mem_info_vram_used" 2>/dev/null); VT=$(cat "$d/mem_info_vram_total" 2>/dev/null); MP="N/A"; \
-        if [ -n "$VU" ] && [ -n "$VT" ] && [ "$VT" -gt 0 ] 2>/dev/null; then MP=$(( VU * 100 / VT )); fi; \
-        T=""; for hw in $(ls "$d/hwmon" 2>/dev/null); do T=$(cat "$d/hwmon/$hw/temp1_input" 2>/dev/null); [ -n "$T" ] && break; done; TC="N/A"; \
-        [ "$T" -ge 0 ] 2>/dev/null && TC=$(( T / 1000 )); \
-        N=$(cat "$d/product_name" 2>/dev/null | head -1); \
-        if [ -z "$N" ] && command -v lspci >/dev/null 2>&1; then N=$(lspci -s "$(basename "$(readlink -f "$d")")" 2>/dev/null | head -1 | sed 's/.*: //' | cut -c1-32); fi; \
-        [ -n "$N" ] || N="AMD GPU"; GPUOUT="$B %, $MP %, $TC, $(printf '%s' "$N" | tr ',' ' ')"; break; done; fi; \
-        if [ -z "$GPUOUT" ]; then GPU_PCT=$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o '"Device Utilization %"=[0-9]*' | head -1 | cut -d= -f2); \
-        [ -n "$GPU_PCT" ] && GPUOUT="AGX,$GPU_PCT"; fi; \
-        [ -n "$GPUOUT" ] && echo "$GPUOUT" || echo "N/A"; \
-        echo "---NPU---"; NPUOUT=""; for n in $(ls /sys/class/accel 2>/dev/null); do a="/sys/class/accel/$n/device"; [ -d "$a" ] || continue; \
-        N=$(cat "$a/vbnv" 2>/dev/null | head -1); [ -n "$N" ] || N=$(cat "$a/device_type" 2>/dev/null | head -1); \
-        [ -n "$N" ] || N=$(basename "$(readlink -f "$a/driver" 2>/dev/null)" 2>/dev/null); [ -n "$N" ] || N="NPU"; \
-        CTL=$(cat "$a/power/control" 2>/dev/null | head -1); ST=$(cat "$a/power/runtime_status" 2>/dev/null | head -1); \
-        [ "$CTL" = "on" ] && ST="unknown"; [ -n "$ST" ] || ST="unknown"; FW=$(cat "$a/fw_version" 2>/dev/null | head -1); \
-        AT=$(cat "$a/power/runtime_active_time" 2>/dev/null | head -1); [ "$AT" -ge 0 ] 2>/dev/null || AT=""; \
-        NPUOUT="$(printf '%s' "$N" | tr '|,' '  ')|$ST|$(printf '%s' "$FW" | tr '|,' '  ')|$AT"; break; done; \
-        [ -n "$NPUOUT" ] && echo "$NPUOUT" || echo "N/A"; \
-        echo "---DOCKER---"; TMO=""; command -v timeout >/dev/null 2>&1 && TMO="timeout 6"; \
+        echo "---UPTIME---"; uptime
+        echo "---CPU---"; CPU_OUT=$(top -bn1 2>/dev/null | head -5)
+        if [ -n "$CPU_OUT" ]; then echo "$CPU_OUT"; else top -l1 -s0 2>/dev/null | head -10; fi
+        echo "---MEM---"; MEM_OUT=$(free -m 2>/dev/null)
+        if [ -n "$MEM_OUT" ]; then echo "$MEM_OUT"; else vm_stat 2>/dev/null; fi
+        echo "---GPU---"; GPUOUT=$(timeout 5 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,temperature.gpu,name --format=csv,noheader 2>/dev/null)
+        for c in $(ls /sys/class/drm 2>/dev/null); do d=/sys/class/drm/$c/device; B=$(cat $d/gpu_busy_percent 2>/dev/null); [ "$B" -ge 0 ] 2>/dev/null || continue; VU=$(cat $d/mem_info_vram_used 2>/dev/null); VT=$(cat $d/mem_info_vram_total 2>/dev/null); MP=N/A; [ "$VT" -gt 0 ] 2>/dev/null && MP=$(( VU * 100 / VT )); TC=N/A; for h in $(ls $d/hwmon 2>/dev/null); do T=$(cat $d/hwmon/$h/temp1_input 2>/dev/null); [ "$T" -ge 0 ] 2>/dev/null && TC=$(( T / 1000 )) && break; done; N=$(cat $d/product_name 2>/dev/null | head -1); [ -n "$N" ] || N="AMD GPU"; GPUOUT="$B %, $MP %, $TC, $N"; break; done
+        if [ -z "$GPUOUT" ]; then GPU_PCT=$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | grep -o '"Device Utilization %"=[0-9]*' | head -1 | cut -d= -f2); fi
+        [ -z "$GPUOUT" ] && [ -n "$GPU_PCT" ] && GPUOUT="AGX,$GPU_PCT"
+        [ -n "$GPUOUT" ] && echo "$GPUOUT" || echo "N/A"
+        echo "---NPU---"; NPUOUT=""
+        for n in $(ls /sys/class/accel 2>/dev/null); do a=/sys/class/accel/$n/device; [ -d "$a" ] || continue; N=$(cat $a/vbnv 2>/dev/null | head -1); [ -n "$N" ] || N=NPU; CTL=$(cat $a/power/control 2>/dev/null); ST=$(cat $a/power/runtime_status 2>/dev/null); [ "$CTL" = on ] && ST=unknown; [ -n "$ST" ] || ST=unknown; FW=$(cat $a/fw_version 2>/dev/null | head -1); AT=$(cat $a/power/runtime_active_time 2>/dev/null); [ "$AT" -ge 0 ] 2>/dev/null || AT=; NPUOUT="$N|$ST|$FW|$AT"; break; done
+        [ -n "$NPUOUT" ] && echo "$NPUOUT" || echo "N/A"
+        echo "---DOCKER---"; TMO=""; command -v timeout >/dev/null 2>&1 && TMO="timeout 6"
         $TMO docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}" 2>/dev/null || true
         """
         return remoteScript(statsScript, host: host)

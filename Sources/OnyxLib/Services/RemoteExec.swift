@@ -104,9 +104,9 @@ public final class RemoteExec {
         register(pid: pid, label: label, longLived: false)
         defer { unregister(pid: pid) }
 
-        // Feed stdin if requested.
+        // Feed stdin if requested — PACED. See writePaced.
         if let inPipe = inPipe, let s = stdin, let data = s.data(using: .utf8) {
-            inPipe.fileHandleForWriting.write(data)
+            Self.writePaced(data, to: inPipe.fileHandleForWriting)
             try? inPipe.fileHandleForWriting.close()
         }
 
@@ -152,6 +152,45 @@ public final class RemoteExec {
                          stdout: stdoutStr,
                          stderr: stderrStr,
                          timedOut: timedOutBox.pointee != 0)
+    }
+
+    // MARK: - Paced stdin
+
+    /// Bytes per write, and the pause between them.
+    ///
+    /// Chosen to stay under a terminal's canonical input buffer (1024
+    /// bytes on macOS) with room to spare. A 3KB script takes ~350ms to
+    /// deliver — nothing next to a poll interval, and the difference
+    /// between working and not.
+    public static let stdinChunk = 512
+    public static let stdinPause: TimeInterval = 0.06
+
+    /// Write `data` to a process's stdin in paced chunks.
+    ///
+    /// This exists because of `ssh -tt`: the far end is a TERMINAL, and a
+    /// terminal cannot absorb a script at full speed. The remote shell
+    /// reads a line, runs it — `top` takes half a second — and everything
+    /// still arriving in the meantime piles into a ~1KB kernel input
+    /// buffer and is DISCARDED once it's full. The shell then sits waiting
+    /// for the rest of a line that will never come; the poll dies at our
+    /// watchdog having produced nothing but the host's login banner.
+    ///
+    /// The symptom is indistinguishable from a hung host, which is what
+    /// made it so expensive to find: adding ~900 bytes of GPU probing to
+    /// the stats script silently broke stats collection on every Mac,
+    /// while Linux hosts (4KB buffer) carried on fine.
+    ///
+    /// Verified against a real interactive zsh on a PTY: unpaced, the
+    /// script stops mid-line and never completes; paced, every section
+    /// arrives and the execution marker comes back.
+    static func writePaced(_ data: Data, to handle: FileHandle) {
+        var offset = 0
+        while offset < data.count {
+            let end = min(offset + stdinChunk, data.count)
+            handle.write(data.subdata(in: offset..<end))
+            offset = end
+            if offset < data.count { Thread.sleep(forTimeInterval: stdinPause) }
+        }
     }
 
     // MARK: - Convenience wrappers (typed for the common cases)

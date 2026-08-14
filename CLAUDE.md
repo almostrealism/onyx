@@ -126,6 +126,8 @@ Driving an *interactive* shell is what defeats noexec — but interactive shells
 
 `AppStateTests` locks both: the stats script must contain no `!` and no path-position `*`. Add to those tests when you add a new remote script.
 
+**A terminal cannot be written to at full speed.** `-tt` means the far end is a terminal, and a terminal's input buffer is ~1KB on macOS (4KB on Linux). The remote shell reads a line, runs it (`top` takes ~0.5s), and everything still arriving piles into that buffer and is **discarded** once it's full — the shell then waits forever for the rest of a line, and the caller sees only the login banner before its watchdog fires. `RemoteExec.writePaced` delivers stdin in 512-byte chunks 60ms apart, which is what makes any multi-KB script work at all; keep script lines short too. This is not theoretical: ~900 bytes of added GPU probing silently killed stats on every Mac while Linux hosts were unaffected.
+
 **Errors come back on stdout.** With `ssh -tt` the remote's complaints arrive over the PTY mixed into stdout, not stderr — so a failing poll's stderr is often empty while the real message ("zsh: event not found") sits in the output we captured. `MonitorManager.remoteComplaint(in:)` digs it out; surface it rather than reporting a timeout.
 
 ### Detecting noexec failure
