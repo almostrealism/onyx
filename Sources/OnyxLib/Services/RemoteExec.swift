@@ -63,7 +63,7 @@ public final class RemoteExec {
     private var tracked: [pid_t: TrackedProcess] = [:]
     private let lock = NSLock()
 
-    private init() {}
+    private init() { _ = Self.sigpipeIgnored }
 
     // MARK: - Spawning
 
@@ -106,7 +106,8 @@ public final class RemoteExec {
 
         // Feed stdin if requested — PACED. See writePaced.
         if let inPipe = inPipe, let s = stdin, let data = s.data(using: .utf8) {
-            Self.writePaced(data, to: inPipe.fileHandleForWriting)
+            Self.writePaced(data, to: inPipe.fileHandleForWriting,
+                            while: { process.isRunning })
             try? inPipe.fileHandleForWriting.close()
         }
 
@@ -162,10 +163,34 @@ public final class RemoteExec {
     /// bytes on macOS) with room to spare. A 3KB script takes ~350ms to
     /// deliver — nothing next to a poll interval, and the difference
     /// between working and not.
+    /// A dead reader on any of our pipes must never kill the app: the
+    /// default disposition for SIGPIPE is *terminate*, and we write to
+    /// pipes owned by short-lived ssh processes that can exit at any
+    /// moment. Ignored here so those writes surface as ordinary EPIPE
+    /// errors that `writePaced` handles.
+    ///
+    /// A `static let` rather than a line in `init()` — `writePaced` is a
+    /// static function, so anything that reaches it must arm this itself.
+    /// (Discovered by a test that called it directly and died with
+    /// signal 13.)
+    private static let sigpipeIgnored: Void = {
+        signal(SIGPIPE, SIG_IGN)
+    }()
+
     public static let stdinChunk = 512
     public static let stdinPause: TimeInterval = 0.06
 
-    /// Write `data` to a process's stdin in paced chunks.
+    /// Write `data` to a process's stdin in paced chunks, giving up the
+    /// moment the process is gone.
+    ///
+    /// **Both halves of that sentence matter.** Writing to a pipe whose
+    /// reader has exited raises SIGPIPE / an NSFileHandle exception, which
+    /// takes the whole app down — and pacing turned a single instantaneous
+    /// write into one spread over hundreds of milliseconds, which is more
+    /// than enough time for `ssh` to fail fast (unreachable host, refused
+    /// auth, a host paused at startup) and close the pipe underneath us.
+    /// That crashed Onyx on launch. Never write to this pipe without
+    /// checking the child is still there and handling the throw.
     ///
     /// This exists because of `ssh -tt`: the far end is a TERMINAL, and a
     /// terminal cannot absorb a script at full speed. The remote shell
@@ -183,14 +208,27 @@ public final class RemoteExec {
     /// Verified against a real interactive zsh on a PTY: unpaced, the
     /// script stops mid-line and never completes; paced, every section
     /// arrives and the execution marker comes back.
-    static func writePaced(_ data: Data, to handle: FileHandle) {
+    @discardableResult
+    static func writePaced(_ data: Data,
+                           to handle: FileHandle,
+                           while isAlive: () -> Bool = { true }) -> Int {
+        _ = sigpipeIgnored
         var offset = 0
         while offset < data.count {
+            // The child may have died between chunks; writing then is fatal.
+            guard isAlive() else { return offset }
             let end = min(offset + stdinChunk, data.count)
-            handle.write(data.subdata(in: offset..<end))
+            do {
+                try handle.write(contentsOf: data.subdata(in: offset..<end))
+            } catch {
+                // Reader gone mid-write. Not our failure to report — the
+                // run's exit code and stderr say what actually happened.
+                return offset
+            }
             offset = end
             if offset < data.count { Thread.sleep(forTimeInterval: stdinPause) }
         }
+        return offset
     }
 
     // MARK: - Convenience wrappers (typed for the common cases)

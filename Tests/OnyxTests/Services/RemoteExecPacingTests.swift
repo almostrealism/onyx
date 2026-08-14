@@ -77,3 +77,48 @@ final class RemoteExecPacingTests: XCTestCase {
                           "a single-chunk script should not pause at all")
     }
 }
+
+/// The crash this pacing caused on launch: `ssh` fails fast (unreachable
+/// host, refused auth, a paused host), the pipe's reader is gone, and the
+/// next chunk we write kills the app. Instant, before any window appears.
+final class RemoteExecPipeSafetyTests: XCTestCase {
+
+    func testWritingToADeadReaderDoesNotCrash() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "exit 0"]          // gone immediately
+        let inPipe = Pipe()
+        process.standardInput = inPipe
+        process.standardOutput = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
+        Thread.sleep(forTimeInterval: 0.1)
+
+        // Several chunks' worth, so it can't slip through in one write.
+        let data = Data(String(repeating: "x", count: RemoteExec.stdinChunk * 5).utf8)
+        let written = RemoteExec.writePaced(data, to: inPipe.fileHandleForWriting)
+
+        // Reaching this line at all is the assertion — before the fix the
+        // process died here with SIGPIPE.
+        XCTAssertLessThanOrEqual(written, data.count)
+    }
+
+    func testStopsWritingOnceTheChildIsGone() {
+        let pipe = Pipe()
+        let done = expectation(description: "drained")
+        DispatchQueue.global().async {
+            _ = pipe.fileHandleForReading.readDataToEndOfFile()
+            done.fulfill()
+        }
+        var alive = true
+        let data = Data(String(repeating: "z", count: RemoteExec.stdinChunk * 6).utf8)
+        // Falls over after the first chunk, as a failing ssh would.
+        let written = RemoteExec.writePaced(data, to: pipe.fileHandleForWriting,
+                                            while: { defer { alive = false }; return alive })
+        try? pipe.fileHandleForWriting.close()
+        wait(for: [done], timeout: 10)
+
+        XCTAssertEqual(written, RemoteExec.stdinChunk,
+                       "must stop at the first chunk rather than keep feeding a corpse")
+    }
+}
