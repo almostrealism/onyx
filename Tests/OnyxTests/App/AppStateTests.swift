@@ -337,8 +337,10 @@ final class AppStateTests: XCTestCase {
     /// Overflow it and the kernel discards the rest: the remote shell
     /// waits for a line that never completes, sends nothing but its login
     /// banner, and the poll dies at the watchdog with no error to show.
-    /// Pacing our writes doesn't save it — they land in ssh's 64KB stdin
-    /// buffer and get re-burst at the far end.
+    /// Pacing the writes helps but does not save it: with pacing a 2.2KB
+    /// script delivered its first sections and lost the rest (one CPU
+    /// reading, no memory, no `exit`, session hung); unpaced it delivered
+    /// nothing.
     ///
     /// This script was 736 bytes and worked on every host for months;
     /// adding AMD/NPU probing took it to 2.4KB and killed stats on every

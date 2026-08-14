@@ -1886,8 +1886,12 @@ public class AppState: ObservableObject {
         // that never comes, emits nothing but its login banner, and the
         // poll dies at the watchdog with no error to show for it.
         //
-        // Pacing our own writes does NOT save you here: they land in ssh's
-        // 64KB stdin buffer and ssh re-bursts them at the far end.
+        // Pacing (RemoteExec.writePaced) is necessary but NOT sufficient.
+        // Measured on a real failing host: unpaced, a 2.2KB script
+        // produced nothing at all; paced, the front of it ran (a CPU
+        // reading arrived) and the tail was still lost — no MEM section,
+        // and no `exit`, so the session hung until the watchdog. Keep
+        // both: pace the writes AND keep the payload small.
         //
         // This script was 736 bytes and worked on every host for months.
         // Adding AMD GPU + NPU probing took it to 2.4KB and killed stats
