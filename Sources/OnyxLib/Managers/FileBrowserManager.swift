@@ -792,12 +792,16 @@ public class FileBrowserManager: ObservableObject {
         searchResults.clear()
 
         let escaped = escapeForShell(basePath)
-        let script = Self.fileNameSearchScript(
+        let wanted = appState.appearance.searchExtensions
+        let command = Self.searchCommand(
             escapedBase: escaped,
             query: query,
-            extensions: appState.appearance.searchExtensions,
+            extensions: wanted,
             maxResults: searchResults.maxResults)
-        let (cmd, args, stdinScript) = appState.remoteScript(script)
+        // When the extension list was too long to fit in the script, the
+        // filtering happens here instead.
+        let localExtensions = command.filterExtensionsLocally ? Set(wanted) : []
+        let (cmd, args, stdinScript) = appState.remoteScript(command.script)
 
         let process = Process()
         let pipe = Pipe()
@@ -844,6 +848,11 @@ public class FileBrowserManager: ObservableObject {
                     // paths "back" navigated into.
                     guard let relative = Self.relativeSearchPath(result: trimmed, base: basePath) else { continue }
 
+                    if !localExtensions.isEmpty {
+                        let ext = (relative as NSString).pathExtension.lowercased()
+                        guard localExtensions.contains(ext) else { continue }
+                    }
+
                     DispatchQueue.main.async {
                         self.searchResults.insertPath(relative, basePath: basePath)
                     }
@@ -865,7 +874,11 @@ public class FileBrowserManager: ObservableObject {
                 if let inputPipe = inputPipe,
                    let scriptText = stdinScript,
                    let data = scriptText.data(using: .utf8) {
-                    inputPipe.fileHandleForWriting.write(data)
+                    // Paced, like every other remote script: a terminal
+                    // can't take a script at full speed, and writing to a
+                    // dead ssh raises SIGPIPE. See RemoteExec.writePaced.
+                    RemoteExec.writePaced(data, to: inputPipe.fileHandleForWriting,
+                                          while: { process.isRunning })
                     try? inputPipe.fileHandleForWriting.close()
                 }
                 process.waitUntilExit()
@@ -896,26 +909,70 @@ public class FileBrowserManager: ObservableObject {
     /// to a set of file extensions. Factored out (and static) so the command
     /// shape is unit-testable, and so a future content (grep) search can sit
     /// alongside this without disturbing it. `extensions` empty = all files.
+    /// Largest search script we'll send. The payload also carries
+    /// RemoteScript's ~250-byte prelude, and a remote terminal takes only
+    /// about 1KB in one go before the kernel starts discarding it — at
+    /// which point the session hangs and the search silently returns
+    /// nothing. With every file type selected the extension clause alone
+    /// ran to ~700 bytes, putting the payload over. See
+    /// AppState.statsCommand for the full story.
+    static let maxSearchScriptBytes = 700
+
+    /// A search to run, and whether its extension filter survived the
+    /// size budget.
+    struct SearchCommand: Equatable {
+        let script: String
+        /// True when the extension list was too long to send, so results
+        /// must be filtered by extension on arrival instead.
+        let filterExtensionsLocally: Bool
+    }
+
     static func fileNameSearchScript(escapedBase: String, query: String,
                                      extensions: [String], maxResults: Int) -> String {
+        searchCommand(escapedBase: escapedBase, query: query,
+                      extensions: extensions, maxResults: maxResults).script
+    }
+
+    static func searchCommand(escapedBase: String, query: String,
+                              extensions: [String], maxResults: Int) -> SearchCommand {
         let safeQuery = query
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
-        var matchClause = "-iname \"*\(safeQuery)*\""
+        let nameClause = "-iname \"*\(safeQuery)*\""
+        var matchClause = nameClause
+        var localFilter = false
+        var limit = maxResults
         if !extensions.isEmpty {
             // \( -iname "*.java" -o -iname "*.kt" \) -iname "*query*"
             let group = extensions
                 .map { "-iname \"*.\($0)\"" }
                 .joined(separator: " -o ")
-            matchClause = "-type f \\( \(group) \\) \(matchClause)"
+            let candidate = "-type f \\( \(group) \\) \(nameClause)"
+            if build(escapedBase: escapedBase, match: candidate, limit: limit).count
+                <= maxSearchScriptBytes {
+                matchClause = candidate
+            } else {
+                // Too many types to name remotely. Ask for files matching
+                // the name, take more of them, and apply the extension
+                // filter to the results — same answer, deliverable script.
+                matchClause = "-type f \(nameClause)"
+                localFilter = true
+                limit = maxResults * 4
+            }
         }
         // No -maxdepth: deep package trees (e.g. Java's
         // src/main/java/org/.../Foo.java) easily exceed any small cap, and
         // find doesn't follow symlinks so there's no loop risk. Output is
         // bounded by `head` and the caller's 30s kill timer instead. Hidden
         // directories are still pruned.
-        return "find \(escapedBase) -name \".*\" -prune -o "
-            + "\(matchClause) -print 2>/dev/null | head -\(maxResults)"
+        return SearchCommand(
+            script: build(escapedBase: escapedBase, match: matchClause, limit: limit),
+            filterExtensionsLocally: localFilter)
+    }
+
+    private static func build(escapedBase: String, match: String, limit: Int) -> String {
+        "find \(escapedBase) -name \".*\" -prune -o "
+            + "\(match) -print 2>/dev/null | head -\(limit)"
     }
 
     /// Cancel search.

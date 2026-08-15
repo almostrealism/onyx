@@ -53,26 +53,7 @@ public class GitManager: ObservableObject {
         isLoading = true
         currentRepoPath = path
 
-        let escaped = escapeForShell(path)
-        // Single compound command with markers — one SSH round-trip
-        let script = """
-        git -C \(escaped) rev-parse --is-inside-work-tree 2>/dev/null && \
-        echo "---GIT_BRANCH---" && \
-        git -C \(escaped) branch --show-current 2>/dev/null && \
-        echo "---GIT_HEAD---" && \
-        git -C \(escaped) rev-parse --short HEAD 2>/dev/null && \
-        echo "---GIT_STATUS---" && \
-        git -C \(escaped) status --porcelain 2>/dev/null && \
-        echo "---GIT_DIFF_STAT---" && \
-        git -C \(escaped) diff --stat 2>/dev/null && \
-        echo "---GIT_DIFF_CACHED_STAT---" && \
-        git -C \(escaped) diff --cached --stat 2>/dev/null && \
-        echo "---GIT_PREFIX---" && \
-        git -C \(escaped) rev-parse --show-prefix 2>/dev/null && \
-        echo "---GIT_PREFIX_END---"
-        """
-
-        let (cmd, args, stdin) = appState.remoteScript(script)
+        let (cmd, args, stdin) = appState.remoteScript(Self.statusScript(for: path))
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin)
@@ -87,6 +68,33 @@ public class GitManager: ObservableObject {
                 self.parseOutput(output, currentPath: path)
             }
         }
+    }
+
+    /// The one-round-trip status script.
+    ///
+    /// `cd` once instead of `git -C <path>` eight times. That repetition
+    /// put the payload over the ~1KB a remote terminal will accept in one
+    /// go the moment a path got past about 30 characters — so the script
+    /// was truncated, the session hung, no output came back, and the
+    /// panel silently decided the directory wasn't a repo. Shallow paths
+    /// kept working, which is why this looked like it broke "some time
+    /// ago" rather than all at once. See AppState.statsCommand for the
+    /// size rule.
+    ///
+    /// One statement, so the remote's line editor never sees a
+    /// continuation; the `&&` before the block preserves the old
+    /// behaviour that nothing is emitted at all when it isn't a repo
+    /// (the parser keys on `---GIT_BRANCH---` being present).
+    static func statusScript(for path: String) -> String {
+        let e = Self.escapeForShell(path)
+        return "cd \(e) 2>/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2>&1 && "
+            + "{ echo \"---GIT_BRANCH---\"; git branch --show-current 2>/dev/null; "
+            + "echo \"---GIT_HEAD---\"; git rev-parse --short HEAD 2>/dev/null; "
+            + "echo \"---GIT_STATUS---\"; git status --porcelain 2>/dev/null; "
+            + "echo \"---GIT_DIFF_STAT---\"; git diff --stat 2>/dev/null; "
+            + "echo \"---GIT_DIFF_CACHED_STAT---\"; git diff --cached --stat 2>/dev/null; "
+            + "echo \"---GIT_PREFIX---\"; git rev-parse --show-prefix 2>/dev/null; "
+            + "echo \"---GIT_PREFIX_END---\"; }"
     }
 
     /// Clear.
@@ -110,11 +118,11 @@ public class GitManager: ObservableObject {
         showLog = true
         commitDetail = nil
 
-        let escaped = escapeForShell(repoPath)
+        let escaped = Self.escapeForShell(repoPath)
         // Use %x00 as field separator, %x01 as record separator
         var script = "git -C \(escaped) log --pretty=format:'%h%x00%s%x00%an%x00%ar%x01' -50"
         if let file = filePath {
-            let escapedFile = escapeForShell(file)
+            let escapedFile = Self.escapeForShell(file)
             script += " -- \(escapedFile)"
         }
 
@@ -139,7 +147,7 @@ public class GitManager: ObservableObject {
         guard let repoPath = currentRepoPath else { return }
         isLoadingCommit = true
 
-        let escaped = escapeForShell(repoPath)
+        let escaped = Self.escapeForShell(repoPath)
         let script = """
         echo "---COMMIT_INFO---" && \
         git -C \(escaped) log -1 --pretty=format:'%H%n%s%n%an%n%ar' \(hash) 2>/dev/null && \
@@ -175,7 +183,7 @@ public class GitManager: ObservableObject {
         isLoadingDiff = true
         fileDiffTitle = file.path
 
-        let escaped = escapeForShell(repoPath)
+        let escaped = Self.escapeForShell(repoPath)
         let filePath = file.path.replacingOccurrences(of: "'", with: "'\\''")
         let script: String
         switch file.area {
@@ -203,7 +211,7 @@ public class GitManager: ObservableObject {
         isLoadingDiff = true
         fileDiffTitle = "All Changes"
 
-        let escaped = escapeForShell(repoPath)
+        let escaped = Self.escapeForShell(repoPath)
         // Show both staged and unstaged in one output
         let script = """
         echo "--- STAGED ---" && \
@@ -408,7 +416,7 @@ public class GitManager: ObservableObject {
         return num
     }
 
-    private func escapeForShell(_ s: String) -> String {
+    static func escapeForShell(_ s: String) -> String {
         let escaped = s
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
