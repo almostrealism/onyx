@@ -188,6 +188,38 @@ public class FileBrowserManager: ObservableObject {
         saveFolders()
     }
 
+    /// Is this path saved as a favorite of the active host?
+    ///
+    /// Compares normalized paths so "/srv/app" and "/srv/app/" are the
+    /// same folder — the same rule the favorites treemap uses to nest.
+    public func isFavorite(_ path: String) -> Bool {
+        favoriteEntry(for: path) != nil
+    }
+
+    /// Add or remove this path from the active host's favorites.
+    ///
+    /// Unlike `removeFolder`, un-favoriting here does NOT navigate you
+    /// away: you asked to stop bookmarking the folder, not to leave it.
+    public func toggleFavorite(_ path: String) {
+        let normalized = FavoriteTree.normalize(path)
+        guard !normalized.isEmpty else { return }
+        if let existing = favoriteEntry(for: path) {
+            savedFolders.removeAll { $0 == existing }
+        } else {
+            let hostID = appState.activeHost?.id ?? HostConfig.localhostID
+            savedFolders.append(SavedFolder(path: normalized, hostID: hostID))
+        }
+        saveFolders()
+    }
+
+    private func favoriteEntry(for path: String) -> SavedFolder? {
+        let hostID = appState.activeHost?.id ?? HostConfig.localhostID
+        let target = FavoriteTree.normalize(path)
+        return savedFolders.first {
+            $0.hostID == hostID && FavoriteTree.normalize($0.path) == target
+        }
+    }
+
     /// Remove folder.
     public func removeFolder(_ folder: SavedFolder) {
         savedFolders.removeAll { $0 == folder }

@@ -805,3 +805,75 @@ final class RemoteSearchOutputFilterTests: XCTestCase {
         XCTAssertTrue(keepAsResult("/usr/bin/find"))
     }
 }
+
+/// The nav-bar heart: favorite the folder you're standing in.
+final class FileBrowserFavoriteToggleTests: XCTestCase {
+
+    private func manager() -> (FileBrowserManager, AppState, HostConfig) {
+        let state = AppState()
+        var host = HostConfig.localhost
+        host.id = UUID()
+        host.ssh.host = "example.com"
+        state.hosts = [host]
+        state.activeSession = TmuxSession(name: "m", source: .host(hostID: host.id))
+        let browser = FileBrowserManager(appState: state)
+        browser.savedFolders = []
+        return (browser, state, host)
+    }
+
+    func testTogglesOnAndOff() {
+        let (browser, _, _) = manager()
+        XCTAssertFalse(browser.isFavorite("/srv/app"))
+
+        browser.toggleFavorite("/srv/app")
+        XCTAssertTrue(browser.isFavorite("/srv/app"))
+        XCTAssertEqual(browser.activeFolders.count, 1)
+
+        browser.toggleFavorite("/srv/app")
+        XCTAssertFalse(browser.isFavorite("/srv/app"))
+        XCTAssertTrue(browser.activeFolders.isEmpty)
+    }
+
+    /// "/srv/app" and "/srv/app/" are the same folder — the rule the
+    /// favorites treemap already uses. Otherwise the heart would read as
+    /// empty for a folder you'd just added.
+    func testTrailingSlashIsTheSameFolder() {
+        let (browser, _, _) = manager()
+        browser.toggleFavorite("/srv/app/")
+        XCTAssertTrue(browser.isFavorite("/srv/app"))
+        XCTAssertTrue(browser.isFavorite("/srv/app/"))
+        XCTAssertEqual(browser.activeFolders.first?.path, "/srv/app",
+                       "stored normalized so the treemap can nest it")
+    }
+
+    /// Un-favoriting from the nav bar must NOT navigate you away —
+    /// removeFolder deliberately does that, and it would be wrong here.
+    func testRemovingKeepsYouWhereYouAre() {
+        let (browser, _, _) = manager()
+        browser.currentPath = "/srv/app/src"
+        browser.toggleFavorite("/srv/app/src")
+        browser.toggleFavorite("/srv/app/src")
+        XCTAssertEqual(browser.currentPath, "/srv/app/src",
+                       "the heart bookmarks a folder; it doesn't leave it")
+    }
+
+    func testFavoritesAreScopedToTheActiveHost() {
+        let (browser, state, _) = manager()
+        browser.toggleFavorite("/srv/app")
+        XCTAssertTrue(browser.isFavorite("/srv/app"))
+
+        var other = HostConfig.localhost
+        other.id = UUID()
+        other.ssh.host = "elsewhere.com"
+        state.hosts.append(other)
+        state.activeSession = TmuxSession(name: "m", source: .host(hostID: other.id))
+        XCTAssertFalse(browser.isFavorite("/srv/app"),
+                       "same path on a different host is a different folder")
+    }
+
+    func testEmptyPathIsIgnored() {
+        let (browser, _, _) = manager()
+        browser.toggleFavorite("   ")
+        XCTAssertTrue(browser.activeFolders.isEmpty)
+    }
+}

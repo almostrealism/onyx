@@ -711,6 +711,26 @@ struct NavigationBar: View {
 
                 Spacer()
 
+                // Favorite the folder you're standing in. Only while
+                // browsing a directory — with a file open the bar names
+                // the file, so a heart here would be ambiguous.
+                if let path = browser.currentPath, browser.viewingFileName == nil {
+                    let favorited = browser.isFavorite(path)
+                    Button(action: { browser.toggleFavorite(path) }) {
+                        Image(systemName: favorited ? "heart.fill" : "heart")
+                            .font(.system(size: 12))
+                            .foregroundColor(favorited ? appState.accentColor : .gray.opacity(0.5))
+                            // A bare Image hit-tests to its glyph box; give
+                            // it a real target (see the pipelines "+").
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(favorited
+                          ? "Remove \(path) from favorites"
+                          : "Add \(path) to favorites")
+                }
+
                 // Collapse paths toggle
                 if browser.currentPath != nil && browser.viewingFileName == nil {
                     Button(action: {
