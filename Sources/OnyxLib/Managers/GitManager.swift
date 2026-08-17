@@ -35,21 +35,53 @@ public class GitManager: ObservableObject {
     @Published public var fileDiff: String?
     @Published public var fileDiffTitle: String?
     @Published public var isLoadingDiff = false
+    /// Why there's no git panel, when the reason ISN'T "this isn't a
+    /// repo". Empty directories and non-repos leave this nil — it's only
+    /// set when we wanted to read git state and couldn't, so the file
+    /// browser can say so instead of showing nothing at all. This feature
+    /// spent a long time simply absent, with no way to tell whether it
+    /// had broken or been removed.
+    @Published public var unavailableReason: String?
 
     private let appState: AppState
     /// internal(set) var currentRepoPath: String?
     public internal(set) var currentRepoPath: String?
 
+    /// Path we wanted to inspect but couldn't, kept so the retry below
+    /// knows what to re-run.
+    private var pendingPath: String?
+    private var healthObserver: AnyCancellable?
+
     /// Create a new instance.
     public init(appState: AppState) {
         self.appState = appState
+        // A host that isn't usable at the moment you open a folder used to
+        // mean no git panel until you navigated somewhere else and back —
+        // one bad moment, gone for good. Re-run when the host comes back.
+        healthObserver = ConnectionPairRegistry.shared.$healthByHost
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, let path = self.pendingPath,
+                      self.appState.hostUsable(self.appState.activeHost) else { return }
+                self.pendingPath = nil
+                self.checkAndLoad(path: path)
+            }
     }
 
     /// Check and load.
     public func checkAndLoad(path: String) {
         // Pair-health gate: a down/offline host makes every git call a
-        // guaranteed 10-30s timeout — skip and keep whatever we have.
-        guard appState.hostUsable(appState.activeHost) else { return }
+        // guaranteed 10-30s timeout — skip and keep whatever we have. But
+        // SAY so, and re-run when the host recovers (see init).
+        guard appState.hostUsable(appState.activeHost) else {
+            pendingPath = path
+            let host = appState.activeHost?.label ?? "host"
+            unavailableReason = "waiting for \(host) — git status will load when it reconnects"
+            isGitRepo = false
+            repoStatus = nil
+            return
+        }
+        pendingPath = nil
         isLoading = true
         currentRepoPath = path
 
@@ -61,10 +93,17 @@ public class GitManager: ObservableObject {
                 guard let self = self else { return }
                 self.isLoading = false
                 guard let output = output else {
+                    // Ran, but nothing usable came back — a truncated
+                    // script, a shell that never answered, a dead channel.
+                    // Whatever it was, don't leave the panel silently
+                    // missing.
                     self.isGitRepo = false
                     self.repoStatus = nil
+                    self.unavailableReason =
+                        "couldn't read git status on \(self.appState.activeHost?.label ?? "this host")"
                     return
                 }
+                self.unavailableReason = nil
                 self.parseOutput(output, currentPath: path)
             }
         }
@@ -99,6 +138,8 @@ public class GitManager: ObservableObject {
 
     /// Clear.
     public func clear() {
+        unavailableReason = nil
+        pendingPath = nil
         isGitRepo = false
         repoStatus = nil
         logEntries = []

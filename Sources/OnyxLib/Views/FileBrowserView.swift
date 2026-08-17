@@ -105,6 +105,14 @@ struct FileBrowserView: View {
                         SearchResultsView(appState: appState, browser: browser, tree: browser.searchResults)
                     } else if browser.currentPath != nil {
                         VStack(spacing: 0) {
+                            if let reason = browser.gitManager.unavailableReason {
+                                GitUnavailableNotice(reason: reason) {
+                                    if let p = browser.currentPath {
+                                        browser.gitManager.checkAndLoad(path: p)
+                                    }
+                                }
+                                Divider().background(Color.white.opacity(0.1))
+                            }
                             if browser.gitManager.isGitRepo, let status = browser.gitManager.repoStatus {
                                 GitLandingView(
                                     status: status,
@@ -659,6 +667,39 @@ struct FolderRow: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isSelected ? Color.white.opacity(0.08) : Color.clear)
+    }
+}
+
+struct GitUnavailableNotice: View {
+    let reason: String
+    let onRetry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 10))
+                .foregroundColor(Color.onyxAmber.opacity(0.8))
+            Text(reason)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(Color.onyxAmber.opacity(0.8))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button(action: onRetry) {
+                Text("retry")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Color.onyxAmber)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.onyxAmber.opacity(0.12))
+                    .cornerRadius(3)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.onyxAmber.opacity(0.06))
     }
 }
 
@@ -1496,6 +1537,14 @@ struct FullFileBrowserView: View {
                             SearchResultsView(appState: appState, browser: browser, tree: browser.searchResults)
                         } else if browser.currentPath != nil {
                             VStack(spacing: 0) {
+                                if let reason = browser.gitManager.unavailableReason {
+                                    GitUnavailableNotice(reason: reason) {
+                                        if let p = browser.currentPath {
+                                            browser.gitManager.checkAndLoad(path: p)
+                                        }
+                                    }
+                                    Divider().background(Color.white.opacity(0.1))
+                                }
                                 if browser.gitManager.isGitRepo, let status = browser.gitManager.repoStatus {
                                     GitLandingView(
                                         status: status,
