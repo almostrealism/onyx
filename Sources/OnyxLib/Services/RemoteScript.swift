@@ -125,6 +125,24 @@ public enum RemoteScript {
             return output
         }
         let tail = lines[(lastEchoIdx + 1)...]
+
+        // The heuristic above assumes the echo arrives as one BLOCK ahead
+        // of all output. That holds when the shell reads the whole script
+        // before running any of it — but an interactive shell executes
+        // line by line, so its echo INTERLEAVES with the output, and the
+        // `$((1+1))` line (our last script line) then lands at the very
+        // end. Cutting there discards everything, which is exactly how the
+        // git panel went blank: 2KB of perfectly good output in, empty
+        // string out, "not a repo".
+        //
+        // If cutting leaves nothing, the assumption didn't hold. Hand back
+        // the output intact — parsers take the LAST occurrence of each
+        // marker (see GitManager.extractSection), so an echoed copy ahead
+        // of the real one is harmless.
+        if tail.joined().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return output
+        }
         return tail.joined(separator: "\n")
     }
 

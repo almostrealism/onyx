@@ -130,6 +130,8 @@ Driving an *interactive* shell is what defeats noexec — but interactive shells
 
 This ceiling has now bitten three separate features, and it always looks the same from the outside: the feature silently reports nothing, with no error anywhere. Watch for scripts whose size scales with something — the git status script named the repo path eight times (broken past ~30 characters of path), and the file-search script named every selected file extension (broken with the type filter fully enabled). Name a path once by `cd`-ing to it; if a list can't be bounded, send the unfiltered query and filter the results locally (`FileBrowserManager.searchCommand`). This is not theoretical: ~900 bytes of added GPU probing silently killed stats on every Mac while Linux hosts were unaffected.
 
+**The TTY echo interleaves.** An interactive shell executes line by line, so its echo of our script is mixed in with the output rather than sitting in front of it — and the echo of the LAST script line lands after the real output. `RemoteScript.cleanedOutput` returns the output untouched when its boundary heuristic would leave nothing (that rule silently emptied every git/docker/fleet response on hosts that echo); parsers must therefore take the LAST occurrence of a marker, never the first. See `GitManager.extractSection`.
+
 **Errors come back on stdout.** With `ssh -tt` the remote's complaints arrive over the PTY mixed into stdout, not stderr — so a failing poll's stderr is often empty while the real message ("zsh: event not found") sits in the output we captured. `MonitorManager.remoteComplaint(in:)` digs it out; surface it rather than reporting a timeout.
 
 ### Detecting noexec failure
