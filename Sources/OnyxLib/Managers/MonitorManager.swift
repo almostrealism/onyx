@@ -455,6 +455,7 @@ public class MonitorManager: ObservableObject {
                 stderr=\(Self.firstMeaningfulLine(result.stderr), privacy: .public) \
                 hostSaid=\(remoteSaid ?? "(nothing)", privacy: .public)
                 """)
+            DiagnosticLog.shared.record("stats", "\(hostLabel): \(text)", failure: true)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 var data = self.hostData[hostID] ?? HostMonitorData()

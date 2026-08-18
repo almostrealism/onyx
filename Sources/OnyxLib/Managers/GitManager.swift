@@ -107,6 +107,8 @@ public class GitManager: ObservableObject {
                         """)
                     self.isGitRepo = false
                     self.repoStatus = nil
+                    DiagnosticLog.shared.record("git",
+                        "\(host): \(run.failureDetail)", failure: true)
                     self.unavailableReason = "git status on \(host): \(run.failureDetail)"
                     return
                 }

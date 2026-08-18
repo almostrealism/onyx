@@ -1121,6 +1121,9 @@ class OnyxTerminalView: NSView {
                 return .ok
             }
             lastErr = r.stderr
+            DiagnosticLog.shared.record("probe",
+                "\(host.label): attempt \(attempt) failed (exit \(r.exit)) "
+                + (r.stderr.isEmpty ? "no stderr" : r.stderr), failure: true)
             OnyxLog.session.error("""
                 probe attempt \(attempt, privacy: .public) failed: \
                 host=\(host.label, privacy: .public) \
@@ -1392,11 +1395,15 @@ class OnyxTerminalView: NSView {
                     // connection pair are independent, and the pair is the
                     // one with actual evidence.
                     guard !self.appState.hostUsable(host) else {
+                        DiagnosticLog.shared.record("key",
+                            "\(label): probe said key-auth, but the host is connected — prompt suppressed")
                         OnyxLog.session.notice("""
                             suppressing key-setup prompt for \(label, privacy: .public) —                             the host is connected
                             """)
                         return
                     }
+                    DiagnosticLog.shared.record("key",
+                        "\(label): authentication refused — asking for key setup", failure: true)
                     self.appState.needsKeySetup = true
                     self.appState.keySetupHostID = hostID
                     self.setHostState(

@@ -16,6 +16,11 @@ struct ConnectionPoolSection: View {
     /// them onto two lines, wrecking the table. Every cell is also
     /// hard-limited to one line (truncate, never wrap) as a backstop.
     @Environment(\.monitorFontScale) private var fontScale
+    @ObservedObject private var diagnostics = DiagnosticLog.shared
+
+    static let eventTime: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
+    }()
     /// Which hostID currently has its diagnostic panel expanded inline.
     @State private var expandedDiagHost: UUID?
     /// Cached diagnostics indexed by hostID. Re-fetched when the row is
@@ -190,6 +195,46 @@ struct ConnectionPoolSection: View {
                                 .transition(.opacity)
                             }
                         }
+                    }
+                }
+
+                // Recent connection events. Every bug this month was
+                // diagnosed by finding out what the host actually said,
+                // and that always meant "go run `log show`" — a round trip
+                // that failed as often as it worked. The evidence belongs
+                // next to the thing misbehaving.
+                let events = diagnostics.recent(8)
+                if !events.isEmpty {
+                    Divider().background(Color.white.opacity(0.06)).padding(.vertical, 4)
+                    HStack(spacing: 0) {
+                        Text("")
+                            .frame(width: 8)
+                        Text("RECENT EVENTS")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .lineLimit(1)
+                    .monitorFont(size: 9, weight: .medium)
+                    .foregroundColor(.gray.opacity(0.4))
+
+                    ForEach(events) { event in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text(Self.eventTime.string(from: event.at))
+                                .monitorFont(size: 9)
+                                .foregroundColor(.gray.opacity(0.35))
+                            Text(event.category)
+                                .monitorFont(size: 9, weight: .medium)
+                                .foregroundColor(.gray.opacity(0.45))
+                                .frame(width: 34 * fontScale, alignment: .leading)
+                            Text(event.message)
+                                .monitorFont(size: 10)
+                                .foregroundColor(event.isFailure
+                                                 ? Color.onyxRed.opacity(0.75)
+                                                 : .white.opacity(0.6))
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 1)
                     }
                 }
             }

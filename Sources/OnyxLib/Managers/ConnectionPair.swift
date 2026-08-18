@@ -418,6 +418,8 @@ public final class ConnectionPair {
                     master process exited: host=\(self.host.label, privacy: .public) \
                     slot=\(i, privacy: .public) pid=\(pid, privacy: .public) — definitive death
                     """)
+                DiagnosticLog.shared.record("ssh",
+                    "\(self.host.label): connection \(i) process exited", failure: true)
                 s[i].phase = .dead
                 s[i].masterPID = nil
             }
@@ -447,6 +449,9 @@ public final class ConnectionPair {
                         """)
                     if s[i].consecutiveFailures >= Self.checkFailureThreshold {
                         OnyxLog.ssh.notice("slot \(i, privacy: .public) died (corroborated): host=\(self.host.label, privacy: .public)")
+                        DiagnosticLog.shared.record("ssh",
+                            "\(self.host.label): connection \(i) died after \(s[i].consecutiveFailures) failed checks",
+                            failure: true)
                         s[i].phase = .dead
                     }
                 }
@@ -531,6 +536,9 @@ public final class ConnectionPair {
                 PAIR FAILOVER: host=\(self.host.label, privacy: .public) \
                 slot \(old, privacy: .public) → slot \(self.activeIndex, privacy: .public)
                 """)
+            DiagnosticLog.shared.record("ssh",
+                "\(self.host.label): failed over to standby connection (was \(old))",
+                failure: true)
         }
 
         // 6. Pre-emptive rotation — ONLY when no terminals are attached.
