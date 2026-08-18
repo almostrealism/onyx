@@ -88,19 +88,26 @@ public class GitManager: ObservableObject {
         let (cmd, args, stdin) = appState.remoteScript(Self.statusScript(for: path))
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin)
+            let run = FileBrowserManager.runRemoteScriptDetailed(cmd: cmd, args: args, stdin: stdin)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoading = false
-                guard let output = output else {
+                guard let output = run.cleaned else {
                     // Ran, but nothing usable came back — a truncated
-                    // script, a shell that never answered, a dead channel.
-                    // Whatever it was, don't leave the panel silently
-                    // missing.
+                    // script, a refused channel, a shell that never
+                    // answered. Say which, in the host's own words: a
+                    // generic "couldn't read git status" is what left this
+                    // undiagnosable for months.
+                    let host = self.appState.activeHost?.label ?? "this host"
+                    OnyxLog.ssh.notice("""
+                        git status failed: host=\(host, privacy: .public) \
+                        exit=\(run.exitCode, privacy: .public) \
+                        timedOut=\(run.timedOut, privacy: .public) \
+                        hostSaid=\(run.hostSaid ?? "(nothing)", privacy: .public)
+                        """)
                     self.isGitRepo = false
                     self.repoStatus = nil
-                    self.unavailableReason =
-                        "couldn't read git status on \(self.appState.activeHost?.label ?? "this host")"
+                    self.unavailableReason = "git status on \(host): \(run.failureDetail)"
                     return
                 }
                 self.unavailableReason = nil

@@ -148,59 +148,14 @@ public class MonitorManager: ObservableObject {
         return exit == 255 ? .transport(detail) : .remoteScript(detail)
     }
 
-    /// What the HOST itself said, out of everything it sent back.
-    ///
-    /// Over `ssh -tt` the remote's errors arrive on the PTY mixed into
-    /// stdout, not stderr — so when a poll comes back with nothing usable
-    /// this is where the actual complaint lives (`zsh: event not found`,
-    /// `command not found`, a sudo prompt…). We were capturing it and
-    /// throwing it away, then reporting a timeout, which told the user
-    /// nothing about what had gone wrong on the other end.
-    ///
-    /// Skips our own scaffolding — section markers, the execution marker,
-    /// prompt escape sequences — and returns the first real line.
+    /// See RemoteScript.remoteComplaint — kept as a shim so the
+    /// monitor's call sites and tests read the same as before.
     static func remoteComplaint(in output: String) -> String? {
-        let line = output
-            .replacingOccurrences(of: "\r", with: "\n")
-            .components(separatedBy: .newlines)
-            .map { stripControlSequences($0).trimmingCharacters(in: .whitespaces) }
-            .first { candidate in
-                guard !candidate.isEmpty else { return false }
-                // Our own markers say nothing about the host.
-                if candidate.hasPrefix("---") && candidate.hasSuffix("---") { return false }
-                if candidate.contains("ONYX-OK") { return false }
-                // A line with no letters or digits is prompt residue.
-                return candidate.rangeOfCharacter(from: .alphanumerics) != nil
-            }
-        guard let line else { return nil }
-        return line.count > 160 ? String(line.prefix(160)) + "…" : line
+        RemoteScript.remoteComplaint(in: output)
     }
 
-    /// Drop ANSI/terminal escape sequences a PTY sprays into the stream.
     static func stripControlSequences(_ s: String) -> String {
-        var out = ""
-        var iterator = s.unicodeScalars.makeIterator()
-        while let scalar = iterator.next() {
-            guard scalar == "\u{1B}" else {              // ESC
-                if scalar.value < 0x20 && scalar != "\t" { continue }
-                out.unicodeScalars.append(scalar)
-                continue
-            }
-            guard let intro = iterator.next() else { break }
-            guard intro == "[" || intro == "]" else {
-                // Two-character escape — the intro byte was the whole of
-                // it. (Note `[` itself is in the "final byte" range, so
-                // scanning for a final byte without this check would stop
-                // on the CSI intro and leak "1m" into the text.)
-                continue
-            }
-            // CSI: parameter and intermediate bytes, then a final byte in
-            // @…~ terminates the sequence.
-            while let next = iterator.next() {
-                if next.value >= 0x40 && next.value <= 0x7E { break }
-            }
-        }
-        return out
+        RemoteScript.stripControlSequences(s)
     }
 
     /// First line of stderr that says something — ssh often leads with

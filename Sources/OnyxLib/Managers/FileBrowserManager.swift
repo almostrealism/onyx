@@ -712,9 +712,47 @@ public class FileBrowserManager: ObservableObject {
     /// as a failure indistinguishable from a connection error, which is
     /// the right call: the stale data on screen is more useful than empty.
     static func runRemoteScript(cmd: String, args: [String], stdin: String?, timeout: TimeInterval = 10) -> String? {
+        runRemoteScriptDetailed(cmd: cmd, args: args, stdin: stdin, timeout: timeout).cleaned
+    }
+
+    /// What a remote script run actually produced, failure included.
+    ///
+    /// `runRemoteScript` collapses every failure to nil, which is fine for
+    /// callers that just keep stale data — but it means nobody can say WHY
+    /// it failed. That is how the git panel spent months absent with no
+    /// explanation available anywhere. Callers that show the user
+    /// something should use this and report `failureDetail`.
+    struct RemoteRun {
+        /// Cleaned output, or nil when the script didn't verifiably run.
+        let cleaned: String?
+        let exitCode: Int32
+        let timedOut: Bool
+        /// The remote's own words, when it said anything.
+        let hostSaid: String?
+        /// Did any output arrive at all?
+        let hadOutput: Bool
+
+        /// One line naming what went wrong, in the host's words where
+        /// possible.
+        var failureDetail: String {
+            if timedOut { return "no answer within the time budget" }
+            if !hadOutput { return "no output (exit \(exitCode))" }
+            if let hostSaid { return hostSaid }
+            return "output arrived but the script never confirmed it ran (exit \(exitCode))"
+        }
+    }
+
+    static func runRemoteScriptDetailed(cmd: String, args: [String], stdin: String?,
+                                        timeout: TimeInterval = 10) -> RemoteRun {
         let result = runProcessWithStatus(cmd: cmd, args: args, stdin: stdin, timeout: timeout)
-        guard let output = result.output, RemoteScript.executionVerified(in: output) else { return nil }
-        return RemoteScript.cleanedOutput(output)
+        let raw = result.output ?? ""
+        let verified = RemoteScript.executionVerified(in: raw)
+        return RemoteRun(
+            cleaned: verified ? RemoteScript.cleanedOutput(raw) : nil,
+            exitCode: result.exitCode,
+            timedOut: result.timedOut,
+            hostSaid: RemoteScript.remoteComplaint(in: raw),
+            hadOutput: !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     static func runProcessWithStatus(cmd: String,

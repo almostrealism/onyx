@@ -146,6 +146,52 @@ public enum RemoteScript {
         return tail.joined(separator: "\n")
     }
 
+    /// What the HOST itself said, out of everything it sent back.
+    ///
+    /// Over `ssh -tt` the remote's errors arrive on the PTY mixed into
+    /// stdout, not stderr — so when a call comes back with nothing usable
+    /// this is where the actual complaint lives (`zsh: event not found`,
+    /// `command not found`, a refused channel, a sudo prompt…). Skips our
+    /// own scaffolding — section markers, the execution marker, prompt
+    /// escape sequences — and returns the first real line.
+    ///
+    /// Moved here from MonitorManager: every remote feature needs it. The
+    /// stats bugs took days each precisely because this evidence was
+    /// captured and then discarded.
+    public static func remoteComplaint(in output: String) -> String? {
+        let line = output
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: .newlines)
+            .map { stripControlSequences($0).trimmingCharacters(in: .whitespaces) }
+            .first { candidate in
+                guard !candidate.isEmpty else { return false }
+                if candidate.hasPrefix("---") && candidate.hasSuffix("---") { return false }
+                if candidate.contains("ONYX-OK") { return false }
+                return candidate.rangeOfCharacter(from: .alphanumerics) != nil
+            }
+        guard let line else { return nil }
+        return line.count > 160 ? String(line.prefix(160)) + "…" : line
+    }
+
+    /// Drop ANSI/terminal escape sequences a PTY sprays into the stream.
+    public static func stripControlSequences(_ s: String) -> String {
+        var out = ""
+        var iterator = s.unicodeScalars.makeIterator()
+        while let scalar = iterator.next() {
+            guard scalar == "\u{1B}" else {
+                if scalar.value < 0x20 && scalar != "\t" { continue }
+                out.unicodeScalars.append(scalar)
+                continue
+            }
+            guard let intro = iterator.next() else { break }
+            guard intro == "[" || intro == "]" else { continue }
+            while let next = iterator.next() {
+                if next.value >= 0x40 && next.value <= 0x7E { break }
+            }
+        }
+        return out
+    }
+
     /// User-facing message for output that came back without the
     /// execution marker — almost always means the remote shell is in
     /// noexec mode.
