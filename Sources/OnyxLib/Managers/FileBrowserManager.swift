@@ -731,14 +731,26 @@ public class FileBrowserManager: ObservableObject {
         let hostSaid: String?
         /// Did any output arrive at all?
         let hadOutput: Bool
+        /// How much came back, and the start of it (control sequences
+        /// stripped, newlines flattened). "A login banner then silence"
+        /// and "our own script echoed back but never ran" are
+        /// indistinguishable without this, and they point at completely
+        /// different faults.
+        let byteCount: Int
+        let preview: String
 
         /// One line naming what went wrong, in the host's words where
         /// possible.
         var failureDetail: String {
             if timedOut { return "no answer within the time budget" }
-            if !hadOutput { return "no output (exit \(exitCode))" }
-            if let hostSaid { return hostSaid }
-            return "output arrived but the script never confirmed it ran (exit \(exitCode))"
+            if !hadOutput { return "no output at all (exit \(exitCode))" }
+            // Output came back without the completion marker: the session
+            // answered but our script never ran to the end. Say THAT —
+            // quoting the host's first line alone showed a login banner
+            // as though the banner were the error.
+            let opening = hostSaid.map { ", starting \"\($0)\"" } ?? ""
+            return "the session answered but never ran the script "
+                + "(\(byteCount)B back, exit \(exitCode)\(opening))"
         }
     }
 
@@ -747,12 +759,20 @@ public class FileBrowserManager: ObservableObject {
         let result = runProcessWithStatus(cmd: cmd, args: args, stdin: stdin, timeout: timeout)
         let raw = result.output ?? ""
         let verified = RemoteScript.executionVerified(in: raw)
+        let flattened = RemoteScript.stripControlSequences(
+            raw.replacingOccurrences(of: "\r", with: "\n"))
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " | ")
         return RemoteRun(
             cleaned: verified ? RemoteScript.cleanedOutput(raw) : nil,
             exitCode: result.exitCode,
             timedOut: result.timedOut,
             hostSaid: RemoteScript.remoteComplaint(in: raw),
-            hadOutput: !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            hadOutput: !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            byteCount: raw.count,
+            preview: String(flattened.prefix(400)))
     }
 
     static func runProcessWithStatus(cmd: String,
