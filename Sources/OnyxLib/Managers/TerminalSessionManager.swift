@@ -217,9 +217,26 @@ class OnyxTerminalView: NSView {
                 }
             }
             reconnect()
-        case .reattaching, .needsKeySetup:
-            // reattaching: the recovery-wait timer handles it.
-            // needsKeySetup: genuinely needs the user.
+        case .needsKeySetup:
+            // The pair is up, which means this host authenticated us —
+            // whatever the probe thought. A key prompt cannot coexist with
+            // a working connection, so clear it and reattach instead of
+            // waiting for the user to act on a false alarm.
+            OnyxLog.session.notice("""
+                auto-heal: \(health.hostID.uuidString.prefix(8), privacy: .public) is connected —                 clearing the key-setup claim
+                """)
+            if appState.keySetupHostID == hostID {
+                appState.needsKeySetup = false
+                appState.keySetupHostID = nil
+            }
+            for session in appState.allSessions where session.source.hostID == hostID {
+                if case .needsKeySetup = appState.sessionConnectionStates[session.id] ?? .connected {
+                    clearSessionState(for: session.id)
+                }
+            }
+            reconnect()
+        case .reattaching:
+            // The recovery-wait timer handles it.
             break
         }
     }
@@ -1065,7 +1082,7 @@ class OnyxTerminalView: NSView {
         publishPoolStatus()
     }
 
-    private enum ProbeResult {
+    enum ProbeResult {
         case ok
         case unreachable
         case keyAuthFailed
@@ -1112,7 +1129,38 @@ class OnyxTerminalView: NSView {
                 """)
             if attempt < 2 { Thread.sleep(forTimeInterval: 1.0) }
         }
-        return .keyAuthFailed
+
+        // A working connection outranks a failed probe, always. The pair
+        // may have come back while we were probing (that's exactly when
+        // probes run — `sshMuxAlive` was false on entry), and telling
+        // someone to install a key they're actively using is indefensible.
+        if appState.hostUsable(host) || appState.sshMuxAlive(for: host) {
+            OnyxLog.session.notice("""
+                probe failed but \(host.label, privacy: .public) is connected —                 treating as reachable
+                """)
+            return .ok
+        }
+        return Self.classifyProbeFailure(stderr: lastErr)
+    }
+
+    /// Decide what a failed probe actually means.
+    ///
+    /// This used to be `return .keyAuthFailed` — unconditionally, for any
+    /// failure at all. stderr was captured and then ignored, so a timeout,
+    /// a refused mux channel or a momentary network drop all announced
+    /// "install your SSH key" across every session on the host. Only
+    /// OpenSSH actually saying the authentication was refused means that.
+    static func classifyProbeFailure(stderr: String) -> ProbeResult {
+        let lowered = stderr.lowercased()
+        let authRefusals = [
+            "permission denied",
+            "no supported authentication methods",
+            "too many authentication failures",
+            "host key verification failed",
+        ]
+        return authRefusals.contains(where: { lowered.contains($0) })
+            ? .keyAuthFailed
+            : .unreachable
     }
 
     func startKeySetup() {
@@ -1339,6 +1387,16 @@ class OnyxTerminalView: NSView {
                 DispatchQueue.main.async {
                     // Guard against race: host may have been removed while probe was running
                     guard self.appState.hosts.contains(where: { $0.id == hostID }) else { return }
+                    // Last line of defence: never demand a key for a host
+                    // we're demonstrably connected to. The probe and the
+                    // connection pair are independent, and the pair is the
+                    // one with actual evidence.
+                    guard !self.appState.hostUsable(host) else {
+                        OnyxLog.session.notice("""
+                            suppressing key-setup prompt for \(label, privacy: .public) —                             the host is connected
+                            """)
+                        return
+                    }
                     self.appState.needsKeySetup = true
                     self.appState.keySetupHostID = hostID
                     self.setHostState(
@@ -1875,7 +1933,12 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
             if self.appState.needsKeySetup,
                let hid = self.appState.keySetupHostID,
                let session = self.appState.activeSession,
-               session.source.hostID == hid {
+               session.source.hostID == hid,
+               // …but not if we're connected to that host right now. The
+               // flag is sticky: once a probe set it, EVERY later session
+               // death re-raised the overlay until something cleared it,
+               // which is why it seemed to be on constantly.
+               !self.appState.hostUsable(self.appState.host(for: hid)) {
                 let label = self.appState.host(for: hid)?.label ?? "remote host"
                 self.setSessionState(
                     .needsKeySetup(error: "Key authentication failed for \(label).\nInstall your SSH key to connect."),
