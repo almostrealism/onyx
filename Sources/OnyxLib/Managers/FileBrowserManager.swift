@@ -775,6 +775,50 @@ public class FileBrowserManager: ObservableObject {
             preview: String(flattened.prefix(400)))
     }
 
+    /// Run a script on a host, preferring a pipe over a terminal.
+    ///
+    /// Order matters and is the whole point:
+    ///
+    ///   1. `-T` (no tty). stdin is a plain pipe — no ~1KB input queue, no
+    ///      line discipline, nothing that can truncate or mangle the
+    ///      script. This is how a data command SHOULD be delivered, and it
+    ///      is what fixes hosts that were corrupting the payload's tail
+    ///      (the shell would report "command not found" for the mangled
+    ///      remainder and exit 127, with no completion marker).
+    ///
+    ///   2. Only if that comes back WITHOUT the completion marker, retry
+    ///      with `-tt`. A missing marker is the noexec signature — the
+    ///      remote profile refusing to execute a non-interactive shell —
+    ///      which is precisely what the interactive form defeats. So the
+    ///      defence is intact; we just stop paying a terminal's
+    ///      constraints for every call on every healthy host.
+    ///
+    /// Local hosts have neither problem and run once.
+    static func runScriptWithFallback(_ script: String,
+                                      appState: AppState,
+                                      host: HostConfig? = nil,
+                                      timeout: TimeInterval = 10) -> RemoteRun {
+        let target = host ?? appState.activeHost
+        if target?.isLocal ?? true {
+            let (cmd, args, stdin) = appState.remoteScript(script, host: target)
+            return runRemoteScriptDetailed(cmd: cmd, args: args, stdin: stdin, timeout: timeout)
+        }
+
+        let piped = appState.remoteScriptNoTTY(script, host: target)
+        let first = runRemoteScriptDetailed(cmd: piped.cmd, args: piped.args,
+                                            stdin: piped.stdin, timeout: timeout)
+        if first.cleaned != nil { return first }
+
+        DiagnosticLog.shared.record("ssh",
+            "\(target?.label ?? "host"): no marker over a plain pipe — retrying with a terminal")
+        let tty = appState.remoteScript(script, host: target)
+        let second = runRemoteScriptDetailed(cmd: tty.cmd, args: tty.args,
+                                             stdin: tty.stdin, timeout: timeout)
+        // Report whichever attempt got further, so the failure message
+        // describes the better evidence rather than the last try.
+        return second.cleaned != nil || second.byteCount >= first.byteCount ? second : first
+    }
+
     static func runProcessWithStatus(cmd: String,
                                      args: [String],
                                      stdin: String? = nil,

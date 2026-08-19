@@ -85,10 +85,11 @@ public class GitManager: ObservableObject {
         isLoading = true
         currentRepoPath = path
 
-        let (cmd, args, stdin) = appState.remoteScript(Self.statusScript(for: path))
+        let script = Self.statusScript(for: path)
+        let state = appState
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let run = FileBrowserManager.runRemoteScriptDetailed(cmd: cmd, args: args, stdin: stdin)
+            let run = FileBrowserManager.runScriptWithFallback(script, appState: state)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoading = false

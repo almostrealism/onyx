@@ -1664,6 +1664,30 @@ public class AppState: ObservableObject {
     /// (tmux, docker exec -it) use `sshCommand` / `dockerTmuxCommand`
     /// directly — those are safe by virtue of being interactive.
     public func remoteScript(_ script: String, host: HostConfig? = nil) -> (cmd: String, args: [String], stdin: String?) {
+        remoteScript(script, host: host, allocateTTY: true)
+    }
+
+    /// The same invocation without a terminal on the far end.
+    ///
+    /// `-tt` exists to defeat noexec shells (see RemoteScript's header),
+    /// and it costs us dearly: a terminal has a ~1KB input queue, drops
+    /// what it can't hold, and — as observed on a real host — can hand the
+    /// shell a MANGLED tail, which then reports "command not found" and
+    /// takes the session down with it (exit 127, no completion marker, no
+    /// error anyone could act on).
+    ///
+    /// Without a tty, stdin is an ordinary pipe: no queue limit, no line
+    /// discipline, no echo, nothing to corrupt. The trade is that the
+    /// remote shell is then NON-interactive, which is exactly the state a
+    /// noexec profile can poison — so callers should try this first and
+    /// fall back to the tty form when the completion marker doesn't come
+    /// back. `FileBrowserManager.runScriptWithFallback` does that.
+    public func remoteScriptNoTTY(_ script: String, host: HostConfig? = nil) -> (cmd: String, args: [String], stdin: String?) {
+        remoteScript(script, host: host, allocateTTY: false)
+    }
+
+    private func remoteScript(_ script: String, host: HostConfig?,
+                              allocateTTY: Bool) -> (cmd: String, args: [String], stdin: String?) {
         let h = host ?? activeHost ?? .localhost
         let wrapped = RemoteScript.wrap(script)
 
@@ -1673,8 +1697,18 @@ public class AppState: ObservableObject {
         }
 
         var args = sshBaseArgs(for: h)
-        args.append("-tt")
+        if allocateTTY {
+            args.append("-tt")
+        } else {
+            // -T: explicitly no terminal. The script arrives over a pipe,
+            // intact, at any size.
+            args.append("-T")
+        }
         args.append(sshUserHost(for: h))
+        guard allocateTTY else {
+            // No tty: no echo to suppress, and the shell exits at EOF.
+            return ("/usr/bin/ssh", args, wrapped + "\n")
+        }
         // NB: `-tt` puts a TERMINAL on the far end, and a terminal cannot
         // be written to at full speed — see RemoteExec's paced stdin
         // writer, which is what actually gets this script delivered
