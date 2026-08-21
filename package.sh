@@ -14,10 +14,12 @@
 #                        identity in your keychain.
 #   ONYX_TEAM_ID         Apple Developer team ID.
 #   ONYX_APPLE_ID        Apple ID used for notarization.
-#   ONYX_NOTARY_PROFILE  Preferred over ONYX_APPLE_ID: a notarytool
-#                        keychain profile created once with
-#                        `xcrun notarytool store-credentials`.
-#                        Then no password ever appears in a command line.
+#   ONYX_NOTARY_PROFILE  Only needed to override the default. Notarization
+#                        uses a notarytool keychain profile named ONYX,
+#                        created once with:
+#                          xcrun notarytool store-credentials ONYX \
+#                            --apple-id <id> --team-id <TEAMID>
+#                        No password ever appears in a command line.
 #
 # The signing certificate lives in the login keychain of the user who owns
 # it, so run this as that user — `security find-identity -v -p codesigning`
@@ -180,20 +182,29 @@ fi
 # ------------------------------------------------------------- notarize
 if [ "$DO_NOTARIZE" = "1" ]; then
     echo "  Submitting for notarization (this waits for Apple)..."
-    if [ -n "${ONYX_NOTARY_PROFILE:-}" ]; then
+    # Default to a profile named after the app. Anyone who ran
+    # `notarytool store-credentials ONYX` — which is what the docs above
+    # tell you to do — should not then have to export a variable saying
+    # so. Set ONYX_NOTARY_PROFILE only to use a differently-named one.
+    PROFILE="${ONYX_NOTARY_PROFILE:-ONYX}"
+    if xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
+        echo "  Using notary profile: $PROFILE"
         xcrun notarytool submit "$DMG_PATH" \
-            --keychain-profile "$ONYX_NOTARY_PROFILE" --wait
+            --keychain-profile "$PROFILE" --wait
     elif [ -n "${ONYX_APPLE_ID:-}" ] && [ -n "${ONYX_TEAM_ID:-}" ]; then
         # Password is read from the keychain item, never passed here.
         xcrun notarytool submit "$DMG_PATH" \
             --apple-id "$ONYX_APPLE_ID" --team-id "$ONYX_TEAM_ID" \
             --password "@keychain:ONYX_NOTARY_PASSWORD" --wait
     else
-        echo "  ERROR: set ONYX_NOTARY_PROFILE (preferred), or both" >&2
-        echo "  ONYX_APPLE_ID and ONYX_TEAM_ID with the app-specific" >&2
-        echo "  password stored in the keychain as ONYX_NOTARY_PASSWORD." >&2
-        echo "  Create a profile once with:" >&2
-        echo "    xcrun notarytool store-credentials ONYX --apple-id … --team-id …" >&2
+        echo "  ERROR: no usable notarization credentials." >&2
+        echo "  Looked for a keychain profile named '$PROFILE'." >&2
+        echo "  Create one once with:" >&2
+        echo "    xcrun notarytool store-credentials ONYX \\" >&2
+        echo "      --apple-id <your-apple-id> --team-id <TEAMID>" >&2
+        echo "  (or set ONYX_NOTARY_PROFILE to a different profile name," >&2
+        echo "  or ONYX_APPLE_ID + ONYX_TEAM_ID with the password stored" >&2
+        echo "  in the keychain as ONYX_NOTARY_PASSWORD)." >&2
         exit 1
     fi
     xcrun stapler staple "$DMG_PATH"
