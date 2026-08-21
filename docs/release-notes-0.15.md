@@ -87,6 +87,18 @@ actually said instead of guessing.
 - Failures now say what happened — the exit code, whether it timed out, and
   the remote's own first line — instead of "connection failed".
 
+## Packaging
+
+- `./package.sh` builds `Onyx.app` and a drag-to-install DMG, stamping the
+  version from the git tag so the bundle can't drift from the release.
+  `--sign` adds a Developer ID signature with the hardened runtime;
+  `--notarize` submits and staples. Credentials come from the environment
+  or a notarytool keychain profile — none live in the repo.
+- Fixed: the app bundle was shipping **without its SPM resource bundles**.
+  `.build/release` is a symlink and BSD `find` doesn't follow symlinks, so
+  the copy silently matched nothing — which is why the dock icon (loaded
+  through `Bundle.module`) went missing. `install.sh` had the same bug.
+
 ## Fixes
 
 - Reordering favorites steps over entries this window doesn't render, so

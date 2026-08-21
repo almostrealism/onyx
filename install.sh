@@ -45,8 +45,14 @@ cp "Sources/OnyxApp/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 # Copy app icon so Finder shows it
 cp "Sources/OnyxApp/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 
-# Copy SPM resource bundles (needed for Bundle.module at runtime)
-find "$BUILD_DIR" -name '*.bundle' -maxdepth 1 -exec cp -R {} "$APP_BUNDLE/Contents/Resources/" \;
+# SPM resource bundles — Bundle.module needs these at runtime.
+# NB: .build/release is a SYMLINK to arm64-apple-macosx/release, and BSD
+# find does not follow symlinks, so `find "$BUILD_DIR" -name '*.bundle'`
+# silently matched NOTHING and every install shipped without them (the
+# dock icon is loaded via Bundle.module, so it quietly went missing).
+for bundle in "$BUILD_DIR"/*.bundle; do
+    [ -e "$bundle" ] && cp -R "$bundle" "$APP_BUNDLE/Contents/Resources/"
+done
 
 # Sign ad-hoc (required on Apple Silicon)
 codesign --force --sign - "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
