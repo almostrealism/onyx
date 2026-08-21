@@ -138,12 +138,30 @@ if [ "$DO_SIGN" = "1" ]; then
             | sed 's/.*"\(.*\)"/\1/')
     fi
     if [ -z "$IDENTITY" ]; then
-        echo "  ERROR: no Developer ID Application identity found." >&2
-        echo "  Run as the user who owns the certificate, or set" >&2
-        echo "  ONYX_SIGN_IDENTITY. Check with:" >&2
-        echo "    security find-identity -v -p codesigning" >&2
-        exit 1
+        # Ask rather than exit. A certificate can't be typed into
+        # existence — that's the one thing a prompt can't fix — but the
+        # usual causes are a locked keychain (already handled above), a
+        # non-default keychain, or an identity whose name we didn't
+        # match. All of those the user can answer right here.
+        echo ""
+        echo "  No Developer ID Application identity was found automatically."
+        echo "  Identities visible to this account:"
+        security find-identity -v -p codesigning 2>/dev/null | sed 's/^/    /' || true
+        echo ""
+        echo "  Enter the identity to sign with (paste the full name in"
+        echo "  quotes from the list above), or leave blank to build an"
+        echo "  UNSIGNED DMG and stop before notarization."
+        ask IDENTITY "  Identity: "
+        if [ -z "$IDENTITY" ]; then
+            echo "  Continuing unsigned."
+            DO_SIGN=0
+            DO_NOTARIZE=0
+        fi
     fi
+fi
+
+# Re-check: the prompt above may have turned signing off.
+if [ "$DO_SIGN" = "1" ]; then
     echo "  Signing as: $IDENTITY"
     # Hardened runtime is required for notarization. Onyx spawns ssh and
     # scp as child processes, so it needs the inherit exception; without
@@ -224,47 +242,127 @@ if [ "$DO_SIGN" = "1" ]; then
 fi
 
 # ------------------------------------------------------------- notarize
-if [ "$DO_NOTARIZE" = "1" ]; then
-    echo "  Submitting for notarization (this waits for Apple)..."
-    # Default to a profile named after the app. Anyone who ran
-    # `notarytool store-credentials ONYX` — which is what the docs above
-    # tell you to do — should not then have to export a variable saying
-    # so. Set ONYX_NOTARY_PROFILE only to use a differently-named one.
-    PROFILE="${ONYX_NOTARY_PROFILE:-ONYX}"
-    # The profile lives in the keychain, so it can only be read while the
-    # keychain is open. Signing may have finished an hour ago.
-    ensure_keychain_unlocked "notarytool reads its profile from the keychain"
-    if keychain_locked; then
-        echo "  ERROR: the keychain is locked, so the '$PROFILE' profile" >&2
-        echo "  can't be read. Unlock it and retry:" >&2
-        echo "    security unlock-keychain \"$KEYCHAIN_PATH\"" >&2
-        exit 1
+#
+# The contract for this section: it finishes with a notarized DMG, or it
+# keeps asking you for what it needs. It does not stop to tell you to go
+# and run something yourself.
+# Read an answer from the user. Prefers the controlling terminal so a
+# prompt still works when stdin is redirected, but falls back to stdin
+# when there ISN'T a terminal (piped input, CI) instead of silently
+# reading nothing and looping on empty answers.
+ask() {   # ask VAR "prompt" [--secret]
+    __var="$1"; __prompt="$2"; __secret="${3:-}"
+    if [ -r /dev/tty ]; then __src=/dev/tty; else __src=/dev/stdin; fi
+    if [ "$__secret" = "--secret" ]; then
+        read -r -s -p "$__prompt" __answer <"$__src" || __answer=""
+        echo ""
+    else
+        read -r -p "$__prompt" __answer <"$__src" || __answer=""
     fi
+    eval "$__var=\$__answer"
+}
+
+prompt_notary_credentials() {
+    NOTARY_CONF="$HOME/.onyx-notary.conf"
+    [ -f "$NOTARY_CONF" ] && . "$NOTARY_CONF"
+
+    DEFAULT_ID="${ONYX_APPLE_ID:-${SAVED_APPLE_ID:-}}"
+    if [ -n "$DEFAULT_ID" ]; then
+        ask APPLE_ID "  Apple ID [$DEFAULT_ID]: "
+        APPLE_ID="${APPLE_ID:-$DEFAULT_ID}"
+    else
+        ask APPLE_ID "  Apple ID: "
+    fi
+
+    DEFAULT_TEAM="${ONYX_TEAM_ID:-${SAVED_TEAM_ID:-}}"
+    if [ -n "$DEFAULT_TEAM" ]; then
+        ask TEAM_ID "  Team ID [$DEFAULT_TEAM]: "
+        TEAM_ID="${TEAM_ID:-$DEFAULT_TEAM}"
+    else
+        ask TEAM_ID "  Team ID: "
+    fi
+
+    ask APP_PASSWORD "  App-specific password: " --secret
+
+    # Remember the non-secret half so this is normally just the password.
+    umask 077
+    cat > "$NOTARY_CONF" <<CONF
+SAVED_APPLE_ID="$APPLE_ID"
+SAVED_TEAM_ID="$TEAM_ID"
+CONF
+}
+
+if [ "$DO_NOTARIZE" = "1" ]; then
+    ensure_keychain_unlocked "notarytool reads its profile from the keychain"
+    PROFILE="${ONYX_NOTARY_PROFILE:-ONYX}"
+
+    NOTARY_ARGS=""
+    # A profile is used only if it actually WORKS — not if it merely
+    # exists. Locked, unreadable and absent all mean the same thing here:
+    # ask the human.
     if xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
         echo "  Using notary profile: $PROFILE"
-        xcrun notarytool submit "$DMG_PATH" \
-            --keychain-profile "$PROFILE" --wait
-    elif [ -n "${ONYX_APPLE_ID:-}" ] && [ -n "${ONYX_TEAM_ID:-}" ]; then
-        # Password is read from the keychain item, never passed here.
-        xcrun notarytool submit "$DMG_PATH" \
-            --apple-id "$ONYX_APPLE_ID" --team-id "$ONYX_TEAM_ID" \
-            --password "@keychain:ONYX_NOTARY_PASSWORD" --wait
-    else
-        echo "  ERROR: no usable notarization credentials." >&2
-        echo "  Looked for a keychain profile named '$PROFILE' in" >&2
-        echo "  $KEYCHAIN_PATH (unlocked: yes — so it really is absent," >&2
-        echo "  or stored in a different keychain/user account)." >&2
-        echo "  Create one once with:" >&2
-        echo "    xcrun notarytool store-credentials ONYX \\" >&2
-        echo "      --apple-id <your-apple-id> --team-id <TEAMID>" >&2
-        echo "  (or set ONYX_NOTARY_PROFILE to a different profile name," >&2
-        echo "  or ONYX_APPLE_ID + ONYX_TEAM_ID with the password stored" >&2
-        echo "  in the keychain as ONYX_NOTARY_PASSWORD)." >&2
+        NOTARY_ARGS="--keychain-profile $PROFILE"
+    fi
+
+    NOTARIZED=0
+    for attempt in 1 2 3; do
+        if [ -z "$NOTARY_ARGS" ]; then
+            echo ""
+            if [ "$attempt" = "1" ]; then
+                echo "  Notarization credentials needed."
+                echo "  (No working '$PROFILE' profile on this machine.)"
+            else
+                echo "  That didn't authenticate. Try again (attempt $attempt of 3)."
+                echo "  The password is an APP-SPECIFIC password from"
+                echo "  appleid.apple.com, not your Apple ID password."
+            fi
+            echo ""
+            prompt_notary_credentials
+
+            # Save a profile so future runs need no prompt. Best effort:
+            # macOS refuses this write over SSH even with the keychain
+            # unlocked, which must never block a release.
+            if xcrun notarytool store-credentials "$PROFILE" \
+                    --apple-id "$APPLE_ID" --team-id "$TEAM_ID" \
+                    --password "$APP_PASSWORD" >/dev/null 2>&1; then
+                echo "  Saved profile '$PROFILE' for next time."
+                NOTARY_ARGS="--keychain-profile $PROFILE"
+            else
+                echo "  (Keychain wouldn't store the profile — macOS blocks"
+                echo "   that write over SSH. Using the credentials directly"
+                echo "   for this run.)"
+                # NB: this puts the password in this process's argv, which
+                # is readable via `ps` by other users on the machine for
+                # the duration of the submit. The keychain profile avoids
+                # that; run once from the desktop session to store it.
+                NOTARY_ARGS="--apple-id $APPLE_ID --team-id $TEAM_ID --password $APP_PASSWORD"
+            fi
+        fi
+
+        echo "  Submitting for notarization (this waits for Apple)..."
+        # shellcheck disable=SC2086
+        if xcrun notarytool submit "$DMG_PATH" $NOTARY_ARGS --wait; then
+            NOTARIZED=1
+            unset APP_PASSWORD
+            break
+        fi
+        # Failed. Drop the credentials and go round again.
+        NOTARY_ARGS=""
+        unset APP_PASSWORD
+    done
+
+    if [ "$NOTARIZED" != "1" ]; then
+        echo "  Notarization did not succeed after 3 attempts." >&2
+        echo "  The DMG at $DMG_PATH is signed but NOT notarized:" >&2
+        echo "  Gatekeeper will refuse it on other Macs." >&2
         exit 1
     fi
+
     xcrun stapler staple "$DMG_PATH"
     xcrun stapler validate "$DMG_PATH"
     spctl -a -t open --context context:primary-signature -vv "$DMG_PATH" || true
+    echo "  Notarized and stapled."
 fi
 
 echo ""

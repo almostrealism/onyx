@@ -8,3 +8,4 @@ DerivedData/
 Onyx.app
 hang.txt
 dist/
+.onyx-notary.conf
