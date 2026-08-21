@@ -13,6 +13,8 @@
 #                        Defaults to the first Developer ID Application
 #                        identity in your keychain.
 #   ONYX_TEAM_ID         Apple Developer team ID.
+#   ONYX_SKIP_LAUNCH_CHECK=1  Skip the post-build launch check (it opens
+#                        the app for four seconds).
 #   ONYX_APPLE_ID        Apple ID used for notarization.
 #   ONYX_NOTARY_PROFILE  Only needed to override the default. Notarization
 #                        uses a notarytool keychain profile named ONYX,
@@ -165,6 +167,38 @@ else
     # Gatekeeper will still warn on another Mac — that's what --sign is for.
     codesign --force --sign - "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
     codesign --force --sign - "$APP_BUNDLE"
+fi
+
+# --------------------------------------------------------------- verify
+# Launch the assembled app and confirm it's still alive a moment later.
+#
+# The first packaged DMG crashed in OnyxApp.init() — before any window —
+# because Bundle.module couldn't find its resource bundle. Nothing in the
+# build caught it: SPM's fallback is an absolute path into THIS machine's
+# .build directory, so on the build machine it always resolves. That is
+# also this check's blind spot; BundleResourceTests is the real guard.
+# What this catches is the gross stuff — a missing dylib, a bad signature,
+# an immediate abort — which is worth the four seconds.
+if [ "${ONYX_SKIP_LAUNCH_CHECK:-0}" != "1" ]; then
+    echo "  Checking the app starts..."
+    LAUNCH_LOG=$(mktemp)
+    "$APP_BUNDLE/Contents/MacOS/$APP_NAME" >"$LAUNCH_LOG" 2>&1 &
+    LAUNCH_PID=$!
+    sleep 4
+    if kill -0 "$LAUNCH_PID" 2>/dev/null; then
+        kill -9 "$LAUNCH_PID" 2>/dev/null || true
+        wait "$LAUNCH_PID" 2>/dev/null || true
+        echo "  Starts cleanly."
+    else
+        echo "  ERROR: the app exited immediately after launch." >&2
+        echo "  ---" >&2
+        tail -20 "$LAUNCH_LOG" >&2
+        echo "  ---" >&2
+        echo "  Refusing to build a DMG that won't start." >&2
+        rm -f "$LAUNCH_LOG"
+        exit 1
+    fi
+    rm -f "$LAUNCH_LOG"
 fi
 
 # ------------------------------------------------------------------ dmg

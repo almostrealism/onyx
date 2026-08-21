@@ -1,0 +1,277 @@
+-------------------------------------
+Translated Report (Full Report Below)
+-------------------------------------
+Process:             Onyx [26902]
+Path:                /Volumes/*/Onyx.app/Contents/MacOS/Onyx
+Identifier:          com.onyx.terminal
+Version:             0.15 (0.15)
+Code Type:           ARM-64 (Native)
+Role:                Background
+Parent Process:      launchd [1]
+Coalition:           com.onyx.terminal [211940]
+User ID:             501
+
+Date/Time:           2026-08-21 12:56:22.2175 -0700
+Launch Time:         2026-08-21 12:56:20.6859 -0700
+Hardware Model:      Mac16,6
+OS Version:          macOS 26.3.1 (25D2128)
+Release Type:        User
+
+Crash Reporter Key:  046F35C9-D9A0-68AE-C8C8-64941FF0AA7D
+Incident Identifier: B655F748-EFCD-4EFB-BD8B-5CD73BFD3B0A
+
+Time Awake Since Boot: 1700000 seconds
+
+System Integrity Protection: enabled
+
+Triggered by Thread: 0, Dispatch Queue: com.apple.main-thread
+
+Exception Type:    EXC_BREAKPOINT (SIGTRAP)
+Exception Codes:   0x0000000000000001, 0x00000001ad67e9d4
+
+Termination Reason:  Namespace SIGNAL, Code 5, Trace/BPT trap: 5
+Terminating Process: exc handler [26902]
+
+
+Thread 0 Crashed::  Dispatch queue: com.apple.main-thread
+0   libswiftCore.dylib            	       0x1ad67e9d4 _assertionFailure(_:_:file:line:flags:) + 176
+1   Onyx                          	       0x100242a90 closure #1 in variable initialization expression of static NSBundle.module + 628
+2   Onyx                          	       0x10024280c one-time initialization function for module + 12
+3   libdispatch.dylib             	       0x199f6cad4 _dispatch_client_callout + 16
+4   libdispatch.dylib             	       0x199f55a60 _dispatch_once_callout + 32
+5   Onyx                          	       0x100241e2c OnyxApp.init() + 508
+6   SwiftUI                       	       0x1ceab9310 static App.main() + 208
+7   Onyx                          	       0x10024225c Onyx_main + 40
+8   dyld                          	       0x199d45d54 start + 7184
+
+
+Thread 0 crashed with ARM Thread State (64-bit):
+    x0: 0x0000000100fee3f8   x1: 0x0000000200000003   x2: 0x00000000000011a4   x3: 0x00000000000000c8
+    x4: 0x0000000100ff1ac0   x5: 0x0000000000000013   x6: 0x0000000000000020   x7: 0x0000000000000000
+    x8: 0xfffffffe00000000   x9: 0x0000000200000003  x10: 0x0000000000000003  x11: 0x0000000000000009
+   x12: 0x0000000000000000  x13: 0x0000000000000092  x14: 0x0000000000000000  x15: 0x00000000ffffffa6
+   x16: 0x92b1000100fd0090  x17: 0x00000000000021a4  x18: 0x0000000000000000  x19: 0x0000000100fedcf0
+   x20: 0x000000016fbbf340  x21: 0xf00000000000002c  x22: 0xaedcf7b7d0cc49db  x23: 0x00000001006bbf40
+   x24: 0xd00000000000004e  x25: 0x000000010071c000  x26: 0x000000010071b000  x27: 0x0000000000000000
+   x28: 0x0000000000000000   fp: 0x000000016fbbf300   lr: 0x00000001ad67e9d4
+    sp: 0x000000016fbbf280   pc: 0x00000001ad67e9d4 cpsr: 0x60000000
+   far: 0x0000000000000000  esr: 0xf2000001 (Breakpoint) brk 1
+
+Binary Images:
+       0x100240000 -        0x1006effff com.onyx.terminal (0.15) <0416bcec-905b-35dd-bed4-e6a49e3e2df9> /Volumes/*/Onyx.app/Contents/MacOS/Onyx
+       0x1ad547000 -        0x1adad56df libswiftCore.dylib (*) <ef17eaac-5e38-3d8f-9849-a68224788fa6> /usr/lib/swift/libswiftCore.dylib
+       0x199f51000 -        0x199f97e5f libdispatch.dylib (*) <4c58ab31-f363-3e75-a8f8-302105812dbf> /usr/lib/system/libdispatch.dylib
+       0x1ce324000 -        0x1cfa6af7f com.apple.SwiftUI (7.3.2) <a01a90c1-cc14-30ae-8fb9-e5173c413f95> /System/Library/Frameworks/SwiftUI.framework/Versions/A/SwiftUI
+       0x199d3d000 -        0x199ddc713 dyld (*) <044cd67e-3a0a-3ca4-8bb3-a9687d5328fe> /usr/lib/dyld
+               0x0 - 0xffffffffffffffff ??? (*) <00000000-0000-0000-0000-000000000000> ???
+
+External Modification Summary:
+  Calls made by other processes targeting this process:
+    task_for_pid: 0
+    thread_create: 0
+    thread_set_state: 0
+  Calls made by this process:
+    task_for_pid: 0
+    thread_create: 0
+    thread_set_state: 0
+  Calls made by all processes on this machine:
+    task_for_pid: 0
+    thread_create: 0
+    thread_set_state: 0
+
+VM Region Summary:
+ReadOnly portion of Libraries: Total=1.5G resident=0K(0%) swapped_out_or_unallocated=1.5G(100%)
+Writable regions: Total=85.5M written=272K(0%) resident=272K(0%) swapped_out=0K(0%) unallocated=85.2M(100%)
+
+                                VIRTUAL   REGION 
+REGION TYPE                        SIZE    COUNT (non-coalesced) 
+===========                     =======  ======= 
+.note.gnu.proper                    320        1 
+Activity Tracing                   256K        1 
+Kernel Alloc Once                   32K        1 
+MALLOC                            76.9M       10 
+MALLOC guard page                 3712K        4 
+STACK GUARD                       56.0M        1 
+Stack                             8176K        1 
+__AUTH                            3688K      361 
+__AUTH_CONST                      59.6M      663 
+__CTF                               824        1 
+__DATA                            24.2M      617 
+__DATA_CONST                      26.5M      670 
+__DATA_DIRTY                      4718K      567 
+__FONT_DATA                        2352        1 
+__INFO_FILTER                         8        1 
+__LINKEDIT                       595.7M        2 
+__OBJC_RO                         78.4M        1 
+__OBJC_RW                         2571K        1 
+__TEXT                           898.7M      689 
+__TPRO_CONST                       128K        2 
+mapped file                         80K        1 
+page table in kernel               272K        1 
+shared memory                       48K        2 
+===========                     =======  ======= 
+TOTAL                              1.8G     3599 
+
+
+-----------
+Full Report
+-----------
+
+{"app_name":"Onyx","timestamp":"2026-08-21 12:56:23.00 -0700","app_version":"0.15","slice_uuid":"0416bcec-905b-35dd-bed4-e6a49e3e2df9","build_version":"0.15","platform":1,"bundleID":"com.onyx.terminal","share_with_app_devs":1,"is_first_party":0,"bug_type":"309","os_version":"macOS 26.3.1 (25D2128)","roots_installed":0,"name":"Onyx","incident_id":"B655F748-EFCD-4EFB-BD8B-5CD73BFD3B0A"}
+{
+  "uptime" : 1700000,
+  "procRole" : "Background",
+  "version" : 2,
+  "userID" : 501,
+  "deployVersion" : 210,
+  "modelCode" : "Mac16,6",
+  "coalitionID" : 211940,
+  "osVersion" : {
+    "train" : "macOS 26.3.1",
+    "build" : "25D2128",
+    "releaseType" : "User"
+  },
+  "captureTime" : "2026-08-21 12:56:22.2175 -0700",
+  "codeSigningMonitor" : 2,
+  "incident" : "B655F748-EFCD-4EFB-BD8B-5CD73BFD3B0A",
+  "pid" : 26902,
+  "translated" : false,
+  "cpuType" : "ARM-64",
+  "procLaunch" : "2026-08-21 12:56:20.6859 -0700",
+  "procStartAbsTime" : 41167807014197,
+  "procExitAbsTime" : 41167843764443,
+  "procName" : "Onyx",
+  "procPath" : "\/Volumes\/*\/Onyx.app\/Contents\/MacOS\/Onyx",
+  "bundleInfo" : {"CFBundleShortVersionString":"0.15","CFBundleVersion":"0.15","CFBundleIdentifier":"com.onyx.terminal"},
+  "storeInfo" : {"deviceIdentifierForVendor":"6E031D25-3919-5C88-B218-84EFA4A9015F","thirdParty":true},
+  "parentProc" : "launchd",
+  "parentPid" : 1,
+  "coalitionName" : "com.onyx.terminal",
+  "crashReporterKey" : "046F35C9-D9A0-68AE-C8C8-64941FF0AA7D",
+  "appleIntelligenceStatus" : {"state":"available"},
+  "developerMode" : 1,
+  "codeSigningID" : "com.onyx.terminal",
+  "codeSigningTeamID" : "H2K4TPY5AW",
+  "codeSigningFlags" : 570491649,
+  "codeSigningValidationCategory" : 6,
+  "codeSigningTrustLevel" : 4294967295,
+  "codeSigningAuxiliaryInfo" : 0,
+  "instructionByteStream" : {"beforePC":"IAAg1MEF+LfpAwC54gMDquMDBKrkAwWq5QMGquYDB6rnAwiqQgMAlA==","atPC":"IAAg1CgAgFKJEoBS6BMAuekHAPlIAIBS6AMAOSAbANAA0D2RIxsA8A=="},
+  "bootSessionUUID" : "E080BD1C-F7A7-45F4-A861-FEB4427A04DE",
+  "sip" : "enabled",
+  "exception" : {"codes":"0x0000000000000001, 0x00000001ad67e9d4","rawCodes":[1,7204235732],"type":"EXC_BREAKPOINT","signal":"SIGTRAP"},
+  "termination" : {"flags":0,"code":5,"namespace":"SIGNAL","indicator":"Trace\/BPT trap: 5","byProc":"exc handler","byPid":26902},
+  "os_fault" : {"process":"Onyx"},
+  "extMods" : {"caller":{"thread_create":0,"thread_set_state":0,"task_for_pid":0},"system":{"thread_create":0,"thread_set_state":0,"task_for_pid":0},"targeted":{"thread_create":0,"thread_set_state":0,"task_for_pid":0},"warnings":0},
+  "faultingThread" : 0,
+  "threads" : [{"triggered":true,"id":502944510,"threadState":{"x":[{"value":4311671800},{"value":8589934595},{"value":4516},{"value":200},{"value":4311685824},{"value":19},{"value":32},{"value":0},{"value":18446744065119617024},{"value":8589934595},{"value":3},{"value":9},{"value":0},{"value":146},{"value":0},{"value":4294967206},{"value":10570229804726812816},{"value":8612},{"value":0},{"value":4311670000},{"value":6169555776},{"value":17293822569102704684},{"value":12600218226329930203},{"value":4302028608},{"value":14987979559889010766},{"value":4302422016},{"value":4302417920},{"value":0},{"value":0}],"flavor":"ARM_THREAD_STATE64","lr":{"value":7204235732},"cpsr":{"value":1610612736},"fp":{"value":6169555712},"sp":{"value":6169555584},"esr":{"value":4060086273,"description":"(Breakpoint) brk 1"},"pc":{"value":7204235732,"matchesCrashFrame":1},"far":{"value":0}},"queue":"com.apple.main-thread","frames":[{"imageOffset":1276372,"symbol":"_assertionFailure(_:_:file:line:flags:)","symbolLocation":176,"imageIndex":1},{"imageOffset":10896,"symbol":"closure #1 in variable initialization expression of static NSBundle.module","symbolLocation":628,"imageIndex":0},{"imageOffset":10252,"symbol":"one-time initialization function for module","symbolLocation":12,"imageIndex":0},{"imageOffset":113364,"symbol":"_dispatch_client_callout","symbolLocation":16,"imageIndex":2},{"imageOffset":19040,"symbol":"_dispatch_once_callout","symbolLocation":32,"imageIndex":2},{"imageOffset":7724,"symbol":"OnyxApp.init()","symbolLocation":508,"imageIndex":0},{"imageOffset":7951120,"symbol":"static App.main()","symbolLocation":208,"imageIndex":3},{"imageOffset":8796,"symbol":"Onyx_main","symbolLocation":40,"imageIndex":0},{"imageOffset":36180,"symbol":"start","symbolLocation":7184,"imageIndex":4}]}],
+  "usedImages" : [
+  {
+    "source" : "P",
+    "arch" : "arm64",
+    "base" : 4297326592,
+    "CFBundleShortVersionString" : "0.15",
+    "CFBundleIdentifier" : "com.onyx.terminal",
+    "size" : 4915200,
+    "uuid" : "0416bcec-905b-35dd-bed4-e6a49e3e2df9",
+    "path" : "\/Volumes\/*\/Onyx.app\/Contents\/MacOS\/Onyx",
+    "name" : "Onyx",
+    "CFBundleVersion" : "0.15"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 7202959360,
+    "size" : 5826272,
+    "uuid" : "ef17eaac-5e38-3d8f-9849-a68224788fa6",
+    "path" : "\/usr\/lib\/swift\/libswiftCore.dylib",
+    "name" : "libswiftCore.dylib"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6877941760,
+    "size" : 290400,
+    "uuid" : "4c58ab31-f363-3e75-a8f8-302105812dbf",
+    "path" : "\/usr\/lib\/system\/libdispatch.dylib",
+    "name" : "libdispatch.dylib"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 7754366976,
+    "CFBundleShortVersionString" : "7.3.2",
+    "CFBundleIdentifier" : "com.apple.SwiftUI",
+    "size" : 24407936,
+    "uuid" : "a01a90c1-cc14-30ae-8fb9-e5173c413f95",
+    "path" : "\/System\/Library\/Frameworks\/SwiftUI.framework\/Versions\/A\/SwiftUI",
+    "name" : "SwiftUI",
+    "CFBundleVersion" : "7.3.2"
+  },
+  {
+    "source" : "P",
+    "arch" : "arm64e",
+    "base" : 6875762688,
+    "size" : 653076,
+    "uuid" : "044cd67e-3a0a-3ca4-8bb3-a9687d5328fe",
+    "path" : "\/usr\/lib\/dyld",
+    "name" : "dyld"
+  },
+  {
+    "size" : 0,
+    "source" : "A",
+    "base" : 0,
+    "uuid" : "00000000-0000-0000-0000-000000000000"
+  }
+],
+  "sharedCache" : {
+  "base" : 6874677248,
+  "size" : 5820792832,
+  "uuid" : "674db25a-34b2-3c56-8bd4-7d78005b2f2e"
+},
+  "vmSummary" : "ReadOnly portion of Libraries: Total=1.5G resident=0K(0%) swapped_out_or_unallocated=1.5G(100%)\nWritable regions: Total=85.5M written=272K(0%) resident=272K(0%) swapped_out=0K(0%) unallocated=85.2M(100%)\n\n                                VIRTUAL   REGION \nREGION TYPE                        SIZE    COUNT (non-coalesced) \n===========                     =======  ======= \n.note.gnu.proper                    320        1 \nActivity Tracing                   256K        1 \nKernel Alloc Once                   32K        1 \nMALLOC                            76.9M       10 \nMALLOC guard page                 3712K        4 \nSTACK GUARD                       56.0M        1 \nStack                             8176K        1 \n__AUTH                            3688K      361 \n__AUTH_CONST                      59.6M      663 \n__CTF                               824        1 \n__DATA                            24.2M      617 \n__DATA_CONST                      26.5M      670 \n__DATA_DIRTY                      4718K      567 \n__FONT_DATA                        2352        1 \n__INFO_FILTER                         8        1 \n__LINKEDIT                       595.7M        2 \n__OBJC_RO                         78.4M        1 \n__OBJC_RW                         2571K        1 \n__TEXT                           898.7M      689 \n__TPRO_CONST                       128K        2 \nmapped file                         80K        1 \npage table in kernel               272K        1 \nshared memory                       48K        2 \n===========                     =======  ======= \nTOTAL                              1.8G     3599 \n",
+  "legacyInfo" : {
+  "threadTriggered" : {
+    "queue" : "com.apple.main-thread"
+  }
+},
+  "logWritingSignature" : "1eb705043c049ec6aaad593f9d3f7f436232625c",
+  "bug_type" : "309",
+  "roots_installed" : 0,
+  "trmStatus" : 1,
+  "trialInfo" : {
+  "rollouts" : [
+    {
+      "rolloutId" : "639124e81d92412bfb4880b3",
+      "factorPackIds" : [
+
+      ],
+      "deploymentId" : 240000012
+    },
+    {
+      "rolloutId" : "6434420a89ec2e0a7a38bf5a",
+      "factorPackIds" : [
+
+      ],
+      "deploymentId" : 240000011
+    }
+  ],
+  "experiments" : [
+
+  ]
+}
+}
+
+Model: Mac16,6, BootROM 13822.81.10, proc 16:12:4:0 processors, 128 GB, SMC 
+Graphics: Apple M4 Max, Apple M4 Max, Built-In
+Display: Color LCD, 3024 x 1964 Retina, Main, MirrorOff, Online
+Memory Module: LPDDR5, Hynix
+AirPort: spairport_wireless_card_type_wifi (0x14E4, 0x4388), wl0: Dec  6 2025 00:30:14 version 23.41.8.0.41.51.201 FWID 01-990604ea
+IO80211_driverkit-1540.16 "IO80211_driverkit-1540.16" Jan 27 2026 21:02:00
+AirPort: 
+Bluetooth: Version (null), 0 services, 0 devices, 0 incoming serial ports
+Network Service: Wi-Fi, AirPort, en0
+Network Service: Tailscale, VPN (io.tailscale.ipn.macos), utun4
+Thunderbolt Bus: MacBook Pro, Apple Inc.
+Thunderbolt Bus: MacBook Pro, Apple Inc.
+Thunderbolt Bus: MacBook Pro, Apple Inc.
