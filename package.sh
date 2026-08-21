@@ -39,6 +39,29 @@ APP_BUNDLE="$STAGE_DIR/$APP_NAME.app"
 # a failed signature, which is exactly when you'd forget. `set-keychain-
 # settings` with no -lut restores lock-on-sleep; leaving an hour-long
 # window open on someone's desktop because a build failed would be rude.
+KEYCHAIN_PATH="${ONYX_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
+
+keychain_locked() {
+    [ -f "$KEYCHAIN_PATH" ] || return 1          # no keychain: nothing to unlock
+    ! security show-keychain-info "$KEYCHAIN_PATH" >/dev/null 2>&1
+}
+
+# Unlock if needed. Called before signing AND again before notarizing:
+# notarytool reads its credential profile OUT OF THE KEYCHAIN, so a
+# keychain that re-locked during the build breaks notarization just as
+# surely as it breaks codesign — and reports it as a missing profile.
+ensure_keychain_unlocked() {
+    [ -f "$KEYCHAIN_PATH" ] || return 0
+    if ! keychain_locked; then return 0; fi
+    echo "  Unlocking login keychain ($1)..."
+    security unlock-keychain "$KEYCHAIN_PATH"
+    # -ut, NOT -lut: `-l` means "also lock when the system sleeps", which
+    # is how the keychain kept re-locking in the middle of a notarization
+    # wait. Timeout only, generous enough for Apple's turnaround.
+    security set-keychain-settings -ut 7200 "$KEYCHAIN_PATH"
+    RELOCK_KEYCHAIN=1
+}
+
 restore_keychain() {
     if [ "${RELOCK_KEYCHAIN:-0}" = "1" ]; then
         security set-keychain-settings "$KEYCHAIN_PATH" 2>/dev/null || true
@@ -106,20 +129,7 @@ if [ "$DO_SIGN" = "1" ]; then
     # what makes this work over SSH; it's the GUI prompt that isn't
     # allowed. Skipped when the keychain is already unlocked, so a
     # desktop run is untouched.
-    KEYCHAIN_PATH="${ONYX_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
-    if [ -f "$KEYCHAIN_PATH" ]; then
-        if security show-keychain-info "$KEYCHAIN_PATH" >/dev/null 2>&1; then
-            echo "  Keychain already unlocked."
-        else
-            echo "  Unlocking login keychain (codesign needs the private key)..."
-            security unlock-keychain "$KEYCHAIN_PATH"
-            # Hold it open long enough to sign, and to notarize if that
-            # follows — Apple's turnaround is minutes, not seconds. This
-            # OUTLIVES the script, so put it back afterwards.
-            security set-keychain-settings -lut 3600 "$KEYCHAIN_PATH"
-            RELOCK_KEYCHAIN=1
-        fi
-    fi
+    ensure_keychain_unlocked "codesign needs the private key"
 
     IDENTITY="${ONYX_SIGN_IDENTITY:-}"
     if [ -z "$IDENTITY" ]; then
@@ -221,6 +231,15 @@ if [ "$DO_NOTARIZE" = "1" ]; then
     # tell you to do — should not then have to export a variable saying
     # so. Set ONYX_NOTARY_PROFILE only to use a differently-named one.
     PROFILE="${ONYX_NOTARY_PROFILE:-ONYX}"
+    # The profile lives in the keychain, so it can only be read while the
+    # keychain is open. Signing may have finished an hour ago.
+    ensure_keychain_unlocked "notarytool reads its profile from the keychain"
+    if keychain_locked; then
+        echo "  ERROR: the keychain is locked, so the '$PROFILE' profile" >&2
+        echo "  can't be read. Unlock it and retry:" >&2
+        echo "    security unlock-keychain \"$KEYCHAIN_PATH\"" >&2
+        exit 1
+    fi
     if xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
         echo "  Using notary profile: $PROFILE"
         xcrun notarytool submit "$DMG_PATH" \
@@ -232,7 +251,9 @@ if [ "$DO_NOTARIZE" = "1" ]; then
             --password "@keychain:ONYX_NOTARY_PASSWORD" --wait
     else
         echo "  ERROR: no usable notarization credentials." >&2
-        echo "  Looked for a keychain profile named '$PROFILE'." >&2
+        echo "  Looked for a keychain profile named '$PROFILE' in" >&2
+        echo "  $KEYCHAIN_PATH (unlocked: yes — so it really is absent," >&2
+        echo "  or stored in a different keychain/user account)." >&2
         echo "  Create one once with:" >&2
         echo "    xcrun notarytool store-credentials ONYX \\" >&2
         echo "      --apple-id <your-apple-id> --team-id <TEAMID>" >&2
