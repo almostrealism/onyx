@@ -31,6 +31,18 @@ DIST_DIR="dist"
 STAGE_DIR="$DIST_DIR/stage"
 APP_BUNDLE="$STAGE_DIR/$APP_NAME.app"
 
+# Put the keychain's lock behaviour back however we leave — including on
+# a failed signature, which is exactly when you'd forget. `set-keychain-
+# settings` with no -lut restores lock-on-sleep; leaving an hour-long
+# window open on someone's desktop because a build failed would be rude.
+restore_keychain() {
+    if [ "${RELOCK_KEYCHAIN:-0}" = "1" ]; then
+        security set-keychain-settings "$KEYCHAIN_PATH" 2>/dev/null || true
+        echo "  Keychain lock settings restored."
+    fi
+}
+trap restore_keychain EXIT
+
 DO_SIGN=0
 DO_NOTARIZE=0
 for arg in "$@"; do
@@ -80,6 +92,31 @@ PLIST="$APP_BUNDLE/Contents/Info.plist"
 
 # ----------------------------------------------------------------- sign
 if [ "$DO_SIGN" = "1" ]; then
+    # Over SSH the login keychain stays LOCKED after login, and codesign
+    # can't reach the private key: it fails with "User interaction is not
+    # allowed" rather than anything mentioning the keychain. Unlock it
+    # here, but only when we're actually signing — an unsigned build has
+    # no business asking for a password.
+    #
+    # `security unlock-keychain` with no -p reads from the tty, which is
+    # what makes this work over SSH; it's the GUI prompt that isn't
+    # allowed. Skipped when the keychain is already unlocked, so a
+    # desktop run is untouched.
+    KEYCHAIN_PATH="${ONYX_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
+    if [ -f "$KEYCHAIN_PATH" ]; then
+        if security show-keychain-info "$KEYCHAIN_PATH" >/dev/null 2>&1; then
+            echo "  Keychain already unlocked."
+        else
+            echo "  Unlocking login keychain (codesign needs the private key)..."
+            security unlock-keychain "$KEYCHAIN_PATH"
+            # Hold it open long enough to sign, and to notarize if that
+            # follows — Apple's turnaround is minutes, not seconds. This
+            # OUTLIVES the script, so put it back afterwards.
+            security set-keychain-settings -lut 3600 "$KEYCHAIN_PATH"
+            RELOCK_KEYCHAIN=1
+        fi
+    fi
+
     IDENTITY="${ONYX_SIGN_IDENTITY:-}"
     if [ -z "$IDENTITY" ]; then
         IDENTITY=$(security find-identity -v -p codesigning \

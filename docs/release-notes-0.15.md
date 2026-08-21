@@ -93,7 +93,10 @@ actually said instead of guessing.
   version from the git tag so the bundle can't drift from the release.
   `--sign` adds a Developer ID signature with the hardened runtime;
   `--notarize` submits and staples. Credentials come from the environment
-  or a notarytool keychain profile — none live in the repo.
+  or a notarytool keychain profile — none live in the repo. Over SSH it
+  unlocks the login keychain first (codesign can't reach the private key
+  otherwise, and says only "user interaction is not allowed"), and puts
+  the lock settings back on the way out.
 - Fixed: the app bundle was shipping **without its SPM resource bundles**.
   `.build/release` is a symlink and BSD `find` doesn't follow symlinks, so
   the copy silently matched nothing — which is why the dock icon (loaded
