@@ -152,7 +152,7 @@ struct SimpleTodayReminders: View {
     /// Enough to be useful, few enough to stay readable at a distance.
     /// Counted across every group, not per group — three lists of five
     /// is still fifteen lines of text on a wall-mounted display.
-    private let maxShown = 8
+    private let maxShown = 10
 
     var body: some View {
         let groups = reminders.todayGroupedByList(preferredOrder: listOrder)
