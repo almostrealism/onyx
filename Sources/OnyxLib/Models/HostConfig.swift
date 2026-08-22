@@ -137,11 +137,15 @@ public struct AppearanceConfig: Codable {
     /// approve/deny a tool call from the Onyx UI. Off by default — when off,
     /// Claude's normal in-terminal permission prompt is used.
     public var claudeHooksGatePermissions: Bool = false
-    /// When true, simple mode lists today's reminders down the left side.
-    /// Toggled with `D` while the overlay is up. Simple mode is meant to
-    /// be readable across a room, so this is one short list — what am I
-    /// doing today — not the full sectioned view.
-    public var simpleShowReminders: Bool = true
+    /// When true, simple mode shows a left column of session notes above
+    /// today's reminders. Toggled with `D` while the overlay is up.
+    ///
+    /// Off by default: simple mode exists to be a wall of charts, and
+    /// this trades chart width for text. Simple mode is also meant to be
+    /// readable across a room, so the column is deliberately terse — a
+    /// status dot per session and a capped list of what's due, not the
+    /// full sectioned view the detailed overlay gives you.
+    public var simpleShowSidePanel: Bool = false
     /// When true, the monitor's reminders section shows only what's due by
     /// the end of tomorrow (still grouped by list). Toggled with `R` while
     /// the overlay is up; persisted because it's a standing preference for
@@ -231,7 +235,7 @@ public struct AppearanceConfig: Codable {
         case remindersList, remindersLists, lastSessionByWindow
         case extraTimezones, use12HourClock
         case claudeHooksGatePermissions, showFocusOutline
-        case searchFileTypeIDs, remindersDueSoonOnly, simpleShowReminders
+        case searchFileTypeIDs, remindersDueSoonOnly, simpleShowSidePanel
     }
 
     public init(from decoder: Decoder) throws {
@@ -253,6 +257,6 @@ public struct AppearanceConfig: Codable {
         self.showFocusOutline           = try c.decodeIfPresent(Bool.self,           forKey: .showFocusOutline)           ?? false
         self.searchFileTypeIDs          = try c.decodeIfPresent([String].self,       forKey: .searchFileTypeIDs)          ?? []
         self.remindersDueSoonOnly       = try c.decodeIfPresent(Bool.self,           forKey: .remindersDueSoonOnly)       ?? false
-        self.simpleShowReminders        = try c.decodeIfPresent(Bool.self,           forKey: .simpleShowReminders)        ?? true
+        self.simpleShowSidePanel        = try c.decodeIfPresent(Bool.self,           forKey: .simpleShowSidePanel)        ?? false
     }
 }

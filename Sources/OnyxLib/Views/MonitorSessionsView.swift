@@ -143,18 +143,49 @@ struct ClaudeSessionsSection: View {
 /// Lists the user-supplied status notes attached to currently-existing
 /// sessions, ordered like the favorites bar. Hides itself entirely when
 /// there are no notes so the monitor doesn't carry a dead heading.
+/// One rendered session-note row: the note plus the ⌘N that actually
+/// reaches it. Shared by the detailed overlay and simple mode's side
+/// panel so the two can't disagree about what order sessions come in.
+struct SessionNoteEntry {
+    let session: TmuxSession
+    let note: SessionNote
+    /// Favorites-bar position (1-based) — nil when this session isn't a
+    /// favorite of this window and therefore has no ⌘N shortcut.
+    let shortcut: Int?
+}
+
+/// Ordered to match the favorites bar at the bottom of the window: this
+/// window's favorites first in bar order, then any other noted session by
+/// most recent output. Free function rather than a method so simple mode
+/// gets the identical ordering without inheriting the whole section view.
+func orderedSessionNotes(appState: AppState,
+                         store: SessionNotesStore = .shared) -> [SessionNoteEntry] {
+    let noted = store.activeNotes(in: appState.allSessions)
+    let byID = Dictionary(noted.map { ($0.session.id, $0) },
+                          uniquingKeysWith: { first, _ in first })
+    var rows: [SessionNoteEntry] = []
+    var placed = Set<String>()
+    for (idx, fav) in appState.favoriteSessions.enumerated() {
+        guard let hit = byID[fav.id] else { continue }
+        rows.append(SessionNoteEntry(session: hit.session, note: hit.note,
+                                     shortcut: idx < 9 ? idx + 1 : nil))
+        placed.insert(fav.id)
+    }
+    let lastActivity: ((session: TmuxSession, note: SessionNote)) -> Date = {
+        TerminalActivityStore.shared.lastOutput(for: $0.session.id) ?? $0.note.updated
+    }
+    let rest = noted
+        .filter { !placed.contains($0.session.id) }
+        .sorted { lastActivity($0) > lastActivity($1) }
+    rows.append(contentsOf: rest.map {
+        SessionNoteEntry(session: $0.session, note: $0.note, shortcut: nil)
+    })
+    return rows
+}
+
 struct SessionNotesSection: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var store = SessionNotesStore.shared
-
-    /// One rendered row: the note plus the ⌘N that actually reaches it.
-    private struct Entry {
-        let session: TmuxSession
-        let note: SessionNote
-        /// Favorites-bar position (1-based) — nil when this session isn't a
-        /// favorite of this window and therefore has no ⌘N shortcut.
-        let shortcut: Int?
-    }
 
     /// Ordered to match the favorites bar at the bottom of the window:
     /// this window's favorites first in bar order, then any other noted
@@ -164,26 +195,8 @@ struct SessionNotesSection: View {
     /// never its position in this list. A favorite with no note is skipped
     /// here but still owns its number — that mismatch (press ⌘4, land on
     /// the 5th favorite) is exactly what the badges exist to prevent.
-    private var orderedEntries: [Entry] {
-        let noted = store.activeNotes(in: appState.allSessions)
-        let byID = Dictionary(noted.map { ($0.session.id, $0) },
-                              uniquingKeysWith: { first, _ in first })
-        var rows: [Entry] = []
-        var placed = Set<String>()
-        for (idx, fav) in appState.favoriteSessions.enumerated() {
-            guard let hit = byID[fav.id] else { continue }
-            rows.append(Entry(session: hit.session,
-                              note: hit.note,
-                              shortcut: idx < 9 ? idx + 1 : nil))
-            placed.insert(fav.id)
-        }
-        let rest = noted
-            .filter { !placed.contains($0.session.id) }
-            .sorted { lastActivity($0) > lastActivity($1) }
-        rows.append(contentsOf: rest.map {
-            Entry(session: $0.session, note: $0.note, shortcut: nil)
-        })
-        return rows
+    private var orderedEntries: [SessionNoteEntry] {
+        orderedSessionNotes(appState: appState, store: store)
     }
 
     /// Most recent terminal output, falling back to when the note itself was

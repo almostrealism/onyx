@@ -480,7 +480,7 @@ final class CodableRoundTripTests: XCTestCase {
         config.showFocusOutline = true
         config.searchFileTypeIDs = ["java", "python"]
         config.remindersDueSoonOnly = true
-        config.simpleShowReminders = false   // default is true, so flip it
+        config.simpleShowSidePanel = true    // default is false, so flip it
 
         let data = try JSONEncoder().encode(config)
         let d = try JSONDecoder().decode(AppearanceConfig.self, from: data)
@@ -501,7 +501,7 @@ final class CodableRoundTripTests: XCTestCase {
         XCTAssertTrue(d.showFocusOutline)
         XCTAssertEqual(d.searchFileTypeIDs, ["java", "python"])
         XCTAssertTrue(d.remindersDueSoonOnly)
-        XCTAssertFalse(d.simpleShowReminders)
+        XCTAssertTrue(d.simpleShowSidePanel)
     }
 
     /// Tripwire: if you add a stored property to AppearanceConfig, this

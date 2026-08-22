@@ -46,7 +46,7 @@ struct HelpOverlay: View {
         .init(keys: "C", label: "Toggle all-containers view"),
         .init(keys: "P", label: "Toggle 12 / 24-hour clock"),
         .init(keys: "R", label: "Reminders: only what's due today / tomorrow"),
-        .init(keys: "D", label: "Simple mode: today's reminders down the left"),
+        .init(keys: "D", label: "Simple mode: sessions + today's reminders on the left"),
     ]
 
     private let features: [(String, String)] = [

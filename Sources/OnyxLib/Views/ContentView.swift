@@ -531,9 +531,9 @@ private struct ContentViewMonitorNotifications: ViewModifier {
                 appState.appearance.remindersDueSoonOnly.toggle()
                 appState.saveAppearance()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .toggleSimpleReminders)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .toggleSimpleSidePanel)) { _ in
                 guard isKeyWindow, appState.showMonitor else { return }
-                appState.appearance.simpleShowReminders.toggle()
+                appState.appearance.simpleShowSidePanel.toggle()
                 appState.saveAppearance()
             }
     }

@@ -20,6 +20,11 @@ struct SimpleMonitorBody: View {
     /// and the today list down the left. It stays in "Today" mode (no
     /// selectedLists wiring), which is exactly the scope simple mode wants.
     @StateObject private var reminders = RemindersManager()
+    /// Observed here, not just inside the panel: `showPanel` depends on
+    /// whether any session has a note, and that decision also controls
+    /// the pills in the bottom strip. Without this, adding the first note
+    /// wouldn't open the column until some other change forced a redraw.
+    @ObservedObject private var notesStore = SessionNotesStore.shared
 
     var body: some View {
         GeometryReader { geo in
@@ -42,25 +47,27 @@ struct SimpleMonitorBody: View {
             let cpuHeight = chartArea * 0.55
             let subHeight = max(40, chartArea * 0.42)
 
-            // Today's reminders take a fixed column down the LEFT, sharing
-            // an edge with the today/by-tmrw chips in the strip below —
-            // the counts and the things being counted line up. Charts keep
-            // whatever's left, which is most of it.
-            // The column only appears when there's room for it — on a narrow
-            // window the charts are the point, and squeezing them to make
-            // space for text would trade the thing you glance at for the
-            // thing you read.
-            let reminderColumn: CGFloat = 260 * fontScale
-            let showReminders = appState.appearance.simpleShowReminders
-                && reminders.accessGranted
-                && reminders.reminders.contains(where: { RemindersManager.isDueToday($0) })
-                && geo.size.width > reminderColumn * 3
+            // The side panel — sessions above today's reminders — takes a
+            // fixed column down the LEFT, sharing an edge with the
+            // today/by-tmrw chips in the strip below, so the counts and the
+            // things being counted line up. Charts keep whatever's left,
+            // which is most of it.
+            //
+            // It only appears when there's room AND something to say: on a
+            // narrow window the charts are the point, and squeezing them for
+            // text would trade the thing you glance at for the thing you
+            // read. An empty column is worse than no column.
+            let panelColumn: CGFloat = 260 * fontScale
+            let showPanel = appState.appearance.simpleShowSidePanel
+                && SimpleSidePanel.hasContent(appState: appState, reminders: reminders,
+                                              store: notesStore)
+                && geo.size.width > panelColumn * 3
 
-            HStack(alignment: .top, spacing: showReminders ? 20 : 0) {
-                if showReminders {
-                    SimpleTodayReminders(reminders: reminders, accentColor: accentColor,
-                                     listOrder: appState.appearance.remindersLists)
-                        .frame(width: reminderColumn, alignment: .topLeading)
+            HStack(alignment: .top, spacing: showPanel ? 20 : 0) {
+                if showPanel {
+                    SimpleSidePanel(appState: appState, reminders: reminders,
+                                    accentColor: accentColor)
+                        .frame(width: panelColumn, alignment: .topLeading)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -119,7 +126,11 @@ struct SimpleMonitorBody: View {
                     SimpleRemindersScope(reminders: reminders)
                     SimpleContainersStrip(dockerStats: dockerStats)
                     Spacer(minLength: 12)
-                    SimpleSessionActivityStrip(appState: appState)
+                    // The panel lists these same sessions with the same
+                    // colours, so the pills would be saying it twice.
+                    if !showPanel {
+                        SimpleSessionActivityStrip(appState: appState)
+                    }
                     SimplePipelinesStrip()
                     if timing.isConfigured {
                         WeeklyTimingTile(timing: timing, accentColor: accentColor)
@@ -128,6 +139,105 @@ struct SimpleMonitorBody: View {
                 .frame(height: bottomStripHeight)
             }
         }
+    }
+}
+
+/// Simple mode's left column: session notes above today's reminders.
+///
+/// Both are "what's on my plate" in a view meant to be read from across
+/// the room, so they share one column and one toggle (`D`). Off by
+/// default — simple mode's whole point is the charts, and this is for
+/// when you want the charts AND the plate.
+struct SimpleSidePanel: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var reminders: RemindersManager
+    let accentColor: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            SimpleSessionNotes(appState: appState, accentColor: accentColor)
+            SimpleTodayReminders(reminders: reminders, accentColor: accentColor,
+                                 listOrder: appState.appearance.remindersLists)
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Whether the column has anything to say. Checked by the parent
+    /// before the width is reserved — an empty 260pt gutter beside the
+    /// charts is worse than no column at all.
+    static func hasContent(appState: AppState, reminders: RemindersManager,
+                           store: SessionNotesStore = .shared) -> Bool {
+        if !orderedSessionNotes(appState: appState, store: store).isEmpty { return true }
+        return reminders.accessGranted
+            && reminders.reminders.contains(where: { RemindersManager.isDueToday($0) })
+    }
+}
+
+/// Session notes for simple mode: a status dot, the ⌘N that reaches it,
+/// and the note. No idle clock — the detailed overlay has the seconds;
+/// here the colour IS the status, which is all you can read at distance.
+struct SimpleSessionNotes: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject private var notesStore = SessionNotesStore.shared
+    @ObservedObject private var activity = TerminalActivityStore.shared
+    let accentColor: Color
+    @Environment(\.monitorFontScale) private var fontScale
+
+    /// The column is shared with reminders, so sessions can't have all
+    /// of it. Favourites come first, so the ones that overflow are the
+    /// ones without a ⌘N anyway.
+    private let maxShown = 6
+
+    var body: some View {
+        let entries = orderedSessionNotes(appState: appState, store: notesStore)
+        if !entries.isEmpty {
+            // One timeline for the whole list rather than one per row:
+            // the dots only change colour as idle time crosses 15s and
+            // 120s, so a 5s tick is plenty and costs one invalidation.
+            TimelineView(.periodic(from: .now, by: 5)) { context in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("SESSIONS")
+                        .monitorFont(size: 10, weight: .medium)
+                        .foregroundColor(accentColor)
+                        .tracking(2)
+
+                    ForEach(Array(entries.prefix(maxShown)), id: \.session.id) { entry in
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Circle()
+                                .fill(dotColor(for: entry.session, now: context.date))
+                                .frame(width: 7, height: 7)
+                            if let n = entry.shortcut {
+                                Text("⌘\(n)")
+                                    .monitorFont(size: 9)
+                                    .foregroundColor(.gray.opacity(0.45))
+                            }
+                            Text(entry.note.text)
+                                .monitorFont(size: 13)
+                                .foregroundColor(appState.activeSession?.id == entry.session.id
+                                                 ? .white.opacity(0.95) : .white.opacity(0.8))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer(minLength: 0)
+                        }
+                    }
+
+                    if entries.count > maxShown {
+                        Text("+\(entries.count - maxShown) more")
+                            .monitorFont(size: 10)
+                            .foregroundColor(.gray.opacity(0.35))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Grey when the session has never reported output — an unknown
+    /// state reads as "not working", which is the safe way round.
+    private func dotColor(for session: TmuxSession, now: Date) -> Color {
+        guard let last = activity.lastOutput(for: session.id) else {
+            return .gray.opacity(0.45)
+        }
+        return monitorSessionActivityColor(now.timeIntervalSince(last))
     }
 }
 
