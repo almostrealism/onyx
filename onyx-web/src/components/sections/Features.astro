@@ -1,34 +1,30 @@
 ---
+// Everything that didn't earn a section of its own. Each of these ships
+// today — if it's listed here, it's in the build you can download.
 const features = [
   {
-    key: 'monitor',
-    title: 'A monitoring overlay for the whole fleet',
-    body: "CPU, memory, GPU — including AMD via amdgpu's own counters and Ryzen AI NPU residency — plus Docker containers, GitHub and GitLab pipelines, open PRs, Apple Reminders and Timing.app hours. One key brings it up over everything.",
+    title: 'Every machine you own, at a glance',
+    body: "CPU, memory and GPU as live charts — including AMD cards through amdgpu's own counters and Ryzen AI NPU residency, not just Apple Silicon. Docker containers ranked by what's actually burning CPU. Hosts you aren't looking at keep being sampled, so the picture is current when you switch to one.",
   },
   {
-    key: 'sessions',
-    title: 'Sessions that survive',
-    body: 'tmux underneath, so scrollback and running jobs outlive any disconnection. Favorites get ⌘1–9. Session notes tell you what each terminal was for, with an activity indicator showing which are still producing output.',
-  },
-  {
-    key: 'files',
     title: 'A remote file browser that knows git',
-    body: 'Branch, staged and changed files above the listing. Search by name or file type across deeply nested trees. Favorite folders are a treemap, so a folder inside a folder looks like one — and two folders with the same name are told apart by what contains them.',
+    body: 'Branch, staged files and working changes sit above the listing. Search by name or file type across a deep tree. Favourite folders are drawn as a treemap, so a folder inside a folder looks like one — and two folders with the same name are told apart by what contains them.',
   },
   {
-    key: 'notes',
+    title: 'Code navigation on the remote machine',
+    body: 'A language server runs where the code lives, not on your laptop. Jump to a definition, find references, list the implementors of an interface or the subtypes of a class — over SSH, without checking anything out locally.',
+  },
+  {
+    title: 'Hours, tracked without asking',
+    body: 'If you use Timing, the week reads back as hours per day and per project, with a ratio bar for how the week actually split. It answers "where did this week go" without opening anything.',
+  },
+  {
     title: 'Notes, palette, browser tabs',
-    body: 'A notes panel that stays out of the way, a ⌘K command palette for everything, and real browser tabs when documentation belongs next to the terminal instead of in another app.',
+    body: "A notes panel that stays out of the way, ⌘K for everything else, and real browser tabs when the documentation belongs beside the terminal instead of in another app. There's a live dashboard you can open as a browser new-tab page, and a screensaver that draws your fleet's CPU.",
   },
   {
-    key: 'agents',
-    title: 'Built for working alongside agents',
-    body: 'Claude Code hooks surface permission requests in the overlay, so a waiting agent is visible instead of buried in a tab. An MCP bridge lets an agent in any repo push diagrams, models and text back into the app.',
-  },
-  {
-    key: 'quiet',
     title: 'Quiet by construction',
-    body: 'Pause a host and Onyx stops reaching for it entirely — favorites and sessions kept, zero connection attempts — which matters when one machine on a bad link is degrading the network for everything else.',
+    body: "Pause a host and Onyx stops reaching for it entirely — favourites, notes and sessions all kept, zero connection attempts, terminals say why. It matters when one machine on a bad link is degrading the network for everything else. Nothing un-pauses itself.",
   },
 ];
 ---
@@ -46,4 +42,14 @@ const features = [
       ))
     }
   </div>
+
+  <p class="mt-14 max-w-2xl text-sm leading-relaxed text-text-muted">
+    None of this phones home. There are no analytics and no account to make. Reminders are
+    read on your Mac through EventKit; GitHub and GitLab are polled directly with tokens
+    you supply, and stop the moment you remove them; your notes, session notes and settings
+    are files in your home directory. The one place content leaves your machine without you
+    aiming it somewhere is diagram rendering, and the
+    <a href="/privacy" class="text-accent-primary transition hover:text-accent-glow">privacy page</a>
+    says exactly where and when.
+  </p>
 </section>

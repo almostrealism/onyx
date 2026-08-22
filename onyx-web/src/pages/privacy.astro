@@ -28,6 +28,19 @@ import Footer from '../components/sections/Footer.astro';
         macOS gates behind its own permission prompt, and which is read-only.
       </p>
       <p>
+        One exception worth stating plainly, because it's the only case where content
+        leaves your machine without you pointing it somewhere: the artifact panel renders
+        in a web view. Diagrams, models and formatted text load their rendering libraries
+        (mermaid, highlight.js, marked) from
+        <span class="font-mono text-text-primary">cdn.jsdelivr.net</span>, so displaying
+        one makes a request to that CDN. And a <span class="font-mono text-text-primary">PlantUML</span>
+        artifact specifically is rendered by
+        <span class="font-mono text-text-primary">plantuml.com</span> — the diagram's
+        source is encoded into the image URL and sent there. Mermaid diagrams render
+        locally in the web view; only the library is fetched. If a diagram's contents are
+        sensitive, use mermaid rather than PlantUML.
+      </p>
+      <p>
         This site is static, served by Cloudflare Pages. It sets no cookies and embeds
         no third-party scripts. Fonts are the only external request.
       </p>

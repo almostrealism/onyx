@@ -1,0 +1,87 @@
+---
+// Sample data — an illustration of the permission prompt and the artifact
+// slots, not a screenshot.
+---
+
+<section class="border-y border-border-subtle bg-bg-secondary/40">
+  <div class="mx-auto max-w-5xl px-6 py-20 sm:py-24">
+    <div class="max-w-2xl">
+      <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
+        Working with agents
+      </p>
+      <h2 class="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
+        Built for the part where you're not the one typing
+      </h2>
+      <p class="mt-4 text-text-secondary">
+        An agent working in a terminal has two failure modes that cost you real time: it
+        finishes and you don't notice, or it stops to ask permission and you don't notice.
+        Both are visibility problems, and the overlay is where they get solved.
+      </p>
+    </div>
+
+    <div class="mt-12 grid items-start gap-10 lg:grid-cols-2">
+      <div>
+        <h3 class="text-lg font-medium">Permission requests come to you</h3>
+        <p class="mt-3 text-sm leading-relaxed text-text-secondary">
+          Claude Code hooks report into Onyx, so its sessions show up as sessions: which
+          are running, what tools they've been reaching for, and how long since each one
+          did anything. A blocked agent stops being a tab you forgot about.
+        </p>
+        <p class="mt-3 text-sm leading-relaxed text-text-secondary">
+          Turn on permission gating and it goes further — a <span class="font-mono text-text-primary">PreToolUse</span>
+          hook holds the agent while the request is shown in Onyx, and your approve or deny
+          is routed back to the waiting hook. It's off by default; leave it off and Claude
+          prompts in the terminal exactly as it always has.
+        </p>
+
+        <div class="mt-6 rounded-xl border border-warn/25 bg-bg-primary/70 p-5">
+          <p class="font-mono text-[10px] tracking-wide text-warn uppercase">
+            Permission requested &middot; api
+          </p>
+          <p class="mt-3 font-mono text-[12px] text-text-primary/90">
+            Bash&nbsp;— <span class="text-text-secondary">terraform apply -auto-approve</span>
+          </p>
+          <div class="mt-4 flex gap-2">
+            <span class="rounded-md bg-ok/15 px-3 py-1 font-mono text-[11px] text-ok">approve</span>
+            <span class="rounded-md bg-bad/15 px-3 py-1 font-mono text-[11px] text-bad">deny</span>
+            <span class="ml-auto self-center font-mono text-[10px] text-text-muted">waiting 0:12</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 class="text-lg font-medium">Agents can put things on your screen</h3>
+        <p class="mt-3 text-sm leading-relaxed text-text-secondary">
+          Onyx runs an MCP server, so an agent working in any repo — on your Mac or on a
+          machine you're connected to — can push a diagram, a data model, or a block of
+          text into one of eight numbered slots and have it appear next to the terminal.
+          Explaining a refactor with a rendered graph beats scrolling back through the
+          description of one.
+        </p>
+        <p class="mt-3 text-sm leading-relaxed text-text-secondary">
+          There's a dependency analyzer in there too: point it at a Java tree and it draws
+          the graph rather than listing the edges.
+        </p>
+
+        <div class="mt-6 rounded-xl border border-border-subtle bg-bg-primary/70 p-5">
+          <p class="font-mono text-[10px] tracking-wide text-accent-primary uppercase">
+            Artifact slots
+          </p>
+          <div class="mt-4 grid grid-cols-4 gap-2 font-mono text-[10px]">
+            <span class="rounded border border-accent-primary/40 bg-accent-primary/10 px-2 py-2 text-center text-accent-primary">1 graph</span>
+            <span class="rounded border border-border-subtle px-2 py-2 text-center text-text-secondary">2 model</span>
+            <span class="rounded border border-border-subtle px-2 py-2 text-center text-text-secondary">3 notes</span>
+            <span class="rounded border border-border-subtle px-2 py-2 text-center text-text-muted">4</span>
+            <span class="rounded border border-border-subtle px-2 py-2 text-center text-text-muted">5</span>
+            <span class="rounded border border-border-subtle px-2 py-2 text-center text-text-muted">6</span>
+            <span class="rounded border border-border-subtle px-2 py-2 text-center text-text-muted">7</span>
+            <span class="rounded border border-border-subtle px-2 py-2 text-center text-text-muted">8</span>
+          </div>
+          <p class="mt-4 font-mono text-[10px] leading-relaxed text-text-muted">
+            show_diagram &middot; show_model &middot; show_text &middot; analyze_deps
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

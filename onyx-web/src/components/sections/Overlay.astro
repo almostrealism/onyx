@@ -1,0 +1,200 @@
+---
+// The centerpiece illustration. Everything in it is invented sample data
+// drawn with CSS — it isn't a screenshot, and the caption says so.
+const reminders = [
+  { title: 'Send the revised contract', time: '10:00', overdue: true },
+  { title: 'Review Q3 forecast', time: '13:30', overdue: false },
+  { title: 'Book conference travel', time: null, overdue: false },
+  { title: 'Renew the wildcard cert', time: '17:00', overdue: false },
+];
+
+const sessions = [
+  { key: '⌘1', name: 'api', note: 'rebasing onto main', state: 'live' },
+  { key: '⌘2', name: 'trainer', note: 'epoch 14/40 — ETA 2h', state: 'live' },
+  { key: '⌘3', name: 'migrate', note: 'waiting on my review', state: 'idle' },
+  { key: '⌘4', name: 'logs', note: 'tailing prod', state: 'quiet' },
+];
+
+const pipelines = [
+  { repo: 'acme/api', ref: 'main', status: 'passed', meta: '4m 12s' },
+  { repo: 'acme/console', ref: 'feat/billing', status: 'running', meta: '2 of 6' },
+  { repo: 'acme/infra', ref: 'main', status: 'failed', meta: 'deploy' },
+];
+
+const prs = [
+  { repo: 'acme/api', number: 412, title: 'Retry policy for the ingest queue', threads: 3, ready: false },
+  { repo: 'acme/console', number: 98, title: 'Billing settings page', threads: 0, ready: true },
+];
+
+const cpu = [22, 31, 28, 44, 61, 58, 72, 66, 51, 47, 63, 81, 74, 59, 42, 38, 45, 52, 49, 35];
+
+const dot = {
+  live: 'bg-ok',
+  idle: 'bg-warn',
+  quiet: 'bg-text-muted',
+};
+
+const pipeColor = {
+  passed: 'text-ok',
+  running: 'text-accent-primary',
+  failed: 'text-bad',
+};
+
+const pipeMark = { passed: '●', running: '◐', failed: '✕' };
+---
+
+<section class="relative border-y border-border-subtle bg-bg-secondary/40">
+  <div class="mx-auto max-w-6xl px-6 py-20 sm:py-24">
+    <div class="mx-auto max-w-2xl text-center">
+      <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">
+        One key, and there it all is
+      </h2>
+      <p class="mt-4 text-text-secondary">
+        The overlay drops over the terminal — over anything — and answers the
+        question you actually have at 9am, or after lunch, or when a build finally
+        finishes: what is going on, and what needs me?
+      </p>
+    </div>
+
+    <!-- Illustrated overlay -->
+    <div
+      class="mt-14 overflow-hidden rounded-2xl border border-border-subtle bg-bg-primary/90 shadow-2xl"
+    >
+      <!-- Headline row -->
+      <div
+        class="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-6 py-4 font-mono text-xs"
+      >
+        <div class="flex items-center gap-4">
+          <span class="text-accent-primary">workstation</span>
+          <span class="text-text-muted">gpu-01</span>
+          <span class="text-text-muted">build-02</span>
+        </div>
+        <div class="flex items-center gap-4 text-text-muted">
+          <span>09:41</span>
+          <span class="text-text-secondary">CPU 47%</span>
+          <span class="text-text-secondary">MEM 34.2 / 64 GB</span>
+          <span class="text-text-secondary">GPU 61%</span>
+          <span class="text-text-secondary">NPU 12%</span>
+        </div>
+      </div>
+
+      <div class="grid gap-px bg-border-subtle lg:grid-cols-3">
+        <!-- Today -->
+        <div class="bg-bg-primary p-6">
+          <div class="flex items-baseline justify-between">
+            <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
+              Today
+            </p>
+            <p class="font-mono text-[10px] text-text-muted">
+              <span class="text-bad">4</span> today &middot; <span class="text-warn">7</span> by tmrw
+            </p>
+          </div>
+          <ul class="mt-4 space-y-2.5">
+            {
+              reminders.map((r) => (
+                <li class="flex items-baseline gap-2.5">
+                  <span class={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${r.overdue ? 'bg-bad' : 'bg-accent-primary/60'}`} />
+                  <span class="flex-1 text-[13px] text-text-primary/90">{r.title}</span>
+                  {r.time && <span class="font-mono text-[10px] text-text-muted">{r.time}</span>}
+                </li>
+              ))
+            }
+          </ul>
+          <p class="mt-4 border-t border-border-subtle pt-3 text-xs text-text-muted">
+            Straight from Apple Reminders. Nothing is copied anywhere.
+          </p>
+        </div>
+
+        <!-- Sessions -->
+        <div class="bg-bg-primary p-6">
+          <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
+            Session notes
+          </p>
+          <ul class="mt-4 space-y-3">
+            {
+              sessions.map((s) => (
+                <li class="flex items-baseline gap-2.5">
+                  <span class={`h-2 w-2 shrink-0 rounded-full ${dot[s.state]}`} />
+                  <span class="font-mono text-[10px] text-text-muted">{s.key}</span>
+                  <span class="flex-1">
+                    <span class="font-mono text-[12px] text-text-primary/90">{s.name}</span>
+                    <span class="block text-[12px] text-text-secondary">{s.note}</span>
+                  </span>
+                </li>
+              ))
+            }
+          </ul>
+          <p class="mt-4 border-t border-border-subtle pt-3 text-xs text-text-muted">
+            The dot is real output, not a heartbeat. Click one to land in it.
+          </p>
+        </div>
+
+        <!-- Pipelines + PRs -->
+        <div class="bg-bg-primary p-6">
+          <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
+            Pipelines
+          </p>
+          <ul class="mt-4 space-y-2">
+            {
+              pipelines.map((p) => (
+                <li class="flex items-baseline gap-2.5 font-mono text-[11px]">
+                  <span class={pipeColor[p.status]}>{pipeMark[p.status]}</span>
+                  <span class="text-text-primary/90">{p.repo}</span>
+                  <span class="text-text-muted">{p.ref}</span>
+                  <span class="ml-auto text-text-muted">{p.meta}</span>
+                </li>
+              ))
+            }
+          </ul>
+
+          <p class="mt-6 font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
+            Open pull requests
+          </p>
+          <ul class="mt-4 space-y-3">
+            {
+              prs.map((pr) => (
+                <li>
+                  <p class="font-mono text-[11px] text-text-muted">
+                    {pr.repo}#{pr.number}
+                    {pr.ready ? (
+                      <span class="ml-2 text-ok">ready to merge</span>
+                    ) : (
+                      <span class="ml-2 text-warn">{pr.threads} unresolved</span>
+                    )}
+                  </p>
+                  <p class="text-[12px] text-text-secondary">{pr.title}</p>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+      </div>
+
+      <!-- CPU strip -->
+      <div class="border-t border-border-subtle bg-bg-primary px-6 py-5">
+        <div class="flex h-16 items-end gap-[3px]" aria-hidden="true">
+          {
+            cpu.map((v) => (
+              <div
+                class="flex-1 rounded-sm bg-accent-primary/50"
+                style={`height: ${v}%`}
+              />
+            ))
+          }
+        </div>
+        <div
+          class="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 font-mono text-[10px] text-text-muted"
+        >
+          <span>ingest &middot; 41%</span>
+          <span>postgres &middot; 12%</span>
+          <span>redis &middot; 3%</span>
+          <span class="ml-auto">this week &middot; 31.4h</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="mt-4 text-center font-mono text-[11px] text-text-muted">
+      Illustration &middot; sample data
+    </p>
+  </div>
+</section>

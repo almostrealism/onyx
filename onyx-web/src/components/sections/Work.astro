@@ -1,0 +1,197 @@
+---
+// The three things Onyx tracks that a terminal doesn't: what's due, what
+// your sessions are doing, and what's queued in front of a merge.
+// Sample data throughout — these are drawings, not screenshots.
+---
+
+<section class="mx-auto max-w-5xl px-6 py-20 sm:py-28">
+  <div class="max-w-2xl">
+    <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">
+      A terminal knows what it ran. It doesn't know what you owe anyone.
+    </h2>
+    <p class="mt-4 text-text-secondary">
+      So the overlay tracks the three things that actually decide what you do next.
+    </p>
+  </div>
+
+  <!-- 1. Reminders -->
+  <div class="mt-16 grid items-start gap-10 lg:grid-cols-2">
+    <div>
+      <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
+        Apple Reminders
+      </p>
+      <h3 class="mt-3 text-xl font-medium">Today, without opening a second app</h3>
+      <p class="mt-4 text-sm leading-relaxed text-text-secondary">
+        Onyx reads Reminders directly through EventKit — your lists, on your Mac.
+        Nothing is copied into Onyx, nothing syncs anywhere, and anything you tick
+        off in Reminders on your phone is gone from the overlay by the next refresh.
+      </p>
+      <p class="mt-4 text-sm leading-relaxed text-text-secondary">
+        Two counts sit in the corner permanently: how much is due <em>today</em>, and how
+        much will be due <em>by the end of tomorrow</em> — so you can see the load coming, not
+        just the load now. Press <span class="font-mono text-text-primary">R</span> and
+        the list collapses to just those, still grouped by list, with anything not due
+        today dimmed. Press <span class="font-mono text-text-primary">S</span> for the
+        across-the-room view and today's list runs down the left beside the charts.
+      </p>
+      <p class="mt-4 text-sm leading-relaxed text-text-secondary">
+        And when a reminder is really a job for something else, you can hand it off:
+        with a flowtree controller configured, a reminder can be submitted straight to
+        an agent workstream from the overlay.
+      </p>
+    </div>
+
+    <div class="rounded-xl border border-border-subtle bg-bg-secondary/60 p-6">
+      <div class="flex items-center gap-3 font-mono text-[10px]">
+        <span class="rounded bg-bad/15 px-2 py-1 text-bad">4 today</span>
+        <span class="rounded bg-warn/15 px-2 py-1 text-warn">7 by tmrw</span>
+        <span class="ml-auto text-text-muted">R — due soon only</span>
+      </div>
+      <ul class="mt-5 space-y-3 text-[13px]">
+        <li class="flex items-baseline gap-2.5">
+          <span class="h-1.5 w-1.5 rounded-full bg-bad"></span>
+          <span class="flex-1 text-text-primary/90">Send the revised contract</span>
+          <span class="font-mono text-[10px] text-bad">overdue</span>
+        </li>
+        <li class="flex items-baseline gap-2.5">
+          <span class="h-1.5 w-1.5 rounded-full bg-accent-primary/60"></span>
+          <span class="flex-1 text-text-primary/90">Review Q3 forecast</span>
+          <span class="font-mono text-[10px] text-text-muted">13:30</span>
+        </li>
+        <li class="flex items-baseline gap-2.5 opacity-45">
+          <span class="h-1.5 w-1.5 rounded-full bg-text-muted"></span>
+          <span class="flex-1 text-text-primary/90">Draft the board update</span>
+          <span class="font-mono text-[10px] text-text-muted">tomorrow</span>
+        </li>
+      </ul>
+      <p class="mt-5 border-t border-border-subtle pt-3 font-mono text-[10px] text-text-muted">
+        not due today → dimmed, not hidden
+      </p>
+    </div>
+  </div>
+
+  <!-- 2. Sessions -->
+  <div class="mt-20 grid items-start gap-10 lg:grid-cols-2">
+    <div class="lg:order-2">
+      <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
+        Session notes
+      </p>
+      <h3 class="mt-3 text-xl font-medium">Sessions that remember what they were for</h3>
+      <p class="mt-4 text-sm leading-relaxed text-text-secondary">
+        Long-running work is the norm now — a fine-tune, a migration, an agent halfway
+        through a refactor. Come back after lunch and the hard part isn't reconnecting,
+        it's remembering which of nine terminals was which.
+      </p>
+      <p class="mt-4 text-sm leading-relaxed text-text-secondary">
+        So every session takes a note — <span class="font-mono text-text-primary">⌘;</span> and
+        type what it's for. The overlay lists them in the same order as your
+        <span class="font-mono text-text-primary">⌘1</span>–<span class="font-mono text-text-primary">9</span>
+        favorites, with the shortcut shown next to each, and clicking one drops you
+        into that session and closes the overlay.
+      </p>
+      <p class="mt-4 text-sm leading-relaxed text-text-secondary">
+        Next to each note is an activity dot, and it's an honest one. It comes from
+        hashing the visible pane with tmux's status bar excluded — so a ticking clock,
+        a redraw, or a reconnect repainting the screen doesn't register as work. Green
+        means that session genuinely produced output; grey means it has been quiet for a
+        while, whatever it claims.
+      </p>
+    </div>
+
+    <div class="rounded-xl border border-border-subtle bg-bg-secondary/60 p-6 lg:order-1">
+      <ul class="space-y-4">
+        <li class="flex items-baseline gap-3 rounded-lg border-l-2 border-accent-primary bg-accent-primary/5 px-3 py-2">
+          <span class="h-2.5 w-2.5 rounded-full bg-ok"></span>
+          <span class="font-mono text-[10px] text-text-muted">⌘2</span>
+          <span class="flex-1">
+            <span class="font-mono text-[12px] text-text-primary">trainer</span>
+            <span class="block text-[12px] text-text-secondary">epoch 14/40 — ETA 2h</span>
+          </span>
+          <span class="font-mono text-[10px] text-ok">4s ago</span>
+        </li>
+        <li class="flex items-baseline gap-3 px-3">
+          <span class="h-2.5 w-2.5 rounded-full bg-warn"></span>
+          <span class="font-mono text-[10px] text-text-muted">⌘3</span>
+          <span class="flex-1">
+            <span class="font-mono text-[12px] text-text-primary/90">migrate</span>
+            <span class="block text-[12px] text-text-secondary">waiting on my review</span>
+          </span>
+          <span class="font-mono text-[10px] text-text-muted">6m</span>
+        </li>
+        <li class="flex items-baseline gap-3 px-3">
+          <span class="h-2.5 w-2.5 rounded-full bg-text-muted"></span>
+          <span class="font-mono text-[10px] text-text-muted">⌘4</span>
+          <span class="flex-1">
+            <span class="font-mono text-[12px] text-text-primary/90">logs</span>
+            <span class="block text-[12px] text-text-secondary">tailing prod</span>
+          </span>
+          <span class="font-mono text-[10px] text-text-muted">2h</span>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 3. PRs + pipelines -->
+  <div class="mt-20 grid items-start gap-10 lg:grid-cols-2">
+    <div>
+      <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
+        GitHub &amp; GitLab
+      </p>
+      <h3 class="mt-3 text-xl font-medium">The queue in front of a merge</h3>
+      <p class="mt-4 text-sm leading-relaxed text-text-secondary">
+        Open pull requests and merge requests arrive in one merged list — GitHub via its
+        GraphQL API, GitLab via v4 — so a codebase split across two forges reads as one
+        pile of work. Each row carries the two things that decide whether you can stop
+        thinking about it: how many review threads are still unresolved, and whether it
+        would actually merge right now under the repo's own branch protections.
+      </p>
+      <p class="mt-4 text-sm leading-relaxed text-text-secondary">
+        Pipelines sit above them — Actions runs and GitLab pipelines side by side, rolled
+        up from their individual jobs, so a partial failure shows as a partial failure.
+        You can add one straight from an open PR: Onyx knows the head branch and offers
+        the pipeline running on it.
+      </p>
+      <p class="mt-4 text-sm leading-relaxed text-text-secondary">
+        Both are polled with a token you supply, one cycle at a time, and both stop the
+        moment you clear the token.
+      </p>
+    </div>
+
+    <div class="rounded-xl border border-border-subtle bg-bg-secondary/60 p-6">
+      <ul class="space-y-2 font-mono text-[11px]">
+        <li class="flex items-baseline gap-2.5">
+          <span class="text-ok">●</span><span class="text-text-primary/90">acme/api</span>
+          <span class="text-text-muted">main</span>
+          <span class="ml-auto text-text-muted">4m 12s</span>
+        </li>
+        <li class="flex items-baseline gap-2.5">
+          <span class="text-accent-primary">◐</span><span class="text-text-primary/90">acme/console</span>
+          <span class="text-text-muted">feat/billing</span>
+          <span class="ml-auto text-text-muted">2 of 6</span>
+        </li>
+        <li class="flex items-baseline gap-2.5">
+          <span class="text-bad">✕</span><span class="text-text-primary/90">acme/infra</span>
+          <span class="text-text-muted">main</span>
+          <span class="ml-auto text-bad">deploy</span>
+        </li>
+      </ul>
+
+      <div class="mt-6 space-y-4 border-t border-border-subtle pt-5">
+        <div>
+          <p class="font-mono text-[10px] text-text-muted">
+            <span class="rounded bg-text-muted/15 px-1.5 py-0.5">GitHub</span>
+            acme/api#412 <span class="ml-1 text-warn">3 unresolved</span>
+          </p>
+          <p class="mt-1 text-[12px] text-text-secondary">Retry policy for the ingest queue</p>
+        </div>
+        <div>
+          <p class="font-mono text-[10px] text-text-muted">
+            <span class="rounded bg-text-muted/15 px-1.5 py-0.5">GitLab</span>
+            platform/deploy!87 <span class="ml-1 text-ok">ready to merge</span>
+          </p>
+          <p class="mt-1 text-[12px] text-text-secondary">Pin the runner image</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

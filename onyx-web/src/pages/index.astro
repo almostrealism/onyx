@@ -1,15 +1,24 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import Hero from '../components/sections/Hero.astro';
+import Overlay from '../components/sections/Overlay.astro';
+import Work from '../components/sections/Work.astro';
+import Agents from '../components/sections/Agents.astro';
 import Connection from '../components/sections/Connection.astro';
 import Features from '../components/sections/Features.astro';
 import Download from '../components/sections/Download.astro';
 import Footer from '../components/sections/Footer.astro';
 ---
 
-<Layout title="Onyx — a terminal-first overlay for macOS">
+<Layout
+  title="Onyx — the workspace for everything you're waiting on"
+  description="A macOS overlay that keeps your SSH sessions connected and shows what's due today, what your sessions are doing, which pull requests are blocked and which builds are red — in one keystroke."
+>
   <main>
     <Hero />
+    <Overlay />
+    <Work />
+    <Agents />
     <Connection />
     <Features />
     <Download />

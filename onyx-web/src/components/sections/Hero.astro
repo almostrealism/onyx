@@ -12,21 +12,27 @@ import { DOWNLOAD_URL, REPO_URL, LATEST_VERSION, REQUIREMENTS } from '../../conf
   >
   </div>
 
-  <div class="relative mx-auto max-w-5xl px-6 pt-24 pb-20 sm:pt-32 sm:pb-28">
+  <div class="relative mx-auto max-w-5xl px-6 pt-24 pb-20 sm:pt-32 sm:pb-24">
     <p class="font-mono text-xs tracking-[0.2em] text-accent-primary/80 uppercase">
-      For people who live in a terminal
+      A workspace for getting things done
     </p>
 
     <h1 class="mt-6 text-4xl leading-[1.1] font-bold tracking-tight sm:text-6xl">
-      Your machines,<br />
+      Everything you're waiting on,<br />
       <span class="accent-text">one keystroke away.</span>
     </h1>
 
     <p class="mt-7 max-w-2xl text-lg leading-relaxed text-text-secondary">
-      Onyx is a jet-black overlay that drops over whatever you're doing. Behind it:
-      SSH sessions that are already connected, a monitoring view of every machine you
-      own, your notes, and a remote file browser that knows about git. Close the lid,
-      change networks, walk away for a day — come back and start typing.
+      More of the work is being done by something that isn't you — an agent, a
+      pipeline, a training run, a reviewer. Onyx is a jet-black overlay that drops
+      over whatever you're doing and shows the state of all of it at once: what's
+      due today, which sessions are still producing output, which pull requests are
+      blocked, which builds are red, and how the machines are holding up.
+    </p>
+
+    <p class="mt-4 max-w-2xl text-lg leading-relaxed text-text-secondary">
+      Underneath it, terminals that are already connected. Close the lid, change
+      networks, walk away for a day — come back and start typing.
     </p>
 
     <div class="mt-10 flex flex-wrap items-center gap-4">
@@ -48,7 +54,7 @@ import { DOWNLOAD_URL, REPO_URL, LATEST_VERSION, REQUIREMENTS } from '../../conf
       v{LATEST_VERSION} &middot; {REQUIREMENTS.os} &middot; {REQUIREMENTS.arch} &middot; free and open source
     </p>
 
-    <!-- A still of the thing itself: the status line you actually look at. -->
+    <!-- The thing itself: a terminal, with the overlay's status line under it. -->
     <div
       class="mt-16 overflow-hidden rounded-xl border border-border-subtle bg-bg-secondary/80 shadow-2xl backdrop-blur"
     >
@@ -56,12 +62,12 @@ import { DOWNLOAD_URL, REPO_URL, LATEST_VERSION, REQUIREMENTS } from '../../conf
         <span class="h-2.5 w-2.5 rounded-full bg-bad/60"></span>
         <span class="h-2.5 w-2.5 rounded-full bg-warn/60"></span>
         <span class="h-2.5 w-2.5 rounded-full bg-ok/60"></span>
-        <span class="ml-3 font-mono text-xs text-text-muted">onyx — mac-studio — main</span>
+        <span class="ml-3 font-mono text-xs text-text-muted">onyx — workstation — main</span>
       </div>
       <div class="space-y-1.5 px-5 py-6 font-mono text-[13px] leading-relaxed">
         <p class="text-text-muted">
-          <span class="text-accent-primary">michael@mac-studio</span>
-          <span class="text-text-secondary">~/Projects/onyx</span>
+          <span class="text-accent-primary">you@workstation</span>
+          <span class="text-text-secondary">~/src/api</span>
           <span class="text-ok">main</span>
         </p>
         <p class="text-text-secondary">$ swift test</p>
@@ -77,8 +83,10 @@ import { DOWNLOAD_URL, REPO_URL, LATEST_VERSION, REQUIREMENTS } from '../../conf
         <span>CPU 12%</span>
         <span>MEM 34.2 GB</span>
         <span>GPU 61%</span>
-        <span class="text-accent-primary">⌘1 main</span>
-        <span>⌘2 build</span>
+        <span><span class="text-bad">4</span> today</span>
+        <span><span class="text-warn">2</span> PRs</span>
+        <span class="text-accent-primary">⌘1 api</span>
+        <span>⌘2 trainer</span>
         <span>⌘3 logs</span>
       </div>
     </div>
