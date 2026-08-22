@@ -253,7 +253,7 @@ struct MonitorView: View {
                                 .foregroundColor(Color.onyxAmber.opacity(0.6))
                                 .help("The stats command didn't finish within its time budget — the readings below are what it had sent by then.")
                         }
-                        Text("(T interval · M memory · C containers · P 12/24hr · R due-soon · S simple · X peek)")
+                        Text("(T interval · M memory · C containers · P 12/24hr · R due-soon · D today · S simple · X peek)")
                             .monitorFont(size: 10)
                             .foregroundColor(.gray.opacity(0.25))
                     }

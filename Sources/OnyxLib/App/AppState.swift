@@ -27,6 +27,7 @@ public extension Notification.Name {
     static let toggleSimpleMonitor = Notification.Name("toggleSimpleMonitor")
     static let toggleMonitorPeek = Notification.Name("toggleMonitorPeek")
     static let toggleRemindersDueSoon = Notification.Name("toggleRemindersDueSoon")
+    static let toggleSimpleReminders = Notification.Name("toggleSimpleReminders")
     static let editSessionNote = Notification.Name("editSessionNote")
     static let focusURLBar = Notification.Name("focusURLBar")
     static let tmuxResizeUp = Notification.Name("tmuxResizeUp")

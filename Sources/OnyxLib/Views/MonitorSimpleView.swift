@@ -1,4 +1,5 @@
 import SwiftUI
+import EventKit
 
 // MARK: - Simple Monitor view
 //
@@ -15,8 +16,9 @@ struct SimpleMonitorBody: View {
     @ObservedObject var timing: TimingManager
     let accentColor: Color
     @Environment(\.monitorFontScale) private var fontScale
-    /// Own reminders manager just for the due-today / due-tomorrow scope
-    /// counts (list-independent, so it needs no selectedLists wiring).
+    /// Own reminders manager for the due-today / due-tomorrow scope counts
+    /// and the today list down the left. It stays in "Today" mode (no
+    /// selectedLists wiring), which is exactly the scope simple mode wants.
     @StateObject private var reminders = RemindersManager()
 
     var body: some View {
@@ -40,48 +42,73 @@ struct SimpleMonitorBody: View {
             let cpuHeight = chartArea * 0.55
             let subHeight = max(40, chartArea * 0.42)
 
-            VStack(alignment: .leading, spacing: 8) {
-                // CPU chart — giant.
-                let cpuData = monitor.bucketedCPU()
-                if !cpuData.isEmpty {
-                    GridChart(title: "CPU", values: cpuData,
-                              accentColor: Color.onyxBlue,
-                              height: cpuHeight)
-                } else {
-                    // Prefer the actual poll failure: "CPU usage
-                    // unavailable on this host" is misleading when the
-                    // truth is that the stats command never ran.
-                    CPUUnavailableCard(
-                        message: monitor.latestSample == nil
-                            ? (monitor.lastError ?? "Waiting for the first sample…")
-                            : (monitor.cpuDiagnostic ?? "CPU usage unavailable on this host."),
-                        height: cpuHeight
-                    )
+            // Today's reminders take a fixed column down the LEFT, sharing
+            // an edge with the today/by-tmrw chips in the strip below —
+            // the counts and the things being counted line up. Charts keep
+            // whatever's left, which is most of it.
+            // The column only appears when there's room for it — on a narrow
+            // window the charts are the point, and squeezing them to make
+            // space for text would trade the thing you glance at for the
+            // thing you read.
+            let reminderColumn: CGFloat = 260 * fontScale
+            let showReminders = appState.appearance.simpleShowReminders
+                && reminders.accessGranted
+                && !reminders.reminders.isEmpty
+                && geo.size.width > reminderColumn * 3
+
+            HStack(alignment: .top, spacing: showReminders ? 20 : 0) {
+                if showReminders {
+                    SimpleTodayReminders(reminders: reminders, accentColor: accentColor)
+                        .frame(width: reminderColumn, alignment: .topLeading)
                 }
 
-                // MEM and GPU side by side. Render whichever are
-                // available; if neither, the row is just empty space.
-                let memData = monitor.showMemoryChart ? monitor.bucketedMemory() : []
-                let gpuData = monitor.bucketedGPU()
-                let hasMem = !memData.isEmpty && monitor.showMemoryChart
-                let hasGpu = !gpuData.isEmpty
-                if hasMem || hasGpu {
-                    HStack(spacing: 12) {
-                        if hasMem {
-                            GridChart(title: "MEMORY", values: memData,
-                                      accentColor: Color.onyxAmber,
-                                      height: subHeight)
-                                .frame(maxWidth: .infinity)
-                        }
-                        if hasGpu {
-                            GridChart(title: "GPU", values: gpuData,
-                                      accentColor: Color.onyxPurple,
-                                      height: subHeight)
-                                .frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: 8) {
+                    // CPU chart — giant.
+                    let cpuData = monitor.bucketedCPU()
+                    if !cpuData.isEmpty {
+                        GridChart(title: "CPU", values: cpuData,
+                                  accentColor: Color.onyxBlue,
+                                  height: cpuHeight)
+                    } else {
+                        // Prefer the actual poll failure: "CPU usage
+                        // unavailable on this host" is misleading when the
+                        // truth is that the stats command never ran.
+                        CPUUnavailableCard(
+                            message: monitor.latestSample == nil
+                                ? (monitor.lastError ?? "Waiting for the first sample…")
+                                : (monitor.cpuDiagnostic ?? "CPU usage unavailable on this host."),
+                            height: cpuHeight
+                        )
+                    }
+
+                    // MEM and GPU side by side. Render whichever are
+                    // available; if neither, the row is just empty space.
+                    let memData = monitor.showMemoryChart ? monitor.bucketedMemory() : []
+                    let gpuData = monitor.bucketedGPU()
+                    let hasMem = !memData.isEmpty && monitor.showMemoryChart
+                    let hasGpu = !gpuData.isEmpty
+                    if hasMem || hasGpu {
+                        HStack(spacing: 12) {
+                            if hasMem {
+                                GridChart(title: "MEMORY", values: memData,
+                                          accentColor: Color.onyxAmber,
+                                          height: subHeight)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            if hasGpu {
+                                GridChart(title: "GPU", values: gpuData,
+                                          accentColor: Color.onyxPurple,
+                                          height: subHeight)
+                                    .frame(maxWidth: .infinity)
+                            }
                         }
                     }
-                }
 
+                    Spacer(minLength: 0)
+                }
+            }
+
+            VStack(spacing: 0) {
                 Spacer(minLength: 0)
 
                 // Bottom strip: reminders due-scope counts and top-CPU
@@ -100,6 +127,78 @@ struct SimpleMonitorBody: View {
                 .frame(height: bottomStripHeight)
             }
         }
+    }
+}
+
+/// Today's reminders, listed down the left of simple mode.
+///
+/// Deliberately austere: simple mode is the across-the-room view, so this
+/// answers one question — what am I doing today — and stops. No lists, no
+/// per-item metadata beyond a time, and a hard cap with a "+N more" so a
+/// heavy day can't push the charts around.
+///
+/// The manager backing simple mode runs in "Today" mode (no selected
+/// lists), so `reminders.reminders` is already exactly what's due by end
+/// of today, overdue included, across every list.
+struct SimpleTodayReminders: View {
+    @ObservedObject var reminders: RemindersManager
+    let accentColor: Color
+    @Environment(\.monitorFontScale) private var fontScale
+
+    /// Enough to be useful, few enough to stay readable at a distance.
+    private let maxShown = 7
+
+    var body: some View {
+        let items = reminders.reminders
+        VStack(alignment: .leading, spacing: 7) {
+            Text("TODAY")
+                .monitorFont(size: 10, weight: .medium)
+                .foregroundColor(accentColor)
+                .tracking(2)
+
+            ForEach(Array(items.prefix(maxShown)), id: \.calendarItemIdentifier) { reminder in
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    // Overdue is the only distinction worth making here.
+                    Circle()
+                        .fill(isOverdue(reminder) ? Color.onyxRed : accentColor.opacity(0.55))
+                        .frame(width: 5, height: 5)
+                    Text(reminder.title ?? "Untitled")
+                        .monitorFont(size: 13)
+                        .foregroundColor(.white.opacity(0.85))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                    if let time = timeLabel(reminder) {
+                        Text(time)
+                            .monitorFont(size: 10)
+                            .foregroundColor(.gray.opacity(0.45))
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+            }
+
+            if items.count > maxShown {
+                Text("+\(items.count - maxShown) more")
+                    .monitorFont(size: 10)
+                    .foregroundColor(.gray.opacity(0.35))
+            }
+        }
+    }
+
+    /// A time only when the reminder has one — an all-day item shows
+    /// nothing rather than a meaningless 00:00.
+    private func timeLabel(_ reminder: EKReminder) -> String? {
+        guard let c = reminder.dueDateComponents,
+              let hour = c.hour, let minute = c.minute else { return nil }
+        return String(format: "%d:%02d", hour, minute)
+    }
+
+    private func isOverdue(_ reminder: EKReminder) -> Bool {
+        guard let c = reminder.dueDateComponents,
+              let date = Calendar.current.date(from: c) else { return false }
+        if c.hour != nil && c.minute != nil { return date < Date() }
+        // All-day: only overdue once the whole day has passed.
+        return Calendar.current.startOfDay(for: date) < Calendar.current.startOfDay(for: Date())
     }
 }
 
