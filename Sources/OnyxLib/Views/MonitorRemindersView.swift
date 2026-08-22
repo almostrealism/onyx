@@ -288,6 +288,43 @@ public class RemindersManager: ObservableObject {
         return date <= endOfToday
     }
 
+    /// Today's reminders — due today or earlier — grouped by the list
+    /// they live in, in the same shape the detailed view's multi-list
+    /// layout uses. Simple mode shows this down its left side.
+    ///
+    /// Built from `reminders` (the Today fetch), NOT from
+    /// `groupedReminders`. The grouped fetch deliberately has no
+    /// due-date predicate — it's the "show me these lists" display — so
+    /// reusing it here would quietly put next month's reminders on
+    /// screen under a heading that says today. Every item is re-checked
+    /// with `isDueToday` anyway, so the filter holds even if the
+    /// underlying fetch ever widens.
+    ///
+    /// `preferredOrder` is the user's configured list order, so the
+    /// groups read in the same sequence as the detailed view. Lists that
+    /// aren't in it still appear — a reminder due today is never hidden
+    /// because its list wasn't picked for the detailed view — they just
+    /// sort after, alphabetically.
+    public func todayGroupedByList(preferredOrder: [String] = []) -> [ReminderListGroup] {
+        let due = reminders.filter { Self.isDueToday($0) }
+        var byList: [String: [EKReminder]] = [:]
+        for reminder in due {
+            byList[reminder.calendar?.title ?? "Reminders", default: []].append(reminder)
+        }
+        return Self.orderedListNames(Array(byList.keys), preferred: preferredOrder)
+            .map { ReminderListGroup(id: $0, name: $0, reminders: byList[$0] ?? []) }
+    }
+
+    /// Preferred names first, in their given order; everything else
+    /// after, alphabetically. Split out from `todayGroupedByList` so the
+    /// ordering rule is testable without an EventKit store.
+    public static func orderedListNames(_ names: [String], preferred: [String]) -> [String] {
+        let present = Set(names)
+        let head = preferred.filter { present.contains($0) }
+        let tail = names.filter { !head.contains($0) }.sorted()
+        return head + tail
+    }
+
     public func toggleComplete(_ reminder: EKReminder) {
         reminder.isCompleted.toggle()
         try? store.save(reminder, commit: true)

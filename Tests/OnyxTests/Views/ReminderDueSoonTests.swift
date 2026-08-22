@@ -85,4 +85,50 @@ final class ReminderDueSoonTests: XCTestCase {
         // on today.
         XCTAssertFalse(RemindersManager.isDueSoon(due: nil, now: now))
     }
+
+    // MARK: - Simple mode's left column
+
+    /// The column is "today and earlier", NOT the `R` filter's
+    /// today-or-tomorrow window. A tomorrow item on the simple overlay
+    /// would be answering a question nobody asked of that view.
+    func testSimpleColumnWindow_excludesTomorrow() {
+        XCTAssertTrue(RemindersManager.isDueToday(due: due(11), now: now),          // yesterday
+                      "overdue work is still today's problem")
+        XCTAssertTrue(RemindersManager.isDueToday(due: due(12, hour: 23, minute: 59), now: now))
+        XCTAssertFalse(RemindersManager.isDueToday(due: due(13), now: now),
+                       "tomorrow belongs to the by-tmrw count, not the list")
+        XCTAssertFalse(RemindersManager.isDueToday(due: nil, now: now),
+                       "an undated reminder is not due today")
+    }
+
+    /// Group order follows the user's configured lists so the simple
+    /// column reads in the same sequence as the detailed overlay — but a
+    /// list they never configured still shows up, because a reminder due
+    /// today shouldn't vanish over a display preference.
+    func testListOrder_preferredFirstThenAlphabetical() {
+        let ordered = RemindersManager.orderedListNames(
+            ["Personal", "Work", "Errands", "Reading"],
+            preferred: ["Work", "Personal"])
+        XCTAssertEqual(ordered, ["Work", "Personal", "Errands", "Reading"])
+    }
+
+    func testListOrder_preferredListWithNothingDueIsSkipped() {
+        // "Someday" is configured but has nothing due today: it must not
+        // appear as an empty heading.
+        let ordered = RemindersManager.orderedListNames(
+            ["Work"], preferred: ["Someday", "Work"])
+        XCTAssertEqual(ordered, ["Work"])
+    }
+
+    func testListOrder_noPreferenceIsAlphabetical() {
+        XCTAssertEqual(RemindersManager.orderedListNames(["Work", "Errands"], preferred: []),
+                       ["Errands", "Work"])
+    }
+
+    func testListOrder_neverDropsOrDuplicatesAList() {
+        let names = ["Work", "Personal", "Errands"]
+        let ordered = RemindersManager.orderedListNames(names, preferred: ["Personal", "Ghost"])
+        XCTAssertEqual(Set(ordered), Set(names))
+        XCTAssertEqual(ordered.count, names.count)
+    }
 }

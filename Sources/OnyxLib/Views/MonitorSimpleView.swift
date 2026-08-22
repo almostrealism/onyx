@@ -53,12 +53,13 @@ struct SimpleMonitorBody: View {
             let reminderColumn: CGFloat = 260 * fontScale
             let showReminders = appState.appearance.simpleShowReminders
                 && reminders.accessGranted
-                && !reminders.reminders.isEmpty
+                && reminders.reminders.contains(where: { RemindersManager.isDueToday($0) })
                 && geo.size.width > reminderColumn * 3
 
             HStack(alignment: .top, spacing: showReminders ? 20 : 0) {
                 if showReminders {
-                    SimpleTodayReminders(reminders: reminders, accentColor: accentColor)
+                    SimpleTodayReminders(reminders: reminders, accentColor: accentColor,
+                                     listOrder: appState.appearance.remindersLists)
                         .frame(width: reminderColumn, alignment: .topLeading)
                 }
 
@@ -143,42 +144,74 @@ struct SimpleMonitorBody: View {
 struct SimpleTodayReminders: View {
     @ObservedObject var reminders: RemindersManager
     let accentColor: Color
+    /// The user's configured list order, so the groups read in the same
+    /// sequence as the detailed overlay.
+    let listOrder: [String]
     @Environment(\.monitorFontScale) private var fontScale
 
     /// Enough to be useful, few enough to stay readable at a distance.
-    private let maxShown = 7
+    /// Counted across every group, not per group — three lists of five
+    /// is still fifteen lines of text on a wall-mounted display.
+    private let maxShown = 8
 
     var body: some View {
-        let items = reminders.reminders
-        VStack(alignment: .leading, spacing: 7) {
+        let groups = reminders.todayGroupedByList(preferredOrder: listOrder)
+        let total = groups.reduce(0) { $0 + $1.reminders.count }
+        // Fill groups in order until the budget runs out, then drop the
+        // rest. Truncating the LAST visible group rather than every group
+        // keeps the earlier lists — the ones the user ordered first —
+        // complete.
+        var budget = maxShown
+        var shown: [ReminderListGroup] = []
+        for group in groups where budget > 0 {
+            let take = Array(group.reminders.prefix(budget))
+            budget -= take.count
+            shown.append(ReminderListGroup(id: group.id, name: group.name, reminders: take))
+        }
+
+        return VStack(alignment: .leading, spacing: 9) {
             Text("TODAY")
                 .monitorFont(size: 10, weight: .medium)
                 .foregroundColor(accentColor)
                 .tracking(2)
 
-            ForEach(Array(items.prefix(maxShown)), id: \.calendarItemIdentifier) { reminder in
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    // Overdue is the only distinction worth making here.
-                    Circle()
-                        .fill(isOverdue(reminder) ? Color.onyxRed : accentColor.opacity(0.55))
-                        .frame(width: 5, height: 5)
-                    Text(reminder.title ?? "Untitled")
-                        .monitorFont(size: 13)
-                        .foregroundColor(.white.opacity(0.85))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Spacer(minLength: 0)
-                    if let time = timeLabel(reminder) {
-                        Text(time)
-                            .monitorFont(size: 10)
-                            .foregroundColor(.gray.opacity(0.45))
-                            .fixedSize(horizontal: true, vertical: false)
+            ForEach(shown, id: \.id) { group in
+                VStack(alignment: .leading, spacing: 5) {
+                    // One list gets no heading — the same rule the
+                    // detailed view follows, where grouping only appears
+                    // once there's more than one list to tell apart.
+                    if shown.count > 1 {
+                        Text(group.name.uppercased())
+                            .monitorFont(size: 9, weight: .medium)
+                            .foregroundColor(accentColor.opacity(0.6))
+                            .tracking(1)
+                    }
+
+                    ForEach(group.reminders, id: \.calendarItemIdentifier) { reminder in
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            // Overdue is the only distinction worth making here.
+                            Circle()
+                                .fill(isOverdue(reminder) ? Color.onyxRed : accentColor.opacity(0.55))
+                                .frame(width: 5, height: 5)
+                            Text(reminder.title ?? "Untitled")
+                                .monitorFont(size: 13)
+                                .foregroundColor(.white.opacity(0.85))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer(minLength: 0)
+                            if let time = timeLabel(reminder) {
+                                Text(time)
+                                    .monitorFont(size: 10)
+                                    .foregroundColor(.gray.opacity(0.45))
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                        }
                     }
                 }
             }
 
-            if items.count > maxShown {
-                Text("+\(items.count - maxShown) more")
+            if total > maxShown {
+                Text("+\(total - maxShown) more")
                     .monitorFont(size: 10)
                     .foregroundColor(.gray.opacity(0.35))
             }
