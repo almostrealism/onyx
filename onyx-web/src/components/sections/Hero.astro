@@ -1,0 +1,93 @@
+---
+import { DOWNLOAD_URL, REPO_URL, LATEST_VERSION, REQUIREMENTS } from '../../config/site';
+---
+
+<section class="relative overflow-hidden">
+  <div class="absolute inset-0 cell-grid opacity-70" aria-hidden="true"></div>
+  <!-- The window's own glow, bleeding off the top of the page. -->
+  <div
+    class="pointer-events-none absolute -top-40 left-1/2 h-[32rem] w-[52rem] -translate-x-1/2 rounded-full opacity-25 blur-3xl"
+    style="background: radial-gradient(circle, #66ccff 0%, transparent 65%)"
+    aria-hidden="true"
+  >
+  </div>
+
+  <div class="relative mx-auto max-w-5xl px-6 pt-24 pb-20 sm:pt-32 sm:pb-28">
+    <p class="font-mono text-xs tracking-[0.2em] text-accent-primary/80 uppercase">
+      For people who live in a terminal
+    </p>
+
+    <h1 class="mt-6 text-4xl leading-[1.1] font-bold tracking-tight sm:text-6xl">
+      Your machines,<br />
+      <span class="accent-text">one keystroke away.</span>
+    </h1>
+
+    <p class="mt-7 max-w-2xl text-lg leading-relaxed text-text-secondary">
+      Onyx is a jet-black overlay that drops over whatever you're doing. Behind it:
+      SSH sessions that are already connected, a monitoring view of every machine you
+      own, your notes, and a remote file browser that knows about git. Close the lid,
+      change networks, walk away for a day — come back and start typing.
+    </p>
+
+    <div class="mt-10 flex flex-wrap items-center gap-4">
+      <a
+        href={DOWNLOAD_URL}
+        class="accent-glow rounded-lg bg-accent-primary px-6 py-3 font-medium text-bg-primary transition hover:bg-accent-glow"
+      >
+        Download for Mac
+      </a>
+      <a
+        href={REPO_URL}
+        class="rounded-lg border border-border-subtle px-6 py-3 font-medium text-text-secondary transition hover:border-border-hover hover:text-text-primary"
+      >
+        Source on GitHub
+      </a>
+    </div>
+
+    <p class="mt-5 font-mono text-xs text-text-muted">
+      v{LATEST_VERSION} &middot; {REQUIREMENTS.os} &middot; {REQUIREMENTS.arch} &middot; free and open source
+    </p>
+
+    <!-- A still of the thing itself: the status line you actually look at. -->
+    <div
+      class="mt-16 overflow-hidden rounded-xl border border-border-subtle bg-bg-secondary/80 shadow-2xl backdrop-blur"
+    >
+      <div class="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
+        <span class="h-2.5 w-2.5 rounded-full bg-bad/60"></span>
+        <span class="h-2.5 w-2.5 rounded-full bg-warn/60"></span>
+        <span class="h-2.5 w-2.5 rounded-full bg-ok/60"></span>
+        <span class="ml-3 font-mono text-xs text-text-muted">onyx — mac-studio — main</span>
+      </div>
+      <div class="space-y-1.5 px-5 py-6 font-mono text-[13px] leading-relaxed">
+        <p class="text-text-muted">
+          <span class="text-accent-primary">michael@mac-studio</span>
+          <span class="text-text-secondary">~/Projects/onyx</span>
+          <span class="text-ok">main</span>
+        </p>
+        <p class="text-text-secondary">$ swift test</p>
+        <p class="text-text-muted">Executed 854 tests, with 0 failures</p>
+        <p class="text-text-secondary">
+          $ <span class="inline-block h-4 w-2 translate-y-0.5 bg-accent-primary/80 [animation:blink_1.1s_step-end_infinite]"></span>
+        </p>
+      </div>
+      <div
+        class="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border-subtle px-5 py-3 font-mono text-[11px] text-text-muted"
+      >
+        <span><span class="text-ok">●</span> connected</span>
+        <span>CPU 12%</span>
+        <span>MEM 34.2 GB</span>
+        <span>GPU 61%</span>
+        <span class="text-accent-primary">⌘1 main</span>
+        <span>⌘2 build</span>
+        <span>⌘3 logs</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+</style>

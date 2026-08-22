@@ -1,0 +1,49 @@
+---
+const features = [
+  {
+    key: 'monitor',
+    title: 'A monitoring overlay for the whole fleet',
+    body: "CPU, memory, GPU — including AMD via amdgpu's own counters and Ryzen AI NPU residency — plus Docker containers, GitHub and GitLab pipelines, open PRs, Apple Reminders and Timing.app hours. One key brings it up over everything.",
+  },
+  {
+    key: 'sessions',
+    title: 'Sessions that survive',
+    body: 'tmux underneath, so scrollback and running jobs outlive any disconnection. Favorites get ⌘1–9. Session notes tell you what each terminal was for, with an activity indicator showing which are still producing output.',
+  },
+  {
+    key: 'files',
+    title: 'A remote file browser that knows git',
+    body: 'Branch, staged and changed files above the listing. Search by name or file type across deeply nested trees. Favorite folders are a treemap, so a folder inside a folder looks like one — and two folders with the same name are told apart by what contains them.',
+  },
+  {
+    key: 'notes',
+    title: 'Notes, palette, browser tabs',
+    body: 'A notes panel that stays out of the way, a ⌘K command palette for everything, and real browser tabs when documentation belongs next to the terminal instead of in another app.',
+  },
+  {
+    key: 'agents',
+    title: 'Built for working alongside agents',
+    body: 'Claude Code hooks surface permission requests in the overlay, so a waiting agent is visible instead of buried in a tab. An MCP bridge lets an agent in any repo push diagrams, models and text back into the app.',
+  },
+  {
+    key: 'quiet',
+    title: 'Quiet by construction',
+    body: 'Pause a host and Onyx stops reaching for it entirely — favorites and sessions kept, zero connection attempts — which matters when one machine on a bad link is degrading the network for everything else.',
+  },
+];
+---
+
+<section class="mx-auto max-w-5xl px-6 py-20 sm:py-28">
+  <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">Everything else it does</h2>
+
+  <div class="mt-12 grid gap-x-10 gap-y-10 sm:grid-cols-2">
+    {
+      features.map((feature) => (
+        <div class="border-l-2 border-border-subtle pl-5 transition hover:border-accent-primary/60">
+          <h3 class="font-medium text-text-primary">{feature.title}</h3>
+          <p class="mt-2.5 text-sm leading-relaxed text-text-secondary">{feature.body}</p>
+        </div>
+      ))
+    }
+  </div>
+</section>

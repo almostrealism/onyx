@@ -1,0 +1,52 @@
+---
+import { DOWNLOAD_URL, REPO_URL, RELEASES_URL, LATEST_VERSION, REQUIREMENTS } from '../../config/site';
+---
+
+<section id="download" class="border-t border-border-subtle bg-bg-secondary/40">
+  <div class="mx-auto max-w-5xl px-6 py-20 sm:py-24">
+    <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">Get Onyx</h2>
+
+    <div class="mt-10 grid gap-8 sm:grid-cols-2">
+      <div class="rounded-xl border border-accent-primary/25 bg-bg-primary/60 p-7">
+        <h3 class="font-medium">Download the app</h3>
+        <p class="mt-2 text-sm text-text-secondary">
+          Signed and notarized. Drag it to Applications and open it.
+        </p>
+        <a
+          href={DOWNLOAD_URL}
+          class="accent-glow mt-6 inline-block rounded-lg bg-accent-primary px-5 py-2.5 text-sm font-medium text-bg-primary transition hover:bg-accent-glow"
+        >
+          Onyx {LATEST_VERSION} for Mac
+        </a>
+        <p class="mt-4 font-mono text-xs text-text-muted">
+          {REQUIREMENTS.os} &middot; {REQUIREMENTS.arch}
+        </p>
+      </div>
+
+      <div class="rounded-xl border border-border-subtle bg-bg-primary/60 p-7">
+        <h3 class="font-medium">Or build it yourself</h3>
+        <p class="mt-2 text-sm text-text-secondary">
+          It's a Swift package. The install script builds it and puts the app in
+          Applications.
+        </p>
+        <pre class="mt-5 overflow-x-auto rounded-lg border border-border-subtle bg-bg-primary p-4 font-mono text-xs leading-relaxed text-text-secondary"><code>git clone https://github.com/almostrealism/onyx
+cd onyx
+./install.sh</code></pre>
+        <a
+          href={RELEASES_URL}
+          class="mt-4 inline-block text-sm text-accent-primary transition hover:text-accent-glow"
+        >
+          All releases &rarr;
+        </a>
+      </div>
+    </div>
+
+    <p class="mt-8 text-sm text-text-muted">
+      Onyx uses <span class="font-mono">tmux</span> for session persistence — it needs to be
+      installed on {REQUIREMENTS.note}, not necessarily on your Mac.
+      <a href={REPO_URL} class="text-accent-primary transition hover:text-accent-glow">
+        Read the source
+      </a>.
+    </p>
+  </div>
+</section>

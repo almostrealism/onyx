@@ -1,0 +1,20 @@
+---
+import { REPO_URL, RELEASES_URL } from '../../config/site';
+const year = new Date().getFullYear();
+---
+
+<footer class="border-t border-border-subtle">
+  <div
+    class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-10 text-sm text-text-muted"
+  >
+    <p>
+      <span class="font-mono text-accent-primary">onyx</span>
+      &middot; by Almost Realism &middot; &copy; {year}
+    </p>
+    <nav class="flex gap-6">
+      <a href={REPO_URL} class="transition hover:text-text-primary">GitHub</a>
+      <a href={RELEASES_URL} class="transition hover:text-text-primary">Releases</a>
+      <a href="/privacy" class="transition hover:text-text-primary">Privacy</a>
+    </nav>
+  </div>
+</footer>

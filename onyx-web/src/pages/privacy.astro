@@ -1,0 +1,40 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Footer from '../components/sections/Footer.astro';
+---
+
+<Layout title="Privacy — Onyx" description="What Onyx does and doesn't collect. It doesn't.">
+  <main class="mx-auto max-w-3xl px-6 py-24">
+    <a href="/" class="font-mono text-sm text-accent-primary transition hover:text-accent-glow">
+      &larr; Onyx
+    </a>
+    <h1 class="mt-8 text-3xl font-bold tracking-tight">Privacy</h1>
+
+    <div class="mt-8 space-y-6 leading-relaxed text-text-secondary">
+      <p>
+        Onyx has no analytics, no telemetry, no crash reporting, and no account. It
+        makes no network connections of its own except the ones you configure: SSH to
+        your hosts, and the APIs you explicitly enable.
+      </p>
+      <p>
+        Everything it stores — hosts, favorites, notes, session notes — is a file in
+        <span class="font-mono text-text-primary">~/Library/Application Support/Onyx</span>
+        on your Mac. Nothing is synced anywhere.
+      </p>
+      <p>
+        Optional integrations talk only to the services you point them at, with
+        credentials you supply: GitHub and GitLab for pipelines and pull requests,
+        Timing.app for hours, and Apple Reminders through the system framework — which
+        macOS gates behind its own permission prompt, and which is read-only.
+      </p>
+      <p>
+        This site is static, served by Cloudflare Pages. It sets no cookies and embeds
+        no third-party scripts. Fonts are the only external request.
+      </p>
+      <p class="text-text-muted">
+        Questions: <a href="https://github.com/almostrealism/onyx/issues" class="text-accent-primary transition hover:text-accent-glow">open an issue</a>.
+      </p>
+    </div>
+  </main>
+  <Footer />
+</Layout>

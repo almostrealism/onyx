@@ -1,0 +1,47 @@
+---
+// The connection model is the thing that makes Onyx different from a
+// terminal with tabs, so it gets its own section rather than a bullet.
+const claims = [
+  {
+    figure: '2',
+    unit: 'connections per host',
+    body: 'One active, one warm standby. Every terminal, every poll, every file listing rides those two as multiplexed channels. Nothing else opens a connection — so a flaky network can never turn into a connection storm against your server.',
+  },
+  {
+    figure: '~100ms',
+    unit: 'failover',
+    body: "When the active connection dies, the standby is already authenticated and waiting. Your session reattaches through tmux with your scrollback intact. No probing, no backoff ladder, no ten-second wait.",
+  },
+  {
+    figure: '0',
+    unit: 'prompts to reconnect',
+    body: 'Sleep, wake, change networks, lose Wi-Fi for six hours. Nothing parks waiting for you to press a key: the moment a host is reachable again, the terminal is live. If a host is genuinely gone, it says so — in the host\'s own words.',
+  },
+];
+---
+
+<section class="border-y border-border-subtle bg-bg-secondary/40">
+  <div class="mx-auto max-w-5xl px-6 py-20 sm:py-24">
+    <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">
+      Connections that stay connected
+    </h2>
+    <p class="mt-4 max-w-2xl text-text-secondary">
+      Most of the work in Onyx went here. Not into features — into the unglamorous
+      business of a session still being there when you get back to your desk.
+    </p>
+
+    <div class="mt-12 grid gap-8 sm:grid-cols-3">
+      {
+        claims.map((claim) => (
+          <div class="rounded-xl border border-border-subtle bg-bg-primary/60 p-6">
+            <p class="font-mono text-3xl font-medium text-accent-primary">{claim.figure}</p>
+            <p class="mt-1 font-mono text-xs tracking-wide text-text-muted uppercase">
+              {claim.unit}
+            </p>
+            <p class="mt-4 text-sm leading-relaxed text-text-secondary">{claim.body}</p>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>

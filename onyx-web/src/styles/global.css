@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+/* Onyx's own palette: the app is a jet-black translucent overlay with a
+   cyan accent, so the site is the same material. Nothing here is
+   borrowed from the Rings site except the shape of the file. */
+@theme {
+  /* Backgrounds — near-black, like the terminal it wraps */
+  --color-bg-primary: #060607;
+  --color-bg-secondary: #0d0d10;
+  --color-bg-tertiary: #141418;
+
+  /* Accent — the app's default accent, #66CCFF */
+  --color-accent-primary: #66ccff;
+  --color-accent-deep: #2a9fd6;
+  --color-accent-glow: #8fdcff;
+
+  /* Text */
+  --color-text-primary: #f4f4f5;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #6b6b74;
+
+  /* Borders */
+  --color-border-subtle: #1e1e23;
+  --color-border-hover: #33333c;
+
+  /* Status — matches the overlay's own chips */
+  --color-ok: #6bff8e;
+  --color-warn: #ffd06b;
+  --color-bad: #ff6b6b;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* The glow the app's accent has against black. */
+@utility accent-glow {
+  box-shadow: 0 0 24px rgba(102, 204, 255, 0.28);
+}
+
+@utility accent-text {
+  background: linear-gradient(135deg, var(--color-accent-glow) 0%, var(--color-accent-primary) 45%, var(--color-accent-deep) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Faint grid, echoing a terminal's character cells. Sits behind the hero. */
+@utility cell-grid {
+  background-image:
+    linear-gradient(rgba(102, 204, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(102, 204, 255, 0.045) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* Reduced motion is respected everywhere: the only animation on the site
+   is the cursor blink, and it stops. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
