@@ -174,6 +174,8 @@ public final class CPUFleetPoller {
             color: Self.color(for: host),
             cpu: cpu,
             gpu: sample.gpuUsage,
+            mem: sample.memUsed,
+            memTotal: sample.memTotal,
             timestamp: timestamp
         )
 

@@ -191,3 +191,39 @@ public struct PersistedSession: Codable {
         self.sourceStableKey = sourceStableKey
     }
 }
+
+
+/// Which layout the monitor overlay is drawing. `S` cycles through them.
+///
+/// The order is a deliberate zoom-out: one host in full detail, one host
+/// big enough to read across a room, then every host, then the fleet as a
+/// single machine. Cycling rather than four separate keys keeps the
+/// single-key namespace free — the overlay already spends T/M/C/P/R/D/X.
+public enum MonitorLayout: String, CaseIterable, Codable {
+    /// Everything about the active host: charts, reminders, sessions,
+    /// pipelines, PRs, connections.
+    case detailed
+    /// The active host as giant charts, for a screen across the room.
+    case simple
+    /// Every remote host, one row each, sharing a time axis.
+    case fleetStacked
+    /// The whole fleet as one CPU and one GPU chart, each column the max
+    /// across hosts, with per-host memory beneath.
+    case fleetMerged
+
+    public var next: MonitorLayout {
+        let all = Self.allCases
+        let idx = all.firstIndex(of: self) ?? 0
+        return all[(idx + 1) % all.count]
+    }
+
+    /// Shown in the overlay's hint line so the current mode is named.
+    public var label: String {
+        switch self {
+        case .detailed:     return "detailed"
+        case .simple:       return "simple"
+        case .fleetStacked: return "fleet"
+        case .fleetMerged:  return "fleet max"
+        }
+    }
+}

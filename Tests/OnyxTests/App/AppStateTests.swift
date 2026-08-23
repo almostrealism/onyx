@@ -529,16 +529,22 @@ final class AppStateTests: XCTestCase {
         XCTAssertFalse(state.showSimpleMonitor)
     }
 
-    func testShowSimpleMonitor_independentOfShowMonitor() {
-        // The simple-mode flag persists across show/hide cycles of the
+    func testMonitorLayout_independentOfShowMonitor() {
+        // The chosen layout persists across show/hide cycles of the
         // monitor itself, so closing and reopening the monitor with
         // Escape doesn't reset the user's preferred layout.
         let state = AppState()
         state.showMonitor = true
-        state.showSimpleMonitor = true
+        state.monitorLayout = .simple
         state.showMonitor = false
         XCTAssertTrue(state.showSimpleMonitor,
-                      "simple-mode should not reset when monitor is hidden")
+                      "the layout should not reset when monitor is hidden")
+
+        state.monitorLayout = .fleetStacked
+        state.showMonitor = true
+        state.showMonitor = false
+        XCTAssertEqual(state.monitorLayout, .fleetStacked)
+        XCTAssertFalse(state.showSimpleMonitor)
     }
 }
 

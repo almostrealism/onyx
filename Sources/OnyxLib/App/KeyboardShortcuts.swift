@@ -203,7 +203,7 @@ public class ShortcutManager {
                 case 35: // P → toggle 12/24hr clock
                     NotificationCenter.default.post(name: .toggleClockFormat, object: nil)
                     return nil
-                case 1: // S → toggle simple monitor layout
+                case 1: // S → cycle monitor layout (detailed → simple → fleet → fleet max)
                     NotificationCenter.default.post(name: .toggleSimpleMonitor, object: nil)
                     return nil
                 case 7: // X → peek behind the overlay (drop to 30% opacity)

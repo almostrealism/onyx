@@ -163,7 +163,10 @@ public class AppState: ObservableObject {
     /// row, but giant CPU/MEM/GPU charts below, a compact strip of the
     /// top-CPU containers along the bottom, and a small weekly Timing
     /// tile in the bottom-right. Toggle with `s` while monitor is open.
-    @Published public var showSimpleMonitor = false
+    @Published public var monitorLayout: MonitorLayout = .detailed
+    /// Back-compat shim for the many places that only care whether the
+    /// stripped-down single-host layout is up.
+    public var showSimpleMonitor: Bool { monitorLayout == .simple }
     /// Temporary "peek" while the monitor overlay is up: drops the
     /// overlay's opacity to the slider floor (0.3) so the user can glance
     /// at the desktop behind it, then restore their chosen opacity.

@@ -265,7 +265,8 @@ struct MonitorView: View {
                             .padding(.horizontal, 40)
                     }
 
-                    if appState.showSimpleMonitor {
+                    switch appState.monitorLayout {
+                    case .simple:
                         SimpleMonitorBody(
                             appState: appState,
                             monitor: monitor,
@@ -274,7 +275,15 @@ struct MonitorView: View {
                             accentColor: appState.accentColor
                         )
                         .padding(.horizontal, 40)
-                    } else {
+                    case .fleetStacked:
+                        FleetStackedBody(appState: appState, monitor: monitor,
+                                         accentColor: appState.accentColor)
+                            .padding(.horizontal, 40)
+                    case .fleetMerged:
+                        FleetMergedBody(appState: appState, monitor: monitor,
+                                        accentColor: appState.accentColor)
+                            .padding(.horizontal, 40)
+                    case .detailed:
                     // Main region: three independently-scrollable columns.
                     // Two columns left of the divider (timing bar+stats +
                     // reminders | heatmap + work-tracking widgets) and one to

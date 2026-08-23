@@ -39,7 +39,7 @@ struct HelpOverlay: View {
 
     /// Single-key shortcuts that only fire while the monitor overlay is up.
     private let monitorShortcuts: [Shortcut] = [
-        .init(keys: "S", label: "Simple / full monitor layout"),
+        .init(keys: "S", label: "Cycle layout: detailed → simple → fleet → fleet max"),
         .init(keys: "X", label: "Peek — drop the overlay to near-transparent"),
         .init(keys: "T", label: "Toggle poll interval (5s / 1m)"),
         .init(keys: "M", label: "Toggle the memory chart"),

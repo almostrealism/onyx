@@ -35,11 +35,31 @@ public struct CPUStreamSample: Codable, Equatable {
     public let cpu: Double
     /// GPU utilization 0..100, or nil if the host has no GPU sensor.
     public let gpu: Double?
+    /// Memory in use, MB. Nil when the host didn't report it.
+    ///
+    /// Carried for the fleet monitor layouts, which need memory per host;
+    /// the screensaver ignores it. Both fields are optional and decoded
+    /// with decodeIfPresent, so an older screensaver reading a newer
+    /// stream file (or the reverse) is unaffected.
+    public let mem: Double?
+    /// Total memory, MB — the denominator for `mem`.
+    public let memTotal: Double?
 
-    public init(t: TimeInterval, cpu: Double, gpu: Double? = nil) {
+    public init(t: TimeInterval, cpu: Double, gpu: Double? = nil,
+                mem: Double? = nil, memTotal: Double? = nil) {
         self.t = t
         self.cpu = cpu
         self.gpu = gpu
+        self.mem = mem
+        self.memTotal = memTotal
+    }
+
+    /// Memory as a percentage of the host's total, or nil when either
+    /// half is missing. Percent is the only form comparable across
+    /// machines with wildly different amounts of RAM.
+    public var memPercent: Double? {
+        guard let mem, let memTotal, memTotal > 0 else { return nil }
+        return (mem / memTotal) * 100
     }
 }
 
@@ -115,7 +135,21 @@ public struct CPUStreamFile: Codable, Equatable {
 }
 
 /// Shared store + publisher for the screensaver's CPU stream file.
-public final class CPUStreamStore {
+public final class CPUStreamStore: ObservableObject {
+
+    /// Bumped whenever a host's samples change, so SwiftUI views built on
+    /// `snapshot()` redraw. The store's own data lives behind a lock and
+    /// isn't published — this is just the "something moved" tick, hopped
+    /// onto main because appends come off the fleet poller's queue.
+    ///
+    /// Only the fleet monitor layouts observe this; the screensaver reads
+    /// the file, not the object.
+    @Published public private(set) var revision: Int = 0
+
+    private func bumpRevision() {
+        if Thread.isMainThread { revision &+= 1 }
+        else { DispatchQueue.main.async { self.revision &+= 1 } }
+    }
 
     /// Per-host newest-N samples. 120 ≈ 20 min @ 10s polling, plenty of time
     /// to show meaningful variation while keeping the file small.
@@ -178,8 +212,11 @@ public final class CPUStreamStore {
                              color: String,
                              cpu: Double,
                              gpu: Double? = nil,
+                             mem: Double? = nil,
+                             memTotal: Double? = nil,
                              timestamp: TimeInterval) {
-        let sample = CPUStreamSample(t: timestamp, cpu: cpu, gpu: gpu)
+        let sample = CPUStreamSample(t: timestamp, cpu: cpu, gpu: gpu,
+                                     mem: mem, memTotal: memTotal)
         lock.lock()
         let existing = buffers[hostID]
         // Label / color may evolve (renamed host, theme change) — keep the
@@ -195,6 +232,7 @@ public final class CPUStreamStore {
         }
         buffers[hostID] = stream
         lock.unlock()
+        bumpRevision()
         scheduleWrite()
     }
 

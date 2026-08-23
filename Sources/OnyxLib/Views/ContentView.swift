@@ -568,7 +568,7 @@ private struct ContentViewNotifications: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleSimpleMonitor)) { _ in
                 guard isKeyWindow, appState.showMonitor else { return }
-                appState.showSimpleMonitor.toggle()
+                appState.monitorLayout = appState.monitorLayout.next
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleMonitorPeek)) { _ in
                 guard isKeyWindow, appState.showMonitor else { return }
