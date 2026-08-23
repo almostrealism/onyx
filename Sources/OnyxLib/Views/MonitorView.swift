@@ -99,6 +99,12 @@ struct MonitorView: View {
     // removed forwarding sinks in AppState.
     @ObservedObject private var monitor: MonitorManager
     @ObservedObject private var dockerStats: DockerStatsManager
+    /// One EventKit client for every at-a-glance layout (simple + both
+    /// fleet views). Owned here rather than inside each body so cycling
+    /// `S` doesn't tear one down and build another — which would mean an
+    /// access check and a re-fetch on every press, and an empty column
+    /// for the first second after each.
+    @StateObject private var overlayReminders = RemindersManager()
 
     init(appState: AppState) {
         self.appState = appState
@@ -272,15 +278,20 @@ struct MonitorView: View {
                             monitor: monitor,
                             dockerStats: dockerStats,
                             timing: appState.timing,
-                            accentColor: appState.accentColor
+                            accentColor: appState.accentColor,
+                            reminders: overlayReminders
                         )
                         .padding(.horizontal, 40)
                     case .fleetStacked:
                         FleetStackedBody(appState: appState, monitor: monitor,
+                                         timing: appState.timing,
+                                         reminders: overlayReminders,
                                          accentColor: appState.accentColor)
                             .padding(.horizontal, 40)
                     case .fleetMerged:
                         FleetMergedBody(appState: appState, monitor: monitor,
+                                        timing: appState.timing,
+                                        reminders: overlayReminders,
                                         accentColor: appState.accentColor)
                             .padding(.horizontal, 40)
                     case .detailed:

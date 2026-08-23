@@ -16,10 +16,11 @@ struct SimpleMonitorBody: View {
     @ObservedObject var timing: TimingManager
     let accentColor: Color
     @Environment(\.monitorFontScale) private var fontScale
-    /// Own reminders manager for the due-today / due-tomorrow scope counts
-    /// and the today list down the left. It stays in "Today" mode (no
-    /// selectedLists wiring), which is exactly the scope simple mode wants.
-    @StateObject private var reminders = RemindersManager()
+    /// Shared with the fleet layouts (owned by MonitorView) so switching
+    /// layouts doesn't spin up a second EventKit client and re-fetch. It
+    /// stays in "Today" mode — no selectedLists wiring — which is exactly
+    /// the scope these layouts want.
+    @ObservedObject var reminders: RemindersManager
     /// Observed here, not just inside the panel: `showPanel` depends on
     /// whether any session has a note, and that decision also controls
     /// the pills in the bottom strip. Without this, adding the first note
@@ -57,11 +58,10 @@ struct SimpleMonitorBody: View {
             // narrow window the charts are the point, and squeezing them for
             // text would trade the thing you glance at for the thing you
             // read. An empty column is worse than no column.
-            let panelColumn: CGFloat = 260 * fontScale
-            let showPanel = appState.appearance.simpleShowSidePanel
-                && SimpleSidePanel.hasContent(appState: appState, reminders: reminders,
-                                              store: notesStore)
-                && geo.size.width > panelColumn * 3
+            let panelColumn = SimpleSidePanel.columnWidth(fontScale: fontScale)
+            let showPanel = SimpleSidePanel.shouldShow(
+                appState: appState, reminders: reminders, store: notesStore,
+                width: geo.size.width, fontScale: fontScale)
 
             HStack(alignment: .top, spacing: showPanel ? 20 : 0) {
                 if showPanel {
@@ -116,28 +116,50 @@ struct SimpleMonitorBody: View {
                 }
             }
 
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-
-                // Bottom strip: reminders due-scope counts and top-CPU
-                // containers on the left, then the compact pipeline activity
-                // indicators, then the weekly Timing tile flush trailing.
-                HStack(alignment: .center, spacing: 12) {
-                    SimpleRemindersScope(reminders: reminders)
-                    SimpleContainersStrip(dockerStats: dockerStats)
-                    Spacer(minLength: 12)
-                    // The panel lists these same sessions with the same
-                    // colours, so the pills would be saying it twice.
-                    if !showPanel {
-                        SimpleSessionActivityStrip(appState: appState)
-                    }
-                    SimplePipelinesStrip()
-                    if timing.isConfigured {
-                        WeeklyTimingTile(timing: timing, accentColor: accentColor)
-                    }
-                }
-                .frame(height: bottomStripHeight)
+            MonitorBottomStrip(appState: appState, reminders: reminders,
+                               timing: timing, accentColor: accentColor,
+                               showSessions: !showPanel,
+                               height: bottomStripHeight) {
+                SimpleContainersStrip(dockerStats: dockerStats)
             }
+        }
+    }
+}
+
+/// The strip along the bottom of every at-a-glance layout: what's due,
+/// what's running, what's building, and the week's hours.
+///
+/// Shared by simple mode and both fleet layouts so they can't drift into
+/// three slightly different answers to "what else is going on". Only the
+/// containers slot differs — one host's containers in simple mode, the
+/// whole fleet's in the fleet layouts — so it's passed in.
+struct MonitorBottomStrip<Containers: View>: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var reminders: RemindersManager
+    @ObservedObject var timing: TimingManager
+    let accentColor: Color
+    /// False when the side panel is up and already listing them, so the
+    /// pills aren't saying it twice.
+    let showSessions: Bool
+    let height: CGFloat
+    @ViewBuilder let containers: () -> Containers
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            HStack(alignment: .center, spacing: 12) {
+                SimpleRemindersScope(reminders: reminders)
+                containers()
+                Spacer(minLength: 12)
+                if showSessions {
+                    SimpleSessionActivityStrip(appState: appState)
+                }
+                SimplePipelinesStrip()
+                if timing.isConfigured {
+                    WeeklyTimingTile(timing: timing, accentColor: accentColor)
+                }
+            }
+            .frame(height: height)
         }
     }
 }
@@ -160,6 +182,24 @@ struct SimpleSidePanel: View {
                                  listOrder: appState.appearance.remindersLists)
             Spacer(minLength: 0)
         }
+    }
+
+    /// The column's width at a given UI font scale.
+    static func columnWidth(fontScale: CGFloat) -> CGFloat { 260 * fontScale }
+
+    /// The full "should the column be up" decision, shared by every
+    /// layout that offers it: the user's toggle, something to say, and
+    /// room to say it in. On a narrow window the charts are the point,
+    /// and squeezing them for text trades the thing you glance at for
+    /// the thing you read.
+    static func shouldShow(appState: AppState,
+                           reminders: RemindersManager,
+                           store: SessionNotesStore = .shared,
+                           width: CGFloat,
+                           fontScale: CGFloat) -> Bool {
+        appState.appearance.simpleShowSidePanel
+            && hasContent(appState: appState, reminders: reminders, store: store)
+            && width > columnWidth(fontScale: fontScale) * 3
     }
 
     /// Whether the column has anything to say. Checked by the parent
