@@ -47,6 +47,24 @@ public final class CPUFleetPoller {
     /// matches DockerStatsManager's >=1% rule.
     public static let containerActivityThreshold: Double = 1.0
 
+    /// How often to re-probe AMD GPUs, per host.
+    ///
+    /// The stats script can only see nvidia (and Apple's ioreg); an AMD
+    /// card is invisible to it, because folding the amdgpu sysfs walk in
+    /// blew the script past what a remote terminal accepts and cost every
+    /// Mac its stats. So it's a second, small call — and a second call
+    /// per host per 10s tick is exactly the poll pileup this codebase
+    /// keeps getting bitten by. Every third tick is the compromise.
+    public static let acceleratorInterval: TimeInterval = 30
+
+    /// How long an AMD reading is carried forward between probes.
+    ///
+    /// Without this the 20s chart buckets would show holes wherever a
+    /// tick fell between probes, and a busy GPU would strobe. With it, a
+    /// host that stops answering goes blank after two missed probes
+    /// rather than showing a maxed-out card that isn't there any more.
+    public static let acceleratorStaleAfter: TimeInterval = 75
+
     public static let shared = CPUFleetPoller()
 
     private weak var appState: AppState?
@@ -58,6 +76,11 @@ public final class CPUFleetPoller {
     /// because pollOne can fire concurrently for multiple hosts on the
     /// shared `queue`. Pruned to bound memory.
     private var lastContainerActivity: [String: Date] = [:]
+    /// hostID → when we last ASKED about its AMD GPU (claimed before the
+    /// call, so a slow probe can't be started twice).
+    private var lastAcceleratorProbe: [String: Date] = [:]
+    /// hostID → last AMD GPU reading and when it arrived.
+    private var lastAMDGPU: [String: (value: Double, at: Date)] = [:]
     private let stateLock = NSLock()
 
     private init() {}
@@ -144,11 +167,51 @@ public final class CPUFleetPoller {
         if !host.isLocal {
             guard appState.sshMuxAlive(for: host) else { return }
         }
+
+        // The stats call takes a channel slot and gives it straight back.
+        // It is NOT held across the AMD probe below: a host only allows
+        // two concurrent utility channels, and holding one while asking
+        // for another means the probe loses every race against whatever
+        // else is polling that host — silently, and only on busy hosts.
+        guard let output = runStats(host: host, appState: appState) else { return }
+
+        guard let sample = MonitorManager.parse(output: output),
+              let cpu = sample.cpuUsage else { return }
+
+        // nvidia and Apple GPUs come back in the stats output above; an
+        // AMD card is invisible to it and needs its own probe, so fall
+        // back to the most recent reading from that.
+        let gpu = sample.gpuUsage
+            ?? amdGPU(for: host, isLinux: sample.isLinux, appState: appState)
+
+        CPUStreamStore.shared.appendSample(
+            hostID: host.id.uuidString,
+            label: Self.label(for: host),
+            color: Self.color(for: host),
+            cpu: cpu,
+            gpu: gpu,
+            mem: sample.memUsed,
+            memTotal: sample.memTotal,
+            timestamp: timestamp
+        )
+
+        let containers = Self.parseContainers(in: output)
+        let active = self.filterByActivity(containers,
+                                           hostID: host.id.uuidString)
+        CPUStreamStore.shared.setContainers(
+            hostID: host.id.uuidString,
+            containers: active.isEmpty ? nil : active
+        )
+    }
+
+    /// One stats sweep of a host, channel slot acquired and released
+    /// within the call.
+    private func runStats(host: HostConfig, appState: AppState) -> String? {
         // Channel budget: dedup + per-host cap. If this host's previous
         // fleet poll hasn't returned yet, skip the cycle — don't stack
         // overlapping ssh calls on a slow network.
         guard let releaseChannel = appState.acquireUtilityChannel(
-            "fleetPoller:\(host.id)", host: host) else { return }
+            "fleetPoller:\(host.id)", host: host) else { return nil }
         defer { releaseChannel() }
 
         let (cmd, args, stdinScript) = appState.statsCommand(host: host)
@@ -162,30 +225,65 @@ public final class CPUFleetPoller {
             captureStderr: true,
             label: "fleetPoller:\(host.label)"
         )
+        return (result.stdout + result.stderr)
+            .replacingOccurrences(of: "\r", with: "")
+    }
+
+    // MARK: - AMD GPU
+
+    /// The AMD GPU reading for this host: probe if one is due, then
+    /// return the freshest cached value.
+    ///
+    /// Returns nil for non-Linux hosts (a Mac can't answer a line of the
+    /// amdgpu probe) and for a host whose last reading has gone stale —
+    /// blank is the honest answer there, not a frozen number.
+    private func amdGPU(for host: HostConfig, isLinux: Bool,
+                        appState: AppState) -> Double? {
+        guard isLinux else { return nil }
+        let key = host.id.uuidString
+
+        stateLock.lock()
+        let due = lastAcceleratorProbe[key].map {
+            Date().timeIntervalSince($0) >= Self.acceleratorInterval
+        } ?? true
+        if due { lastAcceleratorProbe[key] = Date() }   // claim before the call
+        stateLock.unlock()
+
+        if due, let value = probeAMDGPU(host: host, appState: appState) {
+            stateLock.lock()
+            lastAMDGPU[key] = (value, Date())
+            stateLock.unlock()
+            return value
+        }
+
+        stateLock.lock()
+        let cached = lastAMDGPU[key]
+        stateLock.unlock()
+        guard let cached,
+              Date().timeIntervalSince(cached.at) < Self.acceleratorStaleAfter else {
+            return nil
+        }
+        return cached.value
+    }
+
+    /// One amdgpu sysfs read. Runs on the fleet queue we're already on —
+    /// pollOne is off the main thread — and takes its own channel slot so
+    /// it obeys the same in-flight dedup and per-host cap as everything
+    /// else that touches a host.
+    private func probeAMDGPU(host: HostConfig, appState: AppState) -> Double? {
+        guard let release = appState.acquireUtilityChannel(
+            "fleetAccel:\(host.id)", host: host) else { return nil }
+        defer { release() }
+
+        let (cmd, args, stdinScript) = appState.acceleratorCommand(.amdGPU, host: host)
+        let result = RemoteExec.shared.run(
+            cmd, args: args, stdin: stdinScript,
+            softTimeout: Self.perHostTimeout,
+            captureStdout: true, captureStderr: true,
+            label: "fleetAccel:\(host.label)")
         let output = (result.stdout + result.stderr)
             .replacingOccurrences(of: "\r", with: "")
-
-        guard let sample = MonitorManager.parse(output: output),
-              let cpu = sample.cpuUsage else { return }
-
-        CPUStreamStore.shared.appendSample(
-            hostID: host.id.uuidString,
-            label: Self.label(for: host),
-            color: Self.color(for: host),
-            cpu: cpu,
-            gpu: sample.gpuUsage,
-            mem: sample.memUsed,
-            memTotal: sample.memTotal,
-            timestamp: timestamp
-        )
-
-        let containers = Self.parseContainers(in: output)
-        let active = self.filterByActivity(containers,
-                                           hostID: host.id.uuidString)
-        CPUStreamStore.shared.setContainers(
-            hostID: host.id.uuidString,
-            containers: active.isEmpty ? nil : active
-        )
+        return MonitorManager.parse(output: output)?.gpuUsage
     }
 
     // MARK: - Label / color derivation

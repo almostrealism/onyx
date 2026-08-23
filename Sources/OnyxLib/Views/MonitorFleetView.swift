@@ -116,6 +116,18 @@ struct FleetMergedBody: View {
                         GridChart(title: "GPU · MAX ACROSS HOSTS", values: gpu,
                                   accentColor: Color.onyxPurple,
                                   height: max(40, chartHeight))
+                    } else {
+                        // Say so rather than just leaving a gap. A missing
+                        // chart is indistinguishable from a broken one,
+                        // and this exact silence hid an AMD host whose GPU
+                        // was pinned at 100%.
+                        Text("NO GPU REPORTED BY ANY HOST")
+                            .monitorFont(size: 10, weight: .medium)
+                            .foregroundColor(.gray.opacity(0.35))
+                            .tracking(2)
+                        Text("AMD cards are read on their own 30s probe, and only on Linux hosts.")
+                            .monitorFont(size: 10)
+                            .foregroundColor(.gray.opacity(0.25))
                     }
 
                     if !memHosts.isEmpty {
