@@ -207,9 +207,49 @@ struct SettingsView: View {
                                         )
                                     }
 
-                                    Text("Press P in monitor to toggle 12/24hr")
+                                    Toggle(isOn: Binding(
+                                        get: { appState.appearance.use12HourClock },
+                                        set: {
+                                            appState.appearance.use12HourClock = $0
+                                            appState.saveAppearance()
+                                        }
+                                    )) {
+                                        Text("12-hour clock (AM/PM)")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.8))
+                                    }
+                                    .toggleStyle(.switch)
+
+                                    Text("UTC always stays 24-hour. Also on P in the monitor overlay.")
                                         .font(.system(size: 9, design: .monospaced))
-                                        .foregroundColor(.gray.opacity(0.3))
+                                        .foregroundColor(.gray.opacity(0.4))
+                                }
+
+                                // Monitor: container visibility
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("MONITOR")
+                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
+                                        .tracking(2)
+
+                                    Toggle(isOn: Binding(
+                                        get: { appState.appearance.showAllContainers },
+                                        set: {
+                                            appState.appearance.showAllContainers = $0
+                                            appState.saveAppearance()
+                                            appState.dockerStats.showAllContainers = $0
+                                        }
+                                    )) {
+                                        Text("Show every docker container")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.8))
+                                    }
+                                    .toggleStyle(.switch)
+
+                                    Text("Off, the monitor lists only containers that have used CPU in the last five minutes, so a host running thirty idle containers stays readable. Also on C in the monitor overlay.")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(.gray.opacity(0.4))
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
 
                                 // Claude Code permission gating

@@ -151,6 +151,28 @@ struct MonitorView: View {
         }
     }
 
+    /// The single-key hint under the headline.
+    ///
+    /// P (12/24hr) and C (all containers) are deliberately absent: they're
+    /// set-once preferences that belong in Settings, and the keys still
+    /// work for anyone with the muscle memory. Listing every key trained
+    /// people to read past the line entirely.
+    private var shortcutHint: String {
+        "(T \(intervalHint) · M memory · R due-soon · D side panel"
+            + " · S \(appState.monitorLayout.label) · F \(appState.fleetMode.label) · X peek)"
+    }
+
+    /// What T means right now. In fleet modes it can't change the sample
+    /// rate — the fleet sweep is a fixed 10s shared with the screensaver —
+    /// so it changes the window instead, and says so rather than implying
+    /// a resolution the data doesn't have.
+    private var intervalHint: String {
+        if appState.fleetMode == .currentHost {
+            return monitor.useShortInterval ? "5s" : "1m"
+        }
+        return monitor.useShortInterval ? "10m window" : "1h window"
+    }
+
     var body: some View {
         ZStack {
             // The overlay's tint. Driven by the opacity setting (via
@@ -259,7 +281,7 @@ struct MonitorView: View {
                                 .foregroundColor(Color.onyxAmber.opacity(0.6))
                                 .help("The stats command didn't finish within its time budget — the readings below are what it had sent by then.")
                         }
-                        Text("(T interval · M memory · C containers · P 12/24hr · R due-soon · D side panel · S simple · X peek)")
+                        Text(shortcutHint)
                             .monitorFont(size: 10)
                             .foregroundColor(.gray.opacity(0.25))
                     }
@@ -271,8 +293,7 @@ struct MonitorView: View {
                             .padding(.horizontal, 40)
                     }
 
-                    switch appState.monitorLayout {
-                    case .simple:
+                    if appState.monitorLayout == .simple {
                         SimpleMonitorBody(
                             appState: appState,
                             monitor: monitor,
@@ -282,19 +303,7 @@ struct MonitorView: View {
                             reminders: overlayReminders
                         )
                         .padding(.horizontal, 40)
-                    case .fleetStacked:
-                        FleetStackedBody(appState: appState, monitor: monitor,
-                                         timing: appState.timing,
-                                         reminders: overlayReminders,
-                                         accentColor: appState.accentColor)
-                            .padding(.horizontal, 40)
-                    case .fleetMerged:
-                        FleetMergedBody(appState: appState, monitor: monitor,
-                                        timing: appState.timing,
-                                        reminders: overlayReminders,
-                                        accentColor: appState.accentColor)
-                            .padding(.horizontal, 40)
-                    case .detailed:
+                    } else {
                     // Main region: three independently-scrollable columns.
                     // Two columns left of the divider (timing bar+stats +
                     // reminders | heatmap + work-tracking widgets) and one to
@@ -349,6 +358,21 @@ struct MonitorView: View {
                                     )
                                 }
 
+                                // `F` retargets these charts at the fleet.
+                                // The column is narrow, so the fleet views
+                                // get a fixed budget and their own floor on
+                                // chart height rather than the full-height
+                                // arithmetic the simple layout can afford.
+                                if appState.fleetMode == .topHosts {
+                                    FleetStackedCharts(appState: appState, monitor: monitor,
+                                                       accentColor: appState.accentColor,
+                                                       availableHeight: 320,
+                                                       minChartHeight: 14)
+                                } else if appState.fleetMode == .fleetMax {
+                                    FleetMergedCharts(appState: appState, monitor: monitor,
+                                                      accentColor: appState.accentColor,
+                                                      availableHeight: 320)
+                                } else {
                                 let cpuData = monitor.bucketedCPU()
                                 if !cpuData.isEmpty {
                                     GridChart(
@@ -384,6 +408,7 @@ struct MonitorView: View {
                                     GridChart(title: "GPU", values: gpuData,
                                               accentColor: Color.onyxPurple, height: subChartHeight)
                                 }
+                                }
 
                                 if dockerStats.isAvailable {
                                     DockerStatsSection(appState: appState, dockerStats: dockerStats)
@@ -409,7 +434,12 @@ struct MonitorView: View {
             monitor.showMemoryChart.toggle()
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleAllContainers)) { _ in
-            dockerStats.showAllContainers.toggle()
+            // The key still works for the muscle memory, but it now sets
+            // the same persisted preference the Settings toggle does,
+            // rather than a second flag that disagrees with it.
+            appState.appearance.showAllContainers.toggle()
+            appState.saveAppearance()
+            dockerStats.showAllContainers = appState.appearance.showAllContainers
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleClockFormat)) { _ in
             appState.appearance.use12HourClock.toggle()

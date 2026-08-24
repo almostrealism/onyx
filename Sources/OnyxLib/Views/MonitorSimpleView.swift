@@ -70,6 +70,19 @@ struct SimpleMonitorBody: View {
                         .frame(width: panelColumn, alignment: .topLeading)
                 }
 
+                // What the charts are OF is `F`, independent of this
+                // layout being the terse one. Same panel, same strip,
+                // different subject.
+                switch appState.fleetMode {
+                case .topHosts:
+                    FleetStackedCharts(appState: appState, monitor: monitor,
+                                       accentColor: accentColor,
+                                       availableHeight: chartArea)
+                case .fleetMax:
+                    FleetMergedCharts(appState: appState, monitor: monitor,
+                                      accentColor: accentColor,
+                                      availableHeight: chartArea)
+                case .currentHost:
                 VStack(alignment: .leading, spacing: 8) {
                     // CPU chart — giant.
                     let cpuData = monitor.bucketedCPU()
@@ -113,6 +126,7 @@ struct SimpleMonitorBody: View {
                     }
 
                     Spacer(minLength: 0)
+                }
                 }
             }
 

@@ -137,6 +137,11 @@ public struct AppearanceConfig: Codable {
     /// approve/deny a tool call from the Onyx UI. Off by default — when off,
     /// Claude's normal in-terminal permission prompt is used.
     public var claudeHooksGatePermissions: Bool = false
+    /// When true, the monitor lists every docker container rather than
+    /// only those that have used CPU recently. A standing preference —
+    /// "I want to see all of them" rarely changes by the minute — so it
+    /// belongs here rather than only on the `C` key.
+    public var showAllContainers: Bool = false
     /// When true, simple mode shows a left column of session notes above
     /// today's reminders. Toggled with `D` while the overlay is up.
     ///
@@ -236,6 +241,7 @@ public struct AppearanceConfig: Codable {
         case extraTimezones, use12HourClock
         case claudeHooksGatePermissions, showFocusOutline
         case searchFileTypeIDs, remindersDueSoonOnly, simpleShowSidePanel
+        case showAllContainers
     }
 
     public init(from decoder: Decoder) throws {
@@ -258,5 +264,6 @@ public struct AppearanceConfig: Codable {
         self.searchFileTypeIDs          = try c.decodeIfPresent([String].self,       forKey: .searchFileTypeIDs)          ?? []
         self.remindersDueSoonOnly       = try c.decodeIfPresent(Bool.self,           forKey: .remindersDueSoonOnly)       ?? false
         self.simpleShowSidePanel        = try c.decodeIfPresent(Bool.self,           forKey: .simpleShowSidePanel)        ?? false
+        self.showAllContainers          = try c.decodeIfPresent(Bool.self,           forKey: .showAllContainers)          ?? false
     }
 }

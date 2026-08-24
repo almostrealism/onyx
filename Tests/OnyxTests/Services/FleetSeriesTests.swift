@@ -70,14 +70,17 @@ final class FleetSeriesTests: XCTestCase {
     }
 
     func testSamplesInOneBucketAreAveraged() {
-        // Ten seconds past a bucket boundary, so both samples fall inside
-        // the current column instead of straddling into the previous one.
+        // Bucket width is stated explicitly, and `now` sits mid-bucket, so
+        // both samples fall inside the current column instead of
+        // straddling into the previous one — and the test doesn't quietly
+        // change meaning if the default window width is retuned.
         let mid = Date(timeIntervalSince1970: 1_770_000_010)
         let t = mid.timeIntervalSince1970
         let s = FleetSeries.series(for: HostCPUStream(
             hostID: "h", label: "a", color: "#FF0000",
             samples: [CPUStreamSample(t: t - 5, cpu: 20),
-                      CPUStreamSample(t: t - 2, cpu: 40)]), now: mid)
+                      CPUStreamSample(t: t - 2, cpu: 40)]),
+            now: mid, bucketSeconds: 20)
         XCTAssertEqual(s.cpu.last!, 30, accuracy: 0.001)
     }
 
@@ -223,21 +226,72 @@ final class FleetSeriesTests: XCTestCase {
                       "an all-zero GPU chart would imply a GPU sitting idle")
     }
 
-    // MARK: - Layout cycle
+    // MARK: - Layout and fleet mode are separate axes
 
-    func testLayoutCycleReturnsToWhereItStarted() {
-        var layout = MonitorLayout.detailed
-        for _ in 0..<MonitorLayout.allCases.count { layout = layout.next }
-        XCTAssertEqual(layout, .detailed)
+    func testLayoutTogglesBetweenTwoDensities() {
+        XCTAssertEqual(MonitorLayout.detailed.toggled, .simple)
+        XCTAssertEqual(MonitorLayout.simple.toggled, .detailed)
     }
 
-    func testLayoutCycleVisitsEveryMode() {
-        var seen: Set<MonitorLayout> = []
-        var layout = MonitorLayout.detailed
-        for _ in 0..<MonitorLayout.allCases.count {
-            seen.insert(layout)
-            layout = layout.next
+    func testFleetModeCycleReturnsToWhereItStarted() {
+        var mode = FleetMode.currentHost
+        for _ in 0..<FleetMode.allCases.count { mode = mode.next }
+        XCTAssertEqual(mode, .currentHost)
+    }
+
+    func testFleetModeCycleVisitsEveryMode() {
+        var seen: Set<FleetMode> = []
+        var mode = FleetMode.currentHost
+        for _ in 0..<FleetMode.allCases.count {
+            seen.insert(mode)
+            mode = mode.next
         }
-        XCTAssertEqual(seen, Set(MonitorLayout.allCases))
+        XCTAssertEqual(seen, Set(FleetMode.allCases))
+    }
+
+    /// The whole point of splitting S and F: choosing a density must not
+    /// change what the charts are about, and vice versa.
+    func testTheTwoAxesDoNotDisturbEachOther() {
+        let state = AppState()
+        state.fleetMode = .fleetMax
+        state.monitorLayout = state.monitorLayout.toggled
+        XCTAssertEqual(state.fleetMode, .fleetMax)
+
+        state.monitorLayout = .simple
+        state.fleetMode = state.fleetMode.next
+        XCTAssertEqual(state.monitorLayout, .simple)
+    }
+
+    // MARK: - Window follows the T setting
+
+    /// T can't change how often the fleet is sampled (that sweep is
+    /// shared with the screensaver), so it changes how much time is on
+    /// screen instead. The wide setting must not ask for more history
+    /// than the ring buffer holds, or the chart is mostly blank.
+    func testWideWindowFitsInsideTheRingBuffer() {
+        let wide = FleetSeries.bucketSeconds(shortInterval: false)
+        let spanned = Double(FleetSeries.bucketCount) * wide
+        let buffered = Double(CPUStreamStore.maxSamplesPerHost) * CPUFleetPoller.tickInterval
+        XCTAssertLessThanOrEqual(spanned, buffered,
+                                 "the wide window would show more time than we keep samples for")
+    }
+
+    func testShortWindowIsNarrowerThanWide() {
+        XCTAssertLessThan(FleetSeries.bucketSeconds(shortInterval: true),
+                          FleetSeries.bucketSeconds(shortInterval: false))
+    }
+
+    func testWindowWidthChangesWhichSamplesLand() {
+        // A sample 30 minutes old is off the edge of the 10-minute window
+        // and inside the 1-hour one.
+        let old = sample(1800, cpu: 60)
+        let s = stream(UUID(), label: "a", samples: [old, sample(0, cpu: 5)])
+
+        let narrow = FleetSeries.series(for: s, now: now,
+                                        bucketSeconds: FleetSeries.bucketSeconds(shortInterval: true))
+        let wide = FleetSeries.series(for: s, now: now,
+                                      bucketSeconds: FleetSeries.bucketSeconds(shortInterval: false))
+        XCTAssertEqual(narrow.cpu.max(), 5)
+        XCTAssertEqual(wide.cpu.max(), 60)
     }
 }

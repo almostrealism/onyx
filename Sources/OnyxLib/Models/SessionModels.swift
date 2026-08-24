@@ -193,37 +193,50 @@ public struct PersistedSession: Codable {
 }
 
 
-/// Which layout the monitor overlay is drawing. `S` cycles through them.
+/// Which layout the monitor overlay is drawing. `S` toggles them.
 ///
-/// The order is a deliberate zoom-out: one host in full detail, one host
-/// big enough to read across a room, then every host, then the fleet as a
-/// single machine. Cycling rather than four separate keys keeps the
-/// single-key namespace free — the overlay already spends T/M/C/P/R/D/X.
+/// This is about DENSITY — how much detail fits and how far away you can
+/// read it from. What the charts are OF is a separate axis; see
+/// `FleetMode`. Keeping them separate means "simple mode" and "show me
+/// the whole fleet" compose instead of fighting over one key.
 public enum MonitorLayout: String, CaseIterable, Codable {
-    /// Everything about the active host: charts, reminders, sessions,
-    /// pipelines, PRs, connections.
+    /// Everything about the host: charts, reminders, sessions, pipelines,
+    /// PRs, connections.
     case detailed
-    /// The active host as giant charts, for a screen across the room.
+    /// Giant charts and a terse strip, for a screen across the room.
     case simple
-    /// Every remote host, one row each, sharing a time axis.
-    case fleetStacked
-    /// The whole fleet as one CPU and one GPU chart, each column the max
-    /// across hosts, with per-host memory beneath.
-    case fleetMerged
 
-    public var next: MonitorLayout {
-        let all = Self.allCases
-        let idx = all.firstIndex(of: self) ?? 0
-        return all[(idx + 1) % all.count]
-    }
+    public var toggled: MonitorLayout { self == .detailed ? .simple : .detailed }
 
-    /// Shown in the overlay's hint line so the current mode is named.
     public var label: String {
         switch self {
-        case .detailed:     return "detailed"
-        case .simple:       return "simple"
-        case .fleetStacked: return "fleet"
-        case .fleetMerged:  return "fleet max"
+        case .detailed: return "detailed"
+        case .simple:   return "simple"
+        }
+    }
+}
+
+/// Which machines the overlay's charts are about. `F` cycles them, and
+/// the choice applies to whichever layout you're in.
+public enum FleetMode: String, CaseIterable, Codable {
+    /// Just the host you're looking at — the original behaviour.
+    case currentHost
+    /// The busiest few remote hosts, one row each, sharing a time axis.
+    case topHosts
+    /// Those same hosts collapsed to one CPU and one GPU chart, each
+    /// column the max across them: if anyone is busy, we're busy.
+    case fleetMax
+
+    public var next: FleetMode {
+        let all = Self.allCases
+        return all[((all.firstIndex(of: self) ?? 0) + 1) % all.count]
+    }
+
+    public var label: String {
+        switch self {
+        case .currentHost: return "this host"
+        case .topHosts:    return "top \(FleetSeries.defaultLimit)"
+        case .fleetMax:    return "fleet max"
         }
     }
 }

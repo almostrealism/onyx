@@ -540,10 +540,13 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(state.showSimpleMonitor,
                       "the layout should not reset when monitor is hidden")
 
-        state.monitorLayout = .fleetStacked
+        state.monitorLayout = .detailed
+        state.fleetMode = .topHosts
         state.showMonitor = true
         state.showMonitor = false
-        XCTAssertEqual(state.monitorLayout, .fleetStacked)
+        XCTAssertEqual(state.monitorLayout, .detailed)
+        XCTAssertEqual(state.fleetMode, .topHosts,
+                       "fleet mode should survive the monitor closing too")
         XCTAssertFalse(state.showSimpleMonitor)
     }
 }

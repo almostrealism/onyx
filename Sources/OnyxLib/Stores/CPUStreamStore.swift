@@ -151,9 +151,13 @@ public final class CPUStreamStore: ObservableObject {
         else { DispatchQueue.main.async { self.revision &+= 1 } }
     }
 
-    /// Per-host newest-N samples. 120 ≈ 20 min @ 10s polling, plenty of time
-    /// to show meaningful variation while keeping the file small.
-    public static let maxSamplesPerHost = 120
+    /// Per-host newest-N samples. 360 ≈ 60 min @ 10s polling — an hour is
+    /// what the fleet monitor's wide (1m-bucket) setting needs to fill its
+    /// chart; anything less and two thirds of the columns are empty.
+    ///
+    /// Safe for the screensaver, which takes a bounded `suffix` of this
+    /// rather than everything it's given. Costs ~18KB per host on disk.
+    public static let maxSamplesPerHost = 360
 
     /// Debounce window for disk writes. Multiple samples landing inside the
     /// window collapse into a single rewrite — important because the fleet

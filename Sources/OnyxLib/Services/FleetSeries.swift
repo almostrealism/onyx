@@ -59,11 +59,20 @@ public enum FleetSeries {
     /// Columns per chart. Matches the single-host charts so the two
     /// layouts look like the same instrument.
     public static let bucketCount = 60
-    /// Seconds per bucket. The fleet poller ticks every 10s, so 20s means
-    /// roughly two samples per column — enough that one missed poll
-    /// doesn't punch a hole in the row — and 60 × 20s = a 20-minute
-    /// window, which is what the 120-sample ring buffer holds anyway.
-    public static let bucketSeconds: TimeInterval = 20
+    /// Seconds per bucket, by the overlay's T setting.
+    ///
+    /// The fleet sweep is fixed at 10s — it's shared with the screensaver
+    /// and doubling it would double every host's SSH load — so T can't
+    /// change how often we SAMPLE the fleet the way it does for the
+    /// active host. What it changes here is the WINDOW: 10s columns show
+    /// the last 10 minutes at one sample each, 60s columns show the last
+    /// hour averaged. Same instrument, different zoom.
+    public static func bucketSeconds(shortInterval: Bool) -> TimeInterval {
+        shortInterval ? 10 : 60
+    }
+
+    /// Default bucket width, used where no T setting is in scope.
+    public static let bucketSeconds: TimeInterval = 10
     /// How many hosts the stacked layout will draw. Past this the rows
     /// are too short to read, which defeats the point of having them.
     public static let defaultLimit = 5
@@ -82,7 +91,8 @@ public enum FleetSeries {
     public static func build(streams: [HostCPUStream],
                              hosts: [HostConfig],
                              now: Date = Date(),
-                             limit: Int = defaultLimit) -> [FleetHostSeries] {
+                             limit: Int = defaultLimit,
+                             bucketSeconds: TimeInterval = bucketSeconds) -> [FleetHostSeries] {
         let byID = Dictionary(hosts.map { ($0.id.uuidString, $0) },
                               uniquingKeysWith: { first, _ in first })
 
@@ -92,7 +102,7 @@ public enum FleetSeries {
         for stream in streams {
             guard let host = byID[stream.hostID] else { continue }
             if host.isLocal { continue }
-            let series = series(for: stream, now: now)
+            let series = series(for: stream, now: now, bucketSeconds: bucketSeconds)
             // Silence is not the same as idleness — see `hasData`.
             guard series.hasData else { continue }
 
@@ -149,13 +159,14 @@ public enum FleetSeries {
     }
 
     /// Bucket one host's samples onto the shared grid.
-    static func series(for stream: HostCPUStream, now: Date) -> FleetHostSeries {
-        let (start, end) = window(now: now)
+    static func series(for stream: HostCPUStream, now: Date,
+                       bucketSeconds: TimeInterval = bucketSeconds) -> FleetHostSeries {
+        let (start, end) = window(now: now, bucketSeconds: bucketSeconds)
         let hasData = stream.samples.contains { $0.t >= start && $0.t < end + bucketSeconds }
 
-        let cpu = bucket(stream.samples, now: now) { $0.cpu }
-        let gpuValues = bucket(stream.samples, now: now) { $0.gpu }
-        let memValues = bucket(stream.samples, now: now) { $0.memPercent }
+        let cpu = bucket(stream.samples, now: now, bucketSeconds: bucketSeconds) { $0.cpu }
+        let gpuValues = bucket(stream.samples, now: now, bucketSeconds: bucketSeconds) { $0.gpu }
+        let memValues = bucket(stream.samples, now: now, bucketSeconds: bucketSeconds) { $0.memPercent }
 
         let sawGPU = stream.samples.contains { $0.gpu != nil }
         let sawMem = stream.samples.contains { $0.memPercent != nil }
@@ -178,8 +189,9 @@ public enum FleetSeries {
     /// reason these layouts exist. Empty buckets read 0.
     static func bucket(_ samples: [CPUStreamSample],
                        now: Date,
+                       bucketSeconds: TimeInterval = bucketSeconds,
                        value: (CPUStreamSample) -> Double?) -> [Double] {
-        let (start, _) = window(now: now)
+        let (start, _) = window(now: now, bucketSeconds: bucketSeconds)
 
         var sums = [Double](repeating: 0, count: bucketCount)
         var counts = [Int](repeating: 0, count: bucketCount)
@@ -199,7 +211,9 @@ public enum FleetSeries {
     /// the in-progress bucket (floored to a boundary so the grid doesn't
     /// slide under the charts between frames), and `start` is
     /// `bucketCount - 1` buckets before it.
-    static func window(now: Date) -> (start: TimeInterval, end: TimeInterval) {
+    static func window(now: Date,
+                       bucketSeconds: TimeInterval = bucketSeconds)
+        -> (start: TimeInterval, end: TimeInterval) {
         let end = floor(now.timeIntervalSince1970 / bucketSeconds) * bucketSeconds
         return (end - Double(bucketCount - 1) * bucketSeconds, end)
     }

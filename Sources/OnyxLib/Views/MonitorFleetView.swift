@@ -17,197 +17,147 @@ import SwiftUI
 //           in a row underneath, side by side.
 
 /// Rows of full-width charts, one host per row.
-struct FleetStackedBody: View {
+///
+/// Charts only: the side panel and the bottom strip belong to whichever
+/// layout is hosting these, so `F` swaps the chart area without
+/// disturbing anything around it.
+struct FleetStackedCharts: View {
     @ObservedObject var appState: AppState
     @ObservedObject var monitor: MonitorManager
-    @ObservedObject var timing: TimingManager
-    @ObservedObject var reminders: RemindersManager
     /// The fleet sweep writes here; observing it is what makes these
-    /// layouts live rather than frozen at whatever was buffered when the
+    /// charts live rather than frozen at whatever was buffered when the
     /// overlay opened.
     @ObservedObject private var streams = CPUStreamStore.shared
-    @ObservedObject private var notesStore = SessionNotesStore.shared
     let accentColor: Color
+    /// Height to divide between the rows.
+    let availableHeight: CGFloat
+    /// Below this, a chart is a smear — used to decide whether memory
+    /// rows are worth drawing at all in a cramped column.
+    var minChartHeight: CGFloat = 22
     @Environment(\.monitorFontScale) private var fontScale
 
     var body: some View {
-        GeometryReader { geo in
-            let bottomStripHeight: CGFloat = 84 * fontScale
-            let panelColumn = SimpleSidePanel.columnWidth(fontScale: fontScale)
-            let showPanel = SimpleSidePanel.shouldShow(
-                appState: appState, reminders: reminders, store: notesStore,
-                width: geo.size.width, fontScale: fontScale)
-            let chartArea = max(0, geo.size.height - bottomStripHeight - 16)
+        let series = FleetSeries.build(
+            streams: streams.snapshot(), hosts: appState.hosts,
+            bucketSeconds: FleetSeries.bucketSeconds(shortInterval: monitor.useShortInterval))
 
-            let series = FleetSeries.build(streams: streams.snapshot(),
-                                           hosts: appState.hosts)
+        if series.isEmpty {
+            FleetEmptyState(appState: appState)
+        } else {
+            // Every host contributes the same number of charts so the rows
+            // stay the same height as each other — a row that happens to
+            // have a GPU shouldn't be shorter than one that doesn't. Chart
+            // count is decided once, by what the fleet as a whole has.
+            let showGPU = series.contains { $0.gpu != nil }
+            let showMem = monitor.showMemoryChart && series.contains { $0.mem != nil }
+            let perHost = 1 + (showGPU ? 1 : 0) + (showMem ? 1 : 0)
 
-            HStack(alignment: .top, spacing: showPanel ? 20 : 0) {
-                if showPanel {
-                    SimpleSidePanel(appState: appState, reminders: reminders,
-                                    accentColor: accentColor)
-                        .frame(width: panelColumn, alignment: .topLeading)
-                }
+            let headerHeight: CGFloat = 16 * fontScale
+            let rowSpacing: CGFloat = 10
+            let available = availableHeight
+                - CGFloat(series.count) * headerHeight
+                - CGFloat(max(0, series.count - 1)) * rowSpacing
+            let chartHeight = max(minChartHeight,
+                                  available / CGFloat(series.count * perHost) - 4)
 
-                if series.isEmpty {
-                    FleetEmptyState(appState: appState)
-                } else {
-                    // Every host contributes the same number of charts so the
-                    // rows stay the same height as each other — a row that
-                    // happens to have a GPU shouldn't be shorter than one that
-                    // doesn't. Chart count is decided once, by what the fleet
-                    // as a whole has.
-                    let showGPU = series.contains { $0.gpu != nil }
-                    let showMem = monitor.showMemoryChart && series.contains { $0.mem != nil }
-                    let perHost = 1 + (showGPU ? 1 : 0) + (showMem ? 1 : 0)
-
-                    let headerHeight: CGFloat = 18 * fontScale
-                    let rowSpacing: CGFloat = 14
-                    let available = chartArea
-                        - CGFloat(series.count) * headerHeight
-                        - CGFloat(max(0, series.count - 1)) * rowSpacing
-                    // A floor of 22pt: below that a chart is a smear, and it's
-                    // better to overflow (and let the user turn memory off)
-                    // than to draw something unreadable.
-                    let chartHeight = max(22, available / CGFloat(series.count * perHost) - 4)
-
-                    VStack(alignment: .leading, spacing: rowSpacing) {
-                        ForEach(series) { host in
-                            VStack(alignment: .leading, spacing: 4) {
-                                FleetHostHeader(host: host, accentColor: accentColor)
-                                GridChart(title: "CPU", values: host.cpu,
-                                          accentColor: Color.onyxBlue, height: chartHeight)
-                                if showGPU {
-                                    GridChart(title: "GPU", values: host.gpu ?? [],
-                                              accentColor: Color.onyxPurple, height: chartHeight)
-                                }
-                                if showMem {
-                                    GridChart(title: "MEM", values: host.mem ?? [],
-                                              accentColor: Color.onyxAmber, height: chartHeight)
-                                }
-                            }
+            VStack(alignment: .leading, spacing: rowSpacing) {
+                ForEach(series) { host in
+                    VStack(alignment: .leading, spacing: 3) {
+                        FleetHostHeader(host: host, accentColor: accentColor)
+                        GridChart(title: "CPU", values: host.cpu,
+                                  accentColor: Color.onyxBlue, height: chartHeight)
+                        if showGPU {
+                            GridChart(title: "GPU", values: host.gpu ?? [],
+                                      accentColor: Color.onyxPurple, height: chartHeight)
                         }
-                        Spacer(minLength: 0)
+                        if showMem {
+                            GridChart(title: "MEM", values: host.mem ?? [],
+                                      accentColor: Color.onyxAmber, height: chartHeight)
+                        }
                     }
                 }
-            }
-
-            MonitorBottomStrip(appState: appState, reminders: reminders,
-                               timing: timing, accentColor: accentColor,
-                               showSessions: !showPanel,
-                               height: bottomStripHeight) {
-                FleetContainersStrip()
+                Spacer(minLength: 0)
             }
         }
     }
 }
 
 /// One merged CPU chart, one merged GPU chart, per-host memory beneath.
-struct FleetMergedBody: View {
+struct FleetMergedCharts: View {
     @ObservedObject var appState: AppState
     @ObservedObject var monitor: MonitorManager
-    @ObservedObject var timing: TimingManager
-    @ObservedObject var reminders: RemindersManager
     @ObservedObject private var streams = CPUStreamStore.shared
-    @ObservedObject private var notesStore = SessionNotesStore.shared
     let accentColor: Color
+    let availableHeight: CGFloat
     @Environment(\.monitorFontScale) private var fontScale
 
     var body: some View {
-        GeometryReader { geo in
-            let bottomStripHeight: CGFloat = 84 * fontScale
-            let panelColumn = SimpleSidePanel.columnWidth(fontScale: fontScale)
-            let showPanel = SimpleSidePanel.shouldShow(
-                appState: appState, reminders: reminders, store: notesStore,
-                width: geo.size.width, fontScale: fontScale)
+        let series = FleetSeries.build(
+            streams: streams.snapshot(), hosts: appState.hosts,
+            bucketSeconds: FleetSeries.bucketSeconds(shortInterval: monitor.useShortInterval))
 
-            let series = FleetSeries.build(streams: streams.snapshot(),
-                                           hosts: appState.hosts)
+        if series.isEmpty {
+            FleetEmptyState(appState: appState)
+        } else {
+            let cpu = FleetSeries.mergedMaxCPU(series)
+            let gpu = FleetSeries.mergedMax(series, \.gpu)
+            let memHosts = monitor.showMemoryChart ? series.filter { $0.mem != nil } : []
 
-            HStack(alignment: .top, spacing: showPanel ? 20 : 0) {
-                if showPanel {
-                    SimpleSidePanel(appState: appState, reminders: reminders,
-                                    accentColor: accentColor)
-                        .frame(width: panelColumn, alignment: .topLeading)
+            // Memory takes a fixed slice off the bottom; the merged charts
+            // split what's left. They're the headline, so they keep the
+            // majority of the height at every size.
+            let memHeight: CGFloat = memHosts.isEmpty ? 0 : min(110 * fontScale,
+                                                                availableHeight * 0.3)
+            let chartArea = max(0, availableHeight - memHeight - 20)
+            let chartHeight = gpu.isEmpty ? chartArea - 20 : (chartArea / 2) - 20
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("FLEET MAX — \(series.count) HOST\(series.count == 1 ? "" : "S")")
+                    .monitorFont(size: 9, weight: .medium)
+                    .foregroundColor(.gray.opacity(0.4))
+                    .tracking(2)
+
+                GridChart(title: "CPU · MAX ACROSS HOSTS", values: cpu,
+                          accentColor: Color.onyxBlue, height: max(30, chartHeight))
+                if !gpu.isEmpty {
+                    GridChart(title: "GPU · MAX ACROSS HOSTS", values: gpu,
+                              accentColor: Color.onyxPurple, height: max(30, chartHeight))
+                } else {
+                    // Say so rather than just leaving a gap. A missing chart
+                    // is indistinguishable from a broken one, and this exact
+                    // silence hid an AMD host whose GPU was pinned at 100%.
+                    Text("NO GPU REPORTED BY ANY HOST")
+                        .monitorFont(size: 10, weight: .medium)
+                        .foregroundColor(.gray.opacity(0.35))
+                        .tracking(2)
+                    Text("AMD cards are read on their own 30s probe, and only on Linux hosts.")
+                        .monitorFont(size: 10)
+                        .foregroundColor(.gray.opacity(0.25))
                 }
 
-                if series.isEmpty {
-                    FleetEmptyState(appState: appState)
-                } else {
-                    let cpu = FleetSeries.mergedMaxCPU(series)
-                    let gpu = FleetSeries.mergedMax(series, \.gpu)
-                    let memHosts = monitor.showMemoryChart
-                        ? series.filter { $0.mem != nil }
-                        : []
-
-                    // Memory takes a fixed slice off the bottom; the merged
-                    // charts split what's left. They're the headline, so they
-                    // keep the majority of the height at every window size.
-                    let memHeight: CGFloat = memHosts.isEmpty ? 0 : 110 * fontScale
-                    let chartArea = max(0, geo.size.height - bottomStripHeight - memHeight - 24)
-                    let chartHeight = gpu.isEmpty ? chartArea - 24 : (chartArea / 2) - 24
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("FLEET MAX — \(series.count) HOST\(series.count == 1 ? "" : "S")")
-                            .monitorFont(size: 9, weight: .medium)
-                            .foregroundColor(.gray.opacity(0.4))
-                            .tracking(2)
-
-                        GridChart(title: "CPU · MAX ACROSS HOSTS", values: cpu,
-                                  accentColor: Color.onyxBlue,
-                                  height: max(40, chartHeight))
-                        if !gpu.isEmpty {
-                            GridChart(title: "GPU · MAX ACROSS HOSTS", values: gpu,
-                                      accentColor: Color.onyxPurple,
-                                      height: max(40, chartHeight))
-                        } else {
-                            // Say so rather than just leaving a gap. A missing
-                            // chart is indistinguishable from a broken one,
-                            // and this exact silence hid an AMD host whose GPU
-                            // was pinned at 100%.
-                            Text("NO GPU REPORTED BY ANY HOST")
-                                .monitorFont(size: 10, weight: .medium)
-                                .foregroundColor(.gray.opacity(0.35))
-                                .tracking(2)
-                            Text("AMD cards are read on their own 30s probe, and only on Linux hosts.")
-                                .monitorFont(size: 10)
-                                .foregroundColor(.gray.opacity(0.25))
-                        }
-
-                        if !memHosts.isEmpty {
-                            // Side by side, so each host's memory gets a
-                            // slice of the width. These deliberately DON'T
-                            // share the time axis above them — they can't,
-                            // at this width — so they're labelled per host
-                            // and read as their own small multiples.
-                            HStack(alignment: .bottom, spacing: 10) {
-                                ForEach(memHosts) { host in
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(host.label.uppercased())
-                                            .monitorFont(size: 9, weight: .medium)
-                                            .foregroundColor(accentColor.opacity(0.6))
-                                            .tracking(1)
-                                            .lineLimit(1)
-                                        GridChart(title: "MEM",
-                                                  values: host.mem ?? [],
-                                                  accentColor: Color.onyxAmber,
-                                                  height: max(30, memHeight - 40))
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
+                if !memHosts.isEmpty {
+                    // Side by side, so each host's memory gets a slice of the
+                    // width. These deliberately DON'T share the time axis
+                    // above them — they can't, at this width — so they're
+                    // labelled per host and read as small multiples.
+                    HStack(alignment: .bottom, spacing: 8) {
+                        ForEach(memHosts) { host in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(host.label.uppercased())
+                                    .monitorFont(size: 9, weight: .medium)
+                                    .foregroundColor(accentColor.opacity(0.6))
+                                    .tracking(1)
+                                    .lineLimit(1)
+                                GridChart(title: "MEM", values: host.mem ?? [],
+                                          accentColor: Color.onyxAmber,
+                                          height: max(24, memHeight - 34))
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-
-                        Spacer(minLength: 0)
                     }
                 }
-            }
 
-            MonitorBottomStrip(appState: appState, reminders: reminders,
-                               timing: timing, accentColor: accentColor,
-                               showSessions: !showPanel,
-                               height: bottomStripHeight) {
-                FleetContainersStrip()
+                Spacer(minLength: 0)
             }
         }
     }

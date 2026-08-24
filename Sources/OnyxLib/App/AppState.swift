@@ -25,6 +25,7 @@ public extension Notification.Name {
     static let toggleAllContainers = Notification.Name("toggleAllContainers")
     static let toggleClockFormat = Notification.Name("toggleClockFormat")
     static let toggleSimpleMonitor = Notification.Name("toggleSimpleMonitor")
+    static let cycleFleetMode = Notification.Name("cycleFleetMode")
     static let toggleMonitorPeek = Notification.Name("toggleMonitorPeek")
     static let toggleRemindersDueSoon = Notification.Name("toggleRemindersDueSoon")
     static let toggleSimpleSidePanel = Notification.Name("toggleSimpleSidePanel")
@@ -164,6 +165,9 @@ public class AppState: ObservableObject {
     /// top-CPU containers along the bottom, and a small weekly Timing
     /// tile in the bottom-right. Toggle with `s` while monitor is open.
     @Published public var monitorLayout: MonitorLayout = .detailed
+    /// Which machines the overlay's charts are about (`F`). Independent
+    /// of the layout, so "simple mode" and "the whole fleet" compose.
+    @Published public var fleetMode: FleetMode = .currentHost
     /// Back-compat shim for the many places that only care whether the
     /// stripped-down single-host layout is up.
     public var showSimpleMonitor: Bool { monitorLayout == .simple }
@@ -362,7 +366,13 @@ public class AppState: ObservableObject {
     /// AppState (it polls every ~5s while the overlay is open). Its views
     /// (MonitorStatsView, MonitorSimpleView) @ObservedObject it directly.
     public lazy var dockerStats: DockerStatsManager = {
-        DockerStatsManager(appState: self)
+        let d = DockerStatsManager(appState: self)
+        // The preference is persisted (Settings, or the C key); the
+        // manager's flag is the runtime copy. Seed it here so a saved
+        // "show everything" survives a relaunch instead of quietly
+        // reverting on the first poll.
+        d.showAllContainers = appearance.showAllContainers
+        return d
     }()
 
     private var artifactCancellable: AnyCancellable?
