@@ -879,6 +879,18 @@ private struct FlowtreeSettingsSection: View {
 /// GitHub PR watch settings — token + repo URLs. Styled to match the
 /// Timing.app block above.
 private struct GitHubSettingsSection: View {
+    /// "Watching 2 repos + 1 owner" — an owner entry stands for however
+    /// many repos it turns out to have, so counting them as repos would
+    /// be wrong.
+    static func watchSummary(_ specs: [GitHubRepoSpec]) -> String {
+        let owners = specs.filter(\.isOwnerWide).count
+        let repos = specs.count - owners
+        var parts: [String] = []
+        if repos > 0 { parts.append("\(repos) repo\(repos == 1 ? "" : "s")") }
+        if owners > 0 { parts.append("\(owners) owner\(owners == 1 ? "" : "s")") }
+        return "Watching " + (parts.isEmpty ? "nothing" : parts.joined(separator: " + "))
+    }
+
     @ObservedObject private var config = GitHubConfigStore.shared
     @State private var reposText: String = ""
     @State private var hasInitializedText = false
@@ -917,7 +929,7 @@ private struct GitHubSettingsSection: View {
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.3))
 
-            Text("REPOS — one per line, e.g. owner/repo")
+            Text("REPOS — one per line: owner/repo, or just owner for all of them")
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.5))
                 .tracking(1)
@@ -951,7 +963,7 @@ private struct GitHubSettingsSection: View {
                 }
 
             if !config.parsedRepos.isEmpty {
-                Text("Watching \(config.parsedRepos.count) repo\(config.parsedRepos.count == 1 ? "" : "s")")
+                Text(Self.watchSummary(config.parsedRepos))
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.4))
             }
@@ -1065,6 +1077,18 @@ private struct SearchFilterSettingsSection: View {
 }
 
 private struct GitLabSettingsSection: View {
+    /// Only single-segment paths are known to be groups up front; deeper
+    /// ones are resolved by asking GitLab, so they're counted as projects
+    /// here rather than guessed at.
+    static func watchSummary(_ specs: [GitLabProjectSpec]) -> String {
+        let groups = specs.filter(\.isDefinitelyGroup).count
+        let projects = specs.count - groups
+        var parts: [String] = []
+        if projects > 0 { parts.append("\(projects) project\(projects == 1 ? "" : "s")") }
+        if groups > 0 { parts.append("\(groups) group\(groups == 1 ? "" : "s")") }
+        return "Watching " + (parts.isEmpty ? "nothing" : parts.joined(separator: " + "))
+    }
+
     @ObservedObject private var config = GitLabConfigStore.shared
     @State private var projectsText: String = ""
     @State private var hasInitializedProjects = false
@@ -1104,7 +1128,7 @@ private struct GitLabSettingsSection: View {
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.3))
 
-            Text("PROJECTS — one per line, e.g. group/project")
+            Text("PROJECTS — one per line: group/project, or a group for everything under it")
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.5))
                 .tracking(1)
@@ -1136,7 +1160,7 @@ private struct GitLabSettingsSection: View {
                 }
 
             if !config.parsedProjects.isEmpty {
-                Text("Watching \(config.parsedProjects.count) project\(config.parsedProjects.count == 1 ? "" : "s")")
+                Text(Self.watchSummary(config.parsedProjects))
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(.gray.opacity(0.4))
             }

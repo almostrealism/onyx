@@ -113,7 +113,8 @@ final class GitLabProjectSpecParseTests: XCTestCase {
     func test_parse_rejectsNonGitLabHost() {
         XCTAssertNil(GitLabProjectSpec.parse("https://github.com/foo/bar"))
         XCTAssertNil(GitLabProjectSpec.parse(""))
-        XCTAssertNil(GitLabProjectSpec.parse("single"))
+        // NOTE: a single segment used to be rejected. It now means a
+        // group — see GitLabGroupParseTests.
     }
 
     func test_encodedPath() {
@@ -238,5 +239,32 @@ final class ConfigStoreProviderRoutingTests: XCTestCase {
         GitLabConfigStore.shared.removePipeline(spec)
         XCTAssertEqual(GitLabConfigStore.shared.pipelineURLs,
                        ["https://gitlab.com/g/p/-/pipelines/3"])
+    }
+
+}
+
+/// Group entries — one line for a whole group instead of every project.
+final class GitLabGroupParseTests: XCTestCase {
+
+    // MARK: - Group entries
+
+    func testSingleSegmentIsDefinitelyAGroup() {
+        // A project always lives under a namespace, so one segment can
+        // only be a group (or user namespace).
+        XCTAssertTrue(GitLabProjectSpec.parse("fivn")?.isDefinitelyGroup ?? false)
+        XCTAssertTrue(GitLabProjectSpec.parse("https://gitlab.com/fivn")?.isDefinitelyGroup ?? false)
+    }
+
+    func testDeeperPathsAreNotAssumedEitherWay() {
+        // "fivn/product_engineering" could be a project in group fivn OR
+        // a subgroup of it. Nothing in the string decides that, so the
+        // manager asks GitLab rather than guessing here.
+        XCTAssertFalse(GitLabProjectSpec.parse("fivn/product_engineering")?.isDefinitelyGroup ?? true)
+        XCTAssertFalse(GitLabProjectSpec.parse("fivn/product_engineering/thing")?.isDefinitelyGroup ?? true)
+    }
+
+    func testGroupPathStillEncodesForTheAPI() {
+        XCTAssertEqual(GitLabProjectSpec.parse("fivn/product_engineering")?.encodedPath,
+                       "fivn%2Fproduct_engineering")
     }
 }

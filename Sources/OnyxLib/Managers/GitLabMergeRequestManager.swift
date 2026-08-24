@@ -99,12 +99,58 @@ public final class GitLabMergeRequestManager: ObservableObject {
         }
     }
 
+    /// The project an MR lives in, from `references.full`
+    /// ("group/sub/project!123"). For a single-project fetch this equals
+    /// the configured path; for a group fetch it's the only way to tell
+    /// the projects apart, and a row saying just "fivn" would be useless.
+    static func projectPath(of reference: String?, fallback: String) -> String {
+        guard let reference, let bang = reference.firstIndex(of: "!") else { return fallback }
+        let path = String(reference[reference.startIndex..<bang])
+        return path.isEmpty ? fallback : path
+    }
+
+    // MARK: - Group vs project
+
+    /// Which endpoint a configured path turned out to be, once GitLab has
+    /// told us. Only consulted for ambiguous (multi-segment) paths.
+    private enum PathKind { case project, group }
+    private var resolvedKind: [String: PathKind] = [:]
+    private let kindLock = NSLock()
+
+    private func kind(for spec: GitLabProjectSpec) -> PathKind {
+        if spec.isDefinitelyGroup { return .group }
+        kindLock.lock(); defer { kindLock.unlock() }
+        return resolvedKind[spec.path] ?? .project
+    }
+
+    private func remember(_ kind: PathKind, for spec: GitLabProjectSpec) {
+        kindLock.lock(); resolvedKind[spec.path] = kind; kindLock.unlock()
+    }
+
     // MARK: - REST fetch
 
+    /// Fetch a configured entry's open MRs.
+    ///
+    /// A single-segment path is always a group. A deeper one could be
+    /// either a project or a subgroup, and no amount of string
+    /// inspection settles it — so we try it as a project, and on a 404
+    /// try it as a group and remember which worked. That costs one wasted
+    /// request, once, for a path that turns out to be a subgroup.
     private func fetch(project: GitLabProjectSpec, token: String, mineOnly: Bool,
                        completion: @escaping (Result<[PullRequest], Error>) -> Void) {
+        fetch(project: project, token: token, mineOnly: mineOnly,
+              as: kind(for: project), allowRetry: !project.isDefinitelyGroup,
+              completion: completion)
+    }
+
+    private func fetch(project: GitLabProjectSpec, token: String, mineOnly: Bool,
+                       as kind: PathKind, allowRetry: Bool,
+                       completion: @escaping (Result<[PullRequest], Error>) -> Void) {
+        // Group merge_requests covers the group AND its subgroups, which
+        // is exactly what "watch everything under fivn" means.
+        let scope = kind == .group ? "groups" : "projects"
         var components = URLComponents(
-            string: "\(Self.apiBase)/projects/\(project.encodedPath)/merge_requests")
+            string: "\(Self.apiBase)/\(scope)/\(project.encodedPath)/merge_requests")
         var q = [
             URLQueryItem(name: "state", value: "opened"),
             URLQueryItem(name: "per_page", value: "50"),
@@ -123,6 +169,18 @@ public final class GitLabMergeRequestManager: ObservableObject {
         session.dataTask(with: req) { data, response, error in
             if let error = error { completion(.failure(error)); return }
             if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+                // 404 on an ambiguous path means we guessed wrong about
+                // project-vs-group. Try the other one before reporting a
+                // failure the user can't act on.
+                if http.statusCode == 404, allowRetry {
+                    let other: PathKind = kind == .project ? .group : .project
+                    self.fetch(project: project, token: token, mineOnly: mineOnly,
+                               as: other, allowRetry: false) { result in
+                        if case .success = result { self.remember(other, for: project) }
+                        completion(result)
+                    }
+                    return
+                }
                 completion(.failure(GitLabError.http(http.statusCode))); return
             }
             guard let data = data else {
@@ -133,7 +191,7 @@ public final class GitLabMergeRequestManager: ObservableObject {
                 let mrs = nodes.map { mr in
                     PullRequest(
                         provider: .gitlab,
-                        repoFullName: project.path,
+                        repoFullName: Self.projectPath(of: mr.references?.full, fallback: project.path),
                         number: mr.iid,
                         title: mr.title,
                         url: mr.web_url,
@@ -185,6 +243,10 @@ public final class GitLabMergeRequestManager: ObservableObject {
 
     private struct MR: Decodable {
         let iid: Int
+        /// "group/sub/project!123" — the only field that names the
+        /// project an MR belongs to. Needed for group-wide fetches,
+        /// where one response spans many projects.
+        let references: MRReferences?
         let title: String
         let web_url: String
         let source_branch: String?
@@ -193,6 +255,9 @@ public final class GitLabMergeRequestManager: ObservableObject {
         let has_conflicts: Bool?
         let blocking_discussions_resolved: Bool?
         let author: GitLabUser?
+    }
+    private struct MRReferences: Decodable {
+        let full: String?
     }
     private struct GitLabUser: Decodable {
         let username: String

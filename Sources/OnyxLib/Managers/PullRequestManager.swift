@@ -168,6 +168,44 @@ public final class PullRequestManager: ObservableObject {
     }
     """
 
+    /// Every repo an owner has, with its open PRs, in one request.
+    ///
+    /// `repositoryOwner` resolves a User or an Organization, so one query
+    /// covers both and the user doesn't have to know which they typed.
+    /// Forks are excluded at the source and archived repos are dropped
+    /// on the way out — neither is somewhere you have review work.
+    ///
+    /// The page sizes are deliberately modest: this is nested pagination,
+    /// and repos × PRs × threads is what decides both the GraphQL node
+    /// ceiling and the rate-limit cost of a poll that runs all day.
+    private static let ownerQuery = """
+    query($owner: String!) {
+      repositoryOwner(login: $owner) {
+        repositories(first: 30, isFork: false,
+                     orderBy: {field: PUSHED_AT, direction: DESC}) {
+          nodes {
+            name
+            isArchived
+            pullRequests(states: OPEN, first: 10, orderBy: {field: UPDATED_AT, direction: DESC}) {
+              nodes {
+                number
+                title
+                url
+                mergeStateStatus
+                mergeable
+                headRefName
+                author { login }
+                reviewThreads(first: 50) {
+                  nodes { isResolved }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+
     private func fetch(repo: GitHubRepoSpec, token: String,
                        completion: @escaping (Result<[PullRequest], Error>) -> Void) {
         var req = URLRequest(url: Self.graphqlURL)
@@ -180,10 +218,9 @@ public final class PullRequestManager: ObservableObject {
         req.setValue("application/vnd.github.merge-info-preview+json",
                      forHTTPHeaderField: "Accept")
 
-        let payload: [String: Any] = [
-            "query": Self.query,
-            "variables": ["owner": repo.owner, "name": repo.name]
-        ]
+        let payload: [String: Any] = repo.isOwnerWide
+            ? ["query": Self.ownerQuery, "variables": ["owner": repo.owner]]
+            : ["query": Self.query, "variables": ["owner": repo.owner, "name": repo.name]]
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
 
         let task = session.dataTask(with: req) { data, response, error in
@@ -198,11 +235,26 @@ public final class PullRequestManager: ObservableObject {
                     completion(.failure(PRError.graphqlError(msg)))
                     return
                 }
-                let nodes = decoded.data?.repository?.pullRequests?.nodes ?? []
-                let prs = nodes.map { node in
+                // One repo: the nodes are already this repo's. A whole
+                // owner: each node carries the repo it came from, and
+                // the PR list has to stay attributed — "#412 is blocked"
+                // is useless without knowing which repo.
+                let pairs: [(String, Node)]
+                if repo.isOwnerWide {
+                    pairs = (decoded.data?.repositoryOwner?.repositories?.nodes ?? [])
+                        .filter { $0.isArchived != true }
+                        .flatMap { r in
+                            (r.pullRequests?.nodes ?? [])
+                                .map { ("\(repo.owner)/\(r.name)", $0) }
+                        }
+                } else {
+                    pairs = (decoded.data?.repository?.pullRequests?.nodes ?? [])
+                        .map { (repo.fullName, $0) }
+                }
+                let prs = pairs.map { (fullName, node) in
                     PullRequest(
                         provider: .github,
-                        repoFullName: repo.fullName,
+                        repoFullName: fullName,
                         number: node.number,
                         title: node.title,
                         url: node.url,
@@ -244,6 +296,18 @@ public final class PullRequestManager: ObservableObject {
     }
     private struct PayloadData: Decodable {
         let repository: Repo?
+        let repositoryOwner: OwnerPayload?
+    }
+    private struct OwnerPayload: Decodable {
+        let repositories: RepoList?
+    }
+    private struct RepoList: Decodable {
+        let nodes: [OwnedRepo]?
+    }
+    private struct OwnedRepo: Decodable {
+        let name: String
+        let isArchived: Bool?
+        let pullRequests: PRList?
     }
     private struct Repo: Decodable {
         let pullRequests: PRList?

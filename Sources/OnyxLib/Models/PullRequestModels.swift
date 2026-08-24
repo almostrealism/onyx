@@ -79,9 +79,15 @@ public enum PRMergeStatus: String, Codable, Equatable {
 public struct GitHubRepoSpec: Equatable, Hashable {
     public let url: String
     public let owner: String
+    /// Repository name, or empty when this entry means "every repo this
+    /// owner has". Watching a whole org beats listing its repos one at a
+    /// time and then missing the one someone created yesterday.
     public let name: String
 
-    public var fullName: String { "\(owner)/\(name)" }
+    /// True when this entry is an owner or org rather than one repo.
+    public var isOwnerWide: Bool { name.isEmpty }
+
+    public var fullName: String { isOwnerWide ? owner : "\(owner)/\(name)" }
 
     public init(url: String, owner: String, name: String) {
         self.url = url; self.owner = owner; self.name = name
@@ -123,9 +129,14 @@ public struct GitHubRepoSpec: Equatable, Hashable {
         if s.hasSuffix(".git") { s = String(s.dropLast(4)) }
 
         let parts = s.split(separator: "/").map(String.init)
-        guard parts.count >= 2,
-              !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
-        return GitHubRepoSpec(url: raw, owner: parts[0], name: parts[1])
+        guard let owner = parts.first, !owner.isEmpty else { return nil }
+        // One segment = the whole owner ("almostrealism"); two = a single
+        // repo ("almostrealism/common").
+        guard parts.count >= 2 else {
+            return GitHubRepoSpec(url: raw, owner: owner, name: "")
+        }
+        guard !parts[1].isEmpty else { return nil }
+        return GitHubRepoSpec(url: raw, owner: owner, name: parts[1])
     }
 }
 
@@ -135,8 +146,21 @@ public struct GitHubRepoSpec: Equatable, Hashable {
 /// the REST API takes the URL-encoded full path as the project id.
 public struct GitLabProjectSpec: Equatable, Hashable {
     public let url: String
-    /// Full project path, e.g. "group/project" or "group/sub/project".
+    /// Full project path, e.g. "group/project" or "group/sub/project" —
+    /// or a group path ("fivn", "fivn/product_engineering"), which stands
+    /// for every project under it, subgroups included.
     public let path: String
+
+    /// Whether this path is definitely a group.
+    ///
+    /// A single segment can only be a group or user namespace — a project
+    /// always lives under one. Deeper paths are genuinely ambiguous
+    /// (`a/b` is a project in group `a`, OR subgroup `b` of group `a`),
+    /// and nothing in the string can settle it; the manager resolves
+    /// those by asking GitLab.
+    public var isDefinitelyGroup: Bool {
+        path.split(separator: "/").count == 1
+    }
 
     /// "project" — last path segment, for compact display.
     public var name: String { path.split(separator: "/").last.map(String.init) ?? path }
@@ -182,7 +206,10 @@ public struct GitLabProjectSpec: Equatable, Hashable {
         if s.hasSuffix(".git") { s = String(s.dropLast(4)) }
 
         let parts = s.split(separator: "/").map(String.init)
-        guard parts.count >= 2, parts.allSatisfy({ !$0.isEmpty }) else { return nil }
+        // One segment is a group ("fivn"), which stands for every project
+        // under it. Two or more is a project path — or a subgroup, which
+        // only GitLab can tell us.
+        guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty }) else { return nil }
         return GitLabProjectSpec(url: raw, path: parts.joined(separator: "/"))
     }
 }
