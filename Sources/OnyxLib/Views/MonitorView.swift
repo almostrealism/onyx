@@ -293,6 +293,13 @@ struct MonitorView: View {
                             .padding(.horizontal, 40)
                     }
 
+                    // A fired page watch outranks everything else on this
+                    // screen: it's the one thing here you were actively
+                    // waiting for, and it stays until acknowledged so it
+                    // can't scroll past while you're asleep.
+                    WatchFiredBanner()
+                        .padding(.horizontal, 40)
+
                     if appState.monitorLayout == .simple {
                         SimpleMonitorBody(
                             appState: appState,
@@ -736,3 +743,57 @@ struct CPUUnavailableCard: View {
     }
 }
 
+/// The banner a fired page watch gets. Persistent until dismissed —
+/// these fire once, often weeks after being set, and a toast you missed
+/// is the same as no watch at all.
+struct WatchFiredBanner: View {
+    @ObservedObject private var store = PageWatchStore.shared
+
+    var body: some View {
+        let fired = store.fired
+        if !fired.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(fired) { entry in
+                    HStack(spacing: 10) {
+                        Image(systemName: "bell.badge.fill")
+                            .font(.system(size: 13))
+                            .foregroundColor(Color.onyxGreen)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(entry.watch.label.uppercased())
+                                .monitorFont(size: 11, weight: .medium)
+                                .foregroundColor(Color.onyxGreen)
+                                .tracking(1)
+                            Text(entry.watch.trigger == .disappears
+                                 ? "The line you were waiting to lose is gone from the page."
+                                 : "The page changed the way you were waiting for.")
+                                .monitorFont(size: 10)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        Spacer(minLength: 8)
+                        Button(action: { open(entry.watch.url) }) {
+                            Text("open")
+                                .monitorFont(size: 10)
+                                .foregroundColor(Color.onyxBlue)
+                        }
+                        .buttonStyle(.plain)
+                        Button(action: { store.acknowledge(entry.id) }) {
+                            Text("dismiss")
+                                .monitorFont(size: 10)
+                                .foregroundColor(.gray.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.onyxGreen.opacity(0.10))
+                    .cornerRadius(6)
+                }
+            }
+        }
+    }
+
+    private func open(_ url: String) {
+        guard let u = URL(string: url) else { return }
+        NSWorkspace.shared.open(u)
+    }
+}

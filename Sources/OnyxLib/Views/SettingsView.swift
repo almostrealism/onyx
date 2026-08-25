@@ -433,6 +433,7 @@ struct SettingsView: View {
                         GitHubSettingsSection()
                         GitLabSettingsSection()
                         FlowtreeSettingsSection()
+                        PageWatchSettingsSection()
                     }
                 }
                 .frame(maxHeight: 500)
@@ -1209,4 +1210,195 @@ private struct GitLabSettingsSection: View {
             }
         }
     }
+}
+
+// MARK: - Page watches
+
+/// Watch a URL for one specific change.
+///
+/// Last in the settings list on purpose: almost nobody wants this, and
+/// the people who do want it badly. It's the mechanism behind "tell me
+/// the moment Apple's configurator stops saying the 512GB option is
+/// coming later" — a question no feed or alert service answers precisely,
+/// because the signal is a string on a page rather than an article about
+/// the page.
+private struct PageWatchSettingsSection: View {
+    @ObservedObject private var store = PageWatchStore.shared
+    @State private var label = ""
+    @State private var url = ""
+    @State private var text = ""
+    @State private var trigger: WatchTrigger = .disappears
+    @State private var interval = PageWatch.defaultInterval
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("PAGE WATCHES")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            Text("Polls a page and tells you when one string appears or disappears. Checked while Onyx is running, no more often than every \(PageWatch.minimumInterval) minutes.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(store.entries) { entry in
+                WatchRow(entry: entry)
+            }
+
+            if store.entries.isEmpty {
+                Button(action: { store.add(.macStudioUltraMemory()) }) {
+                    Text("+ Watch for the 512GB M5 Ultra Mac Studio")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Color.onyxBlue.opacity(0.8))
+                }
+                .buttonStyle(.plain)
+                .help("Apple's configurator carries a footer reading \"512GB memory option for M5 Ultra coming late October\". This watches for that line to disappear, which is when the option goes orderable.")
+            }
+
+            Divider().background(Color.white.opacity(0.06)).padding(.vertical, 2)
+
+            watchField("Name", text: $label, placeholder: "What to call it")
+            watchField("URL", text: $url, placeholder: "https://…")
+
+            Picker("", selection: $trigger) {
+                ForEach(WatchTrigger.allCases, id: \.self) { t in
+                    Text(t.label).tag(t)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            if trigger.needsText {
+                watchField("Text", text: $text, placeholder: "The exact string to look for")
+            }
+
+            HStack(spacing: 8) {
+                Text("Every")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.5))
+                Stepper("\(interval) min", value: $interval,
+                        in: PageWatch.minimumInterval...720, step: 5)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.7))
+
+                Spacer()
+
+                Button(action: addWatch) {
+                    Text("Add watch")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(canAdd ? Color.onyxBlue : .gray.opacity(0.3))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canAdd)
+            }
+        }
+    }
+
+    private var canAdd: Bool {
+        PageWatch(label: label, url: url, trigger: trigger, text: text,
+                  intervalMinutes: interval).isRunnable && !label.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private func addWatch() {
+        guard canAdd else { return }
+        store.add(PageWatch(label: label, url: url, trigger: trigger,
+                            text: text, intervalMinutes: interval))
+        label = ""; url = ""; text = ""
+    }
+
+    private func watchField(_ title: String, text: Binding<String>, placeholder: String) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.5))
+                .frame(width: 34, alignment: .leading)
+            TextField(placeholder, text: text.sanitizingStylizedText())
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(3)
+        }
+    }
+}
+
+/// One configured watch: what it's for, what it last saw, and whether
+/// it's actually working — a watch that has been 403ing for a week is
+/// worse than no watch, so the last check and any error are always shown.
+private struct WatchRow: View {
+    let entry: WatchEntry
+    @ObservedObject private var store = PageWatchStore.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 6, height: 6)
+                Text(entry.watch.label)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.85))
+                    .lineLimit(1)
+
+                Spacer()
+
+                Button(action: { PageWatchManager.shared.checkNow(entry.id) }) {
+                    Text("check")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(Color.onyxBlue.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+
+                Button(action: { store.remove(entry.id) }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8))
+                        .foregroundColor(.gray.opacity(0.5))
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            Text(status)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(statusColor)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var dotColor: Color {
+        if entry.state.firedAt != nil { return Color.onyxGreen }
+        if entry.state.lastError != nil { return Color.onyxRed }
+        if entry.state.lastCheck == nil { return .gray.opacity(0.4) }
+        return Color.onyxBlue.opacity(0.6)
+    }
+
+    private var statusColor: Color {
+        if entry.state.firedAt != nil { return Color.onyxGreen.opacity(0.8) }
+        if entry.state.lastError != nil { return Color.onyxRed.opacity(0.7) }
+        return .gray.opacity(0.4)
+    }
+
+    private var status: String {
+        if let fired = entry.state.firedAt {
+            return "FIRED \(Self.stamp.string(from: fired)) — \(entry.watch.trigger.label)"
+        }
+        if let err = entry.state.lastError { return err }
+        guard let last = entry.state.lastCheck else {
+            return "Not checked yet — the first check only takes a baseline."
+        }
+        let seen = entry.state.present == true ? "text present" : "text absent"
+        return "\(seen) at \(Self.stamp.string(from: last)) · waiting for \(entry.watch.trigger.label)"
+    }
+
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d HH:mm"
+        return f
+    }()
 }

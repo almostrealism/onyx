@@ -762,6 +762,10 @@ public class AppState: ObservableObject {
         appSupportDir.appendingPathComponent("session-notes.json")
     }
 
+    private var pageWatchesURL: URL {
+        appSupportDir.appendingPathComponent("page-watches.json")
+    }
+
     /// Path the screensaver reads. Lives under /Users/Shared/ rather than
     /// ~/Library/Application Support/ because legacyScreenSaver is sandboxed
     /// and can't read paths inside the user's Library. /Users/Shared is
@@ -1201,6 +1205,11 @@ public class AppState: ObservableObject {
         if NSClassFromString("XCTest") == nil {
             CPUStreamStore.shared.configure(url: cpuStreamURL)
             CPUFleetPoller.shared.start(appState: self)
+            // Page watches. Cheap when none are configured (the tick just
+            // finds nothing due) and the store is loaded either way so the
+            // settings list survives a restart.
+            PageWatchStore.shared.configure(url: pageWatchesURL)
+            PageWatchManager.shared.start()
             // Start polling configured GitHub repos for open PRs. The
             // manager guards itself against an empty config and is a
             // no-op under XCTest.
