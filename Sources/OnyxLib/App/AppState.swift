@@ -366,13 +366,7 @@ public class AppState: ObservableObject {
     /// AppState (it polls every ~5s while the overlay is open). Its views
     /// (MonitorStatsView, MonitorSimpleView) @ObservedObject it directly.
     public lazy var dockerStats: DockerStatsManager = {
-        let d = DockerStatsManager(appState: self)
-        // The preference is persisted (Settings, or the C key); the
-        // manager's flag is the runtime copy. Seed it here so a saved
-        // "show everything" survives a relaunch instead of quietly
-        // reverting on the first poll.
-        d.showAllContainers = appearance.showAllContainers
-        return d
+        DockerStatsManager(appState: self)
     }()
 
     private var artifactCancellable: AnyCancellable?

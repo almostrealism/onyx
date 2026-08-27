@@ -99,6 +99,15 @@ struct DockerStatsSection: View {
                         .monitorFont(size: 10)
                         .foregroundColor(.gray.opacity(0.4))
                 }
+                // Without this, "every container is listed" and "every
+                // container is busy" look identical — which reads as the
+                // idle filter being broken rather than switched off.
+                if dockerStats.showAllContainers {
+                    Text("· all")
+                        .monitorFont(size: 10)
+                        .foregroundColor(Color.onyxAmber.opacity(0.6))
+                        .help("Showing every container, including idle ones. Turn off in Settings → MONITOR, or press C.")
+                }
             }
 
             if dockerStats.containers.isEmpty {

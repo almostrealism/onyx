@@ -51,7 +51,21 @@ public class DockerStatsManager: ObservableObject {
     @Published public var containers: [DockerContainerStats] = []
     @Published public var isAvailable = false
     @Published public var cpuCores: Int = 1
-    @Published public var showAllContainers = false
+    /// Show every container, not just those that have used CPU recently.
+    ///
+    /// Deliberately NOT stored here. It's a persisted preference (Settings
+    /// → MONITOR, or `C`), and keeping a second copy on each window's
+    /// manager meant toggling it in one window left the others stale until
+    /// relaunch — two sources of truth for one user-visible switch.
+    public var showAllContainers: Bool {
+        get { appState.appearance.showAllContainers }
+        set {
+            guard newValue != appState.appearance.showAllContainers else { return }
+            appState.appearance.showAllContainers = newValue
+            appState.saveAppearance()
+            objectWillChange.send()
+        }
+    }
 
     /// Per-container CPU history: name → array of (timestamp, cpuPct) pairs.
     /// Persists across overlay open/close since DockerStatsManager lives on AppState.

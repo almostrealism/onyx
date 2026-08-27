@@ -299,6 +299,8 @@ struct MonitorView: View {
                     // can't scroll past while you're asleep.
                     WatchFiredBanner()
                         .padding(.horizontal, 40)
+                    WatchStatusLine()
+                        .padding(.horizontal, 40)
 
                     if appState.monitorLayout == .simple {
                         SimpleMonitorBody(
@@ -441,12 +443,9 @@ struct MonitorView: View {
             monitor.showMemoryChart.toggle()
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleAllContainers)) { _ in
-            // The key still works for the muscle memory, but it now sets
-            // the same persisted preference the Settings toggle does,
-            // rather than a second flag that disagrees with it.
-            appState.appearance.showAllContainers.toggle()
-            appState.saveAppearance()
-            dockerStats.showAllContainers = appState.appearance.showAllContainers
+            // Still works for the muscle memory; the setter writes the
+            // same persisted preference the Settings toggle does.
+            dockerStats.showAllContainers.toggle()
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleClockFormat)) { _ in
             appState.appearance.use12HourClock.toggle()
@@ -795,5 +794,69 @@ struct WatchFiredBanner: View {
     private func open(_ url: String) {
         guard let u = URL(string: url) else { return }
         NSWorkspace.shared.open(u)
+    }
+}
+
+/// One dim line per armed watch: what it's watching and when it last
+/// looked.
+///
+/// The point isn't the timestamp, it's the freshness. A watch you're
+/// counting on can fail silently for a week — the app quit, the network
+/// changed, the page started 403ing — and "armed" and "broken" look
+/// identical unless something says when it last actually ran. So the
+/// stamp goes where you already look every day, and goes amber when it's
+/// older than three intervals.
+struct WatchStatusLine: View {
+    @ObservedObject private var store = PageWatchStore.shared
+
+    var body: some View {
+        // Fired watches have the loud banner above; this is only for the
+        // ones still waiting.
+        let armed = store.entries.filter { $0.state.firedAt == nil && $0.watch.isRunnable }
+        if !armed.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(armed) { entry in
+                    HStack(spacing: 6) {
+                        Image(systemName: "binoculars")
+                            .font(.system(size: 9))
+                            .foregroundColor(.gray.opacity(0.35))
+                        Text(entry.watch.label)
+                            .monitorFont(size: 10)
+                            .foregroundColor(.gray.opacity(0.45))
+                            .lineLimit(1)
+                        Text(detail(entry))
+                            .monitorFont(size: 10)
+                            .foregroundColor(color(entry))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        }
+    }
+
+    private func detail(_ entry: WatchEntry) -> String {
+        if let err = entry.state.lastError { return "· \(err)" }
+        guard let last = entry.state.lastCheck else { return "· not checked yet" }
+        return "· checked \(Self.ago(last))"
+    }
+
+    private func color(_ entry: WatchEntry) -> Color {
+        if entry.state.lastError != nil { return Color.onyxRed.opacity(0.65) }
+        guard let last = entry.state.lastCheck else { return .gray.opacity(0.35) }
+        let stale = TimeInterval(entry.watch.intervalMinutes * 60) * 3
+        return Date().timeIntervalSince(last) > stale
+            ? Color.onyxAmber.opacity(0.7)
+            : .gray.opacity(0.35)
+    }
+
+    /// Relative, because "checked 4m ago" answers the question and
+    /// "14:32" makes you do arithmetic to find out whether it's stuck.
+    static func ago(_ date: Date) -> String {
+        let s = Int(Date().timeIntervalSince(date))
+        if s < 90 { return "just now" }
+        if s < 3600 { return "\(s / 60)m ago" }
+        if s < 86400 { return "\(s / 3600)h ago" }
+        return "\(s / 86400)d ago"
     }
 }

@@ -237,7 +237,6 @@ struct SettingsView: View {
                                         set: {
                                             appState.appearance.showAllContainers = $0
                                             appState.saveAppearance()
-                                            appState.dockerStats.showAllContainers = $0
                                         }
                                     )) {
                                         Text("Show every docker container")
