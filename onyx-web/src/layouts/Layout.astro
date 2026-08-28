@@ -15,8 +15,28 @@ const {
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- Google Tag Manager. Highest in <head> that's valid: charset must
+         come first (the parser needs the encoding before it reads any
+         text), and viewport is a one-line meta. Everything else — fonts,
+         og tags, title — is below, so GTM loads before any of it. -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Google Tag Manager -->
+    <script is:inline>
+      (function (w, d, s, l, i) {
+        w[l] = w[l] || [];
+        w[l].push({ 'gtm.start': new Date().getTime(), event: 'gtm.js' });
+        var f = d.getElementsByTagName(s)[0],
+          j = d.createElement(s),
+          dl = l != 'dataLayer' ? '&l=' + l : '';
+        j.async = true;
+        j.src = 'https://www.googletagmanager.com/gtm.js?id=' + i + dl;
+        f.parentNode.insertBefore(j, f);
+      })(window, document, 'script', 'dataLayer', 'GTM-T88HLJZP');
+    </script>
+    <!-- End Google Tag Manager -->
+
     <meta name="description" content={description} />
     <meta name="generator" content={Astro.generator} />
 
@@ -41,6 +61,18 @@ const {
     <title>{title}</title>
   </head>
   <body class="min-h-screen bg-bg-primary text-text-primary antialiased">
+    <!-- Google Tag Manager (noscript). GTM's install is two snippets;
+         this is the second, and it must be the first thing inside body.
+         Without it, tags don't fire for anyone with JS disabled. -->
+    <noscript
+      ><iframe
+        src="https://www.googletagmanager.com/ns.html?id=GTM-T88HLJZP"
+        height="0"
+        width="0"
+        style="display:none;visibility:hidden"></iframe></noscript
+    >
+    <!-- End Google Tag Manager (noscript) -->
+
     <slot />
   </body>
 </html>

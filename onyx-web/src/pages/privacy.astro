@@ -12,9 +12,10 @@ import Footer from '../components/sections/Footer.astro';
 
     <div class="mt-8 space-y-6 leading-relaxed text-text-secondary">
       <p>
-        Onyx has no analytics, no telemetry, no crash reporting, and no account. It
-        makes no network connections of its own except the ones you configure: SSH to
-        your hosts, and the APIs you explicitly enable.
+        The Onyx app has no analytics, no telemetry, no crash reporting, and no account.
+        It makes no network connections of its own except the ones you configure: SSH to
+        your hosts, and the APIs you explicitly enable. (This website is a separate
+        thing, and does use analytics — see below.)
       </p>
       <p>
         Everything it stores — hosts, favorites, notes, session notes — is a file in
@@ -41,8 +42,12 @@ import Footer from '../components/sections/Footer.astro';
         sensitive, use mermaid rather than PlantUML.
       </p>
       <p>
-        This site is static, served by Cloudflare Pages. It sets no cookies and embeds
-        no third-party scripts. Fonts are the only external request.
+        This site — as distinct from the app — is static, served by Cloudflare Pages, and
+        loads Google Tag Manager so we can see which pages people actually read. That is
+        a third-party script from Google, and depending on the tags configured inside it,
+        it may set cookies and record your visit. It runs on this website only: it is not
+        in the app, ships in none of the downloads, and can see nothing about your
+        machines, sessions or files. Fonts are the only other external request.
       </p>
       <p class="text-text-muted">
         Questions: <a href="https://github.com/almostrealism/onyx/issues" class="text-accent-primary transition hover:text-accent-glow">open an issue</a>.
