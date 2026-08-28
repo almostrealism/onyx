@@ -16,24 +16,110 @@ const {
 <!doctype html>
 <html lang="en">
   <head>
-    <!-- Google Tag Manager. Highest in <head> that's valid: charset must
-         come first (the parser needs the encoding before it reads any
-         text), and viewport is a one-line meta. Everything else — fonts,
-         og tags, title — is below, so GTM loads before any of it. -->
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Consent state. MUST run before the GTM container: a consent
+         default set after the container has started is too late to stop
+         the first tags. Everything is denied until an affirmative
+         choice, so a first-time visitor is measured only by cookieless
+         pings — no cookies, no identifiers. -->
+    <script is:inline>
+      (function () {
+        // Versioned so the record says WHAT was agreed to. Bump the
+        // version when the categories change and everyone is asked
+        // again, rather than a new purpose inheriting an old yes.
+        var KEY = 'onyx-consent-v1';
+        var LEGACY = 'onyx-analytics';
 
-    <!-- Google Tag Manager. Wrapped in an opt-out check: if the visitor
-         has opted out (see AnalyticsNotice.astro and /privacy), the
-         script is never inserted at all, rather than loaded and then
-         asked to behave. -->
+        window.dataLayer = window.dataLayer || [];
+        function gtag() {
+          window.dataLayer.push(arguments);
+        }
+
+        function read() {
+          try {
+            var raw = localStorage.getItem(KEY);
+            if (raw) return JSON.parse(raw);
+            // The old opt-out banner recorded "ok" for people who simply
+            // never objected. That is not consent, so it is NOT migrated
+            // — those visitors are asked properly. A recorded "off" IS
+            // honoured: someone who already said no should not be asked
+            // again to get the same answer.
+            if (localStorage.getItem(LEGACY) === 'off') {
+              return { choice: 'denied', at: null, version: 1, migrated: true };
+            }
+          } catch (e) {
+            /* storage blocked — treat as no choice, which denies */
+          }
+          return null;
+        }
+
+        function apply(choice) {
+          var on = choice === 'granted' ? 'granted' : 'denied';
+          gtag('consent', 'update', {
+            ad_storage: on,
+            ad_user_data: on,
+            ad_personalization: on,
+            analytics_storage: on,
+            functionality_storage: on,
+            personalization_storage: on,
+          });
+        }
+
+        gtag('consent', 'default', {
+          ad_storage: 'denied',
+          ad_user_data: 'denied',
+          ad_personalization: 'denied',
+          analytics_storage: 'denied',
+          functionality_storage: 'denied',
+          personalization_storage: 'denied',
+          security_storage: 'granted',
+          wait_for_update: 500,
+        });
+
+        var stored = read();
+        if (stored) apply(stored.choice);
+
+        // Shared by the banner and the control on /privacy, so there is
+        // one implementation of "what does consent mean here".
+        window.onyxConsent = {
+          read: read,
+          set: function (choice) {
+            var record = {
+              choice: choice === 'granted' ? 'granted' : 'denied',
+              at: new Date().toISOString(),
+              version: 1,
+            };
+            try {
+              localStorage.setItem(KEY, JSON.stringify(record));
+            } catch (e) {
+              return null;
+            }
+            apply(record.choice);
+            // Withdrawing consent should also take back what was already
+            // stored under it. Analytics cookies are host-scoped, so
+            // expiring them here is the part the page can actually do.
+            if (record.choice === 'denied') {
+              document.cookie.split(';').forEach(function (pair) {
+                var name = pair.split('=')[0].trim();
+                if (name.indexOf('_ga') === 0 || name === '_gid') {
+                  document.cookie =
+                    name + '=; Max-Age=0; path=/; domain=.' + location.hostname;
+                  document.cookie = name + '=; Max-Age=0; path=/';
+                }
+              });
+            }
+            return record;
+          },
+        };
+      })();
+    </script>
+
+    <!-- Google Tag Manager. Loads for everyone, but under the consent
+         defaults above — denied means no cookies and no identifiers, so
+         the container being present is not itself measurement. Blocking
+         the container outright until acceptance is the stricter reading;
+         it is one `if` away, and costs the cookieless traffic counts. -->
     <script is:inline>
       (function (w, d, s, l, i) {
-        try {
-          if (localStorage.getItem('onyx-analytics') === 'off') return;
-        } catch (e) {
-          /* storage unavailable — no recorded opt-out, carry on */
-        }
         w[l] = w[l] || [];
         w[l].push({ 'gtm.start': new Date().getTime(), event: 'gtm.js' });
         var f = d.getElementsByTagName(s)[0],
@@ -70,17 +156,11 @@ const {
     <title>{title}</title>
   </head>
   <body class="min-h-screen bg-bg-primary text-text-primary antialiased">
-    <!-- Google Tag Manager (noscript). GTM's install is two snippets;
-         this is the second, and it must be the first thing inside body.
-         Without it, tags don't fire for anyone with JS disabled. -->
-    <noscript
-      ><iframe
-        src="https://www.googletagmanager.com/ns.html?id=GTM-T88HLJZP"
-        height="0"
-        width="0"
-        style="display:none;visibility:hidden"></iframe></noscript
-    >
-    <!-- End Google Tag Manager (noscript) -->
+    <!-- GTM's noscript iframe is deliberately absent. It fires the
+         container for visitors with JavaScript off — who cannot be shown
+         a consent prompt, and therefore cannot have consented. Measuring
+         exactly the people who can't be asked is the wrong side of this
+         to be on. -->
 
     <slot />
     <AnalyticsNotice />

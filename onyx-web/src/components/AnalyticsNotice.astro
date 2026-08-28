@@ -1,87 +1,75 @@
 ---
-// A small notice that analytics are running, with a way out.
+// Consent-first analytics notice.
 //
-// Opt-out rather than opt-in: the tag loads by default and this says so
-// plainly and lets you stop it. Opting out writes a flag that the loader
-// in Layout.astro checks BEFORE it inserts the GTM script, so the choice
-// actually prevents the load on every later page view rather than just
-// hiding a banner. Choosing it reloads once, so it takes effect on the
-// page you're standing on too — otherwise "opted out" would be a claim
-// that isn't true until you navigate.
+// Nothing is measured until someone actively chooses. Consent Mode v2
+// carries the decision: the container loads with every storage category
+// DENIED (set in Layout.astro before GTM, which is the only place it
+// works — a default set after the container has started is too late), so
+// until you accept, GTM sets no cookies and sends only cookieless pings.
 //
-// The same key backs the control on /privacy, so the choice is
-// changeable after the banner is gone.
+// The two buttons are deliberately identical in size, weight and colour.
+// "Reject as easy as accept" is the part that gets sites fined, and a
+// quiet outline button next to a filled accent one is exactly the
+// pattern being fined for.
 ---
 
 <div
-  id="analytics-notice"
-  role="region"
-  aria-label="Analytics notice"
+  id="consent-notice"
+  role="dialog"
+  aria-modal="false"
+  aria-labelledby="consent-title"
   hidden
-  class="fixed bottom-4 left-4 z-50 hidden max-w-sm rounded-xl border border-border-subtle bg-bg-secondary/95 p-4 shadow-2xl backdrop-blur"
+  class="fixed bottom-4 left-4 z-50 hidden max-w-sm rounded-xl border border-border-subtle bg-bg-secondary/95 p-5 shadow-2xl backdrop-blur"
 >
-  <p class="text-sm leading-relaxed text-text-secondary">
-    This site uses Google Tag Manager to see which pages get read. It's on the website
-    only — never in the app. You can turn it off.
+  <p id="consent-title" class="text-sm font-medium text-text-primary">Analytics?</p>
+  <p class="mt-2 text-sm leading-relaxed text-text-secondary">
+    We'd like to use Google Analytics to see which pages get read. It's on this website
+    only — never in the app, and never anything about your machines. Nothing is
+    measured unless you say yes.
   </p>
-  <div class="mt-3 flex items-center gap-2">
+  <div class="mt-4 grid grid-cols-2 gap-2">
     <button
       type="button"
-      data-analytics-choice="ok"
-      class="rounded-md bg-accent-primary px-3 py-1.5 text-xs font-medium text-bg-primary transition hover:bg-accent-glow"
+      data-consent="granted"
+      class="rounded-md border border-border-subtle bg-bg-tertiary px-3 py-2 text-sm text-text-primary transition hover:border-accent-primary/60"
     >
-      That's fine
+      Accept
     </button>
     <button
       type="button"
-      data-analytics-choice="off"
-      class="rounded-md border border-border-subtle px-3 py-1.5 text-xs text-text-secondary transition hover:border-border-hover hover:text-text-primary"
+      data-consent="denied"
+      class="rounded-md border border-border-subtle bg-bg-tertiary px-3 py-2 text-sm text-text-primary transition hover:border-accent-primary/60"
     >
-      Opt out
+      Reject
     </button>
-    <a href="/privacy" class="ml-auto text-xs text-text-muted transition hover:text-text-secondary">
-      Details
-    </a>
   </div>
+  <a
+    href="/privacy"
+    class="mt-3 inline-block text-xs text-text-muted transition hover:text-text-secondary"
+  >
+    What this collects
+  </a>
 </div>
 
 <script is:inline>
   (function () {
-    var KEY = 'onyx-analytics';
-    var box = document.getElementById('analytics-notice');
-    if (!box) return;
+    var box = document.getElementById('consent-notice');
+    if (!box || !window.onyxConsent) return;
 
-    function read() {
-      // Private modes can throw on access rather than returning null.
-      // Treat that as "no choice recorded" and carry on.
-      try {
-        return localStorage.getItem(KEY);
-      } catch (e) {
-        return null;
-      }
-    }
-
-    // Only ask once. A banner that reappears after you've answered it is
-    // worse than no banner.
-    if (read() !== null) return;
+    // Asked once. The durable control lives on /privacy, because a
+    // banner that returns after you've answered it is its own dark
+    // pattern — and withdrawal has to be as easy as giving.
+    if (window.onyxConsent.read()) return;
 
     box.hidden = false;
     box.classList.remove('hidden');
 
     box.addEventListener('click', function (event) {
-      var choice = event.target && event.target.getAttribute('data-analytics-choice');
+      var choice = event.target && event.target.getAttribute('data-consent');
       if (!choice) return;
-      try {
-        localStorage.setItem(KEY, choice);
-      } catch (e) {
-        // Storage unavailable: we can't remember the choice, so don't
-        // pretend we did. Hiding the box is the most we can honestly do.
-      }
+      window.onyxConsent.set(choice);
       box.hidden = true;
       box.classList.add('hidden');
-      // Reload so an opt-out stops the tag on this page too, not just the
-      // next one.
-      if (choice === 'off') location.reload();
     });
   })();
 </script>

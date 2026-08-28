@@ -43,25 +43,39 @@ import Footer from '../components/sections/Footer.astro';
       </p>
       <p>
         This site — as distinct from the app — is static, served by Cloudflare Pages, and
-        loads Google Tag Manager so we can see which pages people actually read. That is
-        a third-party script from Google, and depending on the tags configured inside it,
-        it may set cookies and record your visit. It runs on this website only: it is not
-        in the app, ships in none of the downloads, and can see nothing about your
-        machines, sessions or files. Fonts are the only other external request.
+        can use Google Analytics (through Google Tag Manager) to see which pages people
+        read. It is off until you accept: the container loads with every storage
+        category denied, which means no cookies and no identifiers, and it only starts
+        measuring properly if you say yes. Decline and it stays denied; if you had
+        accepted earlier, declining also expires the analytics cookies already set. Any
+        of this runs on the website only — it is not in the app, ships in none of the
+        downloads, and can see nothing about your machines, sessions or files. Fonts are
+        the only other external request.
       </p>
       <div class="rounded-xl border border-border-subtle bg-bg-secondary/60 p-5">
         <p class="text-sm text-text-secondary">
-          <span id="analytics-state" class="font-mono text-text-primary">Analytics are on.</span>
-          Your choice is remembered in this browser only — there's no account behind it,
-          so it doesn't follow you to another device.
+          <span id="consent-state" class="font-mono text-text-primary">Loading…</span>
         </p>
-        <button
-          id="analytics-toggle"
-          type="button"
-          class="mt-4 rounded-md border border-border-subtle px-4 py-2 text-sm text-text-secondary transition hover:border-border-hover hover:text-text-primary"
-        >
-          Opt out
-        </button>
+        <div class="mt-4 grid max-w-xs grid-cols-2 gap-2">
+          <button
+            id="consent-accept"
+            type="button"
+            class="rounded-md border border-border-subtle bg-bg-tertiary px-3 py-2 text-sm text-text-primary transition hover:border-accent-primary/60"
+          >
+            Accept
+          </button>
+          <button
+            id="consent-reject"
+            type="button"
+            class="rounded-md border border-border-subtle bg-bg-tertiary px-3 py-2 text-sm text-text-primary transition hover:border-accent-primary/60"
+          >
+            Reject
+          </button>
+        </div>
+        <p class="mt-3 text-xs text-text-muted">
+          Stored in this browser only — there's no account behind it, so it doesn't
+          follow you to another device, and clearing site data resets it.
+        </p>
       </div>
 
       <p class="text-text-muted">
@@ -73,41 +87,47 @@ import Footer from '../components/sections/Footer.astro';
 
   <script is:inline>
     (function () {
-      var KEY = 'onyx-analytics';
-      var label = document.getElementById('analytics-state');
-      var button = document.getElementById('analytics-toggle');
-      if (!label || !button) return;
+      var label = document.getElementById('consent-state');
+      var accept = document.getElementById('consent-accept');
+      var reject = document.getElementById('consent-reject');
+      if (!label || !accept || !reject) return;
 
-      function read() {
-        try {
-          return localStorage.getItem(KEY);
-        } catch (e) {
-          return null;
-        }
+      if (!window.onyxConsent) {
+        label.textContent = "Analytics couldn't load, so nothing is being collected.";
+        return;
       }
 
       function render() {
-        var off = read() === 'off';
-        label.textContent = off ? 'Analytics are off.' : 'Analytics are on.';
-        button.textContent = off ? 'Turn analytics back on' : 'Opt out';
+        var stored = window.onyxConsent.read();
+        if (!stored) {
+          label.textContent = "You haven't been asked yet — analytics are off until you do.";
+          return;
+        }
+        var when = stored.at ? ' on ' + new Date(stored.at).toLocaleDateString() : '';
+        label.textContent =
+          stored.choice === 'granted'
+            ? 'Analytics are on — you accepted' + when + '.'
+            : 'Analytics are off — you declined' + when + '.';
       }
 
-      render();
-
-      button.addEventListener('click', function () {
-        var next = read() === 'off' ? 'ok' : 'off';
-        try {
-          localStorage.setItem(KEY, next);
-        } catch (e) {
+      function choose(choice) {
+        var record = window.onyxConsent.set(choice);
+        if (!record) {
           label.textContent =
-            "This browser won't let the site store your choice, so it can't be remembered.";
+            "This browser won't let the site store your choice, so it can't be remembered — analytics stay off.";
           return;
         }
         render();
-        // Reload either way: off must stop the tag now, and on must
-        // actually start it rather than waiting for the next page.
-        location.reload();
+      }
+
+      accept.addEventListener('click', function () {
+        choose('granted');
       });
+      reject.addEventListener('click', function () {
+        choose('denied');
+      });
+
+      render();
     })();
   </script>
 </Layout>
