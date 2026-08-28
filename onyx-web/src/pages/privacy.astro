@@ -49,10 +49,65 @@ import Footer from '../components/sections/Footer.astro';
         in the app, ships in none of the downloads, and can see nothing about your
         machines, sessions or files. Fonts are the only other external request.
       </p>
+      <div class="rounded-xl border border-border-subtle bg-bg-secondary/60 p-5">
+        <p class="text-sm text-text-secondary">
+          <span id="analytics-state" class="font-mono text-text-primary">Analytics are on.</span>
+          Your choice is remembered in this browser only — there's no account behind it,
+          so it doesn't follow you to another device.
+        </p>
+        <button
+          id="analytics-toggle"
+          type="button"
+          class="mt-4 rounded-md border border-border-subtle px-4 py-2 text-sm text-text-secondary transition hover:border-border-hover hover:text-text-primary"
+        >
+          Opt out
+        </button>
+      </div>
+
       <p class="text-text-muted">
         Questions: <a href="https://github.com/almostrealism/onyx/issues" class="text-accent-primary transition hover:text-accent-glow">open an issue</a>.
       </p>
     </div>
   </main>
   <Footer />
+
+  <script is:inline>
+    (function () {
+      var KEY = 'onyx-analytics';
+      var label = document.getElementById('analytics-state');
+      var button = document.getElementById('analytics-toggle');
+      if (!label || !button) return;
+
+      function read() {
+        try {
+          return localStorage.getItem(KEY);
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function render() {
+        var off = read() === 'off';
+        label.textContent = off ? 'Analytics are off.' : 'Analytics are on.';
+        button.textContent = off ? 'Turn analytics back on' : 'Opt out';
+      }
+
+      render();
+
+      button.addEventListener('click', function () {
+        var next = read() === 'off' ? 'ok' : 'off';
+        try {
+          localStorage.setItem(KEY, next);
+        } catch (e) {
+          label.textContent =
+            "This browser won't let the site store your choice, so it can't be remembered.";
+          return;
+        }
+        render();
+        // Reload either way: off must stop the tag now, and on must
+        // actually start it rather than waiting for the next page.
+        location.reload();
+      });
+    })();
+  </script>
 </Layout>

@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import AnalyticsNotice from '../components/AnalyticsNotice.astro';
 
 interface Props {
   title: string;
@@ -22,9 +23,17 @@ const {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <!-- Google Tag Manager -->
+    <!-- Google Tag Manager. Wrapped in an opt-out check: if the visitor
+         has opted out (see AnalyticsNotice.astro and /privacy), the
+         script is never inserted at all, rather than loaded and then
+         asked to behave. -->
     <script is:inline>
       (function (w, d, s, l, i) {
+        try {
+          if (localStorage.getItem('onyx-analytics') === 'off') return;
+        } catch (e) {
+          /* storage unavailable — no recorded opt-out, carry on */
+        }
         w[l] = w[l] || [];
         w[l].push({ 'gtm.start': new Date().getTime(), event: 'gtm.js' });
         var f = d.getElementsByTagName(s)[0],
@@ -74,5 +83,6 @@ const {
     <!-- End Google Tag Manager (noscript) -->
 
     <slot />
+    <AnalyticsNotice />
   </body>
 </html>

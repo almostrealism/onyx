@@ -1,0 +1,87 @@
+---
+// A small notice that analytics are running, with a way out.
+//
+// Opt-out rather than opt-in: the tag loads by default and this says so
+// plainly and lets you stop it. Opting out writes a flag that the loader
+// in Layout.astro checks BEFORE it inserts the GTM script, so the choice
+// actually prevents the load on every later page view rather than just
+// hiding a banner. Choosing it reloads once, so it takes effect on the
+// page you're standing on too — otherwise "opted out" would be a claim
+// that isn't true until you navigate.
+//
+// The same key backs the control on /privacy, so the choice is
+// changeable after the banner is gone.
+---
+
+<div
+  id="analytics-notice"
+  role="region"
+  aria-label="Analytics notice"
+  hidden
+  class="fixed bottom-4 left-4 z-50 hidden max-w-sm rounded-xl border border-border-subtle bg-bg-secondary/95 p-4 shadow-2xl backdrop-blur"
+>
+  <p class="text-sm leading-relaxed text-text-secondary">
+    This site uses Google Tag Manager to see which pages get read. It's on the website
+    only — never in the app. You can turn it off.
+  </p>
+  <div class="mt-3 flex items-center gap-2">
+    <button
+      type="button"
+      data-analytics-choice="ok"
+      class="rounded-md bg-accent-primary px-3 py-1.5 text-xs font-medium text-bg-primary transition hover:bg-accent-glow"
+    >
+      That's fine
+    </button>
+    <button
+      type="button"
+      data-analytics-choice="off"
+      class="rounded-md border border-border-subtle px-3 py-1.5 text-xs text-text-secondary transition hover:border-border-hover hover:text-text-primary"
+    >
+      Opt out
+    </button>
+    <a href="/privacy" class="ml-auto text-xs text-text-muted transition hover:text-text-secondary">
+      Details
+    </a>
+  </div>
+</div>
+
+<script is:inline>
+  (function () {
+    var KEY = 'onyx-analytics';
+    var box = document.getElementById('analytics-notice');
+    if (!box) return;
+
+    function read() {
+      // Private modes can throw on access rather than returning null.
+      // Treat that as "no choice recorded" and carry on.
+      try {
+        return localStorage.getItem(KEY);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // Only ask once. A banner that reappears after you've answered it is
+    // worse than no banner.
+    if (read() !== null) return;
+
+    box.hidden = false;
+    box.classList.remove('hidden');
+
+    box.addEventListener('click', function (event) {
+      var choice = event.target && event.target.getAttribute('data-analytics-choice');
+      if (!choice) return;
+      try {
+        localStorage.setItem(KEY, choice);
+      } catch (e) {
+        // Storage unavailable: we can't remember the choice, so don't
+        // pretend we did. Hiding the box is the most we can honestly do.
+      }
+      box.hidden = true;
+      box.classList.add('hidden');
+      // Reload so an opt-out stops the tag on this page too, not just the
+      // next one.
+      if (choice === 'off') location.reload();
+    });
+  })();
+</script>
