@@ -52,6 +52,38 @@ public final class TerminalActivityStore: ObservableObject {
         if changed { schedulePublish() }
     }
 
+    /// Report activity observed OUTSIDE this app's terminal views —
+    /// specifically tmux's own `#{session_activity}`, read during
+    /// enumeration.
+    ///
+    /// This exists because the content sampler can only see sessions that
+    /// are currently pooled, and the pool evicts anything you haven't
+    /// looked at for five minutes. Without this, an unviewed session's
+    /// idle clock froze at its last sample and then aged forever — so a
+    /// session that had been busy the whole time read as quiet, and
+    /// opening it showed output from seconds ago. "Time since last
+    /// output" had quietly become "time since we stopped watching".
+    ///
+    /// Forward-only: a pooled session is sampled every 3s locally, which
+    /// is finer than the 15s enumeration, and letting a coarser reading
+    /// move the clock BACKWARDS would make a live session look staler
+    /// than it is. Also clamped to now, because a host whose clock runs
+    /// ahead would otherwise report activity in the future and stay
+    /// permanently green.
+    public func recordExternal(sessionID: String, at date: Date) {
+        let stamp = min(date, Date())
+        var changed = false
+        lock.lock()
+        if let existing = lastChange[sessionID] {
+            if stamp > existing { lastChange[sessionID] = stamp; changed = true }
+        } else {
+            lastChange[sessionID] = stamp
+            changed = true
+        }
+        lock.unlock()
+        if changed { schedulePublish() }
+    }
+
     /// When the session's content last changed, or nil if never seen.
     public func lastOutput(for sessionID: String) -> Date? {
         lock.lock(); defer { lock.unlock() }

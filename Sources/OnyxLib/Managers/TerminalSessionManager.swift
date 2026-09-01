@@ -1448,10 +1448,14 @@ class OnyxTerminalView: NSView {
         let script: String
         switch source {
         case .host:
-            script = "tmux ls -F \"#{session_name}\" 2>/dev/null || true"
+            // `session_activity` is tmux's own unix timestamp of the last
+            // activity in the session — the answer to the question the
+            // idle indicator is asking, for every session on the host, in
+            // the command we were already running.
+            script = "tmux ls -F \"#{session_name}|#{session_activity}\" 2>/dev/null || true"
         case .docker(_, let containerName):
             let safe = appState.sanitizedContainer(containerName)
-            script = "docker exec \(safe) tmux ls -F \"#{session_name}\" 2>/dev/null || true"
+            script = "docker exec \(safe) tmux ls -F \"#{session_name}|#{session_activity}\" 2>/dev/null || true"
         case .dockerLogs, .dockerTop, .browser:
             completion([]) // utility/browser sessions are not fetched via tmux
             return
@@ -1477,13 +1481,48 @@ class OnyxTerminalView: NSView {
         process.waitUntilExit()
 
         let output = String(data: outputData, encoding: .utf8) ?? ""
-        let sessions = output.components(separatedBy: "\n")
+        let parsed = Self.parseSessionList(output, source: source)
+        for (session, activity) in parsed {
+            guard let activity else { continue }
+            TerminalActivityStore.shared.recordExternal(sessionID: session.id, at: activity)
+        }
+
+        completion(parsed.map(\.session))
+    }
+
+    /// Parse `tmux ls -F "#{session_name}|#{session_activity}"`.
+    ///
+    /// The delimiter is split off BEFORE the name is validated. The name
+    /// rule rejects anything with a `|` or a digit-only tail, so
+    /// validating the whole line would have rejected every session and
+    /// silently emptied the list — the failure this codebase keeps
+    /// finding the hard way.
+    ///
+    /// A tmux too old to know `session_activity` expands it to nothing,
+    /// leaving "name|", which parses to a session with no timestamp. That
+    /// degrades to the previous behaviour rather than losing the session.
+    static func parseSessionList(_ output: String,
+                                 source: SessionSource) -> [(session: TmuxSession, activity: Date?)] {
+        output.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            .filter { line in line.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." || $0 == " " } && !line.contains("  ") && line.count < 100 }
-            .map { TmuxSession(name: $0, source: source) }
+            .compactMap { line -> (TmuxSession, Date?)? in
+                let parts = line.split(separator: "|", maxSplits: 1,
+                                       omittingEmptySubsequences: false)
+                let name = String(parts[0])
+                guard !name.isEmpty, name.count < 100, !name.contains("  "),
+                      name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-"
+                                        || $0 == "_" || $0 == "." || $0 == " " })
+                else { return nil }
 
-        completion(sessions)
+                var activity: Date?
+                if parts.count > 1,
+                   let epoch = TimeInterval(parts[1].trimmingCharacters(in: .whitespaces)),
+                   epoch > 0 {
+                    activity = Date(timeIntervalSince1970: epoch)
+                }
+                return (TmuxSession(name: name, source: source), activity)
+            }
     }
 
     private func fetchDockerContainerSessions(host: HostConfig, completion: @escaping ([TmuxSession]) -> Void) {
