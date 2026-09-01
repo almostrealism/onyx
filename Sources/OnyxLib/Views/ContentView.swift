@@ -570,6 +570,19 @@ private struct ContentViewNotifications: ViewModifier {
                 guard isKeyWindow, appState.showMonitor else { return }
                 appState.monitorLayout = appState.monitorLayout.toggled
             }
+            .onReceive(NotificationCenter.default.publisher(for: .focusTerminal)) { _ in
+                guard isKeyWindow else { return }
+                appState.focusedComponent = .terminal
+                NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .focusRightPanel)) { _ in
+                // Nothing to focus if no panel is open — leave the
+                // keyboard where it is rather than pointing it at nothing.
+                guard isKeyWindow,
+                      appState.activeRightPanel != nil || appState.showFullFileBrowser else { return }
+                appState.focusedComponent = .rightPanel
+                NotificationCenter.default.post(name: .resignTerminalFocus, object: nil)
+            }
             .onReceive(NotificationCenter.default.publisher(for: .cycleFleetMode)) { _ in
                 guard isKeyWindow, appState.showMonitor else { return }
                 appState.fleetMode = appState.fleetMode.next

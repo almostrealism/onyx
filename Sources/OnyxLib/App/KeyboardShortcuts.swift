@@ -161,6 +161,25 @@ public class ShortcutManager {
                 return nil
             }
 
+            // Cmd+Option+Left / Right → move focus between the terminal and
+            // the open right panel.
+            //
+            // Directional rather than a toggle: with a toggle you have to
+            // know where focus currently is to predict where it lands, and
+            // not knowing that is the actual complaint. Left is always the
+            // terminal, right is always the panel, whatever you pressed
+            // last. Cmd+Ctrl+arrows are tmux pane resize; these are free.
+            if flags == [.command, .option] {
+                if event.keyCode == 123 {   // Left
+                    NotificationCenter.default.post(name: .focusTerminal, object: nil)
+                    return nil
+                }
+                if event.keyCode == 124 {   // Right
+                    NotificationCenter.default.post(name: .focusRightPanel, object: nil)
+                    return nil
+                }
+            }
+
             // Single-key shortcuts — check the state of the EVENT'S window.
             let state = appState(for: event)
             let monitorVisibleInWindow = state?.showMonitor ?? false
@@ -223,12 +242,35 @@ public class ShortcutManager {
                 }
             }
 
-            // Space bar in file browser → toggle file preview overlay
-            // keyCode 49 = Space. Only fire when file browser is active and
-            // no text field has focus (search field is not focused).
+            // Cmd+Y → toggle the file preview from anywhere, focus or not.
+            //
+            // The counterpart to space being focus-gated: a Cmd chord is
+            // reserved by macOS and never reaches the shell, so this is
+            // safe to leave global in a way a bare key never is. Cmd+Y is
+            // also Finder's own second Quick Look shortcut, which is the
+            // gesture this is imitating.
+            if flags == .command && chars.lowercased() == "y" {
+                let browserOpen = (state?.showFullFileBrowser ?? false)
+                    || (state?.activeRightPanel == .fileBrowser)
+                if browserOpen && state?.fileBrowserManager.viewingFileName != nil {
+                    NotificationCenter.default.post(name: .toggleFilePreview, object: nil)
+                    return nil
+                }
+            }
+
+            // Space bar in file browser → toggle file preview overlay.
+            //
+            // Gated on the file browser actually HAVING focus. It used to
+            // fire whenever the panel was open and a file was selected,
+            // which meant every space typed into the terminal toggled a
+            // preview and never reached the shell — the panel and the
+            // terminal both acting on one keystroke. A bare key may only
+            // be claimed by the component the user is pointed at; that is
+            // the rule for anything added here.
             let fileBrowserActive = (state?.showFullFileBrowser ?? false)
                 || (state?.activeRightPanel == .fileBrowser)
             if event.keyCode == 49 && flags.isEmpty && fileBrowserActive
+                && rightPanelHasFocus
                 && state?.fileBrowserManager.viewingFileName != nil
                 && !hasRealTextInput {
                 NotificationCenter.default.post(name: .toggleFilePreview, object: nil)

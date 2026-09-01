@@ -20,6 +20,13 @@ public extension Notification.Name {
     static let refreshSession = Notification.Name("refreshSession")
     static let toggleArtifacts = Notification.Name("toggleArtifacts")
     static let restoreTerminalFocus = Notification.Name("restoreTerminalFocus")
+    /// Hand the keyboard to the terminal / to the open right panel.
+    static let focusTerminal = Notification.Name("focusTerminal")
+    static let focusRightPanel = Notification.Name("focusRightPanel")
+    /// Take the terminal out of first responder. Moving focus to a panel
+    /// has to do this or the terminal keeps swallowing the keystrokes
+    /// while the UI claims the panel is focused.
+    static let resignTerminalFocus = Notification.Name("resignTerminalFocus")
     static let refreshPoolStatus = Notification.Name("refreshPoolStatus")
     static let toggleMemoryChart = Notification.Name("toggleMemoryChart")
     static let toggleAllContainers = Notification.Name("toggleAllContainers")

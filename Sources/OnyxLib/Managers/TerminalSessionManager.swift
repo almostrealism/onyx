@@ -78,6 +78,7 @@ class OnyxTerminalView: NSView {
     }
 
     private var focusObserver: Any?
+    private var resignObserver: Any?
     private var windowKeyObserver: Any?
     private var appActiveObserver: Any?
     private var mouseMonitor: Any?
@@ -100,6 +101,15 @@ class OnyxTerminalView: NSView {
             forName: .restoreTerminalFocus, object: nil, queue: .main
         ) { [weak self] _ in
             self?.restoreFocus()
+        }
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: .resignTerminalFocus, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Only give up first responder if we currently hold it, and
+            // only in our own window — every window observes this.
+            guard let self, let window = self.window, window.isKeyWindow,
+                  let tv = self.terminalView, window.firstResponder === tv else { return }
+            window.makeFirstResponder(nil)
         }
 
         // Restore terminal focus when the window becomes key (app switch, click on window)
