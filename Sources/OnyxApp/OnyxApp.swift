@@ -51,5 +51,21 @@ struct OnyxApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 900, height: 600)
+        .commands {
+            // Help → "Onyx Help" opened macOS's help-book viewer, which
+            // said "Help isn't available for Onyx" because there is no
+            // help book — the shortcut reference lives in the app, behind
+            // the ? in the corner. Point the standard menu item at the
+            // thing that actually exists.
+            //
+            // Replacing the group rather than adding to it: leaving the
+            // default item in place would keep offering the dead end.
+            CommandGroup(replacing: .help) {
+                Button("Onyx Help") {
+                    NotificationCenter.default.post(name: .toggleHelp, object: nil)
+                }
+                .keyboardShortcut("/", modifiers: .command)
+            }
+        }
     }
 }
