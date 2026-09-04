@@ -695,13 +695,16 @@ public class AppState: ObservableObject {
         saveFavorites()
     }
 
-    /// Switch to a session from anywhere *except* the session sidebar list.
+    /// Switch to a session and get the overlays off it.
     ///
-    /// Any deliberate jump — ⌘-number, ⇧⇥, the favorites bar, a monitor
-    /// row — means "show me that terminal", so the overlays covering it get
-    /// out of the way. The sidebar's own rows set `switchToSession`
-    /// directly instead: flipping between sessions in that list should
-    /// leave it open.
+    /// Any deliberate pick — ⌘-number, ⇧⇥, the favorites bar, a monitor
+    /// row, a row in the session list — means "show me that terminal", so
+    /// whatever is covering it gets out of the way.
+    ///
+    /// The session list used to be the exception, on the theory that you
+    /// might flip between several sessions in a row. Users reported the
+    /// opposite: you pick one, and the list sitting over the terminal you
+    /// just asked for is in the way. ⌘J reopens it.
     ///
     /// `dismissIfAlreadyActive: false` is for list rows where a click on the
     /// row you're already on is more likely a mis-aim than a request —

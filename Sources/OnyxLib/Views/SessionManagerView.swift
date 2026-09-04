@@ -470,9 +470,10 @@ private struct FavoriteRow: View {
             }
             .contentShape(Rectangle())
             .onTapGesture {
-                if !isActive {
-                    appState.switchToSession = session
-                }
+                // Picking a session means "take me there" — the list has
+                // done its job and shouldn't stay parked over the terminal
+                // you just asked for.
+                appState.jumpToSession(session)
             }
 
             // Remove from favorites
@@ -664,9 +665,10 @@ private struct SessionRow: View {
         .background(isActive ? appState.accentColor.opacity(0.08) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture {
-            if !session.unavailable && !isActive {
-                appState.switchToSession = session
-            }
+            // An unavailable session has nothing to switch to; leave the
+            // list open rather than closing it onto a dead terminal.
+            guard !session.unavailable else { return }
+            appState.jumpToSession(session)
         }
     }
 }
