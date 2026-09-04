@@ -124,3 +124,55 @@ final class GitHubOwnerWideParseTests: XCTestCase {
         XCTAssertTrue(GitHubRepoSpec.parse("owner/")?.isOwnerWide ?? false)
     }
 }
+
+/// Draft detection. A filter that hides "most" drafts is one you can't
+/// trust to hide any, so both signals — the API flag and the title
+/// convention — have to count.
+final class PullRequestDraftTests: XCTestCase {
+
+    private func pr(_ title: String, apiDraft: Bool = false) -> PullRequest {
+        PullRequest(repoFullName: "acme/api", number: 1, title: title,
+                    url: "https://example.com", openCommentThreads: 0,
+                    mergeStatus: .unknown, apiSaysDraft: apiDraft)
+    }
+
+    func testApiFlagMarksADraft() {
+        XCTAssertTrue(pr("Retry policy", apiDraft: true).isDraft)
+        XCTAssertFalse(pr("Retry policy").isDraft)
+    }
+
+    /// GitLab's own mechanism is the title prefix, and plenty of GitHub
+    /// teams do the same on a PR the API considers ready.
+    func testTitleConventionsMarkADraft() {
+        for title in ["Draft: retry policy", "draft: retry policy",
+                      "DRAFT: retry policy", "WIP: retry policy",
+                      "wip: retry policy", "[draft] retry policy",
+                      "[WIP] retry policy", "(draft) retry policy",
+                      "  Draft: leading space"] {
+            XCTAssertTrue(pr(title).isDraft, "\(title) should read as a draft")
+        }
+    }
+
+    /// Anchored to the start, or a PR about draft handling gets hidden by
+    /// a filter the user set for something else entirely.
+    func testTheWordDraftElsewhereIsNotADraft() {
+        for title in ["Remove draft: handling", "Fix WIP: parsing",
+                      "Support drafts in the PR list", "Redraft the docs"] {
+            XCTAssertFalse(pr(title).isDraft, "\(title) should NOT read as a draft")
+        }
+    }
+
+    func testFilterKeepsTheRightRows() {
+        let draft = pr("Draft: one")
+        let ready = pr("Two")
+
+        XCTAssertTrue(PRDraftFilter.all.keeps(draft))
+        XCTAssertTrue(PRDraftFilter.all.keeps(ready))
+
+        XCTAssertFalse(PRDraftFilter.hideDrafts.keeps(draft))
+        XCTAssertTrue(PRDraftFilter.hideDrafts.keeps(ready))
+
+        XCTAssertTrue(PRDraftFilter.onlyDrafts.keeps(draft))
+        XCTAssertFalse(PRDraftFilter.onlyDrafts.keeps(ready))
+    }
+}

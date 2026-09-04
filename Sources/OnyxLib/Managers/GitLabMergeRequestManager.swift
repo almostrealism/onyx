@@ -201,7 +201,8 @@ public final class GitLabMergeRequestManager: ObservableObject {
                             mergeStatus: mr.merge_status,
                             hasConflicts: mr.has_conflicts ?? false),
                         headBranch: mr.source_branch,
-                        author: mr.author?.username
+                        author: mr.author?.username,
+                        apiSaysDraft: mr.draft ?? mr.work_in_progress ?? false
                     )
                 }
                 completion(.success(mrs))
@@ -253,6 +254,11 @@ public final class GitLabMergeRequestManager: ObservableObject {
         let merge_status: String?
         let detailed_merge_status: String?
         let has_conflicts: Bool?
+        /// `draft` is current; `work_in_progress` is what older GitLab
+        /// returned for the same thing. Read both so a self-hosted
+        /// instance a version behind still filters correctly.
+        let draft: Bool?
+        let work_in_progress: Bool?
         let blocking_discussions_resolved: Bool?
         let author: GitLabUser?
     }

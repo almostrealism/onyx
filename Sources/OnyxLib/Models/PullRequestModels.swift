@@ -37,14 +37,38 @@ public struct PullRequest: Identifiable, Equatable, Hashable {
     /// URLs for the "add pipeline from open PR" UX — we need the
     /// branch to query the latest workflow run on it.
     public let headBranch: String?
+    /// Whether this is a draft / work-in-progress.
+    ///
+    /// Comes from the API where the API knows (`isDraft` on GitHub,
+    /// `draft` on GitLab) OR from the title, because plenty of teams mark
+    /// drafts by convention on a PR the API considers ready. Either
+    /// signal counts — a filter that hides "most" drafts is one you can't
+    /// trust to hide any.
+    public let isDraft: Bool
     /// Author login/username. Lets the "only mine" filter work and is
     /// shown nowhere directly, but kept for filtering robustness.
     public let author: String?
 
+    /// Does this title announce a draft?
+    ///
+    /// Case-insensitive, and covers the three conventions in the wild:
+    /// GitLab's own "Draft:" prefix, its legacy "WIP:" prefix, and the
+    /// bracketed "[draft]" some teams use. Anchored to the start so a PR
+    /// titled "remove draft: handling" isn't caught.
+    public static func titleMarksDraft(_ title: String) -> Bool {
+        let t = title.trimmingCharacters(in: .whitespaces).lowercased()
+        return t.hasPrefix("draft:") || t.hasPrefix("draft :")
+            || t.hasPrefix("[draft]") || t.hasPrefix("(draft)")
+            || t.hasPrefix("wip:") || t.hasPrefix("[wip]")
+    }
+
     public init(provider: GitProvider = .github,
                 repoFullName: String, number: Int, title: String, url: String,
                 openCommentThreads: Int, mergeStatus: PRMergeStatus,
-                headBranch: String? = nil, author: String? = nil) {
+                headBranch: String? = nil, author: String? = nil,
+                apiSaysDraft: Bool = false) {
+        // Either signal is enough: the API flag, or the title convention.
+        self.isDraft = apiSaysDraft || Self.titleMarksDraft(title)
         self.provider = provider
         self.repoFullName = repoFullName
         self.number = number

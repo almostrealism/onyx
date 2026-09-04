@@ -14,7 +14,11 @@ struct PullRequestsSection: View {
     /// GitHub PRs then GitLab MRs, each already filtered/sorted by its
     /// own manager. Rows carry a provider badge so the source is clear.
     private var merged: [PullRequest] {
-        ghManager.pullRequests + glManager.mergeRequests
+        // Filtered here rather than in the managers: it's a display
+        // preference, so changing it takes effect immediately instead of
+        // waiting for the next poll of two separate APIs.
+        (ghManager.pullRequests + glManager.mergeRequests)
+            .filter { appState.appearance.prDraftFilter.keeps($0) }
     }
 
     private var anyConfigured: Bool { ghConfig.isConfigured || glConfig.isConfigured }

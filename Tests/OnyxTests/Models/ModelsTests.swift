@@ -482,6 +482,7 @@ final class CodableRoundTripTests: XCTestCase {
         config.remindersDueSoonOnly = true
         config.simpleShowSidePanel = true    // default is false, so flip it
         config.showAllContainers = true      // default is false, so flip it
+        config.prDraftFilter = .hideDrafts   // default is .all, so change it
 
         let data = try JSONEncoder().encode(config)
         let d = try JSONDecoder().decode(AppearanceConfig.self, from: data)
@@ -504,6 +505,7 @@ final class CodableRoundTripTests: XCTestCase {
         XCTAssertTrue(d.remindersDueSoonOnly)
         XCTAssertTrue(d.simpleShowSidePanel)
         XCTAssertTrue(d.showAllContainers)
+        XCTAssertEqual(d.prDraftFilter, .hideDrafts)
     }
 
     /// Tripwire: if you add a stored property to AppearanceConfig, this
@@ -512,7 +514,7 @@ final class CodableRoundTripTests: XCTestCase {
     /// missing one of those steps is wiping every user's settings.
     func testAppearanceConfig_storedPropertyCount_isLocked() {
         let count = Mirror(reflecting: AppearanceConfig()).children.count
-        XCTAssertEqual(count, 19, """
+        XCTAssertEqual(count, 20, """
             AppearanceConfig has \(count) stored properties but the test
             expects 17. If you ADDED a field, you must also:
               1. Add it to `CodingKeys` in HostConfig.swift

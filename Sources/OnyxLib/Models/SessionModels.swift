@@ -240,3 +240,33 @@ public enum FleetMode: String, CaseIterable, Codable {
         }
     }
 }
+
+
+/// How the merged PR list treats drafts.
+///
+/// Three-way rather than a "hide drafts" toggle because the request that
+/// prompted it — "can I filter out non-draft PRs" — reads both ways
+/// depending on who's asking. Someone reviewing wants drafts gone;
+/// someone tracking their own work-in-progress wants only drafts. One
+/// picker answers both without anyone having to guess which was meant.
+public enum PRDraftFilter: String, CaseIterable, Codable {
+    case all
+    case hideDrafts
+    case onlyDrafts
+
+    public var label: String {
+        switch self {
+        case .all:         return "All"
+        case .hideDrafts:  return "Hide drafts"
+        case .onlyDrafts:  return "Only drafts"
+        }
+    }
+
+    public func keeps(_ pr: PullRequest) -> Bool {
+        switch self {
+        case .all:        return true
+        case .hideDrafts: return !pr.isDraft
+        case .onlyDrafts: return pr.isDraft
+        }
+    }
+}

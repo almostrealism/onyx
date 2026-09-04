@@ -157,6 +157,7 @@ public final class PullRequestManager: ObservableObject {
             url
             mergeStateStatus
             mergeable
+            isDraft
             headRefName
             author { login }
             reviewThreads(first: 100) {
@@ -193,6 +194,7 @@ public final class PullRequestManager: ObservableObject {
                 url
                 mergeStateStatus
                 mergeable
+                isDraft
                 headRefName
                 author { login }
                 reviewThreads(first: 50) {
@@ -263,7 +265,8 @@ public final class PullRequestManager: ObservableObject {
                         mergeStatus: PRMergeStatus.fromGraphQL(state: node.mergeStateStatus,
                                                                mergeable: node.mergeable),
                         headBranch: node.headRefName,
-                        author: node.author?.login
+                        author: node.author?.login,
+                        apiSaysDraft: node.isDraft ?? false
                     )
                 }
                 completion(.success(prs))
@@ -321,6 +324,7 @@ public final class PullRequestManager: ObservableObject {
         let url: String
         let mergeStateStatus: String?
         let mergeable: String?
+        let isDraft: Bool?
         let headRefName: String?
         let author: Author?
         let reviewThreads: ThreadList?

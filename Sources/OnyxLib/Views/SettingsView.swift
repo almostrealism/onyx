@@ -429,6 +429,35 @@ struct SettingsView: View {
                         }
 
                         SearchFilterSettingsSection(appState: appState)
+
+                        // Applies to the merged GitHub + GitLab list, so
+                        // it sits above both rather than inside either.
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("PULL REQUESTS")
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                                .tracking(2)
+
+                            Picker("", selection: Binding(
+                                get: { appState.appearance.prDraftFilter },
+                                set: {
+                                    appState.appearance.prDraftFilter = $0
+                                    appState.saveAppearance()
+                                }
+                            )) {
+                                ForEach(PRDraftFilter.allCases, id: \.self) { f in
+                                    Text(f.label).tag(f)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+
+                            Text("A PR counts as a draft if the forge says so, or if its title starts with \"Draft:\", \"WIP:\" or \"[draft]\" — some teams mark drafts by convention on a PR the API considers ready.")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.gray.opacity(0.4))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
                         GitHubSettingsSection()
                         GitLabSettingsSection()
                         FlowtreeSettingsSection()
