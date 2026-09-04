@@ -62,6 +62,7 @@ struct TerminalHostView: NSViewRepresentable {
                         appState.allSessions.append(newSession)
                     }
                     appState.activeSession = newSession
+                    appState.autoFavoriteNewSession(newSession)
                     appState.showSessionManager = false
                     appState.saveLocalSessions()
                 }

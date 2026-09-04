@@ -34,7 +34,7 @@ struct WalkthroughOverlay: View {
                  keys: [("`", "monitor overlay"), ("⌘K", "command palette"), ("⌘/", "every shortcut")]),
 
             Step(title: "Move between sessions without reaching for the mouse",
-                 body: "Your terminals are tmux sessions that stay alive on the far end. Give the ones you use most a number and jump straight to them; ⇧⇥ cycles through the rest in order. The session list has everything else, including sessions you started outside Onyx.",
+                 body: "Your terminals are tmux sessions that stay alive on the far end. New sessions get a number automatically — ⌘1 through ⌘9 — so you can jump straight to them without setting anything up. ⇧⇥ cycles through the rest in order, and the session list has everything else, including sessions you started outside Onyx.",
                  keys: [("⌘1–9", "jump to a favorite"), ("⇧⇥", "cycle sessions"), ("⌘J", "the session list")]),
 
             Step(title: "Sessions that remember what they were for",

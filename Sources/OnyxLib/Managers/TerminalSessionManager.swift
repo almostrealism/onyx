@@ -1798,6 +1798,9 @@ class OnyxTerminalView: NSView {
     }
 
     func createNewTmuxSession(_ session: TmuxSession) {
+        // Claim a ⌘-number for it while there's one free, so keyboard
+        // switching works before the user has met the favourites system.
+        DispatchQueue.main.async { self.appState.autoFavoriteNewSession(session) }
         rapidDeaths = 0
         stopPairRecoveryWait()
         lastStartTime = Date()

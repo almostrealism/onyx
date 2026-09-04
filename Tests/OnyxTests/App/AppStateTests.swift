@@ -850,3 +850,86 @@ final class SessionAdminTests: XCTestCase {
         XCTAssertNotEqual(before.id, after.id)
     }
 }
+
+/// New sessions get a ⌘-number automatically, so keyboard switching works
+/// before anyone has met the favourites system.
+final class AutoFavoriteTests: XCTestCase {
+
+    private func state() -> AppState {
+        let s = AppState()
+        FavoritesStore.shared.reset()
+        return s
+    }
+
+    private func session(_ name: String) -> TmuxSession {
+        TmuxSession(name: name, source: .host(hostID: HostConfig.localhostID))
+    }
+
+    /// Register sessions as existing, since ⌘1–9 indexes visible
+    /// favourites rather than stored entries.
+    private func makeVisible(_ sessions: [TmuxSession], in s: AppState) {
+        s.allSessions = sessions
+    }
+
+    func testANewSessionBecomesReachableByNumber() {
+        let s = state()
+        let one = session("build")
+        makeVisible([one], in: s)
+        s.autoFavoriteNewSession(one)
+
+        XCTAssertTrue(s.isFavorited(one))
+        XCTAssertEqual(s.favoriteSessions.map(\.name), ["build"])
+    }
+
+    func testTheFirstNineAreClaimedAndTheTenthIsNot() {
+        let s = state()
+        let sessions = (1...10).map { session("s\($0)") }
+        makeVisible(sessions, in: s)
+        for one in sessions { s.autoFavoriteNewSession(one) }
+
+        XCTAssertEqual(s.favoriteSessions.count, 9,
+                       "⌘1–9 is nine keys; the tenth session has to be favourited deliberately")
+        XCTAssertFalse(s.isFavorited(sessions[9]))
+    }
+
+    func testItNeverDisturbsAnExistingArrangement() {
+        let s = state()
+        let kept = session("kept")
+        makeVisible([kept], in: s)
+        s.toggleFavorite(kept)
+        let before = s.favoriteEntries
+
+        s.autoFavoriteNewSession(kept)
+        XCTAssertEqual(s.favoriteEntries.count, before.count,
+                       "favouriting an already-favourited session must not duplicate it")
+        XCTAssertTrue(s.isFavorited(kept))
+    }
+
+    /// Unfavouriting has to stick. If the automatic pass could re-add a
+    /// session the user removed, the setting would look broken.
+    func testItDoesNotResurrectSomethingTheUserRemoved() {
+        let s = state()
+        let one = session("build")
+        makeVisible([one], in: s)
+        s.autoFavoriteNewSession(one)
+        s.toggleFavorite(one)               // user removes it
+        XCTAssertFalse(s.isFavorited(one))
+
+        // Only *creation* triggers the automatic favourite, and a session
+        // is created once — so nothing re-adds it.
+        XCTAssertFalse(s.favoriteSessions.contains { $0.id == one.id })
+    }
+
+    func testRoomFreedUpIsUsedByTheNextNewSession() {
+        let s = state()
+        let sessions = (1...9).map { session("s\($0)") }
+        makeVisible(sessions, in: s)
+        for one in sessions { s.autoFavoriteNewSession(one) }
+        s.toggleFavorite(sessions[0])       // frees a slot
+
+        let extra = session("extra")
+        makeVisible(sessions + [extra], in: s)
+        s.autoFavoriteNewSession(extra)
+        XCTAssertTrue(s.isFavorited(extra))
+    }
+}

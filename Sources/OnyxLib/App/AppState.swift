@@ -594,6 +594,38 @@ public class AppState: ObservableObject {
         saveFavorites()
     }
 
+    /// Give a newly created session a ⌘-number in this window, if one is
+    /// free.
+    ///
+    /// Switching sessions by keyboard requires a favourite, and users were
+    /// having to discover the favouriting system before they could switch
+    /// at all — the feature that makes the app fast was gated behind a
+    /// concept nobody had met yet. Now the first nine sessions in a window
+    /// arrive with a number already on them, and favouriting only becomes
+    /// something to think about once there are more sessions than keys.
+    ///
+    /// Counts VISIBLE favourites rather than stored entries, because
+    /// that's what ⌘1–9 actually indexes: an entry whose host is
+    /// unreachable isn't reachable by a number either, so it shouldn't
+    /// hold a slot shut.
+    ///
+    /// Only ever adds. It never removes or reorders anything the user
+    /// arranged deliberately.
+    public func autoFavoriteNewSession(_ session: TmuxSession) {
+        if let existing = favoriteEntries.first(where: { $0.sessionID == session.id }),
+           windowIndex > 3 || existing.windows.contains(windowIndex) {
+            return   // already reachable here
+        }
+        guard favoriteSessions.count < 9 else { return }
+
+        if let idx = favoriteEntries.firstIndex(where: { $0.sessionID == session.id }) {
+            favoriteEntries[idx].windows.insert(windowIndex)
+        } else {
+            favoriteEntries.append(FavoriteEntry(sessionID: session.id, windows: [windowIndex]))
+        }
+        saveFavorites()
+    }
+
     /// Is favorited.
     public func isFavorited(_ session: TmuxSession) -> Bool {
         favoriteEntries.contains { $0.sessionID == session.id }
