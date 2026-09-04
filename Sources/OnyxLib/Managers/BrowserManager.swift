@@ -45,6 +45,10 @@ public class BrowserManager: ObservableObject {
     /// Create a new instance.
     public init() {}
 
+    /// The tokens that make a WebKit view read as Safari. The engine
+    /// version alongside is filled in by WebKit itself.
+    static let safariUserAgentSuffix = "Version/17.4.1 Safari/605.1.15"
+
     /// Get or create the web view for a session
     public func webView(for session: TmuxSession) -> WKWebView {
         if let existing = webViews[session.id] {
@@ -52,6 +56,19 @@ public class BrowserManager: ObservableObject {
         }
 
         let config = WKWebViewConfiguration()
+        // Present as Safari.
+        //
+        // WKWebView's stock user agent is Safari's WITHOUT the trailing
+        // "Version/x Safari/y" tokens, so anything sniffing for Safari
+        // sees an unknown WebKit browser and refuses — which is why Slack
+        // says the browser isn't supported. This isn't a lie: the engine
+        // IS Safari's WebKit, same version, so a site taking its Safari
+        // code path gets exactly what it expects. Setting
+        // applicationNameForUserAgent rather than customUserAgent lets
+        // WebKit keep composing the real platform and engine versions;
+        // hardcoding a whole UA string would freeze them at whatever was
+        // true the day it was written.
+        config.applicationNameForUserAgent = Self.safariUserAgentSuffix
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.setValue(false, forKey: "drawsBackground")
         wv.allowsBackForwardNavigationGestures = true
