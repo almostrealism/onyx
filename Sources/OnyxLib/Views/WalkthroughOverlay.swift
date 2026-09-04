@@ -45,6 +45,10 @@ struct WalkthroughOverlay: View {
                  body: "Browse the remote filesystem with the branch, staged files and working changes right above the listing. Search by name or type across a deep tree. Favourite folders are drawn as a treemap, so two folders with the same name are told apart by what contains them.",
                  keys: [("⌘O", "file browser"), ("⇧⌘F", "search files"), ("⌘Y", "preview a file")]),
 
+            Step(title: "Drop a file to hand it to whatever you're running",
+                 body: "Drag a file onto the terminal and its path is typed at the cursor — the gesture you already use to point Claude Code at a file. When the session is on another machine that path would be meaningless, so Onyx copies the file over first and inserts where it landed.",
+                 keys: [("drag & drop", "onto the terminal")]),
+
             Step(title: "The work you're waiting on",
                  body: "Open pull requests from GitHub and GitLab arrive in one list, with unresolved review threads and whether each would actually merge. Pipelines sit above them. Apple Reminders due today show up alongside, because what's due is part of the same picture. Add your tokens in Settings.",
                  keys: [("`", "then look right"), ("⌘,", "settings")]),

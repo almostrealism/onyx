@@ -94,6 +94,11 @@ class OnyxTerminalView: NSView {
         wantsLayer = true
         layer?.isOpaque = false
         layer?.backgroundColor = CGColor.clear
+        // Terminal.app lets you drop a file to get its path; Claude Code
+        // has made that the way people point an agent at a file. SwiftTerm
+        // registers no dragged types of its own, so this container view is
+        // what receives the drop.
+        registerForDraggedTypes([.fileURL])
         installScrollMonitor()
         startEvictionTimer()
         startActivityTimer()
@@ -773,6 +778,155 @@ class OnyxTerminalView: NSView {
         for id in staleIDs {
             destroyPoolEntry(id)
         }
+    }
+
+
+    // MARK: - File drops
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        droppedURLs(from: sender).isEmpty ? [] : .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        droppedURLs(from: sender).isEmpty ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = droppedURLs(from: sender)
+        guard !urls.isEmpty else { return false }
+        handleDroppedFiles(urls)
+        return true
+    }
+
+    private func droppedURLs(from sender: NSDraggingInfo) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        return (sender.draggingPasteboard.readObjects(forClasses: [NSURL.self],
+                                                      options: options) as? [URL]) ?? []
+    }
+
+    /// Insert the dropped paths — after putting the files somewhere the
+    /// shell on the other end can reach, if that's a different machine.
+    private func handleDroppedFiles(_ urls: [URL]) {
+        guard let session = appState.activeSession else { return }
+
+        switch session.source {
+        case .host(let hostID) where isLocalHost(hostID):
+            // Same machine: the path already means something. This is
+            // Terminal.app's behaviour exactly.
+            insertPaths(urls.map(\.path))
+
+        case .host(let hostID):
+            guard let host = appState.hosts.first(where: { $0.id == hostID }) else { return }
+            upload(urls, to: host, container: nil)
+
+        case .docker(let hostID, let containerName):
+            guard let host = appState.hosts.first(where: { $0.id == hostID }) else { return }
+            // Two hops: onto the host, then into the container. Inserting
+            // the host's path would name a file the shell inside the
+            // container cannot open.
+            upload(urls, to: host, container: containerName)
+
+        case .dockerLogs, .dockerTop, .browser:
+            // A log stream has no prompt to type a path into.
+            DiagnosticLog.shared.record("drop", "this view has no shell to paste a path into")
+        }
+    }
+
+    private func isLocalHost(_ hostID: UUID) -> Bool {
+        if hostID == HostConfig.localhostID { return true }
+        return appState.hosts.first(where: { $0.id == hostID })?.isLocal ?? false
+    }
+
+    private func insertPaths(_ paths: [String]) {
+        guard let tv = terminalView else { return }
+        tv.send(txt: TerminalDrop.insertionText(for: paths))
+    }
+
+    /// Copy the files over, then insert where they landed.
+    ///
+    /// scp rides the host's existing connection as a mux channel — same
+    /// rule as every other utility command, so a drop can never open a
+    /// third connection to a host.
+    private func upload(_ urls: [URL], to host: HostConfig, container: String?) {
+        guard appState.hostUsable(host) else {
+            DiagnosticLog.shared.record("drop", "\(host.label) isn't reachable — nothing uploaded",
+                                        failure: true)
+            return
+        }
+        guard let release = appState.acquireUtilityChannel("drop:\(host.id)", host: host) else {
+            DiagnosticLog.shared.record("drop", "\(host.label) is busy — try the drop again")
+            return
+        }
+
+        let files = urls
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            defer { release() }
+            guard let self else { return }
+
+            var landed: [String] = []
+            for url in files {
+                guard let path = self.uploadOne(url, to: host, container: container) else { continue }
+                landed.append(path)
+            }
+
+            DispatchQueue.main.async {
+                guard !landed.isEmpty else { return }
+                self.insertPaths(landed)
+            }
+        }
+    }
+
+    /// Returns the path the file ended up at, or nil if it didn't.
+    private func uploadOne(_ url: URL, to host: HostConfig, container: String?) -> String? {
+        let name = TerminalDrop.safeRemoteName(for: url)
+        let remoteDir = TerminalDrop.remoteRelativeDir
+
+        // mkdir is fire-and-forget: scp fails loudly enough on its own if
+        // the directory isn't there.
+        let (mkCmd, mkArgs) = appState.remoteCommand("mkdir -p ~/\(remoteDir)", host: host)
+        _ = RemoteExec.shared.run(mkCmd, args: mkArgs, stdin: nil, softTimeout: 10,
+                                  captureStdout: false, captureStderr: false, label: "drop:mkdir")
+
+        let (scpCmd, scpArgs) = appState.scpCommand(localPath: url.path,
+                                                    remotePath: "\(remoteDir)/\(name)",
+                                                    host: host)
+        let copied = RemoteExec.shared.run(scpCmd, args: scpArgs, stdin: nil,
+                                           softTimeout: 120,
+                                           captureStdout: true, captureStderr: true,
+                                           label: "drop:scp")
+        guard copied.exit == 0 else {
+            let why = (copied.stderr + copied.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
+            DiagnosticLog.shared.record(
+                "drop", "\(url.lastPathComponent): \(why.isEmpty ? "scp exit \(copied.exit)" : why)",
+                failure: true)
+            return nil
+        }
+
+        guard let container else {
+            return "\(TerminalDrop.remoteDisplayDir)/\(name)"
+        }
+
+        // Second hop into the container.
+        let safe = appState.sanitizedContainer(container)
+        let dir = TerminalDrop.containerDir
+        let script = "docker exec \(safe) mkdir -p \(dir)"
+            + " && docker cp ~/\(remoteDir)/\(name) \(safe):\(dir)/\(name)"
+        let (cpCmd, cpArgs) = appState.remoteCommand(script, host: host)
+        let intoContainer = RemoteExec.shared.run(cpCmd, args: cpArgs, stdin: nil,
+                                                  softTimeout: 60,
+                                                  captureStdout: true, captureStderr: true,
+                                                  label: "drop:docker-cp")
+        guard intoContainer.exit == 0 else {
+            let why = (intoContainer.stderr + intoContainer.stdout)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            DiagnosticLog.shared.record(
+                "drop", "\(name) reached \(host.label) but not the container: \(why)",
+                failure: true)
+            // The file IS on the host, so name where it actually is
+            // rather than pretending the drop failed entirely.
+            return "\(TerminalDrop.remoteDisplayDir)/\(name)"
+        }
+        return "\(dir)/\(name)"
     }
 
     // MARK: - Scroll Monitor

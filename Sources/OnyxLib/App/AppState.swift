@@ -1480,6 +1480,31 @@ public class AppState: ObservableObject {
         ]
     }
 
+    /// `scp` a local file to a path relative to the remote home dir.
+    ///
+    /// Rides the host's connection pair as a mux channel — the same
+    /// ControlMaster=no / ControlPath discipline as every other utility
+    /// command, so a dropped file can never open a third connection to a
+    /// host. `-p` keeps the modification time, which matters when the
+    /// thing reading the file is deciding whether it changed.
+    public func scpCommand(localPath: String, remotePath: String,
+                           host: HostConfig) -> (cmd: String, args: [String]) {
+        var args = sshMuxArgs(for: host)
+        args.append(contentsOf: ["-o", "BatchMode=yes", "-p", "-q"])
+        if host.ssh.port != 22 {
+            // scp spells the port -P, not -p. Getting this wrong silently
+            // copies to the wrong host on a machine with two SSH daemons.
+            args.append(contentsOf: ["-P", "\(host.ssh.port)"])
+        }
+        if !host.ssh.identityFile.isEmpty {
+            args.append(contentsOf: ["-i", host.ssh.identityFile])
+        }
+        args.append(localPath)
+        let target = host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
+        args.append("\(target):\(remotePath)")
+        return ("/usr/bin/scp", args)
+    }
+
     /// Report an SSH failure (exit 255) against a host — marks the pair's
     /// active connection suspect so the standby is promoted immediately
     /// instead of waiting for the next smoke test. Replaces the old

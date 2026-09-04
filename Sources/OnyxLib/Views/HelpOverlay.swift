@@ -37,6 +37,7 @@ struct HelpOverlay: View {
         .init(keys: "⌘1–9", label: "Switch to a favorite session"),
         .init(keys: "⌘⌃ ←↑↓→", label: "Resize the tmux pane"),
         .init(keys: "Space", label: "Preview the selected file (file browser)"),
+        .init(keys: "drag", label: "Drop a file on the terminal to insert its path (uploaded first if the session is remote)"),
         .init(keys: "Esc", label: "Dismiss the top overlay"),
     ]
 
