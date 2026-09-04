@@ -17,6 +17,7 @@
 
 import Foundation
 import Combine
+import AppKit
 
 // MARK: - Claude Code Session Tracking
 
@@ -78,6 +79,10 @@ public struct PermissionRequest: Identifiable {
 public class ClaudeSessionManager: ObservableObject {
     @Published public var sessions: [String: ClaudeActivity] = [:]
     @Published public var pendingPermissions: [PermissionRequest] = []
+
+    /// Outstanding dock-bounce request, so it can be cancelled when the
+    /// agent stops waiting.
+    private var attentionToken: Int?
     @Published public var recentTools: [(date: Date, session: String, tool: String)] = []
 
     private let lock = NSLock()
@@ -189,6 +194,7 @@ public class ClaudeSessionManager: ObservableObject {
             session.lastSeen = Date()
             self.sessions[sessionId] = session
             self.pendingPermissions.append(request)
+            self.beginAttentionRequest()
         }
 
         let semaphore = DispatchSemaphore(value: 0)
@@ -210,6 +216,7 @@ public class ClaudeSessionManager: ObservableObject {
 
         DispatchQueue.main.async {
             self.pendingPermissions.removeAll { $0.id == requestId }
+            self.endAttentionRequestIfIdle()
             if var session = self.sessions[sessionId] {
                 session.status = .idle
                 self.sessions[sessionId] = session
@@ -343,5 +350,35 @@ public class ClaudeSessionManager: ObservableObject {
             self.sessions = self.sessions.filter { $0.value.lastSeen > cutoff }
             self.recentTools = self.recentTools.filter { $0.date > cutoff }
         }
+    }
+}
+
+// MARK: - Getting noticed
+
+extension ClaudeSessionManager {
+
+    /// Bounce the dock icon while an agent is blocked on a decision.
+    ///
+    /// A blocked agent nobody notices is the exact problem this app
+    /// exists to solve — the request has a 120-second timeout, so not
+    /// seeing it doesn't just delay the work, it abandons it.
+    ///
+    /// `.criticalRequest` keeps bouncing until the app is activated,
+    /// which is right here: one bounce is easy to miss while you're in
+    /// another window, and that's precisely when this happens. Nothing
+    /// bounces when Onyx is already the active app — you can see the
+    /// banner.
+    func beginAttentionRequest() {
+        guard !NSApp.isActive, attentionToken == nil else { return }
+        attentionToken = NSApp.requestUserAttention(.criticalRequest)
+    }
+
+    /// Stop bouncing once nothing is waiting. Called when a request is
+    /// answered OR times out, so an abandoned request doesn't leave the
+    /// dock jumping forever.
+    func endAttentionRequestIfIdle() {
+        guard pendingPermissions.isEmpty, let token = attentionToken else { return }
+        NSApp.cancelUserAttentionRequest(token)
+        attentionToken = nil
     }
 }

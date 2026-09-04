@@ -94,5 +94,48 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             hostingView.wantsLayer = true
             hostingView.layer?.backgroundColor = .clear
         }
+
+        installTitleBarDoubleClick()
+    }
+
+    /// Restore double-click-to-zoom in the title-bar strip.
+    ///
+    /// The window hides its title bar and sets isMovableByWindowBackground,
+    /// so SwiftUI content sits where the title bar would be and swallows
+    /// the click AppKit would have zoomed on. Dragging still works —
+    /// that's handled for background drags — but double-click doesn't,
+    /// which is why the window can't be maximised the way every other Mac
+    /// window can.
+    ///
+    /// Deliberately narrow. It only acts on clicks inside the top
+    /// `titleBarHeight` points, so a double-click in the terminal still
+    /// selects a word, and it honours the system preference — someone who
+    /// set double-click to minimise, or to nothing, gets what they asked
+    /// for.
+    private static let titleBarHeight: CGFloat = 28
+    private static var doubleClickMonitor: Any?
+
+    private static func installTitleBarDoubleClick() {
+        guard doubleClickMonitor == nil else { return }
+        doubleClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            guard event.clickCount == 2,
+                  let window = event.window,
+                  window.styleMask.contains(.titled) else { return event }
+
+            // Top strip only, in window coordinates (origin bottom-left).
+            let y = event.locationInWindow.y
+            guard y >= window.frame.height - titleBarHeight else { return event }
+
+            switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+            case "Minimize":
+                window.performMiniaturize(nil)
+            case "None":
+                break
+            default:
+                // Absent or "Maximize" — zoom, which is the macOS default.
+                window.zoom(nil)
+            }
+            return nil
+        }
     }
 }
