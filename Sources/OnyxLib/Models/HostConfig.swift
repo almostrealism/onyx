@@ -137,6 +137,10 @@ public struct AppearanceConfig: Codable {
     /// approve/deny a tool call from the Onyx UI. Off by default — when off,
     /// Claude's normal in-terminal permission prompt is used.
     public var claudeHooksGatePermissions: Bool = false
+    /// Whether the first-launch walkthrough has been shown. Set when the
+    /// tour is closed by ANY route, including skip — re-showing something
+    /// a user dismissed teaches them to dismiss without reading.
+    public var hasSeenWalkthrough: Bool = false
     /// Whether the merged pull-request list shows drafts, hides them, or
     /// shows only them.
     public var prDraftFilter: PRDraftFilter = .all
@@ -244,7 +248,7 @@ public struct AppearanceConfig: Codable {
         case extraTimezones, use12HourClock
         case claudeHooksGatePermissions, showFocusOutline
         case searchFileTypeIDs, remindersDueSoonOnly, simpleShowSidePanel
-        case showAllContainers, prDraftFilter
+        case showAllContainers, prDraftFilter, hasSeenWalkthrough
     }
 
     public init(from decoder: Decoder) throws {
@@ -269,5 +273,6 @@ public struct AppearanceConfig: Codable {
         self.simpleShowSidePanel        = try c.decodeIfPresent(Bool.self,           forKey: .simpleShowSidePanel)        ?? false
         self.showAllContainers          = try c.decodeIfPresent(Bool.self,           forKey: .showAllContainers)          ?? false
         self.prDraftFilter              = try c.decodeIfPresent(PRDraftFilter.self, forKey: .prDraftFilter)              ?? .all
+        self.hasSeenWalkthrough         = try c.decodeIfPresent(Bool.self,           forKey: .hasSeenWalkthrough)         ?? false
     }
 }

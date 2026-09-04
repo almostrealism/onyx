@@ -45,6 +45,7 @@ public extension Notification.Name {
     static let toggleTerminalTextMode = Notification.Name("toggleTerminalTextMode")
     static let cyclePanelSize = Notification.Name("cyclePanelSize")
     static let toggleHelp = Notification.Name("toggleHelp")
+    static let showWalkthrough = Notification.Name("showWalkthrough")
     static let searchFiles = Notification.Name("searchFiles")
 }
 
@@ -159,6 +160,9 @@ public class AppState: ObservableObject {
     @Published public var showCommandPalette = false
     /// Full-screen help / keyboard-shortcut reference overlay (Cmd+/).
     @Published public var showHelp = false
+    /// Guided tour. Shown once on first launch, and on demand from the
+    /// Help menu afterwards.
+    @Published public var showWalkthrough = false
     @Published public var showMonitor = false {
         didSet {
             // The session sidebar and the monitor are both overlays on top
@@ -1410,7 +1414,14 @@ public class AppState: ObservableObject {
 
     /// Dismiss top overlay.
     public func dismissTopOverlay() {
-        if showHelp {
+        if showWalkthrough {
+            // Escape counts as "seen" — see WalkthroughOverlay.finish().
+            showWalkthrough = false
+            if !appearance.hasSeenWalkthrough {
+                appearance.hasSeenWalkthrough = true
+                saveAppearance()
+            }
+        } else if showHelp {
             showHelp = false
         } else if showSessionNoteEditor {
             showSessionNoteEditor = false

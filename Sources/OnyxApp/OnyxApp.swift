@@ -65,6 +65,12 @@ struct OnyxApp: App {
                     NotificationCenter.default.post(name: .toggleHelp, object: nil)
                 }
                 .keyboardShortcut("/", modifiers: .command)
+
+                // The tour is the answer to "I didn't know it did that",
+                // so it has to be findable after the first launch too.
+                Button("Onyx Walkthrough") {
+                    NotificationCenter.default.post(name: .showWalkthrough, object: nil)
+                }
             }
         }
     }

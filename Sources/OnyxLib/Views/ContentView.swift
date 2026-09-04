@@ -38,7 +38,21 @@ public struct ContentView: View {
     private var hasOverlay: Bool {
         appState.showSetup || appState.showSettings
             || appState.showCommandPalette || appState.showSessionManager
-            || appState.showHelp
+            || appState.showHelp || appState.showWalkthrough
+    }
+
+    /// Show the tour once, after the first session is actually up.
+    ///
+    /// Deliberately not at launch: a tour over a blank window, before a
+    /// terminal exists, is describing something the user can't see yet.
+    /// It also only runs in the key window — four windows opening four
+    /// tours would be its own bad first impression.
+    private func offerWalkthroughOnFirstLaunch() {
+        guard hostWindow?.isKeyWindow == true, !appState.appearance.hasSeenWalkthrough,
+              !appState.showSetup, !appState.showWalkthrough else { return }
+        withAnimation(.easeOut(duration: 0.3)) {
+            appState.showWalkthrough = true
+        }
     }
 
     @ViewBuilder
@@ -259,6 +273,13 @@ public struct ContentView: View {
                     HelpOverlay(appState: appState)
                         .transition(.opacity.combined(with: .scale(scale: 0.97)))
                 }
+
+                // Guided tour — above help, since it's what a first-time
+                // user is looking at before they know help exists.
+                if appState.showWalkthrough {
+                    WalkthroughOverlay(appState: appState)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                }
             }
 
             // Favorites bar — outside terminal area at the bottom
@@ -297,6 +318,7 @@ public struct ContentView: View {
                     withAnimation(.easeOut(duration: 0.6)) {
                         showStartupAnimation = false
                     }
+                    offerWalkthroughOnFirstLaunch()
                 }
             }
         }
@@ -653,6 +675,10 @@ private struct ContentViewPanelNotifications: ViewModifier {
                 guard isKeyWindow else { return }
                 appState.showCommandPalette.toggle()
                 appState.recalculateFocus()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .showWalkthrough)) { _ in
+                guard isKeyWindow else { return }
+                appState.showWalkthrough = true
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleHelp)) { _ in
                 guard isKeyWindow else { return }
