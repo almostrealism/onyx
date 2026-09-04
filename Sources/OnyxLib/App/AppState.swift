@@ -268,6 +268,8 @@ public class AppState: ObservableObject {
     @Published public var activeSession: TmuxSession?
     @Published public var switchToSession: TmuxSession?
     @Published public var createNewSession: TmuxSession?  // session to create, nil = none
+    /// The session the user is renaming inline in the session list.
+    @Published public var sessionPendingRename: TmuxSession?
     @Published public var showNewSessionPrompt = false
     /// Shared favorites store — all windows read/write through this singleton
     public var favoriteEntries: [FavoriteEntry] {
@@ -718,6 +720,143 @@ public class AppState: ObservableObject {
         guard !alreadyActive || dismissIfAlreadyActive else { return }
         showMonitor = false
         showSessionManager = false
+    }
+
+
+    // MARK: - Session administration
+
+    /// Characters a new session name may contain.
+    ///
+    /// tmux forbids `.` and `:` in session names (they're the window and
+    /// pane separators), and a name with those in it produces a session
+    /// you can't target afterwards. Spaces are legal but make every
+    /// `-t` awkward, so they're out too — this is deliberately narrower
+    /// than tmux allows.
+    public static func isValidSessionName(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed.count <= 60 else { return false }
+        return trimmed.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+    }
+
+    /// Single-quote for the remote shell. Existing session names can
+    /// contain spaces (enumeration accepts them), so the OLD name always
+    /// needs quoting even though new ones are restricted.
+    static func shellQuote(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Build a tmux admin command for a session, on its own host or
+    /// inside its container. Returns nil for sources that aren't tmux
+    /// (browser tabs, docker logs/top) — there's nothing to rename.
+    private func tmuxAdminCommand(_ args: String,
+                                  for session: TmuxSession) -> (cmd: String, args: [String])? {
+        switch session.source {
+        case .host(let hostID):
+            guard let host = hosts.first(where: { $0.id == hostID })
+                    ?? (hostID == HostConfig.localhostID ? HostConfig.localhost : nil) else { return nil }
+            return remoteCommand("tmux \(args)", host: host)
+        case .docker(let hostID, let containerName):
+            guard let host = hosts.first(where: { $0.id == hostID }) else { return nil }
+            let safe = sanitizedContainer(containerName)
+            return remoteCommand("docker exec \(safe) tmux \(args)", host: host)
+        case .dockerLogs, .dockerTop, .browser:
+            return nil
+        }
+    }
+
+    /// Rename a tmux session, carrying its note and favourite slot over.
+    ///
+    /// A session's identity is `source:name`, so renaming changes its id
+    /// — the note and the ⌘-number slot are keyed by that id and would
+    /// be orphaned by a rename that only touched the remote. Moving them
+    /// is not optional politeness; without it the rename looks like it
+    /// deleted your note.
+    public func renameSession(_ session: TmuxSession, to rawName: String) {
+        let newName = rawName.trimmingCharacters(in: .whitespaces)
+        guard Self.isValidSessionName(newName), newName != session.name,
+              let (cmd, args) = tmuxAdminCommand(
+                "rename-session -t \(Self.shellQuote(session.name)) \(Self.shellQuote(newName))",
+                for: session)
+        else { return }
+
+        let renamed = TmuxSession(name: newName, source: session.source)
+        let oldID = session.id
+        let wasActive = activeSession?.id == oldID
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = RemoteExec.shared.run(cmd, args: args, stdin: nil,
+                                               softTimeout: 10,
+                                               captureStdout: true, captureStderr: true,
+                                               label: "renameSession")
+            let failure = (result.stderr + result.stdout)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if result.exit != 0 {
+                    DiagnosticLog.shared.record(
+                        "session", "rename failed: \(failure.isEmpty ? "exit \(result.exit)" : failure)",
+                        failure: true)
+                    return
+                }
+                self.migrateSessionIdentity(from: oldID, to: renamed)
+                if wasActive { self.activeSession = renamed }
+                self.refreshSessionList = true
+            }
+        }
+    }
+
+    /// Kill a tmux session and forget what was attached to it.
+    public func killSession(_ session: TmuxSession) {
+        guard let (cmd, args) = tmuxAdminCommand(
+            "kill-session -t \(Self.shellQuote(session.name))", for: session) else { return }
+
+        let id = session.id
+        let wasActive = activeSession?.id == id
+        // Move off it BEFORE it dies, so the terminal isn't sitting on a
+        // session that no longer exists while the command runs.
+        if wasActive, let next = allSessions.first(where: { $0.id != id && !$0.unavailable }) {
+            switchToSession = next
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = RemoteExec.shared.run(cmd, args: args, stdin: nil,
+                                               softTimeout: 10,
+                                               captureStdout: true, captureStderr: true,
+                                               label: "killSession")
+            let failure = (result.stderr + result.stdout)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if result.exit != 0 {
+                    DiagnosticLog.shared.record(
+                        "session", "kill failed: \(failure.isEmpty ? "exit \(result.exit)" : failure)",
+                        failure: true)
+                    return
+                }
+                SessionNotesStore.shared.clearNote(for: id)
+                FavoritesStore.shared.entries.removeAll { $0.sessionID == id }
+                FavoritesStore.shared.save()
+                self.refreshSessionList = true
+            }
+        }
+    }
+
+    /// Move a session's note and favourite slot to its new id.
+    private func migrateSessionIdentity(from oldID: String, to renamed: TmuxSession) {
+        if let note = SessionNotesStore.shared.note(for: oldID) {
+            SessionNotesStore.shared.setNote(note.text, for: renamed.id)
+            SessionNotesStore.shared.clearNote(for: oldID)
+        }
+        var moved = false
+        for i in FavoritesStore.shared.entries.indices
+        where FavoritesStore.shared.entries[i].sessionID == oldID {
+            // Edited in place so the ⌘-number keeps its position in the
+            // bar — remove-and-append would silently renumber every
+            // favourite after it.
+            FavoritesStore.shared.entries[i].sessionID = renamed.id
+            moved = true
+        }
+        if moved { FavoritesStore.shared.save() }
     }
 
     // MARK: - Window Title

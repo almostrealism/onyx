@@ -799,3 +799,54 @@ final class MCPForwardingTests: XCTestCase {
             "New hosts should have unique IDs, not the built-in localhost ID")
     }
 }
+
+/// Renaming and killing sessions. The rules here are about not losing
+/// things the user attached to a session, and not producing a session
+/// tmux can no longer target.
+final class SessionAdminTests: XCTestCase {
+
+    func testValidNamesAreAcceptedAndDangerousOnesAreNot() {
+        XCTAssertTrue(AppState.isValidSessionName("build"))
+        XCTAssertTrue(AppState.isValidSessionName("api-2"))
+        XCTAssertTrue(AppState.isValidSessionName("my_session"))
+
+        // tmux treats "." and ":" as window/pane separators — a session
+        // named with them can't be targeted afterwards.
+        XCTAssertFalse(AppState.isValidSessionName("api.2"))
+        XCTAssertFalse(AppState.isValidSessionName("api:2"))
+        XCTAssertFalse(AppState.isValidSessionName(""))
+        XCTAssertFalse(AppState.isValidSessionName("   "))
+        XCTAssertFalse(AppState.isValidSessionName(String(repeating: "a", count: 61)))
+    }
+
+    /// Existing sessions may legitimately contain spaces (enumeration
+    /// accepts them), so the old name is always quoted before it reaches
+    /// the remote shell.
+    func testExistingNamesAreQuotedForTheRemoteShell() {
+        XCTAssertEqual(AppState.shellQuote("my session"), "'my session'")
+        XCTAssertEqual(AppState.shellQuote("plain"), "'plain'")
+        // An embedded quote must not end the quoting and start a command.
+        let quoted = AppState.shellQuote("it's")
+        XCTAssertTrue(quoted.hasPrefix("'") && quoted.hasSuffix("'"))
+        XCTAssertFalse(quoted.contains("it's"), "the inner quote has to be escaped")
+    }
+
+    func testOnlyRealSessionsOfferRenameAndKill() {
+        let id = UUID()
+        XCTAssertTrue(SessionSource.host(hostID: id).isTmuxBacked)
+        XCTAssertTrue(SessionSource.docker(hostID: id, containerName: "api").isTmuxBacked)
+        XCTAssertFalse(SessionSource.dockerLogs(hostID: id, containerName: "api").isTmuxBacked)
+        XCTAssertFalse(SessionSource.dockerTop(hostID: id, containerName: "api").isTmuxBacked)
+        XCTAssertFalse(SessionSource.browser(url: "https://example.com").isTmuxBacked)
+    }
+
+    /// A session's identity is source:name, so a rename changes its id.
+    /// The note and the favourite slot are keyed by that id and would be
+    /// orphaned — a rename that silently drops your note reads as a bug.
+    func testRenameChangesTheIdentityTheNoteIsKeyedBy() {
+        let source = SessionSource.host(hostID: UUID())
+        let before = TmuxSession(name: "old", source: source)
+        let after = TmuxSession(name: "new", source: source)
+        XCTAssertNotEqual(before.id, after.id)
+    }
+}

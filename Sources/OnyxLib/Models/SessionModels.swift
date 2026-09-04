@@ -4,6 +4,16 @@ import Foundation
 
 /// SessionSource.
 public enum SessionSource: Codable, Hashable {
+    /// Whether there is a real tmux session behind this, i.e. something
+    /// that can be renamed or killed. Browser tabs and the docker
+    /// logs/top streams are views, not sessions.
+    public var isTmuxBacked: Bool {
+        switch self {
+        case .host, .docker: return true
+        case .dockerLogs, .dockerTop, .browser: return false
+        }
+    }
+
     case host(hostID: UUID)
     case docker(hostID: UUID, containerName: String)
     case dockerLogs(hostID: UUID, containerName: String)

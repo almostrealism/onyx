@@ -592,6 +592,16 @@ private struct SessionRow: View {
     }
 
     var body: some View {
+        // The row becomes its own rename field, so the edit happens where
+        // the thing being edited is rather than in a modal somewhere else.
+        if appState.sessionPendingRename?.id == session.id {
+            RenameSessionField(appState: appState, session: session)
+        } else {
+            rowBody
+        }
+    }
+
+    private var rowBody: some View {
         HStack(spacing: 6) {
             if session.unavailable {
                 Image(systemName: "exclamationmark.triangle")
@@ -670,5 +680,72 @@ private struct SessionRow: View {
             guard !session.unavailable else { return }
             appState.jumpToSession(session)
         }
+        .contextMenu {
+            // Only real tmux sessions can be renamed or killed — a browser
+            // tab or a docker log stream has nothing behind it to target.
+            if session.source.isTmuxBacked {
+                Button("Rename…") { appState.sessionPendingRename = session }
+                Button("Kill Session", role: .destructive) { appState.killSession(session) }
+            }
+        }
+    }
+}
+
+
+// MARK: - Rename
+
+/// The rename field, shown in place of the row it renames.
+///
+/// Enter commits, Escape cancels, and an invalid name simply won't
+/// commit — tmux forbids `.` and `:` in session names, and a name
+/// containing them produces a session you can no longer target.
+private struct RenameSessionField: View {
+    @ObservedObject var appState: AppState
+    let session: TmuxSession
+    @State private var name: String = ""
+    @FocusState private var focused: Bool
+
+    private var isValid: Bool { AppState.isValidSessionName(name) }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "pencil")
+                .font(.system(size: appState.uiSize(9)))
+                .foregroundColor(.gray.opacity(0.4))
+
+            TextField("", text: $name.sanitizingStylizedText())
+                .textFieldStyle(.plain)
+                .font(.system(size: appState.uiSize(11), design: .monospaced))
+                .foregroundColor(isValid || name.isEmpty ? .white.opacity(0.9) : Color.onyxRed)
+                .focused($focused)
+                .onSubmit(commit)
+
+            Button(action: commit) {
+                Text("rename")
+                    .font(.system(size: appState.uiSize(9), design: .monospaced))
+                    .foregroundColor(isValid ? appState.accentColor : .gray.opacity(0.3))
+            }
+            .buttonStyle(.plain)
+            .disabled(!isValid)
+
+            Button(action: { appState.sessionPendingRename = nil }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: appState.uiSize(8)))
+                    .foregroundColor(.gray.opacity(0.4))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .onAppear {
+            name = session.name
+            focused = true
+        }
+    }
+
+    private func commit() {
+        guard isValid else { return }
+        appState.renameSession(session, to: name)
+        appState.sessionPendingRename = nil
     }
 }
