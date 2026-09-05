@@ -107,7 +107,16 @@ extension AppState {
     /// Recalculate and set focusedComponent based on current visibility state.
     /// Call this when an overlay opens or closes to ensure correct precedence.
     public func recalculateFocus() {
-        focusedComponent = topVisibleComponent
+        let top = topVisibleComponent
+        // A right panel is not modal. If the user put the keyboard in the
+        // terminal, closing the monitor or the session list must not drag
+        // it back to the panel just because the panel happens to be open
+        // — that stomping is what made focus feel random. Panels that
+        // genuinely want the keyboard claim it when they OPEN, explicitly.
+        if top == .rightPanel && focusedComponent == .terminal {
+            return
+        }
+        focusedComponent = top
         if focusedComponent == .terminal {
             NotificationCenter.default.post(name: .restoreTerminalFocus, object: nil)
         }

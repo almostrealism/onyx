@@ -666,7 +666,15 @@ private struct ContentViewPanelNotifications: ViewModifier {
                 appState.activeRightPanel = appState.activeRightPanel == .fileBrowser ? nil : .fileBrowser
             }
         }
-        appState.recalculateFocus()
+        // Opening the browser is a request to use it, so it takes the
+        // keyboard here rather than relying on recalculateFocus — which
+        // now deliberately leaves a terminal focus alone.
+        if appState.activeRightPanel == .fileBrowser || appState.showFullFileBrowser {
+            appState.focusedComponent = .rightPanel
+            NotificationCenter.default.post(name: .resignTerminalFocus, object: nil)
+        } else {
+            appState.recalculateFocus()
+        }
     }
 
     func body(content: Content) -> some View {

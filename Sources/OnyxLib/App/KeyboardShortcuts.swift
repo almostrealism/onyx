@@ -1,4 +1,5 @@
 import AppKit
+import SwiftTerm
 
 /// ShortcutManager.
 public class ShortcutManager {
@@ -182,6 +183,37 @@ public class ShortcutManager {
 
             // Single-key shortcuts — check the state of the EVENT'S window.
             let state = appState(for: event)
+
+            // Who is actually going to receive this keystroke?
+            //
+            // This is the authority, not `focusedComponent`. AppKit
+            // delivers typed characters to the first responder; our flag
+            // is a separate model that can and did drift out of step with
+            // it. When they disagreed the result was the worst possible
+            // outcome: most characters reached the shell while space was
+            // taken by the file browser, so the terminal was neither
+            // usable nor properly locked out.
+            //
+            // Anything that claims a BARE key now asks this question, so
+            // "does my typing go to the terminal" and "does space go to
+            // the terminal" can only ever have the same answer.
+            let terminalHasKeyboard = event.window?.firstResponder is TerminalView
+
+            // A field editor holds the keyboard whenever the user is
+            // typing into any text field — including the file browser's
+            // own search box. Space belongs to whatever is being typed
+            // into, always; searching for "release notes" must not fire a
+            // preview halfway through.
+            let textFieldHasKeyboard = event.window?.firstResponder is NSTextView
+
+            // Keep the model honest. The focus outline reads from
+            // `focusedComponent`, so without this it goes on describing a
+            // state the keyboard isn't in. Assigning only on a real
+            // disagreement means this settles on the first keystroke
+            // instead of churning SwiftUI on every one.
+            if let state, terminalHasKeyboard, state.focusedComponent == .rightPanel {
+                DispatchQueue.main.async { state.focusedComponent = .terminal }
+            }
             let monitorVisibleInWindow = state?.showMonitor ?? false
 
             // "Real" text-input overlays that should block ALL unmodified keys:
@@ -270,7 +302,7 @@ public class ShortcutManager {
             let fileBrowserActive = (state?.showFullFileBrowser ?? false)
                 || (state?.activeRightPanel == .fileBrowser)
             if event.keyCode == 49 && flags.isEmpty && fileBrowserActive
-                && rightPanelHasFocus
+                && !terminalHasKeyboard && !textFieldHasKeyboard
                 && state?.fileBrowserManager.viewingFileName != nil
                 && !hasRealTextInput {
                 NotificationCenter.default.post(name: .toggleFilePreview, object: nil)
