@@ -42,13 +42,39 @@ public class SearchTreeNode: Identifiable, ObservableObject {
     /// Is directory.
     public let isDirectory: Bool
     @Published public var children: [SearchTreeNode] = []
-    @Published public var isExpanded: Bool = true
 
     /// Create a new instance.
     public init(name: String, fullPath: String, isDirectory: Bool) {
         self.name = name
         self.fullPath = fullPath
         self.isDirectory = isDirectory
+    }
+
+    /// Flatten a search tree into the rows that should be on screen.
+    ///
+    /// This exists because rendering the tree recursively — a ForEach of
+    /// child views, each with its own nested ForEach — hung the app for
+    /// 30 seconds on a large result set. A LazyVStack can only be lazy
+    /// about its DIRECT children, so with the recursion nested inside it
+    /// SwiftUI had to walk and place every node in the tree on every
+    /// layout pass, instantiating fresh generic metadata at each level of
+    /// nesting. Flattened, the lazy stack sees one uniform row type and
+    /// only builds the rows actually visible.
+    ///
+    /// Iterative rather than recursive: a deep tree shouldn't be able to
+    /// exhaust the stack while we're fixing a performance bug caused by
+    /// depth.
+    public static func visibleRows(roots: [SearchTreeNode],
+                                   collapsed: Set<UUID>) -> [(node: SearchTreeNode, depth: Int)] {
+        var rows: [(node: SearchTreeNode, depth: Int)] = []
+        // Reversed so the explicit stack pops in the original order.
+        var pending: [(SearchTreeNode, Int)] = roots.reversed().map { ($0, 0) }
+        while let (node, depth) = pending.popLast() {
+            rows.append((node, depth))
+            guard node.isDirectory, !collapsed.contains(node.id) else { continue }
+            pending.append(contentsOf: node.children.reversed().map { ($0, depth + 1) })
+        }
+        return rows
     }
 }
 

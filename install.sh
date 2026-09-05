@@ -39,8 +39,24 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 # Copy binary
 cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
-# Copy Info.plist
+# Copy Info.plist, stamping the real version into it.
+#
+# Without this the bundle keeps the placeholder 0.1.0 from the checked-in
+# plist, and every macOS crash or hang report says "Version: 0.1.0 (1)"
+# — so a report from a user can't be tied to a build, which is exactly
+# when you need to know. package.sh does the same; a script-installed
+# build has no less right to be identifiable.
+#
+# `git describe` (not the bare tag) so a build from a working tree that's
+# ahead of the tag says so, rather than claiming to be the release.
 cp "Sources/OnyxApp/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0")
+BUILD_VERSION=$(git describe --tags --dirty --always 2>/dev/null || echo "$VERSION")
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" \
+    "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 || true
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" \
+    "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 || true
+echo "  Version: $BUILD_VERSION"
 
 # Copy app icon so Finder shows it
 cp "Sources/OnyxApp/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"

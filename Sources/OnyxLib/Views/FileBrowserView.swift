@@ -938,6 +938,23 @@ struct SearchResultsView: View {
     @ObservedObject var browser: FileBrowserManager
     @ObservedObject var tree: SearchResultTree
 
+    /// Which directories are collapsed. Held here rather than on each
+    /// node so that toggling one recomputes the flat row list ONCE, in
+    /// the view that renders it, instead of invalidating a node object
+    /// that the layout then has to chase through the hierarchy.
+    ///
+    /// Empty means everything is expanded, which is the behaviour this
+    /// replaces — and, unexpanded, is also the cheap case now.
+    @State private var collapsedNodes: Set<UUID> = []
+
+    private func toggleCollapsed(_ node: SearchTreeNode) {
+        if collapsedNodes.contains(node.id) {
+            collapsedNodes.remove(node.id)
+        } else {
+            collapsedNodes.insert(node.id)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if tree.roots.isEmpty && !browser.isSearching {
@@ -975,9 +992,20 @@ struct SearchResultsView: View {
                 .padding(.vertical, 4)
 
                 ScrollView {
+                    // One flat ForEach of a single row type. The tree
+                    // shape lives in `visibleRows`, not in the view
+                    // hierarchy — see SearchTreeNode.visibleRows for why
+                    // rendering it recursively hung the app.
                     LazyVStack(spacing: 0) {
-                        ForEach(tree.roots) { node in
-                            SearchTreeNodeView(node: node, depth: 0, accentColor: appState.accentColor, browser: browser)
+                        let rows = SearchTreeNode.visibleRows(roots: tree.roots,
+                                                              collapsed: collapsedNodes)
+                        ForEach(rows, id: \.node.id) { row in
+                            SearchTreeRow(node: row.node,
+                                          depth: row.depth,
+                                          isCollapsed: collapsedNodes.contains(row.node.id),
+                                          accentColor: appState.accentColor,
+                                          browser: browser,
+                                          onToggle: { toggleCollapsed(row.node) })
                         }
                     }
                 }
@@ -986,69 +1014,69 @@ struct SearchResultsView: View {
     }
 }
 
-struct SearchTreeNodeView: View {
-    @ObservedObject var node: SearchTreeNode
+/// One row of the search-results tree.
+///
+/// Deliberately NOT recursive and deliberately not observing the node:
+/// the previous version rendered its own children, so every expanded
+/// subtree was a nested ForEach inside the lazy stack and every node was
+/// an @ObservedObject that could invalidate the layout. The tree is
+/// flattened before it gets here; this draws a single line.
+struct SearchTreeRow: View {
+    let node: SearchTreeNode
     let depth: Int
+    let isCollapsed: Bool
     let accentColor: Color
     @ObservedObject var browser: FileBrowserManager
+    let onToggle: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                // Indent
-                Spacer().frame(width: CGFloat(depth) * 16)
+        HStack(spacing: 4) {
+            // Indent
+            Spacer().frame(width: CGFloat(depth) * 16)
 
-                if node.isDirectory {
-                    // Expand/collapse toggle
-                    Button(action: { node.isExpanded.toggle() }) {
-                        Image(systemName: node.isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9))
-                            .foregroundColor(.gray.opacity(0.4))
-                            .frame(width: 12)
-                    }
-                    .buttonStyle(.plain)
-
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 11))
-                        .foregroundColor(accentColor.opacity(0.7))
-                } else {
-                    Spacer().frame(width: 12) // align with folder toggle
-
-                    Image(systemName: iconForFile(node.name))
-                        .font(.system(size: 11))
-                        .foregroundColor(.gray.opacity(0.5))
+            if node.isDirectory {
+                Button(action: onToggle) {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 9))
+                        .foregroundColor(.gray.opacity(0.4))
+                        .frame(width: 12)
                 }
+                .buttonStyle(.plain)
 
-                Text(node.name)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(node.isDirectory ? .white.opacity(0.9) : .white.opacity(0.7))
-                    .lineLimit(1)
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(accentColor.opacity(0.7))
+            } else {
+                Spacer().frame(width: 12) // align with folder toggle
 
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if node.isDirectory {
-                    // Navigate into this directory — leaving search behind.
-                    browser.clearSearch()
-                    browser.navigateTo(node.fullPath)
-                } else {
-                    // Open the file but KEEP the search results intact so
-                    // "back" returns to them. Clearing search here was the
-                    // long-standing bug: it wiped isSearchActive + the
-                    // results tree before readFileFromSearch could remember
-                    // we came from search, so back never restored them.
-                    let name = (node.fullPath as NSString).lastPathComponent
-                    browser.readFileFromSearch(node.fullPath, name: name)
-                }
+                Image(systemName: iconForFile(node.name))
+                    .font(.system(size: 11))
+                    .foregroundColor(.gray.opacity(0.5))
             }
 
-            if node.isDirectory && node.isExpanded {
-                ForEach(node.children) { child in
-                    SearchTreeNodeView(node: child, depth: depth + 1, accentColor: accentColor, browser: browser)
-                }
+            Text(node.name)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(node.isDirectory ? .white.opacity(0.9) : .white.opacity(0.7))
+                .lineLimit(1)
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if node.isDirectory {
+                // Navigate into this directory — leaving search behind.
+                browser.clearSearch()
+                browser.navigateTo(node.fullPath)
+            } else {
+                // Open the file but KEEP the search results intact so
+                // "back" returns to them. Clearing search here was the
+                // long-standing bug: it wiped isSearchActive + the
+                // results tree before readFileFromSearch could remember
+                // we came from search, so back never restored them.
+                let name = (node.fullPath as NSString).lastPathComponent
+                browser.readFileFromSearch(node.fullPath, name: name)
             }
         }
     }
