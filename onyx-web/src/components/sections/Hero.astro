@@ -1,5 +1,6 @@
 ---
-import { DOWNLOAD_URL, REPO_URL, LATEST_VERSION, REQUIREMENTS } from '../../config/site';
+import { REPO_URL, REQUIREMENTS } from '../../config/site';
+import { LATEST, downloadURL } from '../../config/releases';
 ---
 
 <section class="relative overflow-hidden">
@@ -37,7 +38,7 @@ import { DOWNLOAD_URL, REPO_URL, LATEST_VERSION, REQUIREMENTS } from '../../conf
 
     <div class="mt-10 flex flex-wrap items-center gap-4">
       <a
-        href={DOWNLOAD_URL}
+        href={downloadURL(LATEST.version)}
         class="accent-glow rounded-lg bg-accent-primary px-6 py-3 font-medium text-bg-primary transition hover:bg-accent-glow"
       >
         Download for Mac
@@ -51,7 +52,7 @@ import { DOWNLOAD_URL, REPO_URL, LATEST_VERSION, REQUIREMENTS } from '../../conf
     </div>
 
     <p class="mt-5 font-mono text-xs text-text-muted">
-      v{LATEST_VERSION} &middot; {REQUIREMENTS.os} &middot; {REQUIREMENTS.arch} &middot; free and open source
+      v{LATEST.version} &middot; {REQUIREMENTS.os} &middot; {REQUIREMENTS.arch} &middot; free and open source
     </p>
 
     <!-- The thing itself: a terminal, with the overlay's status line under it. -->

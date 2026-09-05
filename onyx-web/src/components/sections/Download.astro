@@ -1,5 +1,6 @@
 ---
-import { DOWNLOAD_URL, REPO_URL, RELEASES_URL, LATEST_VERSION, REQUIREMENTS } from '../../config/site';
+import { REPO_URL, REQUIREMENTS } from '../../config/site';
+import { LATEST, downloadURL } from '../../config/releases';
 ---
 
 <section id="download" class="border-t border-border-subtle bg-bg-secondary/40">
@@ -13,10 +14,10 @@ import { DOWNLOAD_URL, REPO_URL, RELEASES_URL, LATEST_VERSION, REQUIREMENTS } fr
           Signed and notarized. Drag it to Applications and open it.
         </p>
         <a
-          href={DOWNLOAD_URL}
+          href={downloadURL(LATEST.version)}
           class="accent-glow mt-6 inline-block rounded-lg bg-accent-primary px-5 py-2.5 text-sm font-medium text-bg-primary transition hover:bg-accent-glow"
         >
-          Onyx {LATEST_VERSION} for Mac
+          Onyx {LATEST.version} for Mac
         </a>
         <p class="mt-4 font-mono text-xs text-text-muted">
           {REQUIREMENTS.os} &middot; {REQUIREMENTS.arch}
@@ -33,10 +34,10 @@ import { DOWNLOAD_URL, REPO_URL, RELEASES_URL, LATEST_VERSION, REQUIREMENTS } fr
 cd onyx
 ./install.sh</code></pre>
         <a
-          href={RELEASES_URL}
+          href="/releases"
           class="mt-4 inline-block text-sm text-accent-primary transition hover:text-accent-glow"
         >
-          All releases &rarr;
+          All releases, and what changed in each &rarr;
         </a>
       </div>
     </div>

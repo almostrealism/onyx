@@ -1,0 +1,97 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Footer from '../components/sections/Footer.astro';
+import { RELEASES, downloadURL, notesURL } from '../config/releases';
+import { REQUIREMENTS, RELEASES_URL } from '../config/site';
+
+const dateFormat = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+});
+
+function released(date: string | null): string {
+  return date ? dateFormat.format(new Date(date)) : 'in progress';
+}
+---
+
+<Layout
+  title="Releases — Onyx"
+  description="Every Onyx release, what changed in it, and a download for each — including older versions."
+>
+  <main class="mx-auto max-w-3xl px-6 py-24">
+    <a href="/" class="font-mono text-sm text-accent-primary transition hover:text-accent-glow">
+      &larr; Onyx
+    </a>
+
+    <h1 class="mt-8 text-3xl font-bold tracking-tight">Releases</h1>
+    <p class="mt-4 leading-relaxed text-text-secondary">
+      Every version, what changed, and a download for each. Older builds stay up —
+      if a release breaks something you depend on, you can go back to the one that
+      worked while it gets fixed.
+    </p>
+
+    <div class="mt-14 space-y-14">
+      {
+        RELEASES.map((release) => (
+          <article class="border-l-2 border-border-subtle pl-6">
+            <div class="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <h2 class="font-mono text-2xl font-semibold text-text-primary">
+                {release.version}
+              </h2>
+              <span class="font-mono text-xs text-text-muted">{released(release.date)}</span>
+              {release.upcoming && (
+                <span class="rounded bg-warn/15 px-2 py-0.5 font-mono text-[10px] tracking-wide text-warn uppercase">
+                  Not yet released
+                </span>
+              )}
+            </div>
+
+            <p class="mt-3 leading-relaxed text-text-secondary">{release.summary}</p>
+
+            <ul class="mt-5 space-y-2">
+              {release.highlights.map((item) => (
+                <li class="flex gap-3 text-sm leading-relaxed text-text-secondary">
+                  <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-accent-primary/60" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+
+            <div class="mt-6 flex flex-wrap items-center gap-4">
+              {release.upcoming ? (
+                <span class="text-sm text-text-muted">
+                  Still being tested — there's nothing to download yet.
+                </span>
+              ) : (
+                <>
+                  <a
+                    href={downloadURL(release.version)}
+                    class="rounded-md border border-border-subtle bg-bg-tertiary px-4 py-2 text-sm text-text-primary transition hover:border-accent-primary/60"
+                  >
+                    Download {release.version}
+                  </a>
+                  <a
+                    href={notesURL(release.version)}
+                    class="text-sm text-accent-primary transition hover:text-accent-glow"
+                  >
+                    Full notes &rarr;
+                  </a>
+                </>
+              )}
+            </div>
+          </article>
+        ))
+      }
+    </div>
+
+    <p class="mt-16 text-sm text-text-muted">
+      {REQUIREMENTS.os} &middot; {REQUIREMENTS.arch}. Every download is signed and
+      notarised.
+      <a href={RELEASES_URL} class="text-accent-primary transition hover:text-accent-glow">
+        All releases on GitHub
+      </a>, including source archives.
+    </p>
+  </main>
+  <Footer />
+</Layout>

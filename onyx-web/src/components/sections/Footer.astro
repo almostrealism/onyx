@@ -1,5 +1,5 @@
 ---
-import { REPO_URL, RELEASES_URL } from '../../config/site';
+import { REPO_URL } from '../../config/site';
 const year = new Date().getFullYear();
 ---
 
@@ -13,7 +13,7 @@ const year = new Date().getFullYear();
     </p>
     <nav class="flex gap-6">
       <a href={REPO_URL} class="transition hover:text-text-primary">GitHub</a>
-      <a href={RELEASES_URL} class="transition hover:text-text-primary">Releases</a>
+      <a href="/releases" class="transition hover:text-text-primary">Releases</a>
       <a href="/privacy" class="transition hover:text-text-primary">Privacy</a>
     </nav>
   </div>
