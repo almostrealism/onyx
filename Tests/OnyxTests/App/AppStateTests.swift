@@ -933,3 +933,53 @@ final class AutoFavoriteTests: XCTestCase {
         XCTAssertTrue(s.isFavorited(extra))
     }
 }
+
+/// The two "who owns the keyboard" questions, which used to be three
+/// hand-maintained lists that drifted. The drift broke ⇧⌘C text
+/// selection: the click-routing list omitted showTerminalText, so
+/// clicking to select stole first responder back to the terminal.
+final class KeyboardOwnershipTests: XCTestCase {
+
+    func testTextModeCoversTheTerminalAndOwnsTheKeyboard() {
+        let s = AppState()
+        s.showTerminalText = true
+        XCTAssertTrue(s.terminalIsCovered,
+                      "a click in text mode is not a click on the terminal")
+        XCTAssertTrue(s.keyboardOwnedElsewhere,
+                      "nothing may pull first responder out of the selectable view")
+    }
+
+    /// The monitor is the case where the two questions differ: it covers
+    /// the terminal but deliberately leaves it holding the keyboard, which
+    /// is what makes T/M/F/S work while it's up.
+    func testTheMonitorCoversTheTerminalWithoutTakingTheKeyboard() {
+        let s = AppState()
+        s.showMonitor = true
+        XCTAssertTrue(s.terminalIsCovered)
+        XCTAssertFalse(s.keyboardOwnedElsewhere)
+    }
+
+    func testEveryTextOverlayOwnsTheKeyboard() {
+        for (name, set) in [
+            ("settings", { (s: AppState) in s.showSettings = true }),
+            ("palette", { s in s.showCommandPalette = true }),
+            ("session manager", { s in s.showSessionManager = true }),
+            ("window rename", { s in s.showWindowRename = true }),
+            ("note editor", { s in s.showSessionNoteEditor = true }),
+            ("help", { s in s.showHelp = true }),
+            ("walkthrough", { s in s.showWalkthrough = true }),
+            ("setup", { s in s.showSetup = true }),
+            ("text mode", { s in s.showTerminalText = true }),
+        ] {
+            let s = AppState()
+            set(s)
+            XCTAssertTrue(s.keyboardOwnedElsewhere, "\(name) should own the keyboard")
+        }
+    }
+
+    func testNothingOpenMeansTheTerminalHasIt() {
+        let s = AppState()
+        XCTAssertFalse(s.terminalIsCovered)
+        XCTAssertFalse(s.keyboardOwnedElsewhere)
+    }
+}

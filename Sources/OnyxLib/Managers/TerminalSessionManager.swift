@@ -450,10 +450,7 @@ class OnyxTerminalView: NSView {
             let myFrame = self.convert(self.bounds, to: nil)
 
             // Determine if the click landed in the terminal area (and no overlay is blocking it)
-            let hasOverlay = self.appState.showMonitor || self.appState.showSettings
-                || self.appState.showCommandPalette || self.appState.showSessionManager
-                || self.appState.showSetup
-            let clickedTerminal = myFrame.contains(loc) && !hasOverlay
+            let clickedTerminal = myFrame.contains(loc) && !self.appState.terminalIsCovered
 
             if clickedTerminal {
                 self.appState.focusedComponent = .terminal
@@ -511,11 +508,7 @@ class OnyxTerminalView: NSView {
         // Nobody is listening. Give the keyboard back to the terminal —
         // unless a real text overlay is up, which owns it legitimately.
         if responder === window || responder == nil {
-            let textOverlayUp = appState.showSettings || appState.showCommandPalette
-                || appState.showSessionManager || appState.showWindowRename
-                || appState.showSessionNoteEditor || appState.showHelp
-                || appState.showWalkthrough || appState.showSetup
-            if !textOverlayUp {
+            if !appState.keyboardOwnedElsewhere {
                 window.makeFirstResponder(terminal)
                 if appState.focusedComponent != .terminal {
                     appState.focusedComponent = .terminal
@@ -560,10 +553,7 @@ class OnyxTerminalView: NSView {
     /// Called on window-became-key, app-became-active, and explicit restore.
     private func restoreFocusIfNeeded() {
         // Don't steal focus from overlays
-        let hasOverlay = appState.showMonitor || appState.showSettings
-            || appState.showCommandPalette || appState.showSessionManager
-            || appState.showSetup || appState.showTerminalText
-        guard !hasOverlay else { return }
+        guard !appState.terminalIsCovered else { return }
         // Don't steal focus from right panels with text fields
         guard appState.focusedComponent == .terminal else { return }
         doRestoreFocus()

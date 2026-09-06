@@ -104,6 +104,30 @@ extension AppState {
         return .terminal
     }
 
+    /// Something is drawn over the terminal, so a click in the terminal's
+    /// frame isn't a click on the terminal.
+    ///
+    /// This existed as three hand-maintained lists that had already
+    /// drifted: the one used for click routing omitted `showTerminalText`,
+    /// which was harmless until clicking started taking first responder —
+    /// and then it stole the selection out of ⇧⌘C's selectable view.
+    public var terminalIsCovered: Bool {
+        showMonitor || showSettings || showCommandPalette || showSessionManager
+            || showSetup || showTerminalText
+    }
+
+    /// Something other than the terminal legitimately owns the keyboard,
+    /// so nothing should be "rescuing" it back.
+    ///
+    /// Not the same question as `terminalIsCovered`: the monitor overlay
+    /// covers the terminal but deliberately leaves it holding the
+    /// keyboard, which is what makes its single-key shortcuts work.
+    public var keyboardOwnedElsewhere: Bool {
+        showSettings || showCommandPalette || showSessionManager || showWindowRename
+            || showSessionNoteEditor || showHelp || showWalkthrough || showSetup
+            || showTerminalText
+    }
+
     /// Recalculate and set focusedComponent based on current visibility state.
     /// Call this when an overlay opens or closes to ensure correct precedence.
     public func recalculateFocus() {
