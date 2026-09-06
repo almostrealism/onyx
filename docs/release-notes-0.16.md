@@ -24,7 +24,9 @@ told you so".
   targeted afterwards.
 - **⌘⌥← and ⌘⌥→** move the keyboard between the terminal and the open side
   panel. Directional rather than a toggle: you shouldn't have to know where
-  focus is to predict where it lands.
+  focus is to predict where it lands. The file browser says which way round
+  it currently is, and which key sends the keyboard back — on screen, where
+  someone stuck in the panel is actually looking.
 - **A guided tour** on first launch, and under Help → Onyx Walkthrough
   after that. Organised by the job rather than by the key, because the
   shortcut list answers "what does ⌘J do" and not "what can this do for
@@ -116,6 +118,18 @@ is shown under the monitor headline, and goes amber when it's stale.
   session list re-asserted panel focus merely because a panel was open. A
   panel isn't modal; it claims the keyboard when it opens and not
   afterwards.
+- **The keyboard can no longer go nowhere.** Handing it away without
+  anything taking over left it with the window, where keystrokes are simply
+  discarded — clicking between the terminal and the panel a couple of times
+  could land you there, with no sign except that nothing worked. Whenever
+  nobody holds the keyboard it now goes back to the terminal.
+- **Clicking the terminal takes the keyboard**, rather than hoping the
+  terminal wins a race with a focused text field. That was the "clicked the
+  terminal, still typing into the search box" case. An empty search box also
+  closes when you click away; one with a query in it stays, because those
+  results cost a round trip.
+- The **focus outline** (Settings → DEBUG) now follows the keyboard between
+  events instead of only correcting itself on the next keystroke.
 - **The session idle clock was measuring the wrong thing.** It could only
   see sessions still in the terminal pool, and the pool drops anything you
   haven't looked at for five minutes — so "time since last output" quietly

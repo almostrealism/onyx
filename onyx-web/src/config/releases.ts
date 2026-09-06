@@ -37,6 +37,7 @@ export const RELEASES: Release[] = [
       'Watch a whole GitHub owner or GitLab group instead of listing repositories one at a time, and filter drafts in or out.',
       'Page watches: tell me when a page gains or loses a specific line — for the things that are edited rather than announced.',
       'A guided tour on first launch, and under Help afterwards.',
+      'Keyboard focus between the terminal and the side panel is fixed: the panel says where typing is going and which key sends it back, clicking the terminal reliably takes the keyboard, and it can no longer end up going nowhere at all.',
       'Fixes: the file browser no longer swallows spaces typed into the terminal, the session idle clock measures output rather than attention, and a 30-second hang on large search results is gone.',
     ],
   },
