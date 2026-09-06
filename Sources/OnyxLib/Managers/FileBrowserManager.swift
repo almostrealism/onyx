@@ -1110,6 +1110,19 @@ public class FileBrowserManager: ObservableObject {
     }
 
     /// Cancel search.
+    /// Close the search box when there's nothing in it.
+    ///
+    /// Called when focus leaves the file browser. An empty search field
+    /// holding the keyboard is the "I'm trapped typing in the panel"
+    /// case with nothing to show for it; a search with a query stays,
+    /// because those results cost a round trip to the host.
+    public func dismissSearchIfEmpty() {
+        guard isSearchActive,
+              searchQuery.trimmingCharacters(in: .whitespaces).isEmpty,
+              searchResults.roots.isEmpty else { return }
+        isSearchActive = false
+    }
+
     public func cancelSearch() {
         if let process = searchProcess, process.isRunning {
             process.terminate()

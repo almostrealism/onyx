@@ -79,6 +79,7 @@ class OnyxTerminalView: NSView {
 
     private var focusObserver: Any?
     private var resignObserver: Any?
+    private var responderObserver: Any?
     private var windowKeyObserver: Any?
     private var appActiveObserver: Any?
     private var mouseMonitor: Any?
@@ -106,6 +107,21 @@ class OnyxTerminalView: NSView {
             forName: .restoreTerminalFocus, object: nil, queue: .main
         ) { [weak self] _ in
             self?.restoreFocus()
+        }
+        // Keep the focus model — and therefore the debug outline — honest
+        // between events. Previously it was only corrected on the next
+        // keystroke, so clicking the terminal moved the keyboard but the
+        // outline stayed on the panel until you typed.
+        //
+        // didUpdate fires after the window processes events; the work here
+        // is a type check and, rarely, one assignment.
+        responderObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didUpdateNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, let window = self.window,
+                  (note.object as? NSWindow) === window, window.isKeyWindow,
+                  let tv = self.terminalView else { return }
+            self.syncFocusToResponder(window: window, terminal: tv)
         }
         resignObserver = NotificationCenter.default.addObserver(
             forName: .resignTerminalFocus, object: nil, queue: .main
@@ -441,7 +457,21 @@ class OnyxTerminalView: NSView {
 
             if clickedTerminal {
                 self.appState.focusedComponent = .terminal
-                // Terminal grabs focus via its own mouseDown, no need to do it here
+                // Take the keyboard explicitly. Relying on SwiftTerm's own
+                // mouseDown meant a focused text field in the side panel
+                // could keep it — you clicked the terminal, the outline
+                // moved, and your typing still went to the search box.
+                // Deferred so it runs after the click is delivered.
+                DispatchQueue.main.async {
+                    if let tv = self.terminalView, window.firstResponder !== tv {
+                        window.makeFirstResponder(tv)
+                    }
+                    // An empty search box is pure trap: nothing to lose by
+                    // closing it, and leaving it is what makes the panel
+                    // feel impossible to escape. A search with a query
+                    // stays — those results took a round trip to produce.
+                    self.appState.fileBrowserManager.dismissSearchIfEmpty()
+                }
             } else {
                 // Determine which component based on visibility precedence
                 if self.appState.showSettings {
@@ -464,6 +494,46 @@ class OnyxTerminalView: NSView {
                 }
             }
             return event
+        }
+    }
+
+    /// Make `focusedComponent` agree with the first responder, and make
+    /// sure SOMETHING holds the keyboard.
+    ///
+    /// The rescue is the important half. Resigning the terminal without
+    /// anything else taking over leaves the responder as the window
+    /// itself, where keystrokes go nowhere at all — clicking between the
+    /// terminal and the panel a couple of times could land you there,
+    /// with an outline round a panel that wasn't listening either.
+    private func syncFocusToResponder(window: NSWindow, terminal: NSView) {
+        let responder = window.firstResponder
+
+        // Nobody is listening. Give the keyboard back to the terminal —
+        // unless a real text overlay is up, which owns it legitimately.
+        if responder === window || responder == nil {
+            let textOverlayUp = appState.showSettings || appState.showCommandPalette
+                || appState.showSessionManager || appState.showWindowRename
+                || appState.showSessionNoteEditor || appState.showHelp
+                || appState.showWalkthrough || appState.showSetup
+            if !textOverlayUp {
+                window.makeFirstResponder(terminal)
+                if appState.focusedComponent != .terminal {
+                    appState.focusedComponent = .terminal
+                }
+            }
+            return
+        }
+
+        let terminalHolds = responder === terminal
+            || (responder as? NSView)?.isDescendant(of: terminal) == true
+        if terminalHolds {
+            if appState.focusedComponent == .rightPanel {
+                appState.focusedComponent = .terminal
+            }
+        } else if appState.activeRightPanel != nil || appState.showFullFileBrowser {
+            if appState.focusedComponent == .terminal {
+                appState.focusedComponent = .rightPanel
+            }
         }
     }
 

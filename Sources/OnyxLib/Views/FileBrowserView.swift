@@ -843,6 +843,28 @@ struct NavigationBar: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
 
+            // Where the keyboard is, and how to move it.
+            //
+            // On screen rather than only in ⌘/ because this is the thing
+            // people get stuck on: with the panel open it isn't obvious
+            // that the terminal has stopped listening, or that there's a
+            // key to send the keyboard back.
+            HStack(spacing: 6) {
+                Image(systemName: appState.focusedComponent == .rightPanel
+                      ? "keyboard.fill" : "keyboard")
+                    .font(.system(size: 9))
+                    .foregroundColor(appState.focusedComponent == .rightPanel
+                                     ? appState.accentColor.opacity(0.7) : .gray.opacity(0.35))
+                Text(appState.focusedComponent == .rightPanel
+                     ? "typing goes here · ⌘⌥← terminal"
+                     : "typing goes to the terminal · ⌘⌥→ here")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.45))
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
+
             // Search bar
             if browser.isSearchActive {
                 HStack(spacing: 6) {
