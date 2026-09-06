@@ -136,6 +136,12 @@ is shown under the monitor headline, and goes amber when it's stale.
   became "time since we stopped watching", and a busy session read as
   quiet. It now reads tmux's own activity timestamp for every session on
   the host, pooled or not.
+- **Clicking in ⇧⌘C text mode hung the app** for up to a minute and a
+  half. Selectable SwiftUI text is backed by a text field on macOS, and
+  clicking one re-runs text layout across the whole string for every
+  tracked mouse position — fine for a label, ruinous for a captured
+  terminal screen. It's a proper text view now, so holding the mouse down
+  costs nothing.
 - **A 30-second hang** when search results were large. The results tree was
   rendered recursively inside a lazy stack, which can only be lazy about
   its direct children — so the whole tree was measured and placed on every

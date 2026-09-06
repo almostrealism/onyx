@@ -25,8 +25,7 @@ export interface Release {
 export const RELEASES: Release[] = [
   {
     version: '0.16',
-    date: null,
-    upcoming: true,
+    date: '2026-09-06',
     summary:
       'The first release shaped mostly by other people using it — several things here exist because someone asked a question whose real answer was "you can\'t, actually".',
     highlights: [
@@ -38,7 +37,7 @@ export const RELEASES: Release[] = [
       'Page watches: tell me when a page gains or loses a specific line — for the things that are edited rather than announced.',
       'A guided tour on first launch, and under Help afterwards.',
       'Keyboard focus between the terminal and the side panel is fixed: the panel says where typing is going and which key sends it back, clicking the terminal reliably takes the keyboard, and it can no longer end up going nowhere at all.',
-      'Fixes: the file browser no longer swallows spaces typed into the terminal, the session idle clock measures output rather than attention, and a 30-second hang on large search results is gone.',
+      'Fixes: the file browser no longer swallows spaces typed into the terminal, the session idle clock measures output rather than attention, and two hangs are gone — one on large search results, one on clicking inside selectable terminal text.',
     ],
   },
   {

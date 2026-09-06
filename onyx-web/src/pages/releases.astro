@@ -4,10 +4,15 @@ import Footer from '../components/sections/Footer.astro';
 import { RELEASES, downloadURL, notesURL } from '../config/releases';
 import { REQUIREMENTS, RELEASES_URL } from '../config/site';
 
+// Formatted in UTC on purpose. A date-only string parses as UTC
+// midnight, so formatting it in the build machine's zone rendered every
+// release a day early — and would have baked that machine's timezone
+// into the published HTML.
 const dateFormat = new Intl.DateTimeFormat('en-GB', {
   day: 'numeric',
   month: 'long',
   year: 'numeric',
+  timeZone: 'UTC',
 });
 
 function released(date: string | null): string {
