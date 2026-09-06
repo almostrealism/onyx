@@ -950,24 +950,29 @@ struct TerminalTextOverlay: View {
                     }
                     Spacer()
                 } else {
-                    ScrollView([.vertical, .horizontal]) {
-                        Text(linkedContent)
-                            .font(.system(size: CGFloat(appState.appearance.effectiveTerminalFontSize), design: .monospaced))
-                            .textSelection(.enabled)
-                            .environment(\.openURL, OpenURLAction { url in
-                                if url.scheme == "onyxfile" {
-                                    // Click → open the file; Shift-click →
-                                    // its containing directory.
-                                    let shift = NSEvent.modifierFlags.contains(.shift)
-                                    appState.openPathInFileBrowser(url.path, selectFile: !shift)
-                                    return .handled
-                                }
-                                NSWorkspace.shared.open(url)
-                                return .handled
-                            })
-                            .padding(16)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    // An NSTextView, NOT Text().textSelection(.enabled).
+                    //
+                    // SwiftUI backs a selectable Text with an NSTextField,
+                    // and clicking one starts field-editor mouse tracking
+                    // that re-lays the WHOLE string out through TextKit on
+                    // every iteration of the tracking loop. With a screen
+                    // of terminal output in it, one click hung the app for
+                    // a minute and a half. NSTextView is the control this
+                    // is actually asking for.
+                    SelectableTerminalText(
+                        content: linkedContent,
+                        fontSize: CGFloat(appState.appearance.effectiveTerminalFontSize),
+                        onOpen: { url in
+                            if url.scheme == "onyxfile" {
+                                // Click → open the file; Shift-click →
+                                // its containing directory.
+                                let shift = NSEvent.modifierFlags.contains(.shift)
+                                appState.openPathInFileBrowser(url.path, selectFile: !shift)
+                                return
+                            }
+                            NSWorkspace.shared.open(url)
+                        }
+                    )
                 }
             }
         }
@@ -1322,5 +1327,105 @@ struct ClaudePermissionBanner: View {
                         .stroke(Color.onyxAmber.opacity(0.5), lineWidth: 1)
                 )
         )
+    }
+}
+
+/// Read-only, selectable terminal text with clickable links.
+///
+/// Exists because `Text(...).textSelection(.enabled)` is backed by an
+/// NSTextField on macOS: clicking it enters `_selectOrEdit`, whose mouse
+/// tracking re-runs TextKit 2 layout across the entire string for every
+/// tracked mouse position. Fine for a label; catastrophic for a captured
+/// terminal screen, where a single click hung the app for 30–90 seconds.
+///
+/// NSTextView lays out once and tracks selection against that layout, so
+/// the cost doesn't scale with how long you hold the mouse down.
+struct SelectableTerminalText: NSViewRepresentable {
+    let content: AttributedString
+    let fontSize: CGFloat
+    let onOpen: (URL) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onOpen: onOpen) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
+        // Terminal output is pre-wrapped by the terminal; wrapping it
+        // again would re-flow lines that were laid out for a fixed width.
+        scroll.autohidesScrollers = true
+
+        let text = NSTextView()
+        text.isEditable = false
+        text.isSelectable = true
+        text.drawsBackground = false
+        text.isAutomaticLinkDetectionEnabled = false   // links are ours, already applied
+        text.textContainerInset = NSSize(width: 16, height: 16)
+        text.delegate = context.coordinator
+        text.isHorizontallyResizable = true
+        text.isVerticallyResizable = true
+        let unbounded = CGFloat.greatestFiniteMagnitude
+        text.maxSize = NSSize(width: unbounded, height: unbounded)
+        text.textContainer?.widthTracksTextView = false
+        text.textContainer?.size = NSSize(width: unbounded, height: unbounded)
+        text.linkTextAttributes = [
+            .cursor: NSCursor.pointingHand,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
+
+        scroll.documentView = text
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let text = scroll.documentView as? NSTextView else { return }
+        context.coordinator.onOpen = onOpen
+
+        let rendered = Self.attributed(content, fontSize: fontSize)
+        // Only restyle when something actually changed: this view is
+        // rebuilt on every SwiftUI pass while the overlay is up, and
+        // re-setting the string would drop the user's selection mid-drag.
+        if text.attributedString() != rendered {
+            text.textStorage?.setAttributedString(rendered)
+        }
+    }
+
+    /// Convert to an NSAttributedString AppKit will honour.
+    ///
+    /// The colours in the AttributedString live in SwiftUI's attribute
+    /// scope, which AppKit ignores — so the base colour and the link
+    /// colour are applied here instead, keyed off the `.link` attribute
+    /// that does survive the conversion.
+    static func attributed(_ content: AttributedString, fontSize: CGFloat) -> NSAttributedString {
+        let result = NSMutableAttributedString(content)
+        let whole = NSRange(location: 0, length: result.length)
+        result.addAttributes([
+            .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.9),
+        ], range: whole)
+
+        result.enumerateAttribute(.link, in: whole) { value, range, _ in
+            guard let value else { return }
+            let url = (value as? URL) ?? URL(string: "\(value)")
+            // A path opens in the file browser, a URL leaves the app —
+            // different destinations, so they're coloured differently.
+            let colour: NSColor = url?.scheme == "onyxfile"
+                ? NSColor.systemOrange : NSColor.systemBlue
+            result.addAttribute(.foregroundColor, value: colour, range: range)
+        }
+        return result
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var onOpen: (URL) -> Void
+        init(onOpen: @escaping (URL) -> Void) { self.onOpen = onOpen }
+
+        func textView(_ view: NSTextView, clickedOnLink link: Any,
+                      at charIndex: Int) -> Bool {
+            if let url = link as? URL { onOpen(url); return true }
+            if let s = link as? String, let url = URL(string: s) { onOpen(url); return true }
+            return false
+        }
     }
 }
