@@ -44,7 +44,7 @@ const pipeMark = { passed: '●', running: '◐', failed: '✕' };
 ---
 
 <section class="relative border-y border-border-subtle bg-bg-secondary/40">
-  <div class="mx-auto max-w-6xl px-6 py-20 sm:py-24">
+  <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-24">
     <div class="mx-auto max-w-2xl text-center">
       <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">
         One key, and there it all is
@@ -62,14 +62,14 @@ const pipeMark = { passed: '●', running: '◐', failed: '✕' };
     >
       <!-- Headline row -->
       <div
-        class="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-6 py-4 font-mono text-xs"
+        class="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-4 py-3 font-mono text-xs sm:px-6 sm:py-4"
       >
-        <div class="flex items-center gap-4">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
           <span class="text-accent-primary">workstation</span>
           <span class="text-text-muted">gpu-01</span>
           <span class="text-text-muted">build-02</span>
         </div>
-        <div class="flex items-center gap-4 text-text-muted">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-text-muted">
           <span>09:41</span>
           <span class="text-text-secondary">CPU 47%</span>
           <span class="text-text-secondary">MEM 34.2 / 64 GB</span>
@@ -80,7 +80,7 @@ const pipeMark = { passed: '●', running: '◐', failed: '✕' };
 
       <div class="grid gap-px bg-border-subtle lg:grid-cols-3">
         <!-- Today -->
-        <div class="bg-bg-primary p-6">
+        <div class="bg-bg-primary p-4 sm:p-6">
           <div class="flex items-baseline justify-between">
             <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
               Today
@@ -106,7 +106,7 @@ const pipeMark = { passed: '●', running: '◐', failed: '✕' };
         </div>
 
         <!-- Sessions -->
-        <div class="bg-bg-primary p-6">
+        <div class="bg-bg-primary p-4 sm:p-6">
           <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
             Session notes
           </p>
@@ -130,7 +130,7 @@ const pipeMark = { passed: '●', running: '◐', failed: '✕' };
         </div>
 
         <!-- Pipelines + PRs -->
-        <div class="bg-bg-primary p-6">
+        <div class="bg-bg-primary p-4 sm:p-6">
           <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
             Pipelines
           </p>
@@ -139,9 +139,9 @@ const pipeMark = { passed: '●', running: '◐', failed: '✕' };
               pipelines.map((p) => (
                 <li class="flex items-baseline gap-2.5 font-mono text-[11px]">
                   <span class={pipeColor[p.status]}>{pipeMark[p.status]}</span>
-                  <span class="text-text-primary/90">{p.repo}</span>
-                  <span class="text-text-muted">{p.ref}</span>
-                  <span class="ml-auto text-text-muted">{p.meta}</span>
+                  <span class="shrink-0 text-text-primary/90">{p.repo}</span>
+                  <span class="min-w-0 truncate text-text-muted">{p.ref}</span>
+                  <span class="ml-auto shrink-0 text-text-muted">{p.meta}</span>
                 </li>
               ))
             }
@@ -171,7 +171,7 @@ const pipeMark = { passed: '●', running: '◐', failed: '✕' };
       </div>
 
       <!-- CPU strip -->
-      <div class="border-t border-border-subtle bg-bg-primary px-6 py-5">
+      <div class="border-t border-border-subtle bg-bg-primary px-4 py-4 sm:px-6 sm:py-5">
         <div class="flex h-16 items-end gap-[3px]" aria-hidden="true">
           {
             cpu.map((v) => (

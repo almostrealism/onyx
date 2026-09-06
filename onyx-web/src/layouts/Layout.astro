@@ -16,6 +16,16 @@ const {
 <!doctype html>
 <html lang="en">
   <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Those two come first, and nothing goes above them. Charset has to
+         land in the first 1024 bytes for the parser to trust it, and
+         without the viewport tag mobile Safari lays the page out against
+         a ~980px window and scales the result down — which is what "the
+         text is tiny on my phone" actually is. Both were once deleted by
+         an edit to the consent block below; putting them above anything
+         that can grow is what stops that repeating. -->
+
     <!-- Consent state. MUST run before the GTM container: a consent
          default set after the container has started is too late to stop
          the first tags. Everything is denied until an affirmative
