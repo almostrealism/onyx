@@ -475,6 +475,7 @@ private struct FavoriteRow: View {
                 // you just asked for.
                 appState.jumpToSession(session)
             }
+            .sessionContextMenu(session, appState: appState)
 
             // Remove from favorites
             Button(action: { appState.toggleFavorite(session) }) {
@@ -680,14 +681,7 @@ private struct SessionRow: View {
             guard !session.unavailable else { return }
             appState.jumpToSession(session)
         }
-        .contextMenu {
-            // Only real tmux sessions can be renamed or killed — a browser
-            // tab or a docker log stream has nothing behind it to target.
-            if session.source.isTmuxBacked {
-                Button("Rename…") { appState.sessionPendingRename = session }
-                Button("Kill Session", role: .destructive) { appState.killSession(session) }
-            }
-        }
+        .sessionContextMenu(session, appState: appState)
     }
 }
 
@@ -747,5 +741,31 @@ private struct RenameSessionField: View {
         guard isValid else { return }
         appState.renameSession(session, to: name)
         appState.sessionPendingRename = nil
+    }
+}
+
+// MARK: - Session context menu
+
+/// The right-click menu for a session, wherever a session is shown.
+///
+/// One definition, applied by the session list, the favourites list and
+/// the favourites bar. Three copies of a menu is how the copies end up
+/// offering different things — the same drift that produced two
+/// disagreeing answers to "who has the keyboard".
+extension View {
+    func sessionContextMenu(_ session: TmuxSession, appState: AppState) -> some View {
+        contextMenu {
+            // Only a real tmux session can be renamed or ended; a browser
+            // tab or a docker log stream has nothing to target.
+            if session.source.isTmuxBacked {
+                Button("Rename…") { appState.sessionPendingRename = session }
+                Button("Kill Session", role: .destructive) { appState.killSession(session) }
+                Divider()
+            }
+            Button(appState.isFavorited(session) ? "Remove from Favorites"
+                                                 : "Add to Favorites") {
+                appState.toggleFavorite(session)
+            }
+        }
     }
 }

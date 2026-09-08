@@ -1205,6 +1205,7 @@ struct FavoritesBar: View {
                     .cornerRadius(4)
                 }
                 .buttonStyle(.plain)
+                .sessionContextMenu(session, appState: appState)
             }
 
             // Active session indicator (if not in favorites)

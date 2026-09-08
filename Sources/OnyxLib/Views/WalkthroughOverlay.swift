@@ -38,7 +38,7 @@ struct WalkthroughOverlay: View {
                  keys: [("⌘1–9", "jump to a favorite"), ("⇧⇥", "cycle sessions"), ("⌘J", "the session list")]),
 
             Step(title: "Sessions that remember what they were for",
-                 body: "Come back to nine terminals and the hard part isn't reconnecting, it's remembering which was which. Give each one a note — \"waiting on the migration\", \"epoch 14/40\" — and the monitor lists them with a dot showing which are still producing output. Sessions can be renamed or ended too — right-click one in the session list (⌘J).",
+                 body: "Come back to nine terminals and the hard part isn't reconnecting, it's remembering which was which. Give each one a note — \"waiting on the migration\", \"epoch 14/40\" — and the monitor lists them with a dot showing which are still producing output. Sessions can be renamed or ended too — right-click one anywhere it appears: the session list (⌘J) or the favorites bar along the bottom.",
                  keys: [("⌘;", "note this session"), ("⌘J", "the session list"),
                         ("right-click", "rename or end a session")]),
 
