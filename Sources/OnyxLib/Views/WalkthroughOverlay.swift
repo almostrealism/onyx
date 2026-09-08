@@ -38,8 +38,9 @@ struct WalkthroughOverlay: View {
                  keys: [("⌘1–9", "jump to a favorite"), ("⇧⇥", "cycle sessions"), ("⌘J", "the session list")]),
 
             Step(title: "Sessions that remember what they were for",
-                 body: "Come back to nine terminals and the hard part isn't reconnecting, it's remembering which was which. Give each one a note — \"waiting on the migration\", \"epoch 14/40\" — and the monitor lists them with a dot showing which are still producing output. Right-click a session to rename or end it.",
-                 keys: [("⌘;", "note this session")]),
+                 body: "Come back to nine terminals and the hard part isn't reconnecting, it's remembering which was which. Give each one a note — \"waiting on the migration\", \"epoch 14/40\" — and the monitor lists them with a dot showing which are still producing output. Sessions can be renamed or ended too — right-click one in the session list (⌘J).",
+                 keys: [("⌘;", "note this session"), ("⌘J", "the session list"),
+                        ("right-click", "rename or end a session")]),
 
             Step(title: "Files, git and search on the far machine",
                  body: "Browse the remote filesystem with the branch, staged files and working changes right above the listing. Search by name or type across a deep tree. Favourite folders are drawn as a treemap, so two folders with the same name are told apart by what contains them.\n\nWhen the panel is open it takes the keyboard, so typing goes to it rather than the shell. ⌘⌥← sends the keyboard back to the terminal and ⌘⌥→ returns it to the panel; the panel says which way round it currently is.",
