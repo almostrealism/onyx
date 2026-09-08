@@ -39,6 +39,43 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 # Copy binary
 cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
+# ---------------------------------------------- MCP bridge payload
+#
+# Best effort, and never fatal. The app installs this bridge onto remote
+# hosts in one click, so a build with no bridges can't do that at all —
+# but a build with only the Mac one is still useful, and requiring a CI
+# run before you can test locally would be absurd.
+#
+# macOS: built right here, always.
+# Linux: cross-compiling from macOS needs the swift.org toolchain and a
+#        static SDK Xcode's Swift can't use, so those come from CI. Try
+#        dist/mcp first (a manual drop), then the newest GitHub release.
+MCP_DIR="$APP_BUNDLE/Contents/Resources/mcp"
+mkdir -p "$MCP_DIR"
+if [ -f "$BUILD_DIR/OnyxMCP" ]; then
+    cp "$BUILD_DIR/OnyxMCP" "$MCP_DIR/OnyxMCP-macos-arm64"
+    chmod +x "$MCP_DIR/OnyxMCP-macos-arm64"
+fi
+
+for arch in linux-x86_64 linux-arm64; do
+    if [ -f "dist/mcp/OnyxMCP-$arch" ]; then
+        cp "dist/mcp/OnyxMCP-$arch" "$MCP_DIR/" && chmod +x "$MCP_DIR/OnyxMCP-$arch"
+    elif command -v gh >/dev/null 2>&1 \
+        && gh release download --pattern "OnyxMCP-$arch" --dir "$MCP_DIR" \
+             --clobber >/dev/null 2>&1; then
+        chmod +x "$MCP_DIR/OnyxMCP-$arch"
+    fi
+done
+
+HAVE=$(ls "$MCP_DIR" 2>/dev/null | tr '\n' ' ')
+echo "  MCP bridges: ${HAVE:-none}"
+case "$HAVE" in
+    *linux*) ;;
+    *) echo "           (no Linux bridge — Linux hosts will say so in the"
+       echo "            monitor. Run the 'MCP binaries' workflow, or drop"
+       echo "            binaries in dist/mcp/, to include them.)" ;;
+esac
+
 # Copy Info.plist, stamping the real version into it.
 #
 # Without this the bundle keeps the placeholder 0.1.0 from the checked-in

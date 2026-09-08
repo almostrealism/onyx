@@ -1187,25 +1187,7 @@ struct FavoritesBar: View {
 
             // Favorite session tabs
             ForEach(Array(appState.favoriteSessions.enumerated()), id: \.element.id) { index, session in
-                let isActive = appState.activeSession?.id == session.id
-                Button(action: { appState.jumpToSession(session) }) {
-                    HStack(spacing: 4) {
-                        if index < 9 {
-                            Text("⌘\(index + 1)")
-                                .font(.system(size: sz(8), design: .monospaced))
-                                .foregroundColor(.gray.opacity(0.3))
-                        }
-                        Text(session.displayLabel)
-                            .font(.system(size: sz(10), weight: isActive ? .medium : .regular, design: .monospaced))
-                            .foregroundColor(isActive ? appState.accentColor : .gray.opacity(0.5))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(isActive ? appState.accentColor.opacity(0.12) : Color.clear)
-                    .cornerRadius(4)
-                }
-                .buttonStyle(.plain)
-                .sessionContextMenu(session, appState: appState)
+                FavoriteBarChip(session: session, index: index, appState: appState)
             }
 
             // Active session indicator (if not in favorites)
@@ -1428,5 +1410,49 @@ struct SelectableTerminalText: NSViewRepresentable {
             if let s = link as? String, let url = URL(string: s) { onOpen(url); return true }
             return false
         }
+    }
+}
+
+/// One favourite in the bar along the bottom.
+///
+/// The ⋯ sits BESIDE the button rather than inside it: a menu nested in
+/// a button gives the two a single click target, and neither ends up
+/// doing what it looks like it does.
+private struct FavoriteBarChip: View {
+    let session: TmuxSession
+    let index: Int
+    @ObservedObject var appState: AppState
+    @State private var hovering = false
+
+    private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
+    private var isActive: Bool { appState.activeSession?.id == session.id }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: { appState.jumpToSession(session) }) {
+                HStack(spacing: 4) {
+                    if index < 9 {
+                        Text("⌘\(index + 1)")
+                            .font(.system(size: sz(8), design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.3))
+                    }
+                    Text(session.displayLabel)
+                        .font(.system(size: sz(10), weight: isActive ? .medium : .regular,
+                                      design: .monospaced))
+                        .foregroundColor(isActive ? appState.accentColor : .gray.opacity(0.5))
+                }
+                .padding(.leading, 8)
+                .padding(.vertical, 3)
+            }
+            .buttonStyle(.plain)
+
+            SessionMenuAffordance(session: session, appState: appState,
+                                  visible: hovering, size: sz(9))
+                .padding(.trailing, 4)
+        }
+        .background(isActive ? appState.accentColor.opacity(0.12) : Color.clear)
+        .cornerRadius(4)
+        .sessionContextMenu(session, appState: appState)
+        .onHover { hovering = $0 }
     }
 }

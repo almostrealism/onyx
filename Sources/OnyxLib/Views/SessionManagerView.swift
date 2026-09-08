@@ -424,6 +424,7 @@ private struct FavoriteRow: View {
     let index: Int
     let total: Int
     @ObservedObject var appState: AppState
+    @State private var hovering = false
 
     private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
 
@@ -476,6 +477,10 @@ private struct FavoriteRow: View {
                 appState.jumpToSession(session)
             }
             .sessionContextMenu(session, appState: appState)
+            .onHover { hovering = $0 }
+
+            SessionMenuAffordance(session: session, appState: appState,
+                                  visible: hovering, size: sz(10))
 
             // Remove from favorites
             Button(action: { appState.toggleFavorite(session) }) {
@@ -554,6 +559,7 @@ private struct SessionGroupHeader: View {
 private struct SessionRow: View {
     let session: TmuxSession
     @ObservedObject var appState: AppState
+    @State private var hovering = false
 
     private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
 
@@ -669,6 +675,9 @@ private struct SessionRow: View {
                         }
                     }
                 }
+
+                SessionMenuAffordance(session: session, appState: appState,
+                                      visible: hovering, size: sz(10))
             }
         }
         .padding(.horizontal, 14)
@@ -682,6 +691,7 @@ private struct SessionRow: View {
             appState.jumpToSession(session)
         }
         .sessionContextMenu(session, appState: appState)
+        .onHover { hovering = $0 }
     }
 }
 
@@ -746,26 +756,63 @@ private struct RenameSessionField: View {
 
 // MARK: - Session context menu
 
-/// The right-click menu for a session, wherever a session is shown.
+/// The items in a session's menu, defined once.
 ///
-/// One definition, applied by the session list, the favourites list and
-/// the favourites bar. Three copies of a menu is how the copies end up
-/// offering different things — the same drift that produced two
-/// disagreeing answers to "who has the keyboard".
+/// Shared by the right-click menu and the ⋯ button, so the two can never
+/// offer different things — which is the whole reason there's one
+/// definition rather than one per place a session is drawn.
+@ViewBuilder
+func sessionMenuItems(_ session: TmuxSession, appState: AppState) -> some View {
+    // Only a real tmux session can be renamed or ended; a browser tab or
+    // a docker log stream has nothing to target.
+    if session.source.isTmuxBacked {
+        Button("Rename…") { appState.sessionPendingRename = session }
+        Button("Kill Session", role: .destructive) { appState.killSession(session) }
+        Divider()
+    }
+    Button(appState.isFavorited(session) ? "Remove from Favorites" : "Add to Favorites") {
+        appState.toggleFavorite(session)
+    }
+}
+
 extension View {
+    /// Right-click anywhere a session is shown.
     func sessionContextMenu(_ session: TmuxSession, appState: AppState) -> some View {
-        contextMenu {
-            // Only a real tmux session can be renamed or ended; a browser
-            // tab or a docker log stream has nothing to target.
-            if session.source.isTmuxBacked {
-                Button("Rename…") { appState.sessionPendingRename = session }
-                Button("Kill Session", role: .destructive) { appState.killSession(session) }
-                Divider()
-            }
-            Button(appState.isFavorited(session) ? "Remove from Favorites"
-                                                 : "Add to Favorites") {
-                appState.toggleFavorite(session)
-            }
+        contextMenu { sessionMenuItems(session, appState: appState) }
+    }
+}
+
+/// The visible way in: a ⋯ that appears on hover and opens the same menu.
+///
+/// Right-click alone had no affordance, so the feature kept being
+/// reported as missing by people who had no reason to guess the gesture
+/// existed. The space is reserved whether or not it's showing — fading
+/// in is fine, but a control that changes the row's width as the pointer
+/// crosses it makes everything beside it jump.
+struct SessionMenuAffordance: View {
+    let session: TmuxSession
+    @ObservedObject var appState: AppState
+    /// Usually "is the pointer over this row".
+    let visible: Bool
+    var size: CGFloat = 11
+
+    var body: some View {
+        Menu {
+            sessionMenuItems(session, appState: appState)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: size))
+                .foregroundColor(.gray.opacity(0.55))
+                .frame(width: size + 8, height: size + 6)
+                .contentShape(Rectangle())
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .opacity(visible ? 1 : 0)
+        // Hidden means hidden: an invisible menu that still swallows
+        // clicks would be worse than no affordance at all.
+        .allowsHitTesting(visible)
+        .help("Rename, end or favorite this session")
     }
 }

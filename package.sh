@@ -138,6 +138,12 @@ for arch in linux-x86_64 linux-arm64; do
         && gh release download "$VERSION" --pattern "OnyxMCP-$arch" \
              --dir "$MCP_DIR" --clobber >/dev/null 2>&1; then
         :
+    elif command -v gh >/dev/null 2>&1 \
+        && gh release download --pattern "OnyxMCP-$arch" \
+             --dir "$MCP_DIR" --clobber >/dev/null 2>&1; then
+        # This version's release has no bridge yet — the newest one that
+        # does is closer to right than shipping none.
+        echo "  NOTE: OnyxMCP-$arch came from an older release, not $VERSION."
     else
         echo "  WARNING: no OnyxMCP-$arch — hosts on that architecture"
         echo "           won't be able to install the bridge from this build."
