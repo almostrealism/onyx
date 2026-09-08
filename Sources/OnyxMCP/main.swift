@@ -230,6 +230,19 @@ func errorResponse(id: String, message: String) -> String {
 
 // MARK: - Modes
 
+/// Build identity, stamped by package.sh / CI so an installed bridge can
+/// be tied back to what produced it.
+let onyxMCPVersion = "0.16"
+
+// `--version` answers "is this thing installed and can it start", which
+// is the question both CI and the app's installer ask. It must not touch
+// the socket: the whole point is to verify the binary independently of
+// whether Onyx is running or reachable.
+if CommandLine.arguments.contains("--version") {
+    print("OnyxMCP \(onyxMCPVersion)")
+    exit(0)
+}
+
 let hookIndex = CommandLine.arguments.firstIndex(of: "--hook")
 let isHookMode = hookIndex != nil
 

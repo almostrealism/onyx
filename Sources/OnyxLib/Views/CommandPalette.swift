@@ -91,9 +91,13 @@ struct CommandPaletteView: View {
                 appState.showCommandPalette = false
                 appState.showSetup = true
             },
-            PaletteAction(title: "Setup Claude Hooks", shortcut: "") {
+            // One action, not two. This uploads the bridge, registers it
+            // with Claude Code and configures the hooks — they were
+            // separate before, which let a host end up with one and not
+            // the other and nothing to say which.
+            PaletteAction(title: "Install Onyx MCP", shortcut: "") {
                 appState.showCommandPalette = false
-                appState.setupClaudeHooks()
+                appState.installMCPOnActiveHost()
             },
         ]
         if query.isEmpty { return all }

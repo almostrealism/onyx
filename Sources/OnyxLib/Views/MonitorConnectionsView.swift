@@ -183,6 +183,15 @@ struct ConnectionPoolSection: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+
+                            // Whether the agent bridge is actually working
+                            // on this host. Separate from the mux dot: a
+                            // perfectly connected host with no bridge can't
+                            // run any of the MCP features, and until this
+                            // line existed there was nothing anywhere that
+                            // said so.
+                            MCPHostRow(host: host, appState: appState)
+
                             if expanded {
                                 SSHDiagnosticPanel(
                                     host: host,
@@ -540,3 +549,80 @@ struct PulseModifier: ViewModifier {
 }
 
 // MARK: - Claude Code Sessions
+
+/// The MCP bridge's state on one host, with the install button.
+///
+/// Installing is one action: it uploads the bridge, registers it with
+/// Claude Code and configures the hooks. There used to be a separate
+/// "setup hooks" command, which meant a host could have had one and not
+/// the other with nothing to show which.
+private struct MCPHostRow: View {
+    let host: HostConfig
+    @ObservedObject var appState: AppState
+    @ObservedObject private var installer = MCPInstaller.shared
+
+    var body: some View {
+        let status = installer.status(for: host)
+        let busy = installer.progress[host.id]
+
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color(for: status))
+                .frame(width: 4, height: 4)
+                .padding(.leading, 8)
+
+            Text("MCP")
+                .monitorFont(size: 9, weight: .medium)
+                .foregroundColor(.gray.opacity(0.45))
+                .tracking(1)
+
+            // While an install runs this says what it's doing; otherwise
+            // it's the state, in the remote's own words when broken.
+            Text(busy ?? detail(for: status))
+                .monitorFont(size: 9)
+                .foregroundColor(busy != nil ? Color.onyxBlue.opacity(0.8)
+                                             : color(for: status).opacity(0.85))
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 4)
+
+            if busy == nil && !host.paused {
+                Button(action: { installer.install(host: host, appState: appState) }) {
+                    Text(status.isWorking ? "reinstall" : "install")
+                        .monitorFont(size: 9)
+                        .foregroundColor(Color.onyxBlue.opacity(0.75))
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 6)
+            }
+        }
+        .padding(.leading, 8)
+        .onAppear {
+            // Only ask once per host per appearance — this view is inside
+            // a list that re-renders on every registry bump.
+            if installer.status(for: host).checkedAt == nil {
+                installer.refresh(host: host, appState: appState)
+            }
+        }
+    }
+
+    private func color(for status: MCPHostStatus) -> Color {
+        switch status.state {
+        case .installed:   return Color.onyxGreen
+        case .broken:      return Color.onyxRed
+        case .unsupported: return Color.onyxAmber
+        case .notInstalled, .unknown: return .gray.opacity(0.45)
+        }
+    }
+
+    private func detail(for status: MCPHostStatus) -> String {
+        switch status.state {
+        case .installed(let v):     return "ready · \(v)"
+        case .broken(let why):      return why
+        case .unsupported(let p):   return "no bridge for \(p) in this build"
+        case .notInstalled:         return "not installed"
+        case .unknown:              return host.paused ? "host paused" : "checking…"
+        }
+    }
+}

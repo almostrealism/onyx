@@ -59,8 +59,8 @@ struct WalkthroughOverlay: View {
                  keys: [("F", "this host → fleet"), ("S", "detailed / simple"), ("T", "time window")]),
 
             Step(title: "Working alongside agents",
-                 body: "Claude Code sessions show up as sessions, so an agent that finished — or one that stopped to ask permission — is visible instead of buried in a tab. Agents can push a diagram or a model straight into the panel next to your terminal. Run 'setup hooks' from the command palette to wire it up.",
-                 keys: [("⌘K", "→ setup hooks"), ("⌘D", "artifacts panel")]),
+                 body: "Claude Code sessions show up as sessions, so an agent that finished — or one that stopped to ask permission — is visible instead of buried in a tab. Agents can push a diagram or a model straight into the panel next to your terminal. Run 'Install Onyx MCP' from the command palette to wire it up — one step installs the bridge, registers it with Claude Code and configures the hooks. The monitor's CONNECTIONS section then shows whether it's working, per host.",
+                 keys: [("⌘K", "→ Install Onyx MCP"), ("⌘D", "artifacts panel")]),
 
             Step(title: "That's the tour",
                  body: "⌘/ lists every shortcut whenever you want it, and Help → Onyx Walkthrough brings this back. Settings has the pieces worth setting once: hosts, tokens, reminder lists, and a pause switch for any machine you'd rather Onyx left alone.",

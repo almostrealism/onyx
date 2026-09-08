@@ -111,6 +111,43 @@ for bundle in "$BUILD_DIR"/*.bundle; do
     [ -e "$bundle" ] && cp -R "$bundle" "$APP_BUNDLE/Contents/Resources/"
 done
 
+# ------------------------------------------------- MCP bridge payload
+#
+# The app installs this bridge onto remote hosts in one click, so the
+# binaries have to travel inside the bundle. The macOS one is built right
+# here; the Linux ones are built on Linux by .github/workflows/
+# mcp-binaries.yaml, because cross-compiling Swift to Linux needs the
+# swift.org toolchain and a static SDK that Xcode's Swift can't use.
+#
+# Missing Linux binaries are a WARNING, not an error: a Mac-only bundle
+# is still useful, and blocking the release on a CI artifact would be
+# worse than shipping without it. The app tells the user plainly when a
+# host's architecture isn't carried, rather than failing at install time
+# with something cryptic.
+MCP_DIR="$APP_BUNDLE/Contents/Resources/mcp"
+mkdir -p "$MCP_DIR"
+cp "$BUILD_DIR/OnyxMCP" "$MCP_DIR/OnyxMCP-macos-arm64"
+chmod +x "$MCP_DIR/OnyxMCP-macos-arm64"
+
+# Linux binaries: from dist/mcp/ if they've been fetched, otherwise from
+# the GitHub release for this version.
+for arch in linux-x86_64 linux-arm64; do
+    if [ -f "$DIST_DIR/mcp/OnyxMCP-$arch" ]; then
+        cp "$DIST_DIR/mcp/OnyxMCP-$arch" "$MCP_DIR/"
+    elif command -v gh >/dev/null 2>&1 \
+        && gh release download "$VERSION" --pattern "OnyxMCP-$arch" \
+             --dir "$MCP_DIR" --clobber >/dev/null 2>&1; then
+        :
+    else
+        echo "  WARNING: no OnyxMCP-$arch — hosts on that architecture"
+        echo "           won't be able to install the bridge from this build."
+        echo "           Run the 'MCP binaries' workflow, then re-package."
+        continue
+    fi
+    chmod +x "$MCP_DIR/OnyxMCP-$arch"
+done
+echo "  MCP bridges: $(ls "$MCP_DIR" | tr '\n' ' ')"
+
 # Stamp the real version into the bundle's Info.plist.
 cp "Sources/OnyxApp/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 PLIST="$APP_BUNDLE/Contents/Info.plist"

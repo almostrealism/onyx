@@ -271,7 +271,7 @@ struct SettingsView: View {
                                     }
                                     .toggleStyle(.switch)
 
-                                    Text("When on, Claude shows a banner in Onyx instead of the terminal prompt when it needs permission for a tool call. Only tools that your Claude settings require approval for are affected — auto-allowed tools pass through untouched. Requires hooks set up via ⌘K → 'setup hooks'.")
+                                    Text("When on, Claude shows a banner in Onyx instead of the terminal prompt when it needs permission for a tool call. Only tools that your Claude settings require approval for are affected — auto-allowed tools pass through untouched. Requires the bridge installed via ⌘K → 'Install Onyx MCP'.")
                                         .font(.system(size: 9, design: .monospaced))
                                         .foregroundColor(.gray.opacity(0.4))
                                         .fixedSize(horizontal: false, vertical: true)

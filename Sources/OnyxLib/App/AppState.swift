@@ -1177,6 +1177,27 @@ public class AppState: ObservableObject {
 
     /// Install OnyxMCP and configure Claude Code hooks on the active host.
     /// Copies the binary from the local app bundle and configures hooks via SSH.
+    /// Install the MCP bridge on the active host and wire Claude Code to
+    /// it. The status line reports progress; the monitor's CONNECTIONS
+    /// section shows the result per host afterwards.
+    public func installMCPOnActiveHost() {
+        guard let host = activeHost else {
+            hooksSetupStatus = "No active host"
+            clearStatusAfterDelay()
+            return
+        }
+        hooksSetupStatus = "Installing Onyx MCP on \(host.label)…"
+        MCPInstaller.shared.install(host: host, appState: self) { [weak self] ok in
+            guard let self else { return }
+            let status = MCPInstaller.shared.status(for: host)
+            self.hooksSetupStatus = ok
+                ? "Onyx MCP ready on \(host.label) — \(status.label)"
+                : (MCPInstaller.shared.progress[host.id] ?? "Install failed on \(host.label)")
+            self.clearStatusAfterDelay()
+        }
+    }
+
+    @available(*, deprecated, message: "Use installMCPOnActiveHost — one install does hooks too")
     public func setupClaudeHooks() {
         guard let host = activeHost else {
             hooksSetupStatus = "No active host"
@@ -1545,6 +1566,36 @@ public class AppState: ObservableObject {
         ]
     }
 
+    /// The bundled MCP bridge for a platform, or nil if this build
+    /// doesn't carry one for it.
+    ///
+    /// Looks in the app bundle first (Contents/Resources/mcp) and then
+    /// beside the executable, which is where a `swift build` layout puts
+    /// it during development. Bundle.module is deliberately avoided —
+    /// referencing it fatalErrors when the resource bundle isn't where
+    /// SPM hardcoded it, which is every machine except the one that
+    /// compiled the app.
+    public func bundledMCPBinary(for platform: RemotePlatform) -> URL? {
+        let name = platform.artifactName
+        if let url = Bundle.main.url(forResource: name, withExtension: nil,
+                                     subdirectory: "mcp") {
+            return url
+        }
+        let beside = Bundle.main.bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("mcp/\(name)")
+        return FileManager.default.fileExists(atPath: beside.path) ? beside : nil
+    }
+
+    /// Which platforms this build can install onto — used to say so
+    /// before someone tries.
+    public var bundledMCPPlatforms: [RemotePlatform] {
+        [RemotePlatform(os: .macOS, arch: "arm64"),
+         RemotePlatform(os: .linux, arch: "arm64"),
+         RemotePlatform(os: .linux, arch: "x86_64")]
+            .filter { bundledMCPBinary(for: $0) != nil }
+    }
+
     /// `scp` a local file to a path relative to the remote home dir.
     ///
     /// Rides the host's connection pair as a mux channel — the same
@@ -1568,6 +1619,16 @@ public class AppState: ObservableObject {
         let target = host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
         args.append("\(target):\(remotePath)")
         return ("/usr/bin/scp", args)
+    }
+
+    /// `scp` to an absolute remote path.
+    ///
+    /// The relative variant resolves against the remote home directory,
+    /// which is right for dropped files but wrong for an install that may
+    /// be going to /Users/Shared.
+    public func scpCommandAbsolute(localPath: String, remotePath: String,
+                                   host: HostConfig) -> (cmd: String, args: [String]) {
+        scpCommand(localPath: localPath, remotePath: remotePath, host: host)
     }
 
     /// Report an SSH failure (exit 255) against a host — marks the pair's
