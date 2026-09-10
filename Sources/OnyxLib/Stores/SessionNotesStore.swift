@@ -72,6 +72,28 @@ public class SessionNotesStore: ObservableObject {
         try? data.write(to: url)
     }
 
+    /// Rewrite stored keys, once, when the way sessions are keyed
+    /// changes.
+    ///
+    /// Takes a whole mapping rather than a transform per key so the write
+    /// happens once, and keeps anything the caller declines to rename —
+    /// a note whose host has been deleted is still someone's note.
+    public func rekey(_ mapping: [String: String]) {
+        guard !mapping.isEmpty else { return }
+        lock.lock()
+        var moved = notes
+        for (old, new) in mapping {
+            guard let note = moved.removeValue(forKey: old) else { continue }
+            // If both exist, the newer one wins — re-running a migration
+            // must never lose the note someone wrote since.
+            if let existing = moved[new], existing.updated >= note.updated { continue }
+            moved[new] = note
+        }
+        notes = moved
+        lock.unlock()
+        writeToDisk()
+    }
+
     /// Read the note for a session, if any.
     public func note(for sessionID: String) -> SessionNote? {
         notes[sessionID]

@@ -1120,6 +1120,7 @@ public class AppState: ObservableObject {
         AppearanceStore.shared.configure(url: appearanceURL)
 
         loadFavorites()
+        migrateSessionKeysIfNeeded()
         loadTopology()
         loadLocalSessions()
         configLoaded = true
@@ -1427,6 +1428,53 @@ public class AppState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             self?.hooksSetupStatus = nil
         }
+    }
+
+    /// Move notes and favourites off local UUIDs and onto `user@host`.
+    ///
+    /// Runs after hosts and both stores are loaded, because the mapping
+    /// needs the host list. Idempotent: an already-migrated key contains
+    /// an "@" in its machine field and is skipped, so this can run on
+    /// every launch without doing anything after the first.
+    ///
+    /// A key naming a host that no longer exists is LEFT as it is.
+    /// Someone may re-add that host, and a migration that quietly
+    /// discards notes would be the worst possible way to find out.
+    ///
+    /// The old file is copied aside the first time. This rewrites data
+    /// the user typed and can't retype, so there is a way back that
+    /// doesn't involve me being right.
+    private func migrateSessionKeysIfNeeded() {
+        let noteKeys = SessionNotesStore.shared.notes.keys
+        let favKeys = FavoritesStore.shared.entries.map(\.sessionID)
+        let all = Set(noteKeys).union(favKeys)
+        guard !all.isEmpty else { return }
+
+        var mapping: [String: String] = [:]
+        for key in all {
+            if let new = SessionIdentity.migrate(storageKey: key, hosts: hosts) {
+                mapping[key] = new
+            }
+        }
+        guard !mapping.isEmpty else { return }
+
+        for url in [sessionNotesURL, favoritesURL] {
+            let backup = url.appendingPathExtension("pre-rekey")
+            if !FileManager.default.fileExists(atPath: backup.path) {
+                try? FileManager.default.copyItem(at: url, to: backup)
+            }
+        }
+
+        SessionNotesStore.shared.rekey(mapping)
+        var entries = FavoritesStore.shared.entries
+        for i in entries.indices {
+            if let new = mapping[entries[i].sessionID] { entries[i].sessionID = new }
+        }
+        FavoritesStore.shared.entries = entries
+        FavoritesStore.shared.save()
+
+        DiagnosticLog.shared.record(
+            "config", "session keys moved to user@host (\(mapping.count) entries)")
     }
 
     private func loadFavorites() {
