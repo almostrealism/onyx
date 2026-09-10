@@ -6,6 +6,24 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     public func applicationWillFinishLaunching(_ notification: Notification) {
         // Force the process to be a regular GUI app with menu bar and focus
         NSApplication.shared.setActivationPolicy(.regular)
+
+        // Dark for the whole APPLICATION, not per window.
+        //
+        // Onyx is a jet-black overlay: every colour in it assumes a dark
+        // backdrop. Setting this per window left everything that isn't a
+        // window drawing in the SYSTEM appearance — menus, popovers,
+        // sheets, the field editor behind every text field — and left
+        // any window created after launch unstyled entirely.
+        //
+        // In Dark Mode that's invisible, because the system appearance
+        // already matches; in Light Mode it produces a settings panel of
+        // white text fields with our dark chips beside them, which is
+        // exactly what users reported and what a dark-mode developer
+        // cannot reproduce.
+        //
+        // Set here rather than in didFinishLaunching so it is in force
+        // before the first view is instantiated.
+        NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
         // Kill macOS "smart" text substitution app-wide BEFORE any text view
         // is created. NSTextView / the window field editor read these defaults
         // for their initial state, so a typed " stays a straight " instead of
