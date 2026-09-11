@@ -338,11 +338,22 @@ public final class MCPInstaller: ObservableObject {
             # Remove first so a reinstall that changed the path replaces
             # the old entry instead of failing on a duplicate name.
             claude mcp remove onyx >/dev/null 2>&1 || true
-            if claude mcp add --scope user onyx -- \(shellQuote(remotePath)) >/dev/null 2>&1; then
-                claude mcp get onyx >/dev/null 2>&1 && echo "REGISTERED" || echo "ADDED_NOT_VISIBLE"
+            # KEEP the output. Sending it to /dev/null left the app saying
+            # "didn't take" with nothing to act on — the failure this
+            # codebase keeps re-learning. Whatever claude says is the only
+            # thing here worth reading.
+            ADD_OUT=$(claude mcp add --scope user onyx -- \(shellQuote(remotePath)) 2>&1) && ADD_RC=0 || ADD_RC=$?
+            GET_OUT=$(claude mcp get onyx 2>&1) && GET_RC=0 || GET_RC=$?
+            if [ "$ADD_RC" = "0" ] && [ "$GET_RC" = "0" ]; then
+                echo "REGISTERED"
+            elif [ "$ADD_RC" = "0" ]; then
+                echo "ADDED_NOT_VISIBLE"
+                echo "claude mcp get said: $GET_OUT"
             else
                 echo "ADD_FAILED"
+                echo "claude mcp add (exit $ADD_RC) said: $ADD_OUT"
             fi
+            echo "claude: $(command -v claude)"
         else
             echo "NO_CLAUDE"
         fi
@@ -365,27 +376,38 @@ public final class MCPInstaller: ObservableObject {
             return false
         }
 
-        func marker(_ name: String) -> String? {
-            guard let r = out.range(of: name, options: .backwards) else { return nil }
-            return out[r.upperBound...]
+        // Everything the registration step said, not just its verdict.
+        let reg: [String] = {
+            guard let r = out.range(of: "---REG---", options: .backwards) else { return [] }
+            let rest = out[r.upperBound...]
+            let stop = rest.range(of: "---DONE---")?.lowerBound ?? rest.endIndex
+            return rest[..<stop]
                 .components(separatedBy: "\n")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .first(where: { !$0.isEmpty })
-        }
+                .filter { !$0.isEmpty }
+        }()
+        // The verdict is the first line; the rest is why, in claude's own
+        // words, plus where the claude it used actually lives — a PATH
+        // difference between your shell and ours is a prime suspect when
+        // a command works by hand and not from here.
+        let detail = reg.dropFirst().joined(separator: " · ")
 
-        switch marker("---REG---") {
+        switch reg.first {
         case "REGISTERED":
             break
         case "NO_CLAUDE":
-            fail("Bridge installed, but Claude Code isn't on \(host.label) — nothing to register with",
+            fail("Bridge installed, but the `claude` command isn't on \(host.label)'s PATH for a non-interactive shell — nothing to register with",
                  for: host.id)
             return false
         case "ADD_FAILED", "ADDED_NOT_VISIBLE":
-            fail("Bridge installed, but `claude mcp add` didn't take on \(host.label)",
+            fail("Bridge installed, but registering it failed on \(host.label). \(detail)",
                  for: host.id)
             return false
         default:
-            fail("Couldn't tell whether Claude registered the bridge on \(host.label)",
+            let tail = out.components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .last(where: { !$0.isEmpty }) ?? "no output"
+            fail("Couldn't tell whether Claude registered the bridge on \(host.label): \(tail)",
                  for: host.id)
             return false
         }
