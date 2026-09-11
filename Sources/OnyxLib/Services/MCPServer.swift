@@ -199,9 +199,59 @@ public class MCPMessageHandler {
                 clearSlotTool,
                 listSlotsTool,
                 analyzeDepsTool,
+                notifyTool,
             ])
         ])
         return JSONRPCResponse(id: request.id, result: tools)
+    }
+
+    /// Ask for the user's attention.
+    ///
+    /// The description has to earn its place: an agent decides whether to
+    /// call this from these words alone. It states what the two flags
+    /// MEAN, mentions what a Mac does with them without making the tool
+    /// Apple-shaped, and explains that naming the session is what puts
+    /// the indicator next to the right piece of work.
+    private var notifyTool: AnyCodableValue {
+        .object([
+            "name": .string("notify"),
+            "description": .string("""
+                Tell the user you need their attention — you are blocked, you finished \
+                something they are waiting on, or something needs a decision. The message \
+                appears in Onyx against the session it came from.
+
+                Two optional flags escalate it. `urgent` interrupts: on macOS the dock icon \
+                bounces until they come back to Onyx. `external` delivers outside the app so \
+                it arrives even when Onyx is not in front: on macOS that is Notification \
+                Center. Use neither for "for your information", `external` for "tell me \
+                wherever I am", `urgent` for "I cannot continue without you".
+
+                Say which session you are in — user, host and tmux session name — so the \
+                alert lands next to that session rather than in the general list. If you do \
+                not know, the user can tell you, and one unambiguous detail is often enough: \
+                a session name is sufficient when only one session has it.
+                """),
+            "inputSchema": .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "title": .object(["type": .string("string"),
+                                      "description": .string("One line, written for someone glancing at it. \"Migration finished, needs review\" rather than \"done\".")]),
+                    "body": .object(["type": .string("string"),
+                                     "description": .string("Optional detail shown when they open the alert.")]),
+                    "urgent": .object(["type": .string("boolean"),
+                                       "description": .string("Interrupt them. macOS: bounces the dock icon until Onyx is brought forward. Default false.")]),
+                    "external": .object(["type": .string("boolean"),
+                                         "description": .string("Deliver outside Onyx as well, so it arrives when the app is not in front. macOS: Notification Center. Default false.")]),
+                    "user": .object(["type": .string("string"),
+                                     "description": .string("Remote user of the session this is about, e.g. from `whoami`.")]),
+                    "host": .object(["type": .string("string"),
+                                     "description": .string("Host of the session this is about, as the user refers to it, e.g. from `hostname`.")]),
+                    "session": .object(["type": .string("string"),
+                                        "description": .string("tmux session name, e.g. from `tmux display-message -p \"#S\"`.")])
+                ]),
+                "required": .array([.string("title")])
+            ])
+        ])
     }
 
     private var showTextTool: AnyCodableValue {
@@ -317,6 +367,7 @@ public class MCPMessageHandler {
         case "clear_slot": return callClearSlot(id: request.id, args: arguments)
         case "list_slots": return callListSlots(id: request.id)
         case "analyze_deps": return callAnalyzeDeps(id: request.id, args: arguments)
+        case "notify": return callNotify(id: request.id, args: arguments)
         default:
             return JSONRPCResponse(id: request.id, error: JSONRPCError(code: -32602, message: "Unknown tool: \(toolName)"))
         }
@@ -345,6 +396,39 @@ public class MCPMessageHandler {
             "plist": "xml",
         ]
         return map[ext.lowercased()]
+    }
+
+    private func callNotify(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {
+        guard let title = args["title"]?.stringValue,
+              !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return JSONRPCResponse(id: id, error: .invalidParams)
+        }
+
+        let outcome = AlertDelivery.shared.deliver(
+            title: title,
+            body: args["body"]?.stringValue,
+            urgent: args["urgent"]?.boolValue ?? false,
+            external: args["external"]?.boolValue ?? false,
+            user: args["user"]?.stringValue,
+            host: args["host"]?.stringValue,
+            session: args["session"]?.stringValue)
+
+        // Tell the agent where it landed. "Delivered" when it named no
+        // session; when it named one that matched nothing, say so — an
+        // agent that can see its aim missed can ask the user rather than
+        // repeating the same miss.
+        switch outcome.matchedTarget {
+        case .none:
+            return toolResult(id: id, success: true, message: "Delivered.")
+        case .some(true):
+            return toolResult(id: id, success: true,
+                              message: "Delivered, shown against that session.")
+        case .some(false):
+            return toolResult(id: id, success: true,
+                              message: "Delivered, but no session matched that user/host/session "
+                                     + "— it is in the general alert list. Check the values, or "
+                                     + "ask the user which session they see this work in.")
+        }
     }
 
     private func callShowText(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {

@@ -40,11 +40,12 @@ final class MCPMessageHandlerTests: XCTestCase {
         XCTAssertNil(response.error)
         if case .object(let obj) = response.result,
            case .array(let tools) = obj["tools"] {
-            XCTAssertEqual(tools.count, 6) // show_text, show_diagram, show_model, clear_slot, list_slots, analyze_deps
+            XCTAssertEqual(tools.count, 7) // show_*, clear_slot, list_slots, analyze_deps, notify
             let names = tools.compactMap { tool -> String? in
                 if case .object(let t) = tool { return t["name"]?.stringValue }
                 return nil
             }
+            XCTAssertTrue(names.contains("notify"))
             XCTAssertTrue(names.contains("show_text"))
             XCTAssertTrue(names.contains("show_diagram"))
             XCTAssertTrue(names.contains("show_model"))
@@ -244,5 +245,140 @@ final class JSONRPCCodableTests: XCTestCase {
         XCTAssertEqual(JSONRPCError.invalidRequest.code, -32600)
         XCTAssertEqual(JSONRPCError.methodNotFound.code, -32601)
         XCTAssertEqual(JSONRPCError.invalidParams.code, -32602)
+    }
+}
+
+/// Routing an alert to a session. An alert on the WRONG session is worse
+/// than an unattached one — it lights a light next to work that isn't
+/// waiting on anything — so ambiguity has to resolve to "no session",
+/// never to a guess.
+final class AlertRoutingTests: XCTestCase {
+
+    private let candidates = [
+        (key: "host:me@build-01:trainer", user: "me", host: "build-01", session: "trainer"),
+        (key: "host:me@build-01:api", user: "me", host: "build-01", session: "api"),
+        (key: "host:you@build-02:api", user: "you", host: "build-02", session: "api"),
+    ]
+
+    private func resolve(_ user: String?, _ host: String?, _ session: String?) -> String? {
+        AlertRouting.resolve(user: user, host: host, session: session, candidates: candidates)
+    }
+
+    func testAllThreeDetailsMatchExactly() {
+        XCTAssertEqual(resolve("me", "build-01", "trainer"), "host:me@build-01:trainer")
+    }
+
+    /// The common case worth being generous about: one unique session
+    /// name is enough, so an agent doesn't have to run three commands to
+    /// say where it is.
+    func testAUniqueSessionNameAloneIsEnough() {
+        XCTAssertEqual(resolve(nil, nil, "trainer"), "host:me@build-01:trainer")
+    }
+
+    /// "api" exists twice. Guessing would light the wrong session.
+    func testAnAmbiguousNameResolvesToNothing() {
+        XCTAssertNil(resolve(nil, nil, "api"))
+    }
+
+    func testAmbiguityIsResolvedByAnyAdditionalDetail() {
+        XCTAssertEqual(resolve(nil, "build-02", "api"), "host:you@build-02:api")
+        XCTAssertEqual(resolve("me", nil, "api"), "host:me@build-01:api")
+    }
+
+    /// People and machines disagree about whether a host is short or
+    /// fully qualified; both directions should match.
+    func testHostNamesMatchAcrossTheDomainSuffix() {
+        let fq = [(key: "k", user: "me", host: "build-01.example.com", session: "api")]
+        XCTAssertEqual(AlertRouting.resolve(user: nil, host: "build-01", session: nil,
+                                            candidates: fq), "k")
+        let short = [(key: "k", user: "me", host: "build-01", session: "api")]
+        XCTAssertEqual(AlertRouting.resolve(user: nil, host: "build-01.example.com",
+                                            session: nil, candidates: short), "k")
+    }
+
+    /// …but not loosely. "build" naming "buildsomething" would attach
+    /// alerts to a machine the agent never mentioned.
+    func testAPrefixIsNotEnoughWithoutADotBoundary() {
+        let other = [(key: "k", user: "me", host: "buildsomething", session: "api")]
+        XCTAssertNil(AlertRouting.resolve(user: nil, host: "build", session: nil,
+                                          candidates: other))
+    }
+
+    func testNoDetailsMeansNoSession() {
+        XCTAssertNil(resolve(nil, nil, nil))
+        XCTAssertNil(resolve("", "  ", nil), "blank strings are not a target")
+    }
+
+    func testMatchingIsCaseInsensitive() {
+        XCTAssertEqual(resolve("ME", "BUILD-01", "Trainer"), "host:me@build-01:trainer")
+    }
+
+    func testANameThatMatchesNothingResolvesToNothing() {
+        XCTAssertNil(resolve(nil, nil, "no-such-session"))
+    }
+}
+
+/// The store behind the indicator.
+final class AlertStoreTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        AlertStore.shared.resetForTesting()
+    }
+
+    private func record(_ title: String, key: String?, urgent: Bool = false) {
+        AlertStore.shared.record(SessionAlert(title: title, urgent: urgent, sessionKey: key))
+    }
+
+    func testAnAlertLightsItsOwnSessionAndNoOther() {
+        record("build done", key: "host:me@a:one")
+        XCTAssertTrue(AlertStore.shared.hasUnseen(for: "host:me@a:one"))
+        XCTAssertFalse(AlertStore.shared.hasUnseen(for: "host:me@a:two"))
+    }
+
+    /// "Seen" means "I've looked", not "throw it away" — the message you
+    /// were away for is the one you most want to re-read.
+    func testMarkingSeenClearsTheLightButKeepsTheHistory() {
+        record("first", key: "k")
+        record("second", key: "k")
+        AlertStore.shared.markSeen(for: "k")
+
+        XCTAssertFalse(AlertStore.shared.hasUnseen(for: "k"))
+        XCTAssertEqual(AlertStore.shared.alerts(for: "k").count, 2)
+    }
+
+    func testANewAlertLightsItAgain() {
+        record("first", key: "k")
+        AlertStore.shared.markSeen(for: "k")
+        record("second", key: "k")
+        XCTAssertEqual(AlertStore.shared.unseenCount(for: "k"), 1)
+    }
+
+    func testNewestFirst() {
+        record("older", key: "k")
+        record("newer", key: "k")
+        XCTAssertEqual(AlertStore.shared.alerts(for: "k").first?.title, "newer")
+    }
+
+    /// An agent in a loop must not be able to grow this without bound.
+    func testHistoryIsCappedPerSession() {
+        for i in 0..<(AlertStore.maxPerSession + 25) { record("m\(i)", key: "k") }
+        XCTAssertEqual(AlertStore.shared.alerts(for: "k").count, AlertStore.maxPerSession)
+        XCTAssertEqual(AlertStore.shared.alerts(for: "k").first?.title,
+                       "m\(AlertStore.maxPerSession + 24)", "the newest are the ones kept")
+    }
+
+    func testAlertsWithNoSessionGoSomewhereReachable() {
+        record("unattached", key: nil)
+        XCTAssertEqual(AlertStore.shared.alerts(for: nil).count, 1)
+        XCTAssertTrue(AlertStore.shared.hasUnseen(for: nil))
+    }
+
+    /// A killed session's history goes with it — otherwise it's a light
+    /// nobody can reach and a list nobody can open.
+    func testForgettingASessionDropsItsAlerts() {
+        record("gone", key: "k")
+        AlertStore.shared.forget(key: "k")
+        XCTAssertTrue(AlertStore.shared.alerts(for: "k").isEmpty)
     }
 }

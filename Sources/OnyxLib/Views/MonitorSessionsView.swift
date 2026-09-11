@@ -227,6 +227,7 @@ struct SessionNotesSection: View {
                         shortcut: entry.shortcut,
                         isActive: appState.activeSession?.id == entry.session.id,
                         accentColor: appState.accentColor,
+                        alertKey: appState.storageKey(for: entry.session),
                         // jumpToSession, not switchToSession: it routes through
                         // the terminal pool (so the session's view actually
                         // activates) and drops the overlays covering it —
@@ -247,6 +248,8 @@ private struct SessionNoteRow: View {
     let shortcut: Int?
     let isActive: Bool
     let accentColor: Color
+    /// Storage key for this session, so alerts can be looked up.
+    let alertKey: String?
     let onTap: () -> Void
     @Environment(\.monitorFontScale) private var fontScale
 
@@ -282,6 +285,11 @@ private struct SessionNoteRow: View {
                     }
                 }
                 Spacer(minLength: 0)
+                // Anything an agent said about this session. Sits next to
+                // the note because the note is what tells you which piece
+                // of work this row is.
+                SessionAlertIndicator(sessionKey: alertKey, accentColor: accentColor,
+                                      size: 11 * fontScale)
                 // Terminal-output activity: how long since this session last
                 // produced output. Green when it just printed something, grey
                 // "idle" once it's been quiet — so a test run that finished

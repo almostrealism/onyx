@@ -995,6 +995,7 @@ public class AppState: ObservableObject {
     /// it remotely" and "forget it locally", can't drift.
     func forgetSessionEntries(_ session: TmuxSession) {
         let keys = storageKeys(for: session)
+        for key in keys { AlertStore.shared.forget(key: key) }
         for key in keys { SessionNotesStore.shared.clearNote(for: key) }
         FavoritesStore.shared.entries.removeAll { keys.contains($0.sessionID) }
         FavoritesStore.shared.save()
@@ -1073,6 +1074,10 @@ public class AppState: ObservableObject {
 
     private var sessionNotesURL: URL {
         appSupportDir.appendingPathComponent("session-notes.json")
+    }
+
+    private var alertsURL: URL {
+        appSupportDir.appendingPathComponent("alerts.json")
     }
 
     private var pageWatchesURL: URL {
@@ -1596,6 +1601,10 @@ public class AppState: ObservableObject {
     private func loadFavorites() {
         FavoritesStore.shared.configure(url: favoritesURL)
         SessionNotesStore.shared.configure(url: sessionNotesURL)
+        AlertStore.shared.configure(url: alertsURL)
+        // Alerts attach to sessions, not to windows, so the delivery path
+        // binds once to whichever window came up first.
+        AlertDelivery.shared.register(appState: self)
         // Wire up the screensaver pipeline. Both calls are no-ops under
         // XCTest so unit tests don't write to the user's real cpu-stream.json
         // or kick off real SSH fan-out polling.
@@ -1605,6 +1614,7 @@ public class AppState: ObservableObject {
             // Page watches. Cheap when none are configured (the tick just
             // finds nothing due) and the store is loaded either way so the
             // settings list survives a restart.
+            AlertDelivery.shared.requestExternalPermissionIfPossible()
             PageWatchStore.shared.configure(url: pageWatchesURL)
             PageWatchManager.shared.start()
             // Start polling configured GitHub repos for open PRs. The

@@ -1431,10 +1431,12 @@ private struct FavoriteBarChip: View {
     let session: TmuxSession
     let index: Int
     @ObservedObject var appState: AppState
+    @ObservedObject private var notes = SessionNotesStore.shared
     @State private var hovering = false
 
     private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
     private var isActive: Bool { appState.activeSession?.id == session.id }
+    private var hasNote: Bool { appState.note(for: session) != nil }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -1454,6 +1456,16 @@ private struct FavoriteBarChip: View {
                 .padding(.vertical, 3)
             }
             .buttonStyle(.plain)
+
+            // A session with a note shows its alerts next to that note in
+            // the monitor. One without has no row there, so the chip is
+            // the only place the light can live.
+            if !hasNote {
+                SessionAlertIndicator(sessionKey: appState.storageKey(for: session),
+                                      accentColor: appState.accentColor,
+                                      size: sz(9))
+                    .padding(.trailing, 2)
+            }
 
             SessionMenuAffordance(session: session, appState: appState,
                                   visible: hovering, size: sz(9))
