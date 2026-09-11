@@ -142,3 +142,113 @@ final class StorageKeyResolutionTests: XCTestCase {
         XCTAssertEqual(keys[1], s.id)
     }
 }
+
+/// Step 2: the migration itself. The property that matters is not "the
+/// keys changed" — it's that everything still resolves afterwards, which
+/// is precisely what nobody checked last time.
+final class StorageKeyMigrationTests: XCTestCase {
+
+    private let host = HostConfig(label: "build",
+                                  ssh: SSHConfig(host: "build.example.com", user: "me"))
+
+    private func state() -> AppState {
+        let s = AppState()
+        FavoritesStore.shared.reset()
+        SessionNotesStore.shared.reset()
+        s.hosts = [host]
+        return s
+    }
+
+    private func session(_ name: String) -> TmuxSession {
+        TmuxSession(name: name, source: .host(hostID: host.id))
+    }
+
+    /// Simulates what the launch path does, without touching disk.
+    private func migrate(_ state: AppState) {
+        var mapping: [String: String] = [:]
+        for s in state.allSessions {
+            let keys = state.storageKeys(for: s)
+            if keys.count == 2 { mapping[keys[1]] = keys[0] }
+        }
+        SessionNotesStore.shared.rekey(mapping)
+        var entries = state.favoriteEntries
+        for i in entries.indices {
+            if let new = mapping[entries[i].sessionID] { entries[i].sessionID = new }
+        }
+        state.favoriteEntries = entries
+    }
+
+    func testEverythingStillResolvesAfterMigrating() {
+        let state = self.state()
+        let s = session("api")
+        state.allSessions = [s]
+        FavoritesStore.shared.entries = [FavoriteEntry(sessionID: s.id,
+                                                       windows: [state.windowIndex])]
+        SessionNotesStore.shared.setNote("still here", for: s.id)
+
+        migrate(state)
+
+        // The assertion that was missing in the attempt that lost data.
+        XCTAssertTrue(state.isFavorited(s))
+        XCTAssertEqual(state.favoriteSessions.map(\.name), ["api"])
+        XCTAssertEqual(state.note(for: s)?.text, "still here")
+    }
+
+    func testTheKeysActuallyMoved() {
+        let state = self.state()
+        let s = session("api")
+        state.allSessions = [s]
+        FavoritesStore.shared.entries = [FavoriteEntry(sessionID: s.id,
+                                                       windows: [state.windowIndex])]
+        migrate(state)
+        XCTAssertEqual(FavoritesStore.shared.entries.first?.sessionID,
+                       SessionIdentity.storageKey(for: s, host: host))
+    }
+
+    /// Runs on every launch, so it has to be a no-op the second time.
+    func testMigratingTwiceChangesNothing() {
+        let state = self.state()
+        let s = session("api")
+        state.allSessions = [s]
+        FavoritesStore.shared.entries = [FavoriteEntry(sessionID: s.id,
+                                                       windows: [state.windowIndex])]
+        SessionNotesStore.shared.setNote("note", for: s.id)
+
+        migrate(state)
+        let afterFirst = FavoritesStore.shared.entries.map(\.sessionID)
+        migrate(state)
+
+        XCTAssertEqual(FavoritesStore.shared.entries.map(\.sessionID), afterFirst)
+        XCTAssertEqual(SessionNotesStore.shared.notes.count, 1)
+        XCTAssertEqual(state.note(for: s)?.text, "note")
+    }
+
+    /// A migration can be interrupted; the half-done state must work.
+    func testAHalfMigratedFileResolvesAndFinishes() {
+        let state = self.state()
+        let a = session("api"), b = session("web")
+        state.allSessions = [a, b]
+        FavoritesStore.shared.entries = [
+            FavoriteEntry(sessionID: a.id, windows: [state.windowIndex]),
+            FavoriteEntry(sessionID: SessionIdentity.storageKey(for: b, host: host),
+                          windows: [state.windowIndex]),
+        ]
+
+        XCTAssertEqual(Set(state.favoriteSessions.map(\.name)), ["api", "web"])
+        migrate(state)
+        XCTAssertEqual(Set(state.favoriteSessions.map(\.name)), ["api", "web"])
+    }
+
+    /// A note whose host is gone keeps its key and keeps resolving to
+    /// nothing — but it is NOT deleted, so re-adding the host brings it
+    /// back.
+    func testAnOrphanedEntryIsNotDiscarded() {
+        let state = self.state()
+        let orphan = TmuxSession(name: "api", source: .host(hostID: UUID()))
+        SessionNotesStore.shared.setNote("orphan", for: orphan.id)
+        state.allSessions = []
+
+        migrate(state)
+        XCTAssertEqual(SessionNotesStore.shared.note(for: orphan.id)?.text, "orphan")
+    }
+}

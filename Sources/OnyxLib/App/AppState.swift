@@ -1195,6 +1195,7 @@ public class AppState: ObservableObject {
         AppearanceStore.shared.configure(url: appearanceURL)
 
         loadFavorites()
+        migrateStorageKeysIfNeeded()
         loadTopology()
         loadLocalSessions()
         configLoaded = true
@@ -1502,6 +1503,68 @@ public class AppState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             self?.hooksSetupStatus = nil
         }
+    }
+
+    /// STEP 2: rewrite stored keys to the identity form.
+    ///
+    /// Safe only because step 1 landed first — every read already accepts
+    /// both forms, so a file that is un-migrated, migrated, or caught
+    /// half-way all resolve identically. That ordering is the whole
+    /// lesson from the attempt that wiped a favourites list.
+    ///
+    /// Idempotent: an already-migrated key has "@" in its machine field
+    /// and is skipped, so this runs on every launch and does nothing
+    /// after the first.
+    ///
+    /// A key naming a host that no longer exists is LEFT ALONE. Someone
+    /// may re-add that host, and dropping notes in a migration would be
+    /// unforgivable — step 1 means those keep resolving anyway.
+    ///
+    /// Both files are copied aside once before anything is touched.
+    private func migrateStorageKeysIfNeeded() {
+        var mapping: [String: String] = [:]
+        // Build from LIVE sessions: each one knows both of its keys, so
+        // the mapping is derived from the same resolver the reader uses
+        // rather than from a second parse of the stored string.
+        for session in allSessions {
+            let keys = storageKeys(for: session)
+            guard keys.count == 2 else { continue }   // no host → nothing to move
+            mapping[keys[1]] = keys[0]                // legacy → identity
+        }
+        // Sessions that aren't currently listed still have stored entries;
+        // reconstruct those from the host list.
+        for host in hosts {
+            let prefix = "host:\(host.id.uuidString):"
+            let machine = SessionIdentity.key(for: host)
+            for key in SessionNotesStore.shared.notes.keys
+                        + FavoritesStore.shared.entries.map(\.sessionID)
+            where key.hasPrefix(prefix) && mapping[key] == nil {
+                mapping[key] = "host:\(machine):" + key.dropFirst(prefix.count)
+            }
+        }
+
+        let stored = Set(SessionNotesStore.shared.notes.keys)
+            .union(FavoritesStore.shared.entries.map(\.sessionID))
+        mapping = mapping.filter { stored.contains($0.key) }
+        guard !mapping.isEmpty else { return }
+
+        for url in [sessionNotesURL, favoritesURL] {
+            let backup = url.appendingPathExtension("pre-rekey")
+            if !FileManager.default.fileExists(atPath: backup.path) {
+                try? FileManager.default.copyItem(at: url, to: backup)
+            }
+        }
+
+        SessionNotesStore.shared.rekey(mapping)
+        var entries = favoriteEntries
+        for i in entries.indices {
+            if let new = mapping[entries[i].sessionID] { entries[i].sessionID = new }
+        }
+        favoriteEntries = entries
+        saveFavorites()
+
+        DiagnosticLog.shared.record(
+            "config", "session keys moved to user@host (\(mapping.count) entries)")
     }
 
     private func loadFavorites() {
