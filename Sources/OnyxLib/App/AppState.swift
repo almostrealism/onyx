@@ -734,7 +734,9 @@ public class AppState: ObservableObject {
 
     /// Toggle whether a favorite is visible in a specific window
     public func toggleFavoriteWindow(_ session: TmuxSession, windowIndex: Int) {
-        guard let idx = favoriteEntries.firstIndex(where: { $0.sessionID == session.id }) else { return }
+        let keys = storageKeys(for: session)
+        guard let idx = favoriteEntries.firstIndex(where: { keys.contains($0.sessionID) })
+        else { return }
         if favoriteEntries[idx].windows.contains(windowIndex) {
             favoriteEntries[idx].windows.remove(windowIndex)
         } else {
@@ -745,7 +747,9 @@ public class AppState: ObservableObject {
 
     /// Check if a favorite is visible in a specific window
     public func isFavoriteInWindow(_ session: TmuxSession, windowIndex: Int) -> Bool {
-        guard let entry = favoriteEntries.first(where: { $0.sessionID == session.id }) else { return false }
+        let keys = storageKeys(for: session)
+        guard let entry = favoriteEntries.first(where: { keys.contains($0.sessionID) })
+        else { return false }
         return entry.windows.contains(windowIndex)
     }
 
@@ -942,7 +946,7 @@ public class AppState: ObservableObject {
                         failure: true)
                     return
                 }
-                self.migrateSessionIdentity(from: oldID, to: renamed)
+                self.migrateSessionIdentity(from: session, to: renamed)
                 if wasActive { self.activeSession = renamed }
                 self.refreshSessionList = true
             }
@@ -955,6 +959,7 @@ public class AppState: ObservableObject {
             "kill-session -t \(Self.shellQuote(session.name))", for: session) else { return }
 
         let id = session.id
+        let storedKeys = storageKeys(for: session)
         let wasActive = activeSession?.id == id
         // Move off it BEFORE it dies, so the terminal isn't sitting on a
         // session that no longer exists while the command runs.
@@ -977,27 +982,48 @@ public class AppState: ObservableObject {
                         failure: true)
                     return
                 }
-                SessionNotesStore.shared.clearNote(for: id)
-                FavoritesStore.shared.entries.removeAll { $0.sessionID == id }
-                FavoritesStore.shared.save()
+                self.forgetSessionEntries(session)
                 self.refreshSessionList = true
             }
         }
     }
 
-    /// Move a session's note and favourite slot to its new id.
-    private func migrateSessionIdentity(from oldID: String, to renamed: TmuxSession) {
-        if let note = SessionNotesStore.shared.note(for: oldID) {
-            SessionNotesStore.shared.setNote(note.text, for: renamed.id)
-            SessionNotesStore.shared.clearNote(for: oldID)
+    /// Drop everything stored against a session that no longer exists.
+    ///
+    /// Separate from `killSession` so the local effect can be tested
+    /// without a host to kill anything on — and so the two halves, "end
+    /// it remotely" and "forget it locally", can't drift.
+    func forgetSessionEntries(_ session: TmuxSession) {
+        let keys = storageKeys(for: session)
+        for key in keys { SessionNotesStore.shared.clearNote(for: key) }
+        FavoritesStore.shared.entries.removeAll { keys.contains($0.sessionID) }
+        FavoritesStore.shared.save()
+    }
+
+    /// Move a session's note and favourite slot to its new name.
+    ///
+    /// Resolved through `storageKeys` on BOTH sides. The session's name is
+    /// part of its storage key, so a rename changes that key — and an
+    /// entry may still be sitting under the legacy id as well. Looking
+    /// either side up by the in-memory id alone silently stopped carrying
+    /// notes across a rename the moment storage moved to identity keys.
+    func migrateSessionIdentity(from old: TmuxSession, to renamed: TmuxSession) {
+        let oldKeys = storageKeys(for: old)
+        let newKey = storageKey(for: renamed)
+
+        for key in oldKeys {
+            guard let note = SessionNotesStore.shared.note(for: key) else { continue }
+            SessionNotesStore.shared.setNote(note.text, for: newKey)
+            SessionNotesStore.shared.clearNote(for: key)
+            break
         }
         var moved = false
         for i in FavoritesStore.shared.entries.indices
-        where FavoritesStore.shared.entries[i].sessionID == oldID {
+        where oldKeys.contains(FavoritesStore.shared.entries[i].sessionID) {
             // Edited in place so the ⌘-number keeps its position in the
             // bar — remove-and-append would silently renumber every
             // favourite after it.
-            FavoritesStore.shared.entries[i].sessionID = renamed.id
+            FavoritesStore.shared.entries[i].sessionID = newKey
             moved = true
         }
         if moved { FavoritesStore.shared.save() }

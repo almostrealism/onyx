@@ -252,3 +252,121 @@ final class StorageKeyMigrationTests: XCTestCase {
         XCTAssertEqual(SessionNotesStore.shared.note(for: orphan.id)?.text, "orphan")
     }
 }
+
+/// Everything that MUTATES stored entries, exercised under both key
+/// forms. These are the call sites the first two rounds of this work
+/// missed: each one looked fine in isolation and silently did nothing
+/// once storage moved to identity keys.
+final class StorageKeyMutationTests: XCTestCase {
+
+    private let host = HostConfig(label: "build",
+                                  ssh: SSHConfig(host: "build.example.com", user: "me"))
+
+    private func state() -> AppState {
+        let s = AppState()
+        FavoritesStore.shared.reset()
+        SessionNotesStore.shared.reset()
+        s.hosts = [host]
+        return s
+    }
+
+    private func session(_ name: String) -> TmuxSession {
+        TmuxSession(name: name, source: .host(hostID: host.id))
+    }
+
+    // MARK: - Per-window favourites
+
+    func testWindowToggleFindsAnEntryUnderEitherKey() {
+        for legacy in [true, false] {
+            let state = self.state()
+            let s = session("api")
+            state.allSessions = [s]
+            let key = legacy ? s.id : SessionIdentity.storageKey(for: s, host: host)
+            FavoritesStore.shared.entries = [FavoriteEntry(sessionID: key, windows: [0])]
+
+            state.toggleFavoriteWindow(s, windowIndex: 2)
+            XCTAssertTrue(state.isFavoriteInWindow(s, windowIndex: 2),
+                          "window toggle must find the entry (legacy key: \(legacy))")
+
+            state.toggleFavoriteWindow(s, windowIndex: 2)
+            XCTAssertFalse(state.isFavoriteInWindow(s, windowIndex: 2))
+        }
+    }
+
+    // MARK: - Rename
+
+    /// The session's NAME is part of its storage key, so a rename moves
+    /// the key. Carrying the note across is the whole reason rename is
+    /// more than a tmux call.
+    func testRenameCarriesTheNoteAndTheFavouriteSlot() {
+        let state = self.state()
+        let before = session("old")
+        let after = session("new")
+        state.allSessions = [before]
+
+        SessionNotesStore.shared.setNote("waiting on the migration",
+                                         for: state.storageKey(for: before))
+        FavoritesStore.shared.entries = [
+            FavoriteEntry(sessionID: state.storageKey(for: before), windows: [state.windowIndex])
+        ]
+
+        state.migrateSessionIdentity(from: before, to: after)
+        state.allSessions = [after]
+
+        XCTAssertEqual(state.note(for: after)?.text, "waiting on the migration")
+        XCTAssertTrue(state.isFavorited(after))
+        XCTAssertNil(state.note(for: before), "the old key should not still hold it")
+    }
+
+    /// Same, for a session whose entries predate the migration.
+    func testRenameCarriesEntriesStoredUnderTheLegacyKey() {
+        let state = self.state()
+        let before = session("old")
+        let after = session("new")
+        state.allSessions = [before]
+
+        SessionNotesStore.shared.setNote("legacy", for: before.id)
+        FavoritesStore.shared.entries = [FavoriteEntry(sessionID: before.id,
+                                                       windows: [state.windowIndex])]
+
+        state.migrateSessionIdentity(from: before, to: after)
+        state.allSessions = [after]
+
+        XCTAssertEqual(state.note(for: after)?.text, "legacy")
+        XCTAssertTrue(state.isFavorited(after))
+    }
+
+    /// A rename must not renumber the bar: the entry is edited in place,
+    /// so ⌘3 stays ⌘3.
+    func testRenameKeepsItsPositionInTheBar() {
+        let state = self.state()
+        let a = session("a"), b = session("b"), c = session("c")
+        state.allSessions = [a, b, c]
+        for s in [a, b, c] { state.toggleFavorite(s) }
+
+        let renamed = session("b-renamed")
+        state.migrateSessionIdentity(from: b, to: renamed)
+        state.allSessions = [a, renamed, c]
+
+        XCTAssertEqual(state.favoriteSessions.map(\.name), ["a", "b-renamed", "c"])
+    }
+
+    // MARK: - Kill
+
+    func testKillingASessionForgetsItsEntriesUnderEitherKey() {
+        for legacy in [true, false] {
+            let state = self.state()
+            let s = session("api")
+            state.allSessions = [s]
+            let key = legacy ? s.id : SessionIdentity.storageKey(for: s, host: host)
+            SessionNotesStore.shared.setNote("gone soon", for: key)
+            FavoritesStore.shared.entries = [FavoriteEntry(sessionID: key,
+                                                           windows: [state.windowIndex])]
+
+            state.forgetSessionEntries(s)
+
+            XCTAssertNil(state.note(for: s), "note should be cleared (legacy key: \(legacy))")
+            XCTAssertFalse(state.isFavorited(s))
+        }
+    }
+}
