@@ -160,7 +160,8 @@ struct SessionNoteEntry {
 /// gets the identical ordering without inheriting the whole section view.
 func orderedSessionNotes(appState: AppState,
                          store: SessionNotesStore = .shared) -> [SessionNoteEntry] {
-    let noted = store.activeNotes(in: appState.allSessions)
+    let noted = store.activeNotes(in: appState.allSessions,
+                                  keys: { appState.storageKeys(for: $0) })
     let byID = Dictionary(noted.map { ($0.session.id, $0) },
                           uniquingKeysWith: { first, _ in first })
     var rows: [SessionNoteEntry] = []

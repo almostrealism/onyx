@@ -594,9 +594,59 @@ public class AppState: ObservableObject {
         favoriteEntries.map(\.sessionID)
     }
 
+    // MARK: - Storage keys
+
+    /// A session's note, under whichever key it happens to be stored.
+    public func note(for session: TmuxSession) -> SessionNote? {
+        for key in storageKeys(for: session) {
+            if let note = SessionNotesStore.shared.note(for: key) { return note }
+        }
+        return nil
+    }
+
+
+    /// The key a session's note and favourite are stored under.
+    ///
+    /// Identity-based (`host:user@machine:name`) when we know which host
+    /// the session belongs to, falling back to the in-memory id when we
+    /// don't — a session on a host that's been deleted still has to
+    /// resolve to something.
+    public func storageKey(for session: TmuxSession) -> String {
+        let hostID = session.source.hostID
+        guard let host = hosts.first(where: { $0.id == hostID })
+                ?? (hostID == HostConfig.localhostID ? HostConfig.localhost : nil) else {
+            return session.id
+        }
+        return SessionIdentity.storageKey(for: session, host: host)
+    }
+
+    /// Every key a session may be stored under, newest scheme first.
+    ///
+    /// The reader accepts BOTH forms, which is the whole point of doing
+    /// this before any migration: an un-migrated file keeps working, a
+    /// migrated one works, and a half-migrated one works too. Changing
+    /// the stored format before the reader could do this is what made a
+    /// favourites list vanish.
+    public func storageKeys(for session: TmuxSession) -> [String] {
+        let preferred = storageKey(for: session)
+        return preferred == session.id ? [preferred] : [preferred, session.id]
+    }
+
+    /// Map every key a set of sessions could be stored under back to the
+    /// session, for matching stored entries against live sessions.
+    func sessionsByStorageKey(_ sessions: [TmuxSession]) -> [String: TmuxSession] {
+        var map: [String: TmuxSession] = [:]
+        for session in sessions {
+            for key in storageKeys(for: session) where map[key] == nil {
+                map[key] = session
+            }
+        }
+        return map
+    }
+
     /// Only favorited sessions visible in this window, ordered by position
     public var favoriteSessions: [TmuxSession] {
-        let sessionMap = Dictionary(allSessions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let sessionMap = sessionsByStorageKey(allSessions)
         return favoriteEntries
             .filter { windowIndex > 3 || $0.windows.contains(windowIndex) }
             .compactMap { sessionMap[$0.sessionID] }
@@ -604,7 +654,7 @@ public class AppState: ObservableObject {
 
     /// All favorited sessions regardless of window assignment
     public var allFavoriteSessions: [TmuxSession] {
-        let sessionMap = Dictionary(allSessions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let sessionMap = sessionsByStorageKey(allSessions)
         return favoriteEntries.compactMap { sessionMap[$0.sessionID] }
     }
 
@@ -625,7 +675,8 @@ public class AppState: ObservableObject {
     /// If that leaves no windows, remove the entry entirely.
     /// If not favorited at all, add it for this window.
     public func toggleFavorite(_ session: TmuxSession) {
-        if let idx = favoriteEntries.firstIndex(where: { $0.sessionID == session.id }) {
+        let keys = storageKeys(for: session)
+        if let idx = favoriteEntries.firstIndex(where: { keys.contains($0.sessionID) }) {
             if favoriteEntries[idx].windows.contains(windowIndex) {
                 favoriteEntries[idx].windows.remove(windowIndex)
                 if favoriteEntries[idx].windows.isEmpty {
@@ -635,7 +686,8 @@ public class AppState: ObservableObject {
                 favoriteEntries[idx].windows.insert(windowIndex)
             }
         } else {
-            favoriteEntries.append(FavoriteEntry(sessionID: session.id, windows: [windowIndex]))
+            favoriteEntries.append(FavoriteEntry(sessionID: storageKey(for: session),
+                                                windows: [windowIndex]))
         }
         saveFavorites()
     }
@@ -658,23 +710,26 @@ public class AppState: ObservableObject {
     /// Only ever adds. It never removes or reorders anything the user
     /// arranged deliberately.
     public func autoFavoriteNewSession(_ session: TmuxSession) {
-        if let existing = favoriteEntries.first(where: { $0.sessionID == session.id }),
+        let keys = storageKeys(for: session)
+        if let existing = favoriteEntries.first(where: { keys.contains($0.sessionID) }),
            windowIndex > 3 || existing.windows.contains(windowIndex) {
             return   // already reachable here
         }
         guard favoriteSessions.count < 9 else { return }
 
-        if let idx = favoriteEntries.firstIndex(where: { $0.sessionID == session.id }) {
+        if let idx = favoriteEntries.firstIndex(where: { keys.contains($0.sessionID) }) {
             favoriteEntries[idx].windows.insert(windowIndex)
         } else {
-            favoriteEntries.append(FavoriteEntry(sessionID: session.id, windows: [windowIndex]))
+            favoriteEntries.append(FavoriteEntry(sessionID: storageKey(for: session),
+                                                windows: [windowIndex]))
         }
         saveFavorites()
     }
 
     /// Is favorited.
     public func isFavorited(_ session: TmuxSession) -> Bool {
-        favoriteEntries.contains { $0.sessionID == session.id }
+        let keys = storageKeys(for: session)
+        return favoriteEntries.contains { keys.contains($0.sessionID) }
     }
 
     /// Toggle whether a favorite is visible in a specific window
@@ -767,8 +822,15 @@ public class AppState: ObservableObject {
     /// actually see, which is also the one the ⌘N numbering counts.
     public func moveFavoriteByID(_ sessionID: String, direction: Int) {
         guard direction != 0 else { return }
-        guard let fromIdx = favoriteEntries.firstIndex(where: { $0.sessionID == sessionID }) else { return }
-        let visibleIDs = Set(favoriteSessions.map(\.id))
+        // Callers hand over a live session's id; the entry may be stored
+        // under that or under the identity key, so match on either.
+        let wanted = Set(allSessions.first(where: { $0.id == sessionID })
+                            .map { storageKeys(for: $0) } ?? [sessionID])
+        guard let fromIdx = favoriteEntries.firstIndex(where: { wanted.contains($0.sessionID) })
+        else { return }
+        // Visibility is also a storage-key question: an entry is visible
+        // when some live session resolves to it.
+        let visibleIDs = Set(favoriteSessions.flatMap { storageKeys(for: $0) })
         var toIdx = fromIdx + direction
         while toIdx >= 0, toIdx < favoriteEntries.count,
               !visibleIDs.contains(favoriteEntries[toIdx].sessionID) {

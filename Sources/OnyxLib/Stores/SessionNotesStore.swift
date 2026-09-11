@@ -106,7 +106,25 @@ public class SessionNotesStore: ObservableObject {
     /// sorted most-recently-edited first. Sessions that have since been
     /// removed don't appear in the monitor view but the underlying note
     /// is preserved on disk for when the session comes back.
-    public func activeNotes(in allSessions: [TmuxSession]) -> [(session: TmuxSession, note: SessionNote)] {
+    /// Notes paired with the live sessions they belong to.
+    ///
+    /// `keys` maps a session to every id it might be STORED under — the
+    /// identity key and the legacy in-memory one — so an un-migrated
+    /// file, a migrated one, and a half-migrated one all resolve. Default
+    /// preserves the old behaviour for callers that have no host list.
+    public func activeNotes(in allSessions: [TmuxSession],
+                            keys: (TmuxSession) -> [String] = { [$0.id] })
+        -> [(session: TmuxSession, note: SessionNote)] {
+        var byID: [String: TmuxSession] = [:]
+        for session in allSessions {
+            for key in keys(session) where byID[key] == nil { byID[key] = session }
+        }
+        return notes.values
+            .compactMap { note in byID[note.sessionID].map { (session: $0, note: note) } }
+            .sorted { $0.note.updated > $1.note.updated }
+    }
+
+    private func legacyActiveNotes(in allSessions: [TmuxSession]) -> [(session: TmuxSession, note: SessionNote)] {
         // uniquingKeysWith, not uniqueKeysWithValues: the latter TRAPS on a
         // duplicate session id. Duplicates shouldn't happen, but a crash from
         // transient session-list state isn't worth the risk — keep the first.

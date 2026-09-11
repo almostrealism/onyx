@@ -622,7 +622,8 @@ struct SimpleSessionActivityStrip: View {
     @ObservedObject private var activity = TerminalActivityStore.shared
 
     var body: some View {
-        let entries = notesStore.activeNotes(in: appState.allSessions)
+        let entries = notesStore.activeNotes(in: appState.allSessions,
+                                             keys: { appState.storageKeys(for: $0) })
             .filter { activity.lastOutput(for: $0.session.id) != nil }
         if !entries.isEmpty {
             HStack(spacing: 8) {

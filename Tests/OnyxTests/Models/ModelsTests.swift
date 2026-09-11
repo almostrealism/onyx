@@ -173,8 +173,10 @@ final class SessionModelTests: XCTestCase {
         // Session disappears (container stopped, etc.)
         state.allSessions = []
         XCTAssertEqual(state.favoriteSessions.count, 0)
-        // But the ID is still in the set (will reappear if session comes back)
-        XCTAssertTrue(state.favoritedSessionIDs.contains(s1.id))
+        // But the entry is still stored (it reappears if the session does).
+        // Asked by storage key, not by the in-memory id: those are the
+        // same string only under the legacy scheme.
+        XCTAssertTrue(state.favoritedSessionIDs.contains(state.storageKey(for: s1)))
     }
 
     /// The stored list keeps favorites whose session is currently gone (a
@@ -204,7 +206,7 @@ final class SessionModelTests: XCTestCase {
         XCTAssertEqual(state.favoriteSessions.map(\.id), [s1.id, s2.id])
 
         // The hidden favorite is preserved, not dropped.
-        XCTAssertTrue(state.favoritedSessionIDs.contains(gone.id))
+        XCTAssertTrue(state.favoritedSessionIDs.contains(state.storageKey(for: gone)))
     }
 
     /// Moving past the ends is a no-op even when hidden entries sit beyond
@@ -220,7 +222,8 @@ final class SessionModelTests: XCTestCase {
 
         state.moveFavoriteByID(s1.id, direction: 1)
         XCTAssertEqual(state.favoriteSessions.map(\.id), [s1.id])
-        XCTAssertEqual(state.favoritedSessionIDs, [s1.id, gone.id])
+        XCTAssertEqual(state.favoritedSessionIDs,
+                       [state.storageKey(for: s1), state.storageKey(for: gone)])
     }
 
     // MARK: - session filtering

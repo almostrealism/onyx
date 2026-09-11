@@ -107,7 +107,7 @@ struct SessionNoteEditor: View {
         // built and `selectAll` would select an empty string.
         let seed: String = {
             if let session = appState.activeSession,
-               let existing = SessionNotesStore.shared.note(for: session.id) {
+               let existing = appState.note(for: session) {
                 return existing.text
             }
             return ""
@@ -198,7 +198,7 @@ struct SessionNoteEditor: View {
             appState.showSessionNoteEditor = false
             return
         }
-        SessionNotesStore.shared.setNote(text, for: session.id)
+        SessionNotesStore.shared.setNote(text, for: appState.storageKey(for: session))
         appState.showSessionNoteEditor = false
     }
 }
