@@ -65,6 +65,18 @@ public struct MCPHostStatus: Equatable {
     }
 }
 
+/// What to tell the user about other accounts on a machine, once an
+/// install succeeds.
+public struct MultiUserHint: Identifiable, Equatable {
+    public let id = UUID()
+    public let host: String
+    /// False when the bridge landed in a home directory, where no other
+    /// account can reach it.
+    public let isShared: Bool
+    /// The command another account runs to adopt the shared install.
+    public let command: String
+}
+
 public final class MCPInstaller: ObservableObject {
     public static let shared = MCPInstaller()
 
@@ -73,6 +85,8 @@ public final class MCPInstaller: ObservableObject {
     /// hostID → a line describing what's happening right now, while an
     /// install runs. Nil when idle.
     @Published public private(set) var progress: [UUID: String] = [:]
+    /// Set after a successful install; the UI shows it once and clears it.
+    @Published public var multiUserHint: MultiUserHint?
 
     private let queue = DispatchQueue(label: "com.onyx.mcp-installer", qos: .utility)
 
@@ -107,6 +121,12 @@ public final class MCPInstaller: ObservableObject {
             B="$SHARED_OR_HOME/\(MCPInstall.relativeBinaryPath)"
             echo "---BIN---"
             if [ -x "$B" ]; then "$B" --version 2>&1 || echo "FAILED"; else echo "ABSENT"; fi
+            echo "---REG---"
+            if command -v claude >/dev/null 2>&1; then
+                claude mcp get onyx >/dev/null 2>&1 && echo "REGISTERED" || echo "UNREGISTERED"
+            else
+                echo "NO_CLAUDE"
+            fi
             """
             let (cmd, args, stdin) = appState.remoteScriptNoTTY(script, host: host)
             let result = RemoteExec.shared.run(cmd, args: args, stdin: stdin,
@@ -153,8 +173,26 @@ public final class MCPInstaller: ObservableObject {
         }
         if first.hasPrefix("OnyxMCP ") {
             let version = String(first.dropFirst("OnyxMCP ".count))
-            return MCPHostStatus(state: .installed(version: version),
-                                 checkedAt: Date(), path: path)
+            // The binary running is not the question. Claude Code has to
+            // KNOW about it, and it reads MCP servers from ~/.claude.json
+            // — which is why the previous version of this reported
+            // success on hosts where Claude never listed the server.
+            switch section("---REG---").first {
+            case "REGISTERED":
+                return MCPHostStatus(state: .installed(version: version),
+                                     checkedAt: Date(), path: path)
+            case "NO_CLAUDE":
+                return MCPHostStatus(state: .broken("installed, but Claude Code isn't on this host"),
+                                     checkedAt: Date(), path: path)
+            case "UNREGISTERED":
+                return MCPHostStatus(state: .broken("installed but not registered with Claude"),
+                                     checkedAt: Date(), path: path)
+            default:
+                // No answer at all — say installed rather than inventing a
+                // failure we didn't observe.
+                return MCPHostStatus(state: .installed(version: version),
+                                     checkedAt: Date(), path: path)
+            }
         }
         // It's there and it didn't answer — report what it said instead of
         // calling it "not installed", which would send someone to install
@@ -278,13 +316,38 @@ public final class MCPInstaller: ObservableObject {
         // 4. Move into place, mark executable, verify, and merge settings —
         //    in one script, because each step only makes sense if the one
         //    before it worked.
+        // Registration goes through `claude mcp add --scope user`, which
+        // writes ~/.claude.json — the file Claude Code actually reads for
+        // personal MCP servers. Writing mcpServers into
+        // ~/.claude/settings.json (what this used to do) put it somewhere
+        // Claude never looks, so the install reported success and the
+        // server never appeared. The docs also describe ~/.claude.json as
+        // Claude's own file, rewritten by it and holding the OAuth
+        // session, so editing it by hand is the wrong tool regardless.
+        //
+        // Hooks stay in ~/.claude/settings.json, which IS their
+        // documented home.
         let install = """
         set -e
         mv \(shellQuote(staging)) \(shellQuote(remotePath))
         chmod +x \(shellQuote(remotePath))
         echo "---RUNS---"
         \(shellQuote(remotePath)) --version
+        echo "---REG---"
+        if command -v claude >/dev/null 2>&1; then
+            # Remove first so a reinstall that changed the path replaces
+            # the old entry instead of failing on a duplicate name.
+            claude mcp remove onyx >/dev/null 2>&1 || true
+            if claude mcp add --scope user onyx -- \(shellQuote(remotePath)) >/dev/null 2>&1; then
+                claude mcp get onyx >/dev/null 2>&1 && echo "REGISTERED" || echo "ADDED_NOT_VISIBLE"
+            else
+                echo "ADD_FAILED"
+            fi
+        else
+            echo "NO_CLAUDE"
+        fi
         \(settingsMergeScript(binaryPath: remotePath))
+        \(multiUserScript(binaryPath: remotePath, base: base))
         echo "---DONE---"
         """
         let (icmd, iargs, istdin) = appState.remoteScriptNoTTY(install, host: host)
@@ -302,12 +365,88 @@ public final class MCPInstaller: ObservableObject {
             return false
         }
 
-        DiagnosticLog.shared.record("mcp", "installed on \(host.label) at \(remotePath)")
+        func marker(_ name: String) -> String? {
+            guard let r = out.range(of: name, options: .backwards) else { return nil }
+            return out[r.upperBound...]
+                .components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first(where: { !$0.isEmpty })
+        }
+
+        switch marker("---REG---") {
+        case "REGISTERED":
+            break
+        case "NO_CLAUDE":
+            fail("Bridge installed, but Claude Code isn't on \(host.label) — nothing to register with",
+                 for: host.id)
+            return false
+        case "ADD_FAILED", "ADDED_NOT_VISIBLE":
+            fail("Bridge installed, but `claude mcp add` didn't take on \(host.label)",
+                 for: host.id)
+            return false
+        default:
+            fail("Couldn't tell whether Claude registered the bridge on \(host.label)",
+                 for: host.id)
+            return false
+        }
+
+        DiagnosticLog.shared.record("mcp", "installed and registered on \(host.label) at \(remotePath)")
+
+        // A shared install can be adopted by the machine's other accounts;
+        // a home-directory one can't, and saying so is more useful than
+        // staying quiet about it.
+        DispatchQueue.main.async {
+            MCPInstaller.shared.multiUserHint =
+                MultiUserHint(host: host.label,
+                              isShared: MCPInstall.isSharedBase(base),
+                              command: "sh \(MCPInstall.multiUserScriptPath(base: base))")
+        }
         report("Installed on \(host.label)", for: host.id)
         return true
     }
 
-    /// Merge our hooks and MCP registration into ~/.claude/settings.json.
+    /// Leave a script beside the binary that another account can run to
+    /// adopt it.
+    ///
+    /// Registration is per-user by definition — `--scope user` writes the
+    /// running user's ~/.claude.json — so there is no way to install
+    /// "for everyone" from here. What we CAN do is make the second
+    /// account's job one command instead of a paragraph of instructions.
+    ///
+    /// Written only for a shared install: a bridge in someone's home
+    /// directory isn't readable by anyone else, so the script would
+    /// register a path its reader can't execute.
+    private func multiUserScript(binaryPath: String, base: String) -> String {
+        guard MCPInstall.isSharedBase(base) else { return "" }
+        let path = MCPInstall.multiUserScriptPath(base: base)
+        // Single-quoted heredoc: nothing in the body is expanded now, it
+        // is expanded when the other user runs it.
+        return """
+        cat > \(shellQuote(path)) <<'ONYXEOF'
+        #!/bin/sh
+        # Registers the shared Onyx MCP bridge for whoever runs this.
+        # Safe to re-run; safe to run as any account on this machine.
+        set -e
+        BIN=\(binaryPath)
+        if [ ! -x "$BIN" ]; then
+            echo "Onyx bridge not found at $BIN" >&2
+            exit 1
+        fi
+        if ! command -v claude >/dev/null 2>&1; then
+            echo "Claude Code (the 'claude' command) isn't on this PATH." >&2
+            exit 1
+        fi
+        claude mcp remove onyx >/dev/null 2>&1 || true
+        claude mcp add --scope user onyx -- "$BIN"
+        claude mcp get onyx >/dev/null 2>&1 \\
+            && echo "Onyx MCP registered for $(whoami)." \\
+            || { echo "claude mcp add ran but the server isn't listed." >&2; exit 1; }
+        ONYXEOF
+        chmod 0755 \(shellQuote(path)) 2>/dev/null || true
+        """
+    }
+
+    /// Merge our hooks into ~/.claude/settings.json.
     ///
     /// Merge, never replace: people have their own hooks and their own MCP
     /// servers, and a setup step that quietly deletes them would be the
@@ -344,9 +483,6 @@ public final class MCPInstaller: ObservableObject {
                 m["hooks"].append(entry)
             hooks[event] = matchers
         settings["hooks"] = hooks
-        servers = settings.get("mcpServers") or {}
-        servers["onyx"] = {"command": binary, "args": []}
-        settings["mcpServers"] = servers
         tmp = path + ".onyx-tmp"
         with open(tmp, "w") as f:
             json.dump(settings, f, indent=2)
@@ -354,12 +490,11 @@ public final class MCPInstaller: ObservableObject {
         os.replace(tmp, path)
         print("settings merged")
         PYEOF
-        elif [ ! -f "$HOME/.claude/settings.json" ]; then
-            printf '{\\n  "mcpServers": {\\n    "onyx": { "command": "%s", "args": [] }\\n  }\\n}\\n' "$ONYX_BIN" \\
-                > "$HOME/.claude/settings.json"
-            echo "settings created (no python3 — hooks not configured)"
         else
-            echo "settings left alone (no python3 to merge with)"
+            # Hooks are a nested merge; without python3 we leave the file
+            # alone rather than guess. The MCP registration above is the
+            # part that matters and it went through the CLI.
+            echo "hooks skipped (no python3 to merge with)"
         fi
         """
     }

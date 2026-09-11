@@ -108,12 +108,17 @@ public enum MCPInstall {
         "\(binaryPath) --hook"
     }
 
-    /// The `mcpServers` entry registering the bridge with Claude Code.
+    /// Where the adopt-me script lives, beside the binary.
+    public static func multiUserScriptPath(base: String) -> String {
+        binaryPath(base: base) + "-install-for-user.sh"
+    }
+
+    /// Only a shared install can be adopted by another account.
     ///
-    /// Written as its own object so it can be merged into an existing
-    /// settings file rather than replacing one — people have other MCP
-    /// servers configured and overwriting them would be unforgivable.
-    public static func mcpServerEntry(binaryPath: String) -> [String: Any] {
-        ["onyx": ["command": binaryPath, "args": [String]()]]
+    /// A bridge under one user's home directory is not readable — let
+    /// alone runnable — by anyone else, so offering the other accounts a
+    /// command would be offering them a broken one.
+    public static func isSharedBase(_ base: String) -> Bool {
+        base == "/Users/Shared"
     }
 }

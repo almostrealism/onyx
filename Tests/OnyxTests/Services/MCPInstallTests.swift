@@ -153,3 +153,80 @@ final class MCPStatusParsingTests: XCTestCase {
         XCTAssertEqual(out("zsh: event not found").state, .unknown)
     }
 }
+
+/// Registration is the thing that decides whether the MCP works, and it
+/// lives in ~/.claude.json via `claude mcp add --scope user` — NOT in
+/// ~/.claude/settings.json, which is where this used to write it. The
+/// install reported success for weeks while Claude never listed the
+/// server, so "installed" now means Claude says so.
+final class MCPRegistrationStatusTests: XCTestCase {
+
+    private func out(bin: String, reg: String) -> MCPHostStatus {
+        MCPInstaller.parseStatus("""
+        ---UNAME---
+        Linux
+        aarch64
+        ---BASE---
+        /home/me
+        ---BIN---
+        \(bin)
+        ---REG---
+        \(reg)
+        """)
+    }
+
+    func testReadyMeansClaudeListsIt() {
+        XCTAssertEqual(out(bin: "OnyxMCP 0.16", reg: "REGISTERED").state,
+                       .installed(version: "0.16"))
+    }
+
+    /// The exact case that shipped broken: the binary is there and runs,
+    /// and Claude has never heard of it.
+    func testARunningBinaryClaudeDoesNotKnowAboutIsNotReady() {
+        let s = out(bin: "OnyxMCP 0.16", reg: "UNREGISTERED")
+        guard case .broken(let why) = s.state else {
+            return XCTFail("expected broken, got \(s.state)")
+        }
+        XCTAssertTrue(why.contains("not registered"))
+        XCTAssertFalse(s.isWorking)
+    }
+
+    func testNoClaudeOnTheHostIsSaidPlainly() {
+        let s = out(bin: "OnyxMCP 0.16", reg: "NO_CLAUDE")
+        guard case .broken(let why) = s.state else {
+            return XCTFail("expected broken, got \(s.state)")
+        }
+        XCTAssertTrue(why.contains("Claude Code isn't on this host"))
+    }
+
+    /// An older bridge that predates the registration check answers
+    /// nothing for ---REG---. Reporting a failure we didn't observe would
+    /// be its own lie.
+    func testNoAnswerDoesNotInventAFailure() {
+        let s = MCPInstaller.parseStatus("""
+        ---UNAME---
+        Darwin
+        arm64
+        ---BASE---
+        /Users/Shared
+        ---BIN---
+        OnyxMCP 0.16
+        """)
+        XCTAssertTrue(s.isWorking)
+    }
+}
+
+/// Who can adopt a shared install.
+final class MCPMultiUserTests: XCTestCase {
+
+    func testOnlyASharedInstallCanBeAdopted() {
+        XCTAssertTrue(MCPInstall.isSharedBase("/Users/Shared"))
+        XCTAssertFalse(MCPInstall.isSharedBase("/Users/michael"))
+        XCTAssertFalse(MCPInstall.isSharedBase("/home/me"))
+    }
+
+    func testTheAdoptScriptSitsBesideTheBinary() {
+        XCTAssertEqual(MCPInstall.multiUserScriptPath(base: "/Users/Shared"),
+                       "/Users/Shared/.onyx/bin/OnyxMCP-install-for-user.sh")
+    }
+}

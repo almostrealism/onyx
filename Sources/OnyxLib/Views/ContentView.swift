@@ -274,6 +274,15 @@ public struct ContentView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.97)))
                 }
 
+                // Shown once after an MCP install succeeds.
+                if let hint = MCPInstaller.shared.multiUserHint {
+                    MCPMultiUserSheet(hint: hint, appState: appState) {
+                        MCPInstaller.shared.multiUserHint = nil
+                    }
+                    .transition(.opacity)
+                    .zIndex(60)
+                }
+
                 // Guided tour — above help, since it's what a first-time
                 // user is looking at before they know help exists.
                 if appState.showWalkthrough {
