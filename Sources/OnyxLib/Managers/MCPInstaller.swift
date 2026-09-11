@@ -301,7 +301,7 @@ public final class MCPInstaller: ObservableObject {
         //    that's half-uploaded is worse than one that's absent: Claude
         //    would run a truncated file and fail in a way that points
         //    nowhere near here.
-        let mk = "mkdir -p \"$(dirname \(shellQuote(remotePath)))\""
+        let mk = "mkdir -p \"$(dirname \(Self.shellQuote(remotePath)))\""
         let (mkc, mka, mks) = appState.remoteScriptNoTTY(mk, host: host)
         _ = RemoteExec.shared.run(mkc, args: mka, stdin: mks, softTimeout: 20,
                                   captureStdout: false, captureStderr: false,
@@ -354,10 +354,10 @@ public final class MCPInstaller: ObservableObject {
         // documented home.
         let install = """
         set -e
-        mv \(shellQuote(staging)) \(shellQuote(remotePath))
-        chmod +x \(shellQuote(remotePath))
+        mv \(Self.shellQuote(staging)) \(Self.shellQuote(remotePath))
+        chmod +x \(Self.shellQuote(remotePath))
         echo "---RUNS---"
-        \(shellQuote(remotePath)) --version
+        \(Self.shellQuote(remotePath)) --version
         \(Self.claudePickerScript)
         echo "---REG---"
         if [ -n "$ONYX_CLAUDE" ]; then
@@ -375,7 +375,7 @@ public final class MCPInstaller: ObservableObject {
             # claude CLI is a Node program that crashed on exactly that:
             # by hand it worked, under Onyx it died inside cli.js. Giving
             # it an empty stdin also stops it eating the lines after it.
-            ADD_OUT=$("$ONYX_CLAUDE" mcp add --scope user onyx -- \(shellQuote(remotePath)) </dev/null 2>&1) && ADD_RC=0 || ADD_RC=$?
+            ADD_OUT=$("$ONYX_CLAUDE" mcp add --scope user onyx -- \(Self.shellQuote(remotePath)) </dev/null 2>&1) && ADD_RC=0 || ADD_RC=$?
             GET_OUT=$("$ONYX_CLAUDE" mcp get onyx </dev/null 2>&1) && GET_RC=0 || GET_RC=$?
             if [ "$ADD_RC" = "0" ] && [ "$GET_RC" = "0" ]; then
                 echo "REGISTERED"
@@ -390,8 +390,8 @@ public final class MCPInstaller: ObservableObject {
         else
             echo "NO_CLAUDE"
         fi
-        \(settingsMergeScript(binaryPath: remotePath))
-        \(multiUserScript(binaryPath: remotePath, base: base))
+        \(Self.settingsMergeScript(binaryPath: remotePath))
+        \(Self.multiUserScript(binaryPath: remotePath, base: base))
         echo "---DONE---"
         """
         let (icmd, iargs, istdin) = appState.remoteScriptNoTTY(install, host: host)
@@ -471,22 +471,27 @@ public final class MCPInstaller: ObservableObject {
     /// Written only for a shared install: a bridge in someone's home
     /// directory isn't readable by anyone else, so the script would
     /// register a path its reader can't execute.
-    private func multiUserScript(binaryPath: String, base: String) -> String {
+    static func multiUserScript(binaryPath: String, base: String) -> String {
         guard MCPInstall.isSharedBase(base) else { return "" }
         let path = MCPInstall.multiUserScriptPath(base: base)
         // Single-quoted heredoc: nothing in the body is expanded now, it
         // is expanded when the other user runs it.
         return """
-        cat > \(shellQuote(path)) <<'ONYXEOF'
-        #!/bin/sh
+        cat > \(Self.shellQuote(path)) <<'ONYXEOF'
         # Registers the shared Onyx MCP bridge for whoever runs this.
         # Safe to re-run; safe to run as any account on this machine.
+        # No shebang on purpose: this heredoc travels through an
+        # interactive remote shell, where a bare bang is history
+        # expansion and takes the whole line with it. Run it as
+        # "sh <path>", which is what the dialog tells you to do.
         set -e
-        BIN=\(binaryPath)
-        if [ ! -x "$BIN" ]; then
+        BIN=\(Self.shellQuote(binaryPath))
+        # Written as "[ -x ] ||" rather than a negated test, for the same
+        # reason as the missing shebang above.
+        [ -x "$BIN" ] || {
             echo "Onyx bridge not found at $BIN" >&2
             exit 1
-        fi
+        }
         ONYX_CLAUDE=""
         for c in "$(command -v claude 2>/dev/null)" /opt/homebrew/bin/claude \\
                  /usr/local/bin/claude "$HOME/.local/bin/claude"; do
@@ -495,17 +500,17 @@ public final class MCPInstaller: ObservableObject {
             ONYX_CLAUDE="$c"
             break
         done
-        if [ -z "$ONYX_CLAUDE" ]; then
+        [ -n "$ONYX_CLAUDE" ] || {
             echo "No working 'claude' found on this PATH." >&2
             exit 1
-        fi
+        }
         "$ONYX_CLAUDE" mcp remove onyx </dev/null >/dev/null 2>&1 || true
         "$ONYX_CLAUDE" mcp add --scope user onyx -- "$BIN" </dev/null
         "$ONYX_CLAUDE" mcp get onyx </dev/null >/dev/null 2>&1 \\
             && echo "Onyx MCP registered for $(whoami)." \\
             || { echo "claude mcp add ran but the server isn't listed." >&2; exit 1; }
         ONYXEOF
-        chmod 0755 \(shellQuote(path)) 2>/dev/null || true
+        chmod 0755 \(Self.shellQuote(path)) 2>/dev/null || true
         """
     }
 
@@ -517,12 +522,12 @@ public final class MCPInstaller: ObservableObject {
     /// we only write a settings file when there ISN'T one, because a
     /// half-understood rewrite of somebody's config is not worth the
     /// convenience.
-    private func settingsMergeScript(binaryPath: String) -> String {
+    static func settingsMergeScript(binaryPath: String) -> String {
         let hookCmd = MCPInstall.hookCommand(binaryPath: binaryPath)
         return """
         mkdir -p "$HOME/.claude"
-        ONYX_BIN=\(shellQuote(binaryPath))
-        ONYX_HOOK=\(shellQuote(hookCmd))
+        ONYX_BIN=\(Self.shellQuote(binaryPath))
+        ONYX_HOOK=\(Self.shellQuote(hookCmd))
         if command -v python3 >/dev/null 2>&1; then
         python3 - "$HOME/.claude/settings.json" "$ONYX_BIN" "$ONYX_HOOK" <<'PYEOF'
         import json, sys, os
@@ -564,7 +569,7 @@ public final class MCPInstaller: ObservableObject {
 
     // MARK: - Plumbing
 
-    private func shellQuote(_ s: String) -> String {
+    static func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
