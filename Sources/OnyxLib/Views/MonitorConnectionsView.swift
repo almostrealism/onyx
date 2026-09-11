@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ConnectionPoolSection: View {
     @ObservedObject var appState: AppState
@@ -10,6 +11,8 @@ struct ConnectionPoolSection: View {
     /// expanded panel showed "alive" because they sampled the state
     /// at different times).
     @ObservedObject private var registry = ConnectionPairRegistry.shared
+    /// The event whose full text is being shown, if any.
+    @State private var selectedEvent: DiagnosticLog.Entry?
     /// Text scales with the user's UI font size — the fixed column
     /// widths must scale by the SAME factor, or at larger sizes words
     /// like "connected" stop fitting their column and SwiftUI wraps
@@ -226,6 +229,11 @@ struct ConnectionPoolSection: View {
                     .foregroundColor(.gray.opacity(0.4))
 
                     ForEach(events) { event in
+                        // Clickable: these are the messages that explain a
+                        // failure, and they are routinely longer than the
+                        // two lines there's room for — a truncated remote
+                        // error is the same as no error.
+                        Button(action: { selectedEvent = event }) {
                         HStack(alignment: .top, spacing: 6) {
                             Text(Self.eventTime.string(from: event.at))
                                 .monitorFont(size: 9)
@@ -244,8 +252,17 @@ struct ConnectionPoolSection: View {
                             Spacer(minLength: 0)
                         }
                         .padding(.vertical, 1)
+                        .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Click for the full text")
                     }
                 }
+            }
+        }
+        .overlay {
+            if let event = selectedEvent {
+                EventDetailSheet(event: event) { selectedEvent = nil }
             }
         }
         // No timer-based refresh needed — keeper.stateGeneration
@@ -624,5 +641,87 @@ private struct MCPHostRow: View {
         case .notInstalled:         return "not installed"
         case .unknown:              return host.paused ? "host paused" : "checking…"
         }
+    }
+}
+
+/// One event's full text, because the list truncates.
+///
+/// These carry the remote's own words about a failure — an scp error, a
+/// crash from `claude`, a shell complaint — and they are exactly the
+/// thing someone needs to paste somewhere. Selectable, and one click to
+/// copy all of it.
+private struct EventDetailSheet: View {
+    let event: DiagnosticLog.Entry
+    let onClose: () -> Void
+
+    @State private var copied = false
+
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d MMM HH:mm:ss"
+        return f
+    }()
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.6)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onClose)
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 8) {
+                    Text(event.category.uppercased())
+                        .monitorFont(size: 10, weight: .medium)
+                        .foregroundColor(event.isFailure ? Color.onyxRed : Color.onyxBlue)
+                        .tracking(2)
+                    Text(Self.stamp.string(from: event.at))
+                        .monitorFont(size: 10)
+                        .foregroundColor(.gray.opacity(0.45))
+                    Spacer()
+                    Button(action: copy) {
+                        Text(copied ? "copied" : "copy")
+                            .monitorFont(size: 10)
+                            .foregroundColor(copied ? Color.onyxGreen : Color.onyxBlue)
+                    }
+                    .buttonStyle(.plain)
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9))
+                            .foregroundColor(.gray.opacity(0.5))
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+                Divider().background(Color.white.opacity(0.06))
+
+                ScrollView {
+                    Text(event.message)
+                        .monitorFont(size: 11)
+                        .foregroundColor(.white.opacity(0.85))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                }
+                .frame(maxHeight: 320)
+            }
+            .frame(width: 560)
+            .background(Color.black.opacity(0.95))
+            .cornerRadius(10)
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1))
+            .shadow(color: .black.opacity(0.5), radius: 24)
+        }
+    }
+
+    private func copy() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(
+            "[\(event.category)] \(Self.stamp.string(from: event.at))\n\(event.message)",
+            forType: .string)
+        copied = true
     }
 }

@@ -202,6 +202,13 @@ public class AppState: ObservableObject {
             // of the terminal; raising the monitor shouldn't leave the
             // session list stacked over it.
             if showMonitor && showSessionManager { showSessionManager = false }
+            // ⇧⌘C draws the terminal's text over the terminal; the monitor
+            // draws over everything. Both at once leaves selectable text
+            // under an opaque overlay — invisible, still eating clicks.
+            if showMonitor && showTerminalText {
+                showTerminalText = false
+                terminalTextContent = ""
+            }
         }
     }
     /// When true, the monitor renders the "simple" layout: same headline
@@ -230,7 +237,13 @@ public class AppState: ObservableObject {
     @Published public var needsKeySetup = false
     @Published public var keySetupInProgress = false
     @Published public var showSessionManager = false
-    @Published public var showTerminalText = false
+    @Published public var showTerminalText = false {
+        didSet {
+            // Same rule from the other direction: capturing the terminal's
+            // text means you want to read the terminal, not the monitor.
+            if showTerminalText && showMonitor { showMonitor = false }
+        }
+    }
     @Published public var terminalTextContent: String = ""
 
     /// Per-session connection truth. Single writer: OnyxTerminalView.
