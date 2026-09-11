@@ -230,3 +230,14 @@ final class MCPMultiUserTests: XCTestCase {
                        "/Users/Shared/.onyx/bin/OnyxMCP-install-for-user.sh")
     }
 }
+
+/// The bridge is a standalone target and can't import the library, so it
+/// hardcodes the forwarded port. If this number changes on one side and
+/// not the other, every remote MCP call fails with "backend unreachable"
+/// and nothing points here.
+final class MCPForwardedPortTests: XCTestCase {
+    func testTheForwardedPortMatchesWhatTheBridgeHardcodes() {
+        XCTAssertEqual(MCPSocketServer.defaultRemotePort, 19432,
+                       "Sources/OnyxMCP/main.swift hardcodes 19432 as defaultForwardedPort")
+    }
+}

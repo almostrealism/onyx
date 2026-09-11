@@ -32,6 +32,9 @@ final class HookModeTests: XCTestCase {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent("onyx-hook-test-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
         env["HOME"] = temp.path
+        // Same reason as MCPStdioTests: with the forwarded-port fallback
+        // live, "no backend" isn't a state this machine can be in.
+        env["ONYX_MCP_FORWARD_PORT"] = "0"
         env.removeValue(forKey: "ONYX_MCP_PORT")
         return env
     }

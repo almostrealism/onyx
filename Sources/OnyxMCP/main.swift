@@ -6,9 +6,20 @@ import Glibc
 /// OnyxMCP — stdio-to-socket bridge for MCP integration.
 /// Reads JSON-RPC from stdin, forwards to the Onyx app, writes responses to stdout.
 ///
-/// Connection modes:
-/// 1. If ONYX_MCP_PORT is set: connect via TCP to 127.0.0.1:<port> (remote SSH forwarding)
-/// 2. Otherwise: connect via Unix domain socket (local use)
+/// Connection modes, in order:
+/// 1. ONYX_MCP_PORT set: TCP to 127.0.0.1:<port>. Onyx exports this into
+///    the tmux sessions it starts.
+/// 2. The Unix socket — right when the bridge and the app are on the
+///    same machine.
+/// 3. TCP to the well-known forwarded port. Onyx's connection pair
+///    always carries `-R 19432:127.0.0.1:<app port>`, so on any host
+///    Onyx is connected to, the app is reachable there whether or not
+///    anything set an environment variable.
+///
+/// Without (3) the bridge worked only inside an Onyx terminal: run
+/// `claude mcp list` from your own ssh shell on a remote host and it
+/// reported "Onyx backend unreachable", because the socket it fell back
+/// to lives on the Mac running the app, not on the host.
 ///
 /// Resilience: the bridge process stays alive for the lifetime of the Claude
 /// session. Each request transparently reconnects on failure (up to 3 attempts
@@ -74,13 +85,35 @@ func connectToTCP(port: UInt16) -> Int32 {
     return fd
 }
 
+/// The port Onyx's connection-pair master forwards on every host.
+/// Must match MCPSocketServer.defaultRemotePort — the bridge is a
+/// standalone target and can't import the library to share it.
+///
+/// `ONYX_MCP_FORWARD_PORT` overrides it, and 0 turns the fallback off.
+/// Tests need that: without it, "no backend reachable" can't be asserted
+/// on a machine where Onyx happens to be forwarding this port — which is
+/// any machine a developer is actually using.
+let defaultForwardedPort: UInt16 = {
+    if let raw = ProcessInfo.processInfo.environment["ONYX_MCP_FORWARD_PORT"],
+       let port = UInt16(raw) {
+        return port
+    }
+    return 19432
+}()
+
 func connectToOnyx() -> Int32 {
     if let portStr = ProcessInfo.processInfo.environment["ONYX_MCP_PORT"],
        let port = UInt16(portStr) {
         let fd = connectToTCP(port: port)
         if fd >= 0 { return fd }
     }
-    return connectToUnixSocket()
+    // Same machine as the app.
+    let unix = connectToUnixSocket()
+    if unix >= 0 { return unix }
+    // A host Onyx is connected to: the master's -R forwarding makes the
+    // app answer here, with nothing needed in the environment.
+    guard defaultForwardedPort > 0 else { return -1 }
+    return connectToTCP(port: defaultForwardedPort)
 }
 
 func setReceiveTimeout(fd: Int32, seconds: Int) {
@@ -232,7 +265,7 @@ func errorResponse(id: String, message: String) -> String {
 
 /// Build identity, stamped by package.sh / CI so an installed bridge can
 /// be tied back to what produced it.
-let onyxMCPVersion = "0.16"
+let onyxMCPVersion = "0.17"
 
 // `--version` answers "is this thing installed and can it start", which
 // is the question both CI and the app's installer ask. It must not touch

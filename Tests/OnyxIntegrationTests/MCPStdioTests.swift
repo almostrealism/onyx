@@ -37,6 +37,11 @@ final class MCPStdioTests: XCTestCase {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent("onyx-mcp-test-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
         env["HOME"] = temp.path
+        // And switch off the forwarded-port fallback. Otherwise these
+        // tests pass or fail depending on whether Onyx happens to be
+        // forwarding 19432 on the machine running them — which it is,
+        // on any machine someone is actually using Onyx from.
+        env["ONYX_MCP_FORWARD_PORT"] = "0"
         env.removeValue(forKey: "ONYX_MCP_PORT")
         return env
     }
