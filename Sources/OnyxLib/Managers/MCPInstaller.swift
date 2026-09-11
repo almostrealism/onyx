@@ -121,9 +121,11 @@ public final class MCPInstaller: ObservableObject {
             B="$SHARED_OR_HOME/\(MCPInstall.relativeBinaryPath)"
             echo "---BIN---"
             if [ -x "$B" ]; then "$B" --version 2>&1 || echo "FAILED"; else echo "ABSENT"; fi
+            \(Self.claudePickerScript)
             echo "---REG---"
-            if command -v claude >/dev/null 2>&1; then
-                claude mcp get onyx >/dev/null 2>&1 && echo "REGISTERED" || echo "UNREGISTERED"
+            if [ -n "$ONYX_CLAUDE" ]; then
+                "$ONYX_CLAUDE" mcp get onyx </dev/null >/dev/null 2>&1 \
+                    && echo "REGISTERED" || echo "UNREGISTERED"
             else
                 echo "NO_CLAUDE"
             fi
@@ -137,6 +139,29 @@ public final class MCPInstaller: ObservableObject {
             self.setStatus(Self.parseStatus(output), for: host.id)
         }
     }
+
+/// Find a `claude` that actually runs.
+    ///
+    /// A machine can carry more than one install — a Homebrew one under
+    /// /opt/homebrew and a stale npm-global one under /usr/local — and
+    /// PATH order decides which you get. On mac-studio ours resolved to
+    /// the /usr/local one, which crashed inside cli.js, while the user's
+    /// own shell found the Homebrew one and worked. Same command, same
+    /// host, different binary.
+    ///
+    /// So PATH is honoured FIRST — it is the user's own answer — and
+    /// only if that one can't even print its version do we look in the
+    /// usual places. The criterion is "it runs", not "it exists".
+    static let claudePickerScript = """
+    ONYX_CLAUDE=""
+    for c in "$(command -v claude 2>/dev/null)" /opt/homebrew/bin/claude \
+             /usr/local/bin/claude "$HOME/.local/bin/claude"; do
+        [ -n "$c" ] && [ -x "$c" ] || continue
+        "$c" --version </dev/null >/dev/null 2>&1 || continue
+        ONYX_CLAUDE="$c"
+        break
+    done
+    """
 
     /// Read the detection script's output.
     ///
@@ -333,17 +358,25 @@ public final class MCPInstaller: ObservableObject {
         chmod +x \(shellQuote(remotePath))
         echo "---RUNS---"
         \(shellQuote(remotePath)) --version
+        \(Self.claudePickerScript)
         echo "---REG---"
-        if command -v claude >/dev/null 2>&1; then
+        if [ -n "$ONYX_CLAUDE" ]; then
             # Remove first so a reinstall that changed the path replaces
             # the old entry instead of failing on a duplicate name.
-            claude mcp remove onyx >/dev/null 2>&1 || true
+            "$ONYX_CLAUDE" mcp remove onyx </dev/null >/dev/null 2>&1 || true
             # KEEP the output. Sending it to /dev/null left the app saying
             # "didn't take" with nothing to act on — the failure this
             # codebase keeps re-learning. Whatever claude says is the only
             # thing here worth reading.
-            ADD_OUT=$(claude mcp add --scope user onyx -- \(shellQuote(remotePath)) 2>&1) && ADD_RC=0 || ADD_RC=$?
-            GET_OUT=$(claude mcp get onyx 2>&1) && GET_RC=0 || GET_RC=$?
+            #
+            # </dev/null on every claude call. The whole script arrives on
+            # the remote shell's STDIN, so anything that reads stdin gets
+            # the rest of the script instead of a terminal — and the
+            # claude CLI is a Node program that crashed on exactly that:
+            # by hand it worked, under Onyx it died inside cli.js. Giving
+            # it an empty stdin also stops it eating the lines after it.
+            ADD_OUT=$("$ONYX_CLAUDE" mcp add --scope user onyx -- \(shellQuote(remotePath)) </dev/null 2>&1) && ADD_RC=0 || ADD_RC=$?
+            GET_OUT=$("$ONYX_CLAUDE" mcp get onyx </dev/null 2>&1) && GET_RC=0 || GET_RC=$?
             if [ "$ADD_RC" = "0" ] && [ "$GET_RC" = "0" ]; then
                 echo "REGISTERED"
             elif [ "$ADD_RC" = "0" ]; then
@@ -353,7 +386,7 @@ public final class MCPInstaller: ObservableObject {
                 echo "ADD_FAILED"
                 echo "claude mcp add (exit $ADD_RC) said: $ADD_OUT"
             fi
-            echo "claude: $(command -v claude)"
+            echo "claude used: $ONYX_CLAUDE"
         else
             echo "NO_CLAUDE"
         fi
@@ -454,13 +487,21 @@ public final class MCPInstaller: ObservableObject {
             echo "Onyx bridge not found at $BIN" >&2
             exit 1
         fi
-        if ! command -v claude >/dev/null 2>&1; then
-            echo "Claude Code (the 'claude' command) isn't on this PATH." >&2
+        ONYX_CLAUDE=""
+        for c in "$(command -v claude 2>/dev/null)" /opt/homebrew/bin/claude \\
+                 /usr/local/bin/claude "$HOME/.local/bin/claude"; do
+            [ -n "$c" ] && [ -x "$c" ] || continue
+            "$c" --version </dev/null >/dev/null 2>&1 || continue
+            ONYX_CLAUDE="$c"
+            break
+        done
+        if [ -z "$ONYX_CLAUDE" ]; then
+            echo "No working 'claude' found on this PATH." >&2
             exit 1
         fi
-        claude mcp remove onyx >/dev/null 2>&1 || true
-        claude mcp add --scope user onyx -- "$BIN"
-        claude mcp get onyx >/dev/null 2>&1 \\
+        "$ONYX_CLAUDE" mcp remove onyx </dev/null >/dev/null 2>&1 || true
+        "$ONYX_CLAUDE" mcp add --scope user onyx -- "$BIN" </dev/null
+        "$ONYX_CLAUDE" mcp get onyx </dev/null >/dev/null 2>&1 \\
             && echo "Onyx MCP registered for $(whoami)." \\
             || { echo "claude mcp add ran but the server isn't listed." >&2; exit 1; }
         ONYXEOF
