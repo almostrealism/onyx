@@ -113,6 +113,11 @@ public enum OnyxGuide {
             The reply tells you whether it matched; if it says nothing matched, ask the \
             user which session they see your work in rather than guessing again.
 
+            Either of those two flags may leave the Mac entirely — the user can have \
+            urgent and external alerts pushed to their phone, and therefore their \
+            watch. Assume a real person is interrupted, possibly away from the desk, \
+            and do not spend that on progress they didn't ask for.
+
             Write the title for someone glancing at it. "Migration finished, 3 conflicts \
             need a decision" is useful; "done" is not.
             """

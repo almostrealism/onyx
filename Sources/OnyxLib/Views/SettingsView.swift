@@ -457,6 +457,8 @@ struct SettingsView: View {
 
                         SharedStateSettingsSection(appState: appState)
 
+                        AlertForwardingSettingsSection(appState: appState)
+
                         SearchFilterSettingsSection(appState: appState)
 
                         // Applies to the merged GitHub + GitLab list, so
@@ -1533,6 +1535,132 @@ private struct SharedStateSettingsSection: View {
         case .synced:         return .gray.opacity(0.6)
         case .syncing:        return appState.accentColor.opacity(0.8)
         case .localOnly:      return .gray.opacity(0.45)
+        }
+    }
+}
+
+// MARK: - Alert forwarding (phone / watch)
+
+/// Getting an alert off the Mac and onto a wrist.
+///
+/// The explanation carries weight here, because the thing users expect —
+/// "forward my Mac notifications to my watch" — does not exist. The watch
+/// mirrors a PHONE. So Onyx sends the alert to something the phone already
+/// listens to, and the panel says which options those are and what each
+/// one costs to set up.
+private struct AlertForwardingSettingsSection: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject private var store = AlertForwardingStore.shared
+    @ObservedObject private var forwarder = AlertForwarder.shared
+
+    private var config: AlertForwardingConfig { store.config }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionHeader(title: "ALERTS ON YOUR PHONE")
+
+            Picker("", selection: Binding(
+                get: { config.service },
+                set: { service in store.update { $0.service = service } }
+            )) {
+                ForEach(PushService.allCases) { service in
+                    Text(service.label).tag(service)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+
+            if config.service != .off {
+                VStack(alignment: .leading, spacing: 8) {
+                    serviceFields
+
+                    Picker("", selection: Binding(
+                        get: { config.threshold },
+                        set: { threshold in store.update { $0.threshold = threshold } }
+                    )) {
+                        ForEach(ForwardThreshold.allCases) { t in
+                            Text(t.label).tag(t)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    HStack(spacing: 10) {
+                        Button(action: { AlertForwarder.shared.sendTest() }) {
+                            Text("Send a test")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(appState.accentColor)
+                        }
+                        .buttonStyle(.plain)
+
+                        if let result = forwarder.lastResult {
+                            Text(result)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(result.hasPrefix("sent")
+                                                 ? .gray.opacity(0.6)
+                                                 : Color.onyxRed.opacity(0.8))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            }
+
+            Text(explanation)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var serviceFields: some View {
+        switch config.service {
+        case .off:
+            EmptyView()
+        case .ntfy:
+            OnyxTextField(label: "ntfy topic", text: Binding(
+                get: { config.ntfyTopic },
+                set: { v in store.update { $0.ntfyTopic = v } }
+            ), placeholder: "onyx-2f9a7c41")
+            OnyxTextField(label: "ntfy server", text: Binding(
+                get: { config.ntfyServer },
+                set: { v in store.update { $0.ntfyServer = v } }
+            ), placeholder: "https://ntfy.sh")
+        case .pushover:
+            OnyxTextField(label: "Pushover user key", text: Binding(
+                get: { config.pushoverUser },
+                set: { v in store.update { $0.pushoverUser = v } }
+            ), placeholder: "u…")
+            OnyxTextField(label: "Pushover app token", text: Binding(
+                get: { config.pushoverToken },
+                set: { v in store.update { $0.pushoverToken = v } }
+            ), placeholder: "a…")
+        case .webhook:
+            OnyxTextField(label: "POST URL", text: Binding(
+                get: { config.webhookURL },
+                set: { v in store.update { $0.webhookURL = v } }
+            ), placeholder: "https://…")
+        case .imessage:
+            OnyxTextField(label: "Send to", text: Binding(
+                get: { config.imessageRecipient },
+                set: { v in store.update { $0.imessageRecipient = v } }
+            ), placeholder: "+15551234567 or you@icloud.com")
+        }
+    }
+
+    private var explanation: String {
+        switch config.service {
+        case .off:
+            return "An Apple Watch mirrors your iPhone, not your Mac — macOS notifications never reach it. Pick a service your phone already listens to and Onyx will send urgent alerts there, which is what makes your wrist buzz."
+        case .ntfy:
+            return "Free. Install ntfy from the App Store, subscribe it to a topic, and put the same topic here. Anyone who knows the topic name can publish to it, so use something unguessable rather than \"onyx\". Urgent alerts go out at max priority, which is the one iOS delivers insistently."
+        case .pushover:
+            return "One-off purchase, and the most reliable of these. Create an application at pushover.net for the token; the user key is on your dashboard. Urgent alerts are sent high-priority, so they arrive through Do Not Disturb."
+        case .webhook:
+            return "Any endpoint that takes a JSON POST — a Discord or Slack webhook, Home Assistant, a shortcut runner. The body carries title, body, urgent, external and session, plus `text` and `content` copies so Slack and Discord webhooks work with no adapter."
+        case .imessage:
+            return "No signup: Onyx asks Messages on this Mac to text you. iMessage is data rather than SMS, so a carrier that filters gateway messages has nothing to filter. Send to your own number or Apple ID and it lands on every device you're signed in on. macOS will ask once for permission to control Messages — the first send fails if you decline."
         }
     }
 }

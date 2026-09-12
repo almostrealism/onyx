@@ -56,6 +56,7 @@ Models       ← Pure data types; no dependencies on anything else
 - `ArtifactManager` — diagram/model/text artifacts
 - `SharedStateSync` — session notes + favourites on a chosen "home host" (`~/.onyx/shared-state.json`), three-way merged against a local shadow. Moving home hosts UNIONS instead of adopting, and the local files stay the working copy — a missing shadow must never delete anything.
 - `MenuBarController` — the menu bar item: sessions with notes, and which have unread agent alerts
+- `AlertForwarder` — pushes urgent/external alerts off the Mac (ntfy, Pushover, webhook, iMessage). An Apple Watch mirrors a PHONE, not a Mac, so this is the only path to a wrist. Agent-authored text is never interpolated into AppleScript — `AlertForwardRequest.imessageCommand` passes it via `on run argv`.
 - `NotesManager`, `ClaudeSessionManager`, `TimingManager`
 
 Managers depend on Stores, Services, and Models — not on Views or other Managers (prefer communication through AppState or Stores).

@@ -70,6 +70,11 @@ public final class AlertDelivery {
 
         if urgent { bounce() }
         if external { postExternal(alert) }
+        // And off the Mac entirely, if the user has set that up. A Mac
+        // notification never reaches an Apple Watch — the watch mirrors a
+        // phone — so this is the only path from "an agent is blocked" to
+        // "my wrist buzzed".
+        AlertForwarder.shared.consider(alert, sessionLabel: target?.label)
 
         return Outcome(
             attachedTo: match.key,
