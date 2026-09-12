@@ -620,6 +620,26 @@ public class AppState: ObservableObject {
     // MARK: - Storage keys
 
     /// A session's note, under whichever key it happens to be stored.
+    /// Write (or clear) a session's note.
+    ///
+    /// Writes the identity key and REMOVES every other spelling the note
+    /// might be filed under. Without that second half, clearing a note
+    /// stored under the legacy key silently did nothing: the write path
+    /// cleared the identity key, the read path still found the legacy one,
+    /// and the note came straight back. There was no way to get rid of it
+    /// from the UI at all.
+    ///
+    /// Writes go through here rather than to the store directly — the
+    /// store knows about keys, and only AppState knows which keys mean the
+    /// same session.
+    public func setNote(_ text: String, for session: TmuxSession) {
+        let preferred = storageKey(for: session)
+        SessionNotesStore.shared.setNote(text, for: preferred)
+        for key in storageKeys(for: session) where key != preferred {
+            SessionNotesStore.shared.clearNote(for: key)
+        }
+    }
+
     public func note(for session: TmuxSession) -> SessionNote? {
         for key in storageKeys(for: session) {
             if let note = SessionNotesStore.shared.note(for: key) { return note }

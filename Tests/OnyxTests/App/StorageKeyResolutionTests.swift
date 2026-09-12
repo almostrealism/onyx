@@ -504,3 +504,83 @@ final class DuplicateFavouriteTests: XCTestCase {
         XCTAssertEqual(rows.first?.note.text, "newer", "newest wins")
     }
 }
+
+/// Clearing a note has to actually clear it.
+///
+/// The bug: the note editor wrote (and cleared) the identity key only,
+/// while `note(for:)` accepts BOTH spellings. A note filed under the
+/// legacy key therefore survived every attempt to remove it — cleared,
+/// re-read, and there it was again, with no way to get rid of it from the
+/// UI at all.
+final class SessionNoteClearingTests: XCTestCase {
+
+    private let host = HostConfig(label: "build",
+                                  ssh: SSHConfig(host: "build.example.com", user: "me"))
+
+    private func makeState() -> AppState {
+        let state = AppState()
+        FavoritesStore.shared.reset()
+        SessionNotesStore.shared.reset()
+        state.hosts = [host]
+        return state
+    }
+
+    private func session(_ name: String) -> TmuxSession {
+        TmuxSession(name: name, source: .host(hostID: host.id))
+    }
+
+    func testClearingRemovesANoteStoredUnderTheLegacyKey() {
+        let state = makeState()
+        let s = session("api")
+        SessionNotesStore.shared.setNote("waiting on the build", for: s.id)   // legacy
+        XCTAssertNotNil(state.note(for: s))
+
+        state.setNote("", for: s)
+        XCTAssertNil(state.note(for: s), "cleared means gone, whichever key held it")
+    }
+
+    func testClearingRemovesANoteStoredUnderTheIdentityKey() {
+        let state = makeState()
+        let s = session("api")
+        state.setNote("waiting on the build", for: s)
+        state.setNote("", for: s)
+        XCTAssertNil(state.note(for: s))
+    }
+
+    /// Both spellings at once — the state the migration could leave behind.
+    func testClearingRemovesANoteStoredUnderBothKeys() {
+        let state = makeState()
+        let s = session("api")
+        SessionNotesStore.shared.setNote("old", for: s.id)
+        SessionNotesStore.shared.setNote("new", for: state.storageKey(for: s))
+
+        state.setNote("", for: s)
+        XCTAssertNil(state.note(for: s))
+        XCTAssertTrue(SessionNotesStore.shared.notes.isEmpty,
+                      "no orphan left behind to resurface later")
+    }
+
+    /// Writing must also collapse the duplicate, or the next clear has two
+    /// entries to fight again.
+    func testWritingANoteLeavesExactlyOneEntry() {
+        let state = makeState()
+        let s = session("api")
+        SessionNotesStore.shared.setNote("old", for: s.id)
+
+        state.setNote("current", for: s)
+        XCTAssertEqual(SessionNotesStore.shared.notes.count, 1)
+        XCTAssertEqual(state.note(for: s)?.text, "current")
+    }
+
+    /// A session whose host isn't configured has only one key; clearing it
+    /// must still work rather than fall through the "other keys" path.
+    func testClearingWorksForASessionWithNoResolvableHost() {
+        let state = makeState()
+        state.hosts = []
+        let s = session("orphan")
+        state.setNote("note", for: s)
+        XCTAssertNotNil(state.note(for: s))
+        state.setNote("", for: s)
+        XCTAssertNil(state.note(for: s))
+    }
+}

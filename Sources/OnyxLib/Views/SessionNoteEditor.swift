@@ -198,7 +198,7 @@ struct SessionNoteEditor: View {
             appState.showSessionNoteEditor = false
             return
         }
-        SessionNotesStore.shared.setNote(text, for: appState.storageKey(for: session))
+        appState.setNote(text, for: session)
         appState.showSessionNoteEditor = false
     }
 }

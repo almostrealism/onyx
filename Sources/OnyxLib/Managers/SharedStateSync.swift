@@ -293,6 +293,14 @@ public final class SharedStateSync: ObservableObject {
 
     // MARK: - Transfer
 
+    /// Both scripts go through `runScriptWithFallback`, which retries over a
+    /// TTY — so both are bound by the ~1KB payload ceiling and are named
+    /// here so `RemoteScriptBudgetTests` can measure them.
+    static let makeDirectoryScript = "mkdir -p \"$HOME/.onyx\" && echo READY"
+
+    static let moveIntoPlaceScript =
+        "mv \"$HOME/.onyx/\(remoteFilename).incoming\" \"$HOME/.onyx/\(remoteFilename)\" && echo MOVED"
+
     private enum Fetched {
         /// nil = the host has no copy yet, which is the normal first run.
         case success(SharedState?)
@@ -350,7 +358,7 @@ public final class SharedStateSync: ObservableObject {
 
         // The directory may not exist yet; scp won't make it.
         let mkdir = FileBrowserManager.runScriptWithFallback(
-            "mkdir -p \"$HOME/.onyx\" && echo READY", appState: appState, host: host, timeout: 20)
+            Self.makeDirectoryScript, appState: appState, host: host, timeout: 20)
         guard mkdir.cleaned?.contains("READY") == true else {
             report(.failed(mkdir.failureDetail))
             return false
@@ -373,9 +381,7 @@ public final class SharedStateSync: ObservableObject {
         }
 
         let move = FileBrowserManager.runScriptWithFallback(
-            "mv \"$HOME/.onyx/\(Self.remoteFilename).incoming\" "
-            + "\"$HOME/.onyx/\(Self.remoteFilename)\" && echo MOVED",
-            appState: appState, host: host, timeout: 20)
+            Self.moveIntoPlaceScript, appState: appState, host: host, timeout: 20)
         guard move.cleaned?.contains("MOVED") == true else {
             report(.failed(move.failureDetail))
             return false
