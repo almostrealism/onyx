@@ -138,11 +138,11 @@ final class SCPCommandTests: XCTestCase {
     /// upload. Reversing them by accident would copy the LOCAL file over
     /// the remote one — a silent, total loss of whatever was on the host.
     func testFetchPutsTheRemoteFirstAndTheLocalLast() {
-        let (cmd, args) = AppState().scpFetchCommand(remotePath: "$HOME/.onyx/shared-state.json",
+        let (cmd, args) = AppState().scpFetchCommand(remotePath: ".onyx/shared-state.json",
                                                     localPath: "/tmp/pulled.json",
                                                     host: host())
         XCTAssertEqual(cmd, "/usr/bin/scp")
-        XCTAssertEqual(args[args.count - 2], "me@build.example.com:$HOME/.onyx/shared-state.json")
+        XCTAssertEqual(args[args.count - 2], "me@build.example.com:.onyx/shared-state.json")
         XCTAssertEqual(args.last, "/tmp/pulled.json")
     }
 
@@ -154,6 +154,41 @@ final class SCPCommandTests: XCTestCase {
         XCTAssertTrue(args.contains { $0.hasPrefix("ControlPath=") })
         XCTAssertTrue(args.contains("BatchMode=yes"),
                       "a background sync must never sit waiting for a passphrase")
+    }
+
+    /// scp has spoken SFTP since OpenSSH 9.0: the remote path is
+    /// interpreted by the SFTP server, not a shell. A `$HOME` in it
+    /// arrives as four literal characters and the transfer dies with "No
+    /// such file or directory" — which is exactly what shared-state sync
+    /// did, in both directions, while reporting the failed PULL as "there
+    /// is no copy on the host yet".
+    func testNoScpPathRelisOnShellExpansion() {
+        for path in [SharedStateSync.remotePath, SharedStateSync.remoteStagingPath] {
+            XCTAssertFalse(path.contains("$"),
+                           "\(path) would be sent to an SFTP server verbatim; "
+                           + "use a path relative to the remote home instead")
+            XCTAssertFalse(path.hasPrefix("~"), "SFTP does not expand ~ either")
+            XCTAssertFalse(path.hasPrefix("/"),
+                           "relative to the remote home is what makes this work for any user")
+        }
+    }
+
+    /// …while the SCRIPTS do run in a shell, and should say $HOME rather
+    /// than assume a working directory.
+    func testTheShellScriptsDoUseHome() {
+        XCTAssertTrue(SharedStateSync.makeDirectoryScript.contains("$HOME"))
+        XCTAssertTrue(SharedStateSync.moveIntoPlaceScript.contains("$HOME"))
+    }
+
+    /// The two halves have to name the same file, or the upload lands
+    /// somewhere the move never looks.
+    func testTheStagedUploadIsWhatTheMoveScriptRenames() {
+        XCTAssertTrue(SharedStateSync.remoteStagingPath.hasSuffix(".incoming"))
+        XCTAssertTrue(SharedStateSync.moveIntoPlaceScript.contains(".incoming"))
+        XCTAssertTrue(SharedStateSync.moveIntoPlaceScript
+            .contains(SharedStateSync.remoteFilename))
+        XCTAssertTrue(SharedStateSync.remoteStagingPath
+            .contains(SharedStateSync.remoteFilename))
     }
 
     func testFetchSpellsThePortTheScpWay() {

@@ -111,11 +111,15 @@ extension AppState {
         return ("/usr/bin/scp", args)
     }
 
-    /// `scp` to an absolute remote path.
+    /// Kept as a name for call sites that pass an absolute remote path.
     ///
-    /// The relative variant resolves against the remote home directory,
-    /// which is right for dropped files but wrong for an install that may
-    /// be going to /Users/Shared.
+    /// There is no behavioural difference and there cannot be: scp speaks
+    /// SFTP (OpenSSH 9.0+), so the remote path is interpreted by the SFTP
+    /// server, not a shell. Absolute paths work, relative ones resolve
+    /// against the remote home directory, and SHELL SYNTAX DOES NOT WORK
+    /// AT ALL — `$HOME/x` arrives as four literal characters and fails
+    /// with "No such file or directory". Use `$HOME` in scripts; use a
+    /// relative path here.
     public func scpCommandAbsolute(localPath: String, remotePath: String,
                                    host: HostConfig) -> (cmd: String, args: [String]) {
         scpCommand(localPath: localPath, remotePath: remotePath, host: host)

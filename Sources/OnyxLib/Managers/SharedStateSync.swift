@@ -32,11 +32,25 @@ import Combine
 public final class SharedStateSync: ObservableObject {
     public static let shared = SharedStateSync()
 
-    /// Where the bundle lives on the home host. Under `~/.onyx/` with the
-    /// rest of what Onyx puts on a host — and a path with no spaces, which
-    /// the mux sockets taught us to care about.
-    public static let remoteDirectory = "$HOME/.onyx"
+    /// Where the bundle lives on the home host: `~/.onyx/`, with the rest
+    /// of what Onyx puts on a host, and no spaces in the path — which the
+    /// mux sockets taught us to care about.
+    ///
+    /// TWO spellings, and they are not interchangeable. scp has spoken
+    /// SFTP since OpenSSH 9.0: there is no remote shell in the transfer,
+    /// so `$HOME` arrives at the far end as four literal characters and
+    /// the copy fails with "No such file or directory". A RELATIVE path is
+    /// what works — the SFTP session starts in the user's home directory.
+    ///
+    /// The shell scripts (mkdir, mv) do run in a shell, and use `$HOME`
+    /// because a script should not assume its working directory.
     public static let remoteFilename = "shared-state.json"
+    /// For scp. Relative to the remote home directory.
+    public static let remotePath = ".onyx/\(remoteFilename)"
+    /// For scp, before the atomic move into place.
+    public static let remoteStagingPath = "\(remotePath).incoming"
+    /// For shell scripts only.
+    public static let remoteDirectoryScript = "$HOME/.onyx"
 
     public enum Status: Equatable {
         /// No home host: this Mac only. The default.
@@ -352,10 +366,12 @@ public final class SharedStateSync: ObservableObject {
     /// Both scripts go through `runScriptWithFallback`, which retries over a
     /// TTY — so both are bound by the ~1KB payload ceiling and are named
     /// here so `RemoteScriptBudgetTests` can measure them.
-    static let makeDirectoryScript = "mkdir -p \"$HOME/.onyx\" && echo READY"
+    static let makeDirectoryScript =
+        "mkdir -p \"\(remoteDirectoryScript)\" && echo READY"
 
     static let moveIntoPlaceScript =
-        "mv \"$HOME/.onyx/\(remoteFilename).incoming\" \"$HOME/.onyx/\(remoteFilename)\" && echo MOVED"
+        "mv \"\(remoteDirectoryScript)/\(remoteFilename).incoming\" "
+        + "\"\(remoteDirectoryScript)/\(remoteFilename)\" && echo MOVED"
 
     private enum Fetched {
         /// nil = the host has no copy yet, which is the normal first run.
@@ -371,8 +387,7 @@ public final class SharedStateSync: ObservableObject {
     private func fetch(host: HostConfig, appState: AppState) -> Fetched {
         let local = scratch
         try? FileManager.default.removeItem(at: local)
-        let remote = "\(Self.remoteDirectory)/\(Self.remoteFilename)"
-        let (cmd, args) = appState.scpFetchCommand(remotePath: remote,
+        let (cmd, args) = appState.scpFetchCommand(remotePath: Self.remotePath,
                                                    localPath: local.path, host: host)
         let result = RemoteExec.shared.run(cmd, args: args, stdin: nil, softTimeout: 30,
                                            captureStdout: true, captureStderr: true,
@@ -392,6 +407,15 @@ public final class SharedStateSync: ObservableObject {
             if let complaint, !complaint.lowercased().contains("no such file") {
                 return .failure(complaint)
             }
+            // Nothing there yet — the normal first sync against a host.
+            // Logged rather than silent: this branch once swallowed a
+            // malformed remote path ("$HOME/…", which scp sends to an
+            // SFTP server verbatim) and reported it as an empty host,
+            // every cycle, for both directions.
+            DiagnosticLog.shared.record(
+                "config",
+                "shared state: no copy at \(host.label):\(Self.remotePath) yet"
+                + (complaint.map { " (\($0))" } ?? ""))
             return .success(nil)
         }
         guard let decoded = try? JSONDecoder().decode(SharedState.self, from: data) else {
@@ -424,9 +448,8 @@ public final class SharedStateSync: ObservableObject {
         // in the clear: an interrupted transfer straight onto the
         // destination leaves a truncated file, and a truncated
         // shared-state.json read by the next Mac is every note gone.
-        let staged = "\(Self.remoteDirectory)/\(Self.remoteFilename).incoming"
-        let (cmd, args) = appState.scpCommandAbsolute(localPath: local.path,
-                                                      remotePath: staged, host: host)
+        let (cmd, args) = appState.scpCommand(localPath: local.path,
+                                              remotePath: Self.remoteStagingPath, host: host)
         let upload = RemoteExec.shared.run(cmd, args: args, stdin: nil, softTimeout: 30,
                                            captureStdout: true, captureStderr: true,
                                            label: "sharedStatePush:\(host.label)")
