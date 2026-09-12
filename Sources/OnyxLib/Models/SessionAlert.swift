@@ -75,6 +75,22 @@ public struct SessionAlert: Identifiable, Codable, Equatable {
 
 public enum AlertRouting {
 
+    /// The outcome of aiming an alert at a session.
+    public struct Match: Equatable {
+        /// The session's storage key, or nil when nothing unambiguous
+        /// matched.
+        public let key: String?
+        /// True when the match was only found after ignoring the user the
+        /// agent named — worth telling the agent, since its idea of who
+        /// it is doesn't match ours.
+        public let ignoredUser: Bool
+
+        public init(key: String?, ignoredUser: Bool = false) {
+            self.key = key
+            self.ignoredUser = ignoredUser
+        }
+    }
+
     /// Work out which session an alert is for.
     ///
     /// The agent may name a user, a host and a tmux session; it may name
@@ -89,21 +105,58 @@ public enum AlertRouting {
     public static func resolve(user: String?, host: String?, session: String?,
                                candidates: [(key: String, user: String, host: String, session: String)])
         -> String? {
+        match(user: user, host: host, session: session, candidates: candidates).key
+    }
+
+    /// As `resolve`, and says whether the user had to be ignored.
+    ///
+    /// Two passes, because the user is the detail an agent is most likely
+    /// to get wrong and the least likely to be wrong ABOUT. You sign in
+    /// as one account and `su` to another to run the agent, so `whoami`
+    /// inside the agent is not the user Onyx connected as — while the
+    /// host and the tmux session name are things the agent can read
+    /// correctly and that already narrow it down.
+    ///
+    /// So: match on everything first. Failing that, drop the user and try
+    /// again — if host and/or session still single out one session, trust
+    /// it. Naming the right session on the right host is a strong enough
+    /// claim to be the agent that belongs to it.
+    ///
+    /// The user is only ever dropped when something else was named. A
+    /// target of "user: bob" alone must not resolve to the one session
+    /// that happens to exist; that isn't a near miss, it's no aim at all.
+    public static func match(user: String?, host: String?, session: String?,
+                             candidates: [(key: String, user: String, host: String, session: String)])
+        -> Match {
         func norm(_ s: String?) -> String? {
             guard let s = s?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
                   !s.isEmpty else { return nil }
             return s
         }
         let wantUser = norm(user), wantHost = norm(host), wantSession = norm(session)
-        guard wantUser != nil || wantHost != nil || wantSession != nil else { return nil }
-
-        let matches = candidates.filter { c in
-            if let u = wantUser, c.user.lowercased() != u { return false }
-            if let h = wantHost, !hostMatches(c.host.lowercased(), h) { return false }
-            if let s = wantSession, c.session.lowercased() != s { return false }
-            return true
+        guard wantUser != nil || wantHost != nil || wantSession != nil else {
+            return Match(key: nil)
         }
-        return matches.count == 1 ? matches[0].key : nil
+
+        func single(user wantUser: String?) -> String? {
+            let matches = candidates.filter { c in
+                if let u = wantUser, c.user.lowercased() != u { return false }
+                if let h = wantHost, !hostMatches(c.host.lowercased(), h) { return false }
+                if let s = wantSession, c.session.lowercased() != s { return false }
+                return true
+            }
+            return matches.count == 1 ? matches[0].key : nil
+        }
+
+        if let exact = single(user: wantUser) { return Match(key: exact) }
+
+        // Nothing to relax: either no user was named, or the user was the
+        // only thing named.
+        guard wantUser != nil, wantHost != nil || wantSession != nil else {
+            return Match(key: nil)
+        }
+        guard let relaxed = single(user: nil) else { return Match(key: nil) }
+        return Match(key: relaxed, ignoredUser: true)
     }
 
     /// A host is named loosely in practice — "build-01" for

@@ -131,6 +131,11 @@ public enum OnyxGuide {
             Pass those to `notify`. The host should be how the USER refers to the \
             machine; a short name and a fully-qualified one both match.
 
+            The session name and the host are the ones worth getting right. If they \
+            single out one session, Onyx trusts them even when the user disagrees — an \
+            agent started with `su` sees a different `whoami` than the account Onyx \
+            connected as, and that is not a reason to lose the alert.
+
             If you cannot work them out — no tmux, an unusual setup — ask the user. \
             "Which Onyx session am I running in?" is a reasonable question, and they can \
             tell you the session name from the list in the app.

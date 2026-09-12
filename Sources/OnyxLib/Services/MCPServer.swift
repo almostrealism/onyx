@@ -541,8 +541,15 @@ public class MCPMessageHandler {
         case .none:
             return toolResult(id: id, success: true, message: "Delivered.")
         case .some(true):
-            return toolResult(id: id, success: true,
-                              message: "Delivered, shown against that session.")
+            // Worth saying when the user didn't match: the alert landed
+            // correctly, but the agent's idea of who it is is wrong, and
+            // an agent told this can stop sending a user that never helps.
+            let where_ = outcome.ignoredUser
+                ? "Delivered, shown against that session — matched on host/session; "
+                  + "the user you named isn't the one Onyx connects as (a `su` or `sudo -u` "
+                  + "away, most likely), so it was ignored."
+                : "Delivered, shown against that session."
+            return toolResult(id: id, success: true, message: where_)
         case .some(false):
             return toolResult(id: id, success: true,
                               message: "Delivered, but no session matched that user/host/session "

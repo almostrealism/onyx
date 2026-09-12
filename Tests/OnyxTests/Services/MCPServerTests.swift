@@ -318,6 +318,61 @@ final class AlertRoutingTests: XCTestCase {
     func testANameThatMatchesNothingResolvesToNothing() {
         XCTAssertNil(resolve(nil, nil, "no-such-session"))
     }
+
+    // MARK: - The su case
+
+    /// You sign in as one account and run the agent as another. `whoami`
+    /// inside the agent then reports a user Onyx never connected as — but
+    /// the host and the tmux session name are still right, and together
+    /// they name exactly one session. Trust that over the user.
+    func testAWrongUserIsIgnoredWhenHostAndSessionSingleOutOneSession() {
+        let m = AlertRouting.match(user: "root", host: "build-01", session: "trainer",
+                                   candidates: candidates)
+        XCTAssertEqual(m.key, "host:me@build-01:trainer")
+        XCTAssertTrue(m.ignoredUser, "the caller should be told its user didn't match")
+    }
+
+    /// A right answer must not be reported as a relaxed one, or the reply
+    /// tells every correct agent its user is wrong.
+    func testAnExactMatchDoesNotClaimToHaveIgnoredTheUser() {
+        let m = AlertRouting.match(user: "me", host: "build-01", session: "trainer",
+                                   candidates: candidates)
+        XCTAssertEqual(m.key, "host:me@build-01:trainer")
+        XCTAssertFalse(m.ignoredUser)
+    }
+
+    /// Relaxing must not turn an ambiguous aim into a match. "api" on no
+    /// particular host is two sessions with or without the user.
+    func testRelaxingTheUserDoesNotResolveAnAmbiguousSessionName() {
+        XCTAssertNil(resolve("nobody", nil, "api"))
+    }
+
+    /// The session name alone is enough, even with a wrong user attached.
+    func testAWrongUserIsIgnoredWhenTheSessionNameIsUniqueOnItsOwn() {
+        XCTAssertEqual(resolve("root", nil, "trainer"), "host:me@build-01:trainer")
+    }
+
+    /// One session on a host, named wrongly by user: the host alone
+    /// narrows it, so take it.
+    func testAWrongUserIsIgnoredWhenTheHostHasOnlyOneSession() {
+        XCTAssertEqual(resolve("root", "build-02", nil), "host:you@build-02:api")
+    }
+
+    /// A user is the ONE thing that can't stand alone after relaxation:
+    /// dropping it leaves no aim at all, and "the only session there is"
+    /// is not a match. Onyx would attach the alert to whatever happens to
+    /// be running.
+    func testAUserAloneNeverResolvesByRelaxation() {
+        let one = [(key: "k", user: "me", host: "build-01", session: "trainer")]
+        XCTAssertNil(AlertRouting.resolve(user: "someone-else", host: nil, session: nil,
+                                          candidates: one))
+    }
+
+    /// And a correct user alone still works when it's unambiguous — the
+    /// relaxation is additive, not a replacement.
+    func testACorrectUserAloneStillResolves() {
+        XCTAssertEqual(resolve("you", nil, nil), "host:you@build-02:api")
+    }
 }
 
 /// The store behind the indicator.

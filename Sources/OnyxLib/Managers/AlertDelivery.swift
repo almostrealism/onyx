@@ -29,7 +29,19 @@ public final class AlertDelivery {
     private weak var appState: AppState?
     private let lock = NSLock()
 
-    private init() {}
+    private init() {
+        // macOS cancels an attention request the moment the app is
+        // activated, but it doesn't tell us — so the token we're holding
+        // becomes a dead handle. Left in place it reads as "already
+        // bouncing" and every LATER urgent alert is silently swallowed:
+        // you get one bounce per app launch. Drop the token when the user
+        // comes back, which is exactly when the request ended.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.attentionToken = nil
+        }
+    }
 
     public func register(appState: AppState) {
         lock.lock()
@@ -51,20 +63,21 @@ public final class AlertDelivery {
             ? nil
             : SessionAlert.Target(user: user, host: host, session: session)
 
-        let key = resolveSessionKey(user: user, host: host, session: session)
+        let match = resolveSession(user: user, host: host, session: session)
         let alert = SessionAlert(title: title, body: body, urgent: urgent,
-                                 external: external, sessionKey: key, target: target)
+                                 external: external, sessionKey: match.key, target: target)
         AlertStore.shared.record(alert)
 
         if urgent { bounce() }
         if external { postExternal(alert) }
 
         return Outcome(
-            attachedTo: key,
+            attachedTo: match.key,
             // An alert that named a session we can't find still gets
             // delivered — it just lands in the unattached list. Saying so
             // lets the agent correct itself next time.
-            matchedTarget: target == nil ? nil : (key != nil)
+            matchedTarget: target == nil ? nil : (match.key != nil),
+            ignoredUser: match.ignoredUser
         )
     }
 
@@ -73,13 +86,23 @@ public final class AlertDelivery {
         /// nil when no target was given; false when one was and nothing
         /// matched it.
         public let matchedTarget: Bool?
+        /// True when host and session picked out one session but the user
+        /// named didn't match it — the `su` case.
+        public let ignoredUser: Bool
+
+        public init(attachedTo: String?, matchedTarget: Bool?, ignoredUser: Bool = false) {
+            self.attachedTo = attachedTo
+            self.matchedTarget = matchedTarget
+            self.ignoredUser = ignoredUser
+        }
     }
 
     // MARK: - Routing
 
-    private func resolveSessionKey(user: String?, host: String?, session: String?) -> String? {
+    private func resolveSession(user: String?, host: String?, session: String?)
+        -> AlertRouting.Match {
         lock.lock(); let state = appState; lock.unlock()
-        guard let state else { return nil }
+        guard let state else { return AlertRouting.Match(key: nil) }
 
         var candidates: [(key: String, user: String, host: String, session: String)] = []
         // Snapshot on main — allSessions and hosts are @Published.
@@ -97,8 +120,8 @@ public final class AlertDelivery {
                 session: s.name
             ))
         }
-        return AlertRouting.resolve(user: user, host: host, session: session,
-                                    candidates: candidates)
+        return AlertRouting.match(user: user, host: host, session: session,
+                                  candidates: candidates)
     }
 
     // MARK: - Getting noticed
