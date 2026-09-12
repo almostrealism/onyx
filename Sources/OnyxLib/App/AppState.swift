@@ -959,7 +959,6 @@ public class AppState: ObservableObject {
             "kill-session -t \(Self.shellQuote(session.name))", for: session) else { return }
 
         let id = session.id
-        let storedKeys = storageKeys(for: session)
         let wasActive = activeSession?.id == id
         // Move off it BEFORE it dies, so the terminal isn't sitting on a
         // session that no longer exists while the command runs.
