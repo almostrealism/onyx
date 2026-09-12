@@ -313,7 +313,11 @@ let onyxMCPVersion = OnyxVersion.current
 // the socket: the whole point is to verify the binary independently of
 // whether Onyx is running or reachable.
 if CommandLine.arguments.contains("--version") {
-    print("OnyxMCP \(onyxMCPVersion)")
+    // The proto number is what the installer actually reads. A bridge
+    // that prints none is older than the idea of printing one, which is
+    // how a stale install is recognised without relying on the release
+    // number — the old bridge shipped claiming 0.17 too.
+    print("OnyxMCP \(onyxMCPVersion) (proto \(OnyxVersion.bridgeProtocol))")
     exit(0)
 }
 

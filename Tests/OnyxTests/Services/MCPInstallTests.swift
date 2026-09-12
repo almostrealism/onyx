@@ -176,19 +176,41 @@ final class MCPRegistrationStatusTests: XCTestCase {
         """)
     }
 
-    func testReadyMeansClaudeListsItAndTheVersionMatchesThisBuild() {
-        XCTAssertEqual(out(bin: "OnyxMCP \(MCPInstall.currentVersion)", reg: "REGISTERED").state,
-                       .installed(version: MCPInstall.currentVersion))
+    func testReadyMeansClaudeListsItAndItSpeaksThisProtocol() {
+        let line = "OnyxMCP \(OnyxVersion.current) (proto \(OnyxVersion.bridgeProtocol))"
+        XCTAssertEqual(out(bin: line, reg: "REGISTERED").state,
+                       .installed(version: OnyxVersion.current))
     }
 
-    /// An older bridge still works, and still needs saying: the app and
-    /// the bridge speak a protocol to each other, so a fix to one usually
-    /// needs the other. Reported as "ready" it would never be reinstalled.
-    func testAnOlderBridgeIsReportedAsOutdatedRatherThanReady() {
-        let s = out(bin: "OnyxMCP 0.16", reg: "REGISTERED")
-        XCTAssertEqual(s.state, .outdated(version: "0.16"))
-        XCTAssertTrue(s.isWorking, "it does work — it is just behind")
+    /// The case that made the version comparison useless: the OLD bridge
+    /// shipped calling itself 0.17 while the app was 0.16, so a bridge
+    /// reporting today's release number can still be the broken one. What
+    /// separates them is the protocol, which the old one never prints.
+    func testABridgeWithTheSameVersionButNoProtocolIsOutdated() {
+        let s = out(bin: "OnyxMCP \(OnyxVersion.current)", reg: "REGISTERED")
+        XCTAssertEqual(s.state, .outdated(version: OnyxVersion.current),
+                       "no protocol means it predates protocol numbers")
+        XCTAssertTrue(s.isWorking, "it does run — it just isn't the one that goes with this app")
         XCTAssertTrue(s.label.contains("update"))
+    }
+
+    func testAnOlderProtocolIsOutdated() {
+        XCTAssertEqual(out(bin: "OnyxMCP 0.17 (proto 1)", reg: "REGISTERED").state,
+                       .outdated(version: "0.17"))
+    }
+
+    /// A bridge from a LATER app is not something to nag about — it
+    /// speaks everything this one does.
+    func testANewerProtocolIsAccepted() {
+        let line = "OnyxMCP 9.9 (proto \(OnyxVersion.bridgeProtocol + 1))"
+        XCTAssertEqual(out(bin: line, reg: "REGISTERED").state, .installed(version: "9.9"))
+    }
+
+    func testTheVersionLineIsParsedInBothForms() {
+        XCTAssertEqual(MCPInstaller.parseVersionLine("OnyxMCP 0.17 (proto 2)").version, "0.17")
+        XCTAssertEqual(MCPInstaller.parseVersionLine("OnyxMCP 0.17 (proto 2)").proto, 2)
+        XCTAssertEqual(MCPInstaller.parseVersionLine("OnyxMCP 0.16").version, "0.16")
+        XCTAssertEqual(MCPInstaller.parseVersionLine("OnyxMCP 0.16").proto, 0)
     }
 
     /// The exact case that shipped broken: the binary is there and runs,
@@ -280,11 +302,15 @@ final class OnyxVersionTests: XCTestCase {
                       "the scripts and the git tag use it verbatim")
     }
 
-    /// 0.17 was claimed by the bridge alone, including the builds with the
-    /// notification bug — a host reporting it could be either, so the
-    /// number can never mean one thing. Never reuse it.
-    func testTheAmbiguousVersionIsNotReused() {
-        XCTAssertNotEqual(OnyxVersion.current, "0.17")
+    /// The release number answers "which Onyx is this". It must never be
+    /// what decides whether a bridge is current — the old bridge shipped
+    /// claiming 0.17 while the app was 0.16, so the numbers can agree
+    /// while the binaries don't. That question belongs to the protocol.
+    func testTheProtocolNumberIsWhatGatesAnInstall() {
+        XCTAssertGreaterThanOrEqual(OnyxVersion.bridgeProtocol, 2)
+        let stale = MCPInstaller.parseVersionLine("OnyxMCP \(OnyxVersion.current)")
+        XCTAssertLessThan(stale.proto, OnyxVersion.bridgeProtocol,
+                          "a bridge with our exact version but no protocol is still stale")
     }
 
     /// Every script that stamps or tags must read the constant rather than

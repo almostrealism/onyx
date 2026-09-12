@@ -19,15 +19,28 @@
 // carrying their own copy; release.sh refuses to tag a version that
 // disagrees with it.
 //
-// 0.17 is skipped deliberately. The bridge already claimed it, including
-// the builds with the notification bug, so a host reporting "0.17" is
-// ambiguous — it could be either. 0.18 is the first version where the
-// number means one thing.
-//
 
 public enum OnyxVersion {
     /// The version this source tree builds. Matches the git tag at a
     /// release, and is the version a build from an untagged tree claims to
     /// be working toward.
-    public static let current = "0.18"
+    public static let current = "0.17"
+
+    /// What the bridge and the app have agreed between themselves, bumped
+    /// whenever that agreement changes.
+    ///
+    /// Separate from `current` because the release number can't answer the
+    /// question the installer actually has. The drifting bridge already
+    /// shipped calling itself 0.17 — including builds that answered
+    /// notifications and broke the connection — so "is this bridge the one
+    /// that goes with this app" cannot be settled by comparing release
+    /// numbers, whatever we number the next release.
+    ///
+    /// A bridge states it in `--version`; one that states nothing predates
+    /// the idea and is by definition too old. That makes the check work
+    /// without burning a version number to route around our own mistake.
+    ///
+    /// 1 — the original: answered notifications, waited for replies to them.
+    /// 2 — notifications are one-way in both directions.
+    public static let bridgeProtocol = 2
 }

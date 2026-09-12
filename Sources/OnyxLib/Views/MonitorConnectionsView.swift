@@ -637,7 +637,7 @@ private struct MCPHostRow: View {
     private func detail(for status: MCPHostStatus) -> String {
         switch status.state {
         case .installed(let v):     return "ready · \(v)"
-        case .outdated(let v):      return "v\(v) — reinstall for \(MCPInstall.currentVersion)"
+        case .outdated(let v):      return "v\(v) — reinstall, this build is older than the app"
         case .broken(let why):      return why
         case .unsupported(let p):   return "no bridge for \(p) in this build"
         case .notInstalled:         return "not installed"

@@ -21,6 +21,7 @@
 //
 
 import Foundation
+import OnyxVersion
 
 /// What the app knows about the bridge on one host.
 public struct MCPHostStatus: Equatable {
@@ -170,6 +171,24 @@ public final class MCPInstaller: ObservableObject {
     done
     """
 
+    /// Pull the version and protocol out of `OnyxMCP 0.17 (proto 2)`.
+    ///
+    /// A bare `OnyxMCP 0.17` is a bridge from before protocol numbers,
+    /// which reports 0 — old by definition, whatever its version says.
+    static func parseVersionLine(_ line: String) -> (version: String, proto: Int) {
+        let rest = line.hasPrefix("OnyxMCP ")
+            ? String(line.dropFirst("OnyxMCP ".count))
+            : line
+        let version = rest.split(separator: " ").first.map(String.init) ?? rest
+        guard let open = rest.range(of: "(proto "),
+              let close = rest.range(of: ")", range: open.upperBound..<rest.endIndex),
+              let proto = Int(rest[open.upperBound..<close.lowerBound]
+                                .trimmingCharacters(in: .whitespaces)) else {
+            return (version, 0)
+        }
+        return (version, proto)
+    }
+
     /// Read the detection script's output.
     ///
     /// Sections are found by their LAST occurrence: an interactive remote
@@ -204,15 +223,22 @@ public final class MCPInstaller: ObservableObject {
             return MCPHostStatus(state: .notInstalled, checkedAt: Date(), path: path)
         }
         if first.hasPrefix("OnyxMCP ") {
-            let version = String(first.dropFirst("OnyxMCP ".count))
+            let reported = Self.parseVersionLine(first)
+            let version = reported.version
             // The binary running is not the question. Claude Code has to
             // KNOW about it, and it reads MCP servers from ~/.claude.json
             // — which is why the previous version of this reported
             // success on hosts where Claude never listed the server.
             switch section("---REG---").first {
             case "REGISTERED":
+                // Judged on the PROTOCOL, not the release number. The
+                // bridge spent a while carrying its own version and
+                // shipped calling itself 0.17 while the app was 0.16 —
+                // so a matching number proves nothing about whether that
+                // binary speaks what this app speaks. A bridge that
+                // reports no protocol at all predates the idea.
                 return MCPHostStatus(
-                    state: version == MCPInstall.currentVersion
+                    state: reported.proto >= OnyxVersion.bridgeProtocol
                         ? .installed(version: version)
                         : .outdated(version: version),
                     checkedAt: Date(), path: path)
