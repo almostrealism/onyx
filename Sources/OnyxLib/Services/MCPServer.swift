@@ -201,6 +201,7 @@ public class MCPMessageHandler {
                 analyzeDepsTool,
                 notifyTool,
                 showHTMLTool,
+                guideTool,
             ])
         ])
         return JSONRPCResponse(id: request.id, result: tools)
@@ -251,6 +252,39 @@ public class MCPMessageHandler {
                                         "description": .string("tmux session name, e.g. from `tmux display-message -p \"#S\"`.")])
                 ]),
                 "required": .array([.string("title")])
+            ])
+        ])
+    }
+
+    /// How to use Onyx, on request.
+    ///
+    /// Listed FIRST in the description's own words — "start here" — for
+    /// the same reason the tool exists: an agent asked to "show me a
+    /// report in Onyx" has no way to know that publishing and alerting
+    /// are two calls that pair, or that a remote agent cannot hand over a
+    /// file path. Parameter descriptions can't carry that.
+    private var guideTool: AnyCodableValue {
+        .object([
+            "name": .string("onyx_guide"),
+            "description": .string("""
+                How to use Onyx in a workflow. Start here if the user has asked you to show \
+                them something in Onyx, alert them, or build a skill or command that does \
+                either — the other tools describe themselves individually, this explains how \
+                they fit together and what to avoid.
+
+                Call with no topic for the overview. Topics: \
+                \(OnyxGuide.index.joined(separator: ", ")).
+                """),
+            "inputSchema": .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "topic": .object([
+                        "type": .string("string"),
+                        "enum": .array(OnyxGuide.index.map { .string($0) }),
+                        "description": .string("Which topic. Omit for the overview.")
+                    ])
+                ]),
+                "required": .array([])
             ])
         ])
     }
@@ -417,6 +451,9 @@ public class MCPMessageHandler {
         case "analyze_deps": return callAnalyzeDeps(id: request.id, args: arguments)
         case "notify": return callNotify(id: request.id, args: arguments)
         case "show_html": return callShowHTML(id: request.id, args: arguments)
+        case "onyx_guide":
+            return toolResult(id: request.id, success: true,
+                              message: OnyxGuide.response(for: arguments["topic"]?.stringValue))
         default:
             return JSONRPCResponse(id: request.id, error: JSONRPCError(code: -32602, message: "Unknown tool: \(toolName)"))
         }
