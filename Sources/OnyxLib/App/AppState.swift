@@ -125,7 +125,7 @@ extension AppState {
     public var keyboardOwnedElsewhere: Bool {
         showSettings || showCommandPalette || showSessionManager || showWindowRename
             || showSessionNoteEditor || showHelp || showWalkthrough || showSetup
-            || showTerminalText
+            || showTerminalText || showPipelineAdder
     }
 
     /// Recalculate and set focusedComponent based on current visibility state.
@@ -229,6 +229,12 @@ public class AppState: ObservableObject {
     @Published public var monitorPeek = false
     /// When true, show the small text-field overlay for editing the
     /// note attached to the active session. Toggled by Cmd+;.
+    /// The "add a pipeline" panel, shown over the monitor overlay.
+    ///
+    /// A panel rather than a popover: the popover version crashed the app
+    /// on open, inside AppKit's animated window resize. See
+    /// PipelineAdderPanel.swift.
+    @Published public var showPipelineAdder = false
     @Published public var showSessionNoteEditor = false
     @Published public var reconnectRequested = false
     @Published public var refreshSessionList = false
@@ -1109,6 +1115,8 @@ public class AppState: ObservableObject {
             }
         } else if showHelp {
             showHelp = false
+        } else if showPipelineAdder {
+            showPipelineAdder = false
         } else if showSessionNoteEditor {
             showSessionNoteEditor = false
         } else if showCommandPalette {

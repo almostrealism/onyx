@@ -58,6 +58,20 @@ private struct AlertHistoryPopover: View {
     let alerts: [SessionAlert]
     let accentColor: Color
 
+    /// A FIXED height, chosen from what was there when the popover opened.
+    ///
+    /// An NSPopover that changes size animates the window, and that
+    /// animation runs a nested runloop in which a stale runloop observer
+    /// can be called — a null-pointer crash with no frames of ours in it.
+    /// The pipeline picker died that way (see PipelineAdderPanel.swift).
+    /// Here the trigger would be an alert ARRIVING while you read the
+    /// history, which is exactly when it is most likely to happen. So the
+    /// list scrolls inside a size fixed at open time and the window never
+    /// resizes.
+    private var listHeight: CGFloat {
+        min(260, max(70, CGFloat(alerts.count) * 52))
+    }
+
     private static let stamp: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "d MMM HH:mm"
@@ -117,7 +131,7 @@ private struct AlertHistoryPopover: View {
                 }
                 .padding(14)
             }
-            .frame(maxHeight: 260)
+            .frame(height: listHeight)
         }
         .frame(width: 320)
     }

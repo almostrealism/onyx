@@ -435,6 +435,15 @@ struct MonitorView: View {
                 Spacer()
             }
             .padding(.top, 40)
+
+            // The pipeline adder, as a card in this overlay's own ZStack
+            // rather than an NSPopover. See PipelineAdderPanel.swift — the
+            // popover version crashed inside AppKit's resize animation.
+            if appState.showPipelineAdder {
+                PipelineAdderPanel(appState: appState)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    .zIndex(100)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleMonitorInterval)) { _ in
             monitor.toggleInterval()

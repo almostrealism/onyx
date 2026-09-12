@@ -77,6 +77,7 @@ Managers depend on Stores, Services, and Models — not on Views or other Manage
 - Running SPM executables on macOS requires `NSApplication.shared.setActivationPolicy(.regular)` for proper GUI behavior.
 - `NSVisualEffectView` must NOT be injected into SwiftUI's contentView via AppDelegate — use `NSViewRepresentable` instead.
 - Background ZStack layers need `.allowsHitTesting(false)` to pass events through.
+- **A SwiftUI `.popover` whose content CHANGES SIZE crashes the app.** `NSPopover` animates the window resize, the animation spins a nested runloop, and a stale runloop observer in it is called as a null pointer — `EXC_BAD_ACCESS` at 0x0 with no Onyx frames in the stack. It killed the pipeline picker (small while loading, +288pt when results arrived). Present modals as a card in the app's own ZStack like `SessionNoteEditor`/`PipelineAdderPanel`; if a popover is unavoidable, fix its size at open time (`SessionAlertIndicator`).
 - WKWebView state must NOT be read from `@Published` properties during SwiftUI `updateNSView` — it causes re-entry loops. Use KVO observations instead (`BrowserManager` pattern).
 - SSH ControlMaster paths must live in a directory without spaces — `~/.onyx/` not `~/Library/Application Support/`.
 - Broken pipe recovery: report via `appState.reportSSHFailure(host:)` — the host's `ConnectionPair` marks its active connection suspect and promotes the warm standby immediately. Never delete mux sockets by hand.

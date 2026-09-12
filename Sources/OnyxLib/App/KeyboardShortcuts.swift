@@ -227,6 +227,11 @@ public class ShortcutManager {
                 || (state?.showSessionManager ?? false)
                 || (state?.showWindowRename ?? false)
                 || (state?.showSessionNoteEditor ?? false)
+                // The pipeline panel has a URL field. Without this, typing
+                // a URL fires the monitor's single-key shortcuts — "c"
+                // toggles containers, "r" the reminder filter — while the
+                // characters go into the field.
+                || (state?.showPipelineAdder ?? false)
                 || (state?.showHelp ?? false)
 
             // For non-monitor shortcuts, also suppress when a right panel

@@ -175,7 +175,6 @@ struct PipelinesSection: View {
     @ObservedObject private var prManager = PullRequestManager.shared
     @ObservedObject private var ghConfig = GitHubConfigStore.shared
     @ObservedObject private var glConfig = GitLabConfigStore.shared
-    @State private var showSuggestions = false
     @State private var hoveringAdd = false
     @Environment(\.monitorFontScale) private var fontScale
 
@@ -233,7 +232,7 @@ struct PipelinesSection: View {
                             .monitorFont(size: 10)
                             .foregroundColor(.gray.opacity(0.4))
                     }
-                    Button(action: { showSuggestions = true }) {
+                    Button(action: { appState.showPipelineAdder = true }) {
                         // A bare Image hit-tests only its glyph box (~10pt
                         // square) and .padding around it is NOT hit-testable —
                         // that is what made this button feel like it had to be
@@ -255,15 +254,6 @@ struct PipelinesSection: View {
                     .buttonStyle(.plain)
                     .onHover { hoveringAdd = $0 }
                     .help("Add a pipeline from your open PRs, or paste a URL")
-                    .popover(isPresented: $showSuggestions) {
-                        PipelineSuggestionsPopover(
-                            prs: prManager.pullRequests,
-                            existingIDs: Set(ghConfig.parsedPipelines.map(\.id)
-                                             + glConfig.parsedPipelines.map(\.id)),
-                            accentColor: appState.accentColor,
-                            onAdd: addPipeline
-                        )
-                    }
                 }
                 if let error = firstError {
                     Text(error)
@@ -489,161 +479,6 @@ struct PipelineStatusDot: View {
         case .queued:   return "Queued — hasn't started"
         case .skipped:  return "Skipped"
         case .unknown:  return "No run data yet"
-        }
-    }
-}
-
-/// Popover content for the "+" button. Surfaces one suggestion per
-/// (open PR, workflow that ran on its head branch) — typically up to
-/// `numPRs × numWorkflowsPerPR` rows. Filters out any suggestion the
-/// user has already added.
-private struct PipelineSuggestionsPopover: View {
-    let prs: [PullRequest]
-    let existingIDs: Set<String>
-    let accentColor: Color
-    let onAdd: (String) -> Void
-    @State private var manualURL: String = ""
-    @State private var suggestions: [WorkflowMonitor.Suggestion] = []
-    @State private var loading = false
-    @Environment(\.dismiss) private var dismiss
-
-    /// Per-row height (two text lines + padding + inter-row spacing),
-    /// slightly generous so the exact-fit case never clips the last row.
-    private static let rowHeight: CGFloat = 36
-
-    /// The filtered list — drops suggestions the user already added,
-    /// matched by the parsed PipelineSpec id.
-    private var visibleSuggestions: [WorkflowMonitor.Suggestion] {
-        suggestions.filter { s in
-            guard let parsed = PipelineSpec.parse(s.url) else { return true }
-            return !existingIDs.contains(parsed.id)
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("ADD PIPELINE")
-                .monitorFont(size: 10, weight: .medium)
-                .foregroundColor(accentColor)
-                .tracking(2)
-            HStack(spacing: 6) {
-                TextField("Paste workflow or run URL", text: $manualURL)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.85))
-                    .padding(.horizontal, 6).padding(.vertical, 4)
-                    .background(Color.white.opacity(0.06))
-                    .cornerRadius(3)
-                Button("Add") {
-                    let trimmed = manualURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty, PipelineSpec.parse(trimmed) != nil {
-                        onAdd(trimmed); manualURL = ""; dismiss()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
-            Divider().background(Color.white.opacity(0.06))
-            Text("FROM OPEN PRs")
-                .monitorFont(size: 9, weight: .medium)
-                .foregroundColor(.gray.opacity(0.5))
-                .tracking(1)
-            if loading {
-                HStack(spacing: 6) {
-                    ProgressView().scaleEffect(0.6).colorScheme(.dark)
-                    Text("Looking up pipelines for each open PR…")
-                        .monitorFont(size: 10)
-                        .foregroundColor(.gray.opacity(0.5))
-                }
-            } else if visibleSuggestions.isEmpty {
-                Text(suggestions.isEmpty
-                     ? "No workflow runs found on any open PR head branch."
-                     : "All of these are already being tracked.")
-                    .monitorFont(size: 10)
-                    .foregroundColor(.gray.opacity(0.5))
-                    .frame(maxWidth: 320, alignment: .leading)
-            } else {
-                // Grow to fit the suggestions, up to 8 rows tall, then
-                // scroll. A bare ScrollView has no intrinsic content height,
-                // so inside a popover it collapses to ~one row — hence the
-                // explicit, row-count-driven height instead of a maxHeight.
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(visibleSuggestions) { s in
-                            SuggestionRow(suggestion: s,
-                                          accentColor: accentColor,
-                                          onAdd: {
-                                              onAdd(s.url)
-                                          })
-                        }
-                    }
-                }
-                .frame(height: CGFloat(min(visibleSuggestions.count, 8)) * Self.rowHeight)
-            }
-        }
-        .padding(14)
-        .frame(width: 420)
-        .onAppear { loadSuggestions() }
-    }
-
-    private func loadSuggestions() {
-        loading = true
-        WorkflowMonitor.shared.fetchSuggestions(for: prs) { results in
-            suggestions = results
-            loading = false
-        }
-    }
-}
-
-private struct SuggestionRow: View {
-    let suggestion: WorkflowMonitor.Suggestion
-    let accentColor: Color
-    let onAdd: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            // Dot reflecting the LAST run's conclusion — gives a hint of
-            // whether this pipeline is currently green/red without
-            // having to click in.
-            Circle().fill(conclusionColor)
-                .frame(width: 5, height: 5)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text(suggestion.workflowName)
-                        .monitorFont(size: 11)
-                        .foregroundColor(.white.opacity(0.9))
-                        .lineLimit(1)
-                    Text(suggestion.workflowFile)
-                        .monitorFont(size: 9)
-                        .foregroundColor(.gray.opacity(0.4))
-                        .lineLimit(1)
-                }
-                Text("\(suggestion.pr.repoFullName)#\(suggestion.pr.number)  ·  \(suggestion.branch)")
-                    .monitorFont(size: 9)
-                    .foregroundColor(accentColor.opacity(0.6))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer(minLength: 0)
-            Button("Add") { onAdd() }
-                .buttonStyle(.plain)
-                .monitorFont(size: 10, weight: .medium)
-                .foregroundColor(accentColor)
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(accentColor.opacity(0.12))
-                .cornerRadius(3)
-        }
-        .padding(.vertical, 2)
-    }
-
-    private var conclusionColor: Color {
-        switch suggestion.mostRecentConclusion {
-        case "success": return Color.onyxGreen
-        case "failure", "timed_out", "cancelled", "action_required":
-            return Color.onyxRed
-        case "skipped": return Color.gray.opacity(0.5)
-        case nil: return Color.onyxBlue   // in progress
-        default: return Color.gray.opacity(0.4)
         }
     }
 }

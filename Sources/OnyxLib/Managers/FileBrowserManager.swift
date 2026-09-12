@@ -803,15 +803,29 @@ public class FileBrowserManager: ObservableObject {
             let (cmd, args, stdin) = appState.remoteScript(script, host: target)
             return runRemoteScriptDetailed(cmd: cmd, args: args, stdin: stdin, timeout: timeout)
         }
+        return runScriptWithFallback(piped: appState.remoteScriptNoTTY(script, host: target),
+                                     tty: appState.remoteScript(script, host: target),
+                                     label: target?.label ?? "host",
+                                     timeout: timeout)
+    }
 
-        let piped = appState.remoteScriptNoTTY(script, host: target)
+    /// The same two attempts, from PRE-BUILT commands.
+    ///
+    /// Both triples are plain values, so this can be called from a
+    /// background queue without dragging AppState (which isn't Sendable)
+    /// across the boundary. Callers that are already off the main thread —
+    /// LSPManager's async reads — build the commands where the state lives
+    /// and run them here.
+    static func runScriptWithFallback(piped: (cmd: String, args: [String], stdin: String?),
+                                      tty: (cmd: String, args: [String], stdin: String?),
+                                      label: String,
+                                      timeout: TimeInterval = 10) -> RemoteRun {
         let first = runRemoteScriptDetailed(cmd: piped.cmd, args: piped.args,
                                             stdin: piped.stdin, timeout: timeout)
         if first.cleaned != nil { return first }
 
         DiagnosticLog.shared.record("ssh",
-            "\(target?.label ?? "host"): no marker over a plain pipe — retrying with a terminal")
-        let tty = appState.remoteScript(script, host: target)
+            "\(label): no marker over a plain pipe — retrying with a terminal")
         let second = runRemoteScriptDetailed(cmd: tty.cmd, args: tty.args,
                                              stdin: tty.stdin, timeout: timeout)
         // Report whichever attempt got further, so the failure message

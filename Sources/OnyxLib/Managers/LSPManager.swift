@@ -488,15 +488,21 @@ public final class LSPManager: ObservableObject {
     /// remote shell for data reads (workspace resolution, file content,
     /// preflight, install).
     private func runRemote(_ script: String, host: HostConfig, timeout: TimeInterval) async -> String? {
-        let state = appState
+        // Pipe first, terminal only if the completion marker doesn't come
+        // back (the noexec signature). A pipe has no ~1KB input limit, so
+        // a script's size stops being a silent failure mode on every host
+        // that isn't hostile.
+        //
+        // Both commands are built HERE, on the actor that owns the state,
+        // and only the resulting values cross to the background queue —
+        // AppState isn't Sendable and has no business being captured.
+        let piped = appState.remoteScriptNoTTY(script, host: host)
+        let tty = appState.remoteScript(script, host: host)
+        let label = host.label
         return await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                // Pipe first, terminal only if the completion marker
-                // doesn't come back (the noexec signature). A pipe has no
-                // ~1KB input limit, so the script's size stops being a
-                // silent failure mode on every host that isn't hostile.
                 cont.resume(returning: FileBrowserManager.runScriptWithFallback(
-                    script, appState: state, host: host, timeout: timeout).cleaned)
+                    piped: piped, tty: tty, label: label, timeout: timeout).cleaned)
             }
         }
     }
