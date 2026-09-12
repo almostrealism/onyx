@@ -26,6 +26,7 @@
 //
 
 import Foundation
+import AppKit
 import Combine
 
 public final class SharedStateSync: ObservableObject {
@@ -64,6 +65,9 @@ public final class SharedStateSync: ObservableObject {
     private var storedHome: UUID?
     private var shadow: SharedState?
     private var lastSync: Date?
+    /// When a run last STARTED, successful or not. Drives the back-off;
+    /// `lastSync` records success and is what the status line reads.
+    private var lastAttemptAt: Date?
     private let lock = NSLock()
     private let queue = DispatchQueue(label: "com.onyx.shared-state", qos: .utility)
     private var timer: Timer?
@@ -116,17 +120,68 @@ public final class SharedStateSync: ObservableObject {
         start()
     }
 
+    /// How often the home host is checked for someone else's changes.
+    ///
+    /// The budget is end-to-end: a note written on one Mac should be on
+    /// the other inside about a minute. That splits into a 4-second
+    /// write-side debounce (typing publishes on every keystroke and each
+    /// push is three round trips) and this poll, so the worst case is
+    /// roughly `active + 4` seconds and the average about half of it.
+    ///
+    /// The back-off matters as much as the interval. A Mac nobody is
+    /// looking at has nothing to show, so polling it every minute spends a
+    /// channel on every host for a screen no one can see — and the machine
+    /// you walk BACK to syncs the moment it is activated, which is the
+    /// case that actually feels slow.
+    public enum Cadence {
+        /// While the app is frontmost.
+        public static let active: TimeInterval = 60
+        /// While it isn't.
+        public static let idle: TimeInterval = 300
+        /// Don't re-sync on every ⌘-tab.
+        public static let activationThrottle: TimeInterval = 10
+
+        /// Whether a tick should do anything. Pure, so the policy can be
+        /// asserted without waiting five minutes for a timer.
+        public static func shouldRun(now: Date, lastAttempt: Date?,
+                                     isActive: Bool) -> Bool {
+            guard let lastAttempt else { return true }
+            let elapsed = now.timeIntervalSince(lastAttempt)
+            return elapsed >= (isActive ? active : idle)
+        }
+    }
+
     private func start() {
         guard timer == nil else { return }
-        // Two minutes. The remote file only changes when another Mac
-        // writes it, and a slow pickup of someone else's note costs
-        // nothing; a tight poll costs a channel on every host every tick.
-        let timer = Timer(timeInterval: 120, repeats: true) { [weak self] _ in
-            self?.sync(reason: "tick")
+        // Ticks at the ACTIVE interval and decides inside whether this one
+        // counts — one timer, and the idle back-off is a policy rather
+        // than a second schedule to keep in sync with the first.
+        let timer = Timer(timeInterval: Cadence.active, repeats: true) { [weak self] _ in
+            self?.tick()
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
+
+        // Coming back to a Mac is the moment you expect to see what the
+        // other one did. Waiting up to a minute for a tick is exactly the
+        // delay this whole cadence exists to avoid.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.lock.lock(); let last = self.lastAttemptAt; self.lock.unlock()
+            if let last, Date().timeIntervalSince(last) < Cadence.activationThrottle { return }
+            self.sync(reason: "app activated")
+        }
+
         sync(reason: "launch")
+    }
+
+    private func tick() {
+        lock.lock(); let last = lastAttemptAt; lock.unlock()
+        guard Cadence.shouldRun(now: Date(), lastAttempt: last,
+                                isActive: NSApp?.isActive ?? true) else { return }
+        sync(reason: "tick")
     }
 
     // MARK: - The home host
@@ -173,6 +228,7 @@ public final class SharedStateSync: ObservableObject {
             guard let self else { return }
             guard !self.claimRun() else { return }
             defer { self.finishRun() }
+            self.lock.lock(); self.lastAttemptAt = Date(); self.lock.unlock()
 
             let hosts = DispatchQueue.main.sync { appState.hosts }
             guard let host = hosts.first(where: { $0.id == home }) else {

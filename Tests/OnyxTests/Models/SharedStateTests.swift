@@ -244,3 +244,70 @@ final class SharedStateSyncTests: XCTestCase {
                        "something odd happened")
     }
 }
+
+/// How quickly one Mac sees the other's change.
+///
+/// The budget is end-to-end and stated as a promise to the user: a note
+/// written (or cleared) on one machine should be on the other inside about
+/// a minute. That is the write-side debounce plus the read-side poll, so
+/// both halves are asserted here — changing either one silently changes
+/// what the feature is.
+final class SharedStateCadenceTests: XCTestCase {
+
+    /// The number that matters. 4s debounce + 60s poll ≈ 64s worst case,
+    /// ~34s average.
+    func testTheEndToEndBudgetIsAboutAMinute() {
+        let worstCase = SharedStateSync.Cadence.active + 4
+        XCTAssertLessThanOrEqual(worstCase, 70,
+                                 "a change should reach the other machine inside about a minute")
+    }
+
+    func testAnIdleMacBacksOff() {
+        XCTAssertGreaterThan(SharedStateSync.Cadence.idle,
+                             SharedStateSync.Cadence.active,
+                             "a screen nobody is looking at doesn't need minute-by-minute polling")
+    }
+
+    func testAFirstTickAlwaysRuns() {
+        XCTAssertTrue(SharedStateSync.Cadence.shouldRun(now: Date(), lastAttempt: nil,
+                                                        isActive: false))
+    }
+
+    func testAnActiveMacPollsAtTheActiveInterval() {
+        let now = Date()
+        let justBefore = now.addingTimeInterval(-(SharedStateSync.Cadence.active - 1))
+        XCTAssertFalse(SharedStateSync.Cadence.shouldRun(now: now, lastAttempt: justBefore,
+                                                         isActive: true))
+        let due = now.addingTimeInterval(-SharedStateSync.Cadence.active)
+        XCTAssertTrue(SharedStateSync.Cadence.shouldRun(now: now, lastAttempt: due,
+                                                        isActive: true))
+    }
+
+    /// The same elapsed time is due when you're looking and not when
+    /// you aren't — that IS the back-off.
+    func testAnIdleMacSkipsTicksThatAnActiveOneWouldTake() {
+        let now = Date()
+        let aMinuteAgo = now.addingTimeInterval(-SharedStateSync.Cadence.active)
+        XCTAssertTrue(SharedStateSync.Cadence.shouldRun(now: now, lastAttempt: aMinuteAgo,
+                                                        isActive: true))
+        XCTAssertFalse(SharedStateSync.Cadence.shouldRun(now: now, lastAttempt: aMinuteAgo,
+                                                         isActive: false))
+    }
+
+    func testAnIdleMacStillPollsEventually() {
+        let now = Date()
+        let longAgo = now.addingTimeInterval(-SharedStateSync.Cadence.idle)
+        XCTAssertTrue(SharedStateSync.Cadence.shouldRun(now: now, lastAttempt: longAgo,
+                                                        isActive: false))
+    }
+
+    /// Activation syncs immediately — walking back to a Mac is exactly when
+    /// you expect to see what the other one did — but ⌘-tabbing repeatedly
+    /// must not turn into a poll loop.
+    func testTheActivationThrottleIsShortButNotZero() {
+        XCTAssertGreaterThan(SharedStateSync.Cadence.activationThrottle, 0)
+        XCTAssertLessThan(SharedStateSync.Cadence.activationThrottle,
+                          SharedStateSync.Cadence.active,
+                          "activation must beat the regular tick or it adds nothing")
+    }
+}
