@@ -223,6 +223,11 @@ if [ "$DO_SIGN" = "1" ]; then
     <true/>
     <key>com.apple.security.inherit</key>
     <true/>
+    <!-- Sending Apple events is blocked by the hardened runtime without
+         this. Needed for the iMessage alert-forwarding route, which asks
+         Messages.app to text the user. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
 </dict>
 </plist>
 PLIST

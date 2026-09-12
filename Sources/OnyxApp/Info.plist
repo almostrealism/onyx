@@ -25,5 +25,11 @@
     <string>AppIcon</string>
     <key>NSRemindersUsageDescription</key>
     <string>Onyx shows your reminders due today on the monitor screen.</string>
+    <!-- Required before macOS will even PROMPT to allow driving Messages.
+         Without this string the Apple event is denied outright, with no
+         dialog and nothing in the UI to fix. Used only for the iMessage
+         alert-forwarding route (Settings -> ALERTS ON YOUR PHONE). -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Onyx sends you an iMessage when an agent needs your attention, so the alert reaches your phone and watch.</string>
 </dict>
 </plist>
