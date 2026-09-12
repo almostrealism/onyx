@@ -445,30 +445,35 @@ public final class LSPManager: ObservableObject {
     }
 
     /// Shell that walks up from `startDir` printing the resolved workspace root.
+    ///
+    /// Written tight on purpose: this goes to a remote shell, and a
+    /// terminal will swallow about 1KB before discarding the rest in
+    /// silence. The five build-file names are a `for` list rather than a
+    /// chain of `-f` tests for the same reason — that one line was 150
+    /// bytes on its own. Comments cost bytes here too, so there are none
+    /// inside the script.
+    ///
+    /// `RemoteScriptBudgetTests` measures it against a deep path.
     static func workspaceResolveScript(startDir: String) -> String {
         let q = shellQuote(startDir)
         return """
-        start=\(q)
-        # nearest .git ancestor = ceiling (a workspace never spans repos)
-        ceil=""; d="$start"
+        s=\(q)
+        c=""; d="$s"
         while [ -n "$d" ]; do
-          if [ -e "$d/.git" ]; then ceil="$d"; break; fi
+          [ -e "$d/.git" ] && { c="$d"; break; }
           p=$(dirname "$d"); [ "$p" = "$d" ] && break; d="$p"
         done
-        # highest build-file dir at/below the ceiling (aggregator beats module)
-        best=""; d="$start"
+        b=""; d="$s"
         while [ -n "$d" ]; do
-          if [ -f "$d/pom.xml" ] || [ -f "$d/build.gradle" ] || [ -f "$d/build.gradle.kts" ] || [ -f "$d/settings.gradle" ] || [ -f "$d/settings.gradle.kts" ]; then
-            best="$d"
-          fi
-          if [ -n "$ceil" ] && [ "$d" = "$ceil" ]; then break; fi
+          for f in pom.xml build.gradle build.gradle.kts settings.gradle settings.gradle.kts; do
+            [ -f "$d/$f" ] && { b="$d"; break; }
+          done
+          [ -n "$c" ] && [ "$d" = "$c" ] && break
           p=$(dirname "$d"); [ "$p" = "$d" ] && break
-          if [ -z "$ceil" ] && [ "$p" = "$HOME" ]; then break; fi
+          [ -z "$c" ] && [ "$p" = "$HOME" ] && break
           d="$p"
         done
-        if [ -n "$best" ]; then echo "$best"
-        elif [ -n "$ceil" ]; then echo "$ceil"
-        else echo "$start"; fi
+        [ -n "$b" ] && echo "$b" || { [ -n "$c" ] && echo "$c" || echo "$s"; }
         """
     }
 
@@ -483,11 +488,15 @@ public final class LSPManager: ObservableObject {
     /// remote shell for data reads (workspace resolution, file content,
     /// preflight, install).
     private func runRemote(_ script: String, host: HostConfig, timeout: TimeInterval) async -> String? {
-        let (cmd, args, stdin) = appState.remoteScript(script, host: host)
+        let state = appState
         return await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: FileBrowserManager.runRemoteScript(
-                    cmd: cmd, args: args, stdin: stdin, timeout: timeout))
+                // Pipe first, terminal only if the completion marker
+                // doesn't come back (the noexec signature). A pipe has no
+                // ~1KB input limit, so the script's size stops being a
+                // silent failure mode on every host that isn't hostile.
+                cont.resume(returning: FileBrowserManager.runScriptWithFallback(
+                    script, appState: state, host: host, timeout: timeout).cleaned)
             }
         }
     }

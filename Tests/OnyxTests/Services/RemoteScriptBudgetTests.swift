@@ -118,6 +118,20 @@ final class RemoteScriptBudgetTests: XCTestCase {
                    "the Java preflight")
     }
 
+    /// The other two ways an interactive remote shell eats a script, from
+    /// CLAUDE.md: `!` is history expansion in zsh (which discards the whole
+    /// line), and an unmatched glob in path position is FATAL under zsh's
+    /// nomatch. AppStateTests locks the stats script this way; the LSP
+    /// script is the other one that walks the filesystem.
+    @MainActor
+    func testTheWorkspaceScriptAvoidsTheInteractiveShellHazards() {
+        let script = LSPManager.workspaceResolveScript(startDir: "/tmp/x")
+        XCTAssertFalse(script.contains("!"),
+                       "zsh expands ! as history and discards the line, comments included")
+        XCTAssertFalse(script.contains("/*") || script.contains("*/") || script.contains("*."),
+                       "an unmatched glob in path position aborts the script under zsh")
+    }
+
     // MARK: - Git
 
     /// Covered in depth by GitScriptSizeTests; here so this file lists
