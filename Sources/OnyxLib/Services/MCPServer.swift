@@ -200,6 +200,7 @@ public class MCPMessageHandler {
                 listSlotsTool,
                 analyzeDepsTool,
                 notifyTool,
+                showHTMLTool,
             ])
         ])
         return JSONRPCResponse(id: request.id, result: tools)
@@ -250,6 +251,53 @@ public class MCPMessageHandler {
                                         "description": .string("tmux session name, e.g. from `tmux display-message -p \"#S\"`.")])
                 ]),
                 "required": .array([.string("title")])
+            ])
+        ])
+    }
+
+    /// Publish a rendered HTML page into a slot.
+    ///
+    /// Separate from show_text rather than a format flag on it, because
+    /// this is the one agents need to FIND: "build a status page and show
+    /// it to me" is a different intention from "display this text", and a
+    /// tool named for it is what makes that discoverable.
+    ///
+    /// The description is blunt about the file/content split. An agent
+    /// running on a remote host is talking to Onyx through a pipe — the
+    /// app reads files from ITS OWN filesystem, so a path that exists
+    /// where the agent is would silently fail to be found, or worse, find
+    /// a different file of the same name.
+    private var showHTMLTool: AnyCodableValue {
+        .object([
+            "name": .string("show_html"),
+            "description": .string("""
+                Render an HTML page in an artifact slot beside the user's terminal. Use it \
+                for anything that is better looked at than read in a chat: a status summary, \
+                a table of results, a report with links to the things it describes.
+
+                Links are clickable and open in the user's browser, so linking to each item \
+                you describe is usually worth doing.
+
+                Pass the page in `content`. Only use `file` when you are running on the SAME \
+                machine as Onyx — the app reads the path on its own filesystem, so a path \
+                from a remote host either fails or finds the wrong file. If you are on a \
+                remote host, read the file yourself and send the text.
+
+                A complete document is shown exactly as you wrote it, so style it however \
+                you like; a bare fragment is wrapped in the app's own dark styling. The \
+                panel is dark, so a page that assumes a white background should set one.
+
+                Pair it with `notify` when the user needs to know the page is ready.
+                """),
+            "inputSchema": .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "slot": .object(["type": .string("integer"), "description": .string("Slot number 0-7"), "minimum": .int(0), "maximum": .int(7)]),
+                    "title": .object(["type": .string("string"), "description": .string("Title shown above the page")]),
+                    "content": .object(["type": .string("string"), "description": .string("The HTML. A full document or a fragment.")]),
+                    "file": .object(["type": .string("string"), "description": .string("Absolute path to an HTML file — only when you are on the same machine as Onyx.")])
+                ]),
+                "required": .array([.string("slot"), .string("title")])
             ])
         ])
     }
@@ -368,6 +416,7 @@ public class MCPMessageHandler {
         case "list_slots": return callListSlots(id: request.id)
         case "analyze_deps": return callAnalyzeDeps(id: request.id, args: arguments)
         case "notify": return callNotify(id: request.id, args: arguments)
+        case "show_html": return callShowHTML(id: request.id, args: arguments)
         default:
             return JSONRPCResponse(id: request.id, error: JSONRPCError(code: -32602, message: "Unknown tool: \(toolName)"))
         }
@@ -396,6 +445,40 @@ public class MCPMessageHandler {
             "plist": "xml",
         ]
         return map[ext.lowercased()]
+    }
+
+    private func callShowHTML(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {
+        guard let slot = args["slot"]?.intValue,
+              let title = args["title"]?.stringValue else {
+            return JSONRPCResponse(id: id, error: .invalidParams)
+        }
+
+        let html: String
+        if let path = args["file"]?.stringValue {
+            guard let data = FileManager.default.contents(atPath: path),
+                  let text = String(data: data, encoding: .utf8) else {
+                // Name the likely cause: this is the mistake a remote
+                // agent makes, and "cannot read file" alone sends it
+                // looking at permissions on the wrong machine.
+                return toolResult(id: id, success: false,
+                                  message: "Cannot read \(path) — note that Onyx reads files "
+                                         + "on the machine it runs on. If you are on a remote "
+                                         + "host, read the file there and pass `content`.")
+            }
+            html = text
+        } else if let content = args["content"]?.stringValue {
+            html = content
+        } else {
+            return JSONRPCResponse(id: id, error: JSONRPCError(
+                code: -32602, message: "Either content or file must be provided"))
+        }
+
+        let artifactContent = ArtifactContent.text(content: html, format: .html,
+                                                    language: nil, wrap: true)
+        DispatchQueue.main.async { [self] in
+            _ = self.artifactManager.setSlot(slot, title: title, content: artifactContent)
+        }
+        return toolResult(id: id, success: true, message: "Showing in slot \(slot).")
     }
 
     private func callNotify(id: AnyCodableValue?, args: [String: AnyCodableValue]) -> JSONRPCResponse {

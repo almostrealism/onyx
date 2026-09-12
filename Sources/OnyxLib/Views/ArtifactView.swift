@@ -190,12 +190,35 @@ struct CodeWebView: NSViewRepresentable {
     let language: String?
     let wrap: Bool
 
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.setValue(false, forKey: "drawsBackground")
+        // The panel is a viewport onto one page, not a browser: a link
+        // followed in place would replace the status page an agent just
+        // published, with no way back to it.
+        webView.navigationDelegate = context.coordinator
         loadContent(webView)
         return webView
+    }
+
+    /// Sends links outward instead of navigating the panel.
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        func webView(_ webView: WKWebView,
+                     decidePolicyFor action: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            // Only user activation counts: the initial loadHTMLString is a
+            // navigation too, and cancelling that would show nothing.
+            guard action.navigationType == .linkActivated,
+                  ArtifactHTML.shouldOpenExternally(action.request.url) else {
+                decisionHandler(.allow)
+                return
+            }
+            if let url = action.request.url { NSWorkspace.shared.open(url) }
+            decisionHandler(.cancel)
+        }
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
@@ -218,7 +241,12 @@ struct CodeWebView: NSViewRepresentable {
         switch format {
         case .markdown:
             html = markdownHTML(escaped, wrapCSS: wrapCSS)
-        default:
+        case .html:
+            // Rendered, not escaped. This case previously fell through to
+            // the code renderer, so an agent asking for HTML got its own
+            // source listed back at it.
+            html = ArtifactHTML.prepared(content)
+        case .plain:
             html = codeHTML(escaped, langClass: langClass, wrapCSS: wrapCSS)
         }
 

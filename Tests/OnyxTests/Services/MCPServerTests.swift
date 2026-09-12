@@ -40,12 +40,13 @@ final class MCPMessageHandlerTests: XCTestCase {
         XCTAssertNil(response.error)
         if case .object(let obj) = response.result,
            case .array(let tools) = obj["tools"] {
-            XCTAssertEqual(tools.count, 7) // show_*, clear_slot, list_slots, analyze_deps, notify
+            XCTAssertEqual(tools.count, 8) // show_*, clear_slot, list_slots, analyze_deps, notify, show_html
             let names = tools.compactMap { tool -> String? in
                 if case .object(let t) = tool { return t["name"]?.stringValue }
                 return nil
             }
             XCTAssertTrue(names.contains("notify"))
+            XCTAssertTrue(names.contains("show_html"))
             XCTAssertTrue(names.contains("show_text"))
             XCTAssertTrue(names.contains("show_diagram"))
             XCTAssertTrue(names.contains("show_model"))
