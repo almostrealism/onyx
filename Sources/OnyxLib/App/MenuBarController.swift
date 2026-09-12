@@ -76,18 +76,59 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     ///
     /// Template images only: the menu bar inverts them for light and dark
     /// and for the highlight state, and a coloured icon gets that wrong in
-    /// at least one of the three. The BELL is the signal, not a tint.
+    /// at least one of the three.
     private func refreshIcon() {
         guard let button = statusItem?.button else { return }
         let unseen = Self.unseenTotal()
-        let symbol = unseen > 0 ? "bell.badge.fill" : "terminal"
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Onyx")
-        image?.isTemplate = true
-        button.image = image
+        button.image = Self.markImage(unread: unseen > 0)
         button.title = unseen > 1 ? " \(unseen)" : ""
         button.toolTip = unseen > 0
             ? "\(unseen) unread from your agents"
             : "Onyx"
+    }
+
+    /// Onyx's mark — the `>_` prompt, same as the app icon and the
+    /// favicon — with a dot when something is waiting.
+    ///
+    /// The mark NEVER changes. An icon that swaps to a different glyph
+    /// when it has news stops being a logo: you lose the thing your eye
+    /// finds the item by, exactly when you most need to find it. So the
+    /// unread state is the same mark plus a badge, which is how every
+    /// other menu bar item on the machine says the same thing.
+    static func markImage(unread: Bool) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+        guard let base = NSImage(systemSymbolName: "terminal", accessibilityDescription: "Onyx")?
+                .withSymbolConfiguration(config) else { return nil }
+        guard unread else {
+            base.isTemplate = true
+            return base
+        }
+
+        let dot: CGFloat = 5
+        let gap: CGFloat = 1.5
+        let size = NSSize(width: base.size.width + dot / 2 + gap,
+                          height: base.size.height + dot / 2 + gap)
+        let badged = NSImage(size: size, flipped: false) { _ in
+            base.draw(at: .zero, from: .zero, operation: .sourceOver, fraction: 1)
+            let center = NSPoint(x: size.width - dot / 2, y: size.height - dot / 2)
+
+            // Punch a transparent ring first. Without it the dot merges
+            // into the terminal glyph's own corner at 16pt and reads as a
+            // smudge rather than a badge.
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: NSRect(x: center.x - dot / 2 - gap,
+                                        y: center.y - dot / 2 - gap,
+                                        width: dot + gap * 2, height: dot + gap * 2)).fill()
+
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: NSRect(x: center.x - dot / 2, y: center.y - dot / 2,
+                                        width: dot, height: dot)).fill()
+            return true
+        }
+        badged.isTemplate = true
+        return badged
     }
 
     private static func unseenTotal() -> Int {
@@ -177,10 +218,12 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
             item.target = self
             item.representedObject = row.key
             if row.unseen > 0 {
-                let bell = NSImage(systemSymbolName: "bell.badge.fill",
-                                   accessibilityDescription: nil)
-                bell?.isTemplate = true
-                item.image = bell
+                // The same unread dot as the status item carries, at menu
+                // scale — one vocabulary for "this one is waiting".
+                let dot = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)?
+                    .withSymbolConfiguration(.init(pointSize: 7, weight: .bold))
+                dot?.isTemplate = true
+                item.image = dot
             }
             item.toolTip = "Switch to this session"
             menu.addItem(item)

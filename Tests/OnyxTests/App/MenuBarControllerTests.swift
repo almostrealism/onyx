@@ -95,3 +95,36 @@ final class MenuBarRowTests: XCTestCase {
         XCTAssertEqual(MenuBarController.clip("  fine  ", 40), "fine")
     }
 }
+
+/// The status item's icon.
+///
+/// The mark is the product's identity in a row of thirty other icons. It
+/// must not become a different glyph when it has news — that is precisely
+/// when the user is scanning for it.
+final class MenuBarIconTests: XCTestCase {
+
+    func testTheMarkExistsInBothStates() {
+        XCTAssertNotNil(MenuBarController.markImage(unread: false))
+        XCTAssertNotNil(MenuBarController.markImage(unread: true))
+    }
+
+    func testTheUnreadStateIsTheSameMarkPlusABadge() {
+        guard let quiet = MenuBarController.markImage(unread: false),
+              let loud = MenuBarController.markImage(unread: true) else {
+            return XCTFail("no image")
+        }
+        // Same glyph, grown just enough for the dot in the corner — not a
+        // swap to some other symbol, which would be a different size
+        // entirely and, more to the point, a different picture.
+        XCTAssertGreaterThan(loud.size.width, quiet.size.width)
+        XCTAssertLessThan(loud.size.width, quiet.size.width + 6)
+        XCTAssertGreaterThan(loud.size.height, quiet.size.height)
+    }
+
+    /// Non-template images don't invert for a light menu bar, so a dark
+    /// icon disappears against it.
+    func testBothStatesAreTemplateImages() {
+        XCTAssertTrue(MenuBarController.markImage(unread: false)?.isTemplate == true)
+        XCTAssertTrue(MenuBarController.markImage(unread: true)?.isTemplate == true)
+    }
+}
