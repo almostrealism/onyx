@@ -81,10 +81,21 @@ for arg in "$@"; do
     esac
 done
 
-# Version comes from the git tag, so the bundle can't drift from the
-# release. A dirty or untagged tree is marked as such rather than
-# silently shipping as the last tag.
-VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0")
+# Version comes from the shared Swift constant, so the bundle, the bridge
+# inside it and the per-host update check can't disagree. A dirty or
+# untagged tree is still marked as such in the build identifier rather
+# than silently shipping as the last tag.
+# The version comes from Sources/OnyxVersion/OnyxVersion.swift — the same
+# constant the app and the MCP bridge compile in. Reading it here is what
+# keeps the bundle, the bridge and the tag from drifting apart; `git
+# describe` is kept only for the BUILD identifier, which is about which
+# commit you are running, not which release it claims to be.
+onyx_version() {
+    sed -n 's/.*public static let current = "\(.*\)".*/\1/p' \
+        "Sources/OnyxVersion/OnyxVersion.swift" | head -1
+}
+VERSION="$(onyx_version)"
+[ -n "$VERSION" ] || VERSION="0.0"
 FULL_VERSION=$(git describe --tags --dirty 2>/dev/null || echo "$VERSION")
 DMG_PATH="$DIST_DIR/${APP_NAME}-${VERSION}.dmg"
 

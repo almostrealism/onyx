@@ -10,8 +10,12 @@
     <string>com.onyx.terminal</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <!-- Placeholder. install.sh and package.sh stamp the real value from
+         Sources/OnyxVersion/OnyxVersion.swift; nothing a user runs carries
+         this string, and duplicating the number here would just be one
+         more place for it to go stale. -->
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>0.0.0-dev</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>

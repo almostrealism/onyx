@@ -1,4 +1,5 @@
 import Foundation
+import OnyxVersion
 #if canImport(Glibc)
 import Glibc
 #endif
@@ -305,7 +306,7 @@ func errorResponse(id: String, message: String) -> String {
 
 /// Build identity, stamped by package.sh / CI so an installed bridge can
 /// be tied back to what produced it.
-let onyxMCPVersion = "0.18"
+let onyxMCPVersion = OnyxVersion.current
 
 // `--version` answers "is this thing installed and can it start", which
 // is the question both CI and the app's installer ask. It must not touch

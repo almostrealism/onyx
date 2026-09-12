@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnyxLib
+import OnyxVersion
 
 /// Choosing what to install and where. These decisions happen before any
 /// SSH, which is what makes them testable — and worth testing, because
@@ -252,30 +253,57 @@ final class MCPForwardedPortTests: XCTestCase {
     }
 }
 
-/// The two halves of the bridge are versioned together.
+/// One version number, reachable from everywhere that needs it.
 ///
-/// The app and OnyxMCP speak a protocol to each other, and OnyxMCP is a
-/// separate executable target that tests cannot import — so this reads its
-/// source. Crude, and the alternative is a version constant that drifts
-/// silently while every host reports "ready" on a bridge that predates the
-/// fix you just shipped.
-final class MCPInstallVersionTests: XCTestCase {
+/// The bridge used to carry its own and drifted to 0.17 while the app
+/// shipped as 0.16, so "which bridge goes with which app" had no answer
+/// and a stale bridge reported "ready" forever. Both now compile in
+/// OnyxVersion; what is left to guard is the things a compiler never
+/// sees — the shell scripts that stamp and tag.
+final class OnyxVersionTests: XCTestCase {
 
-    func testTheBundledVersionMatchesTheBridgeSource() throws {
-        // Tests/OnyxTests/Services/… → repo root
-        let root = URL(fileURLWithPath: #filePath)
+    private var root: URL {
+        URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // Services
             .deletingLastPathComponent()   // OnyxTests
             .deletingLastPathComponent()   // Tests
             .deletingLastPathComponent()   // repo
-        let source = try String(contentsOf: root
-            .appendingPathComponent("Sources/OnyxMCP/main.swift"), encoding: .utf8)
-        XCTAssertTrue(
-            source.contains("let onyxMCPVersion = \"\(MCPInstall.currentVersion)\""),
-            """
-            MCPInstall.currentVersion is \(MCPInstall.currentVersion) but \
-            Sources/OnyxMCP/main.swift declares something else. Bump both, or \
-            every host will keep reporting a stale bridge as ready.
-            """)
+    }
+
+    func testTheInstallerReportsTheAppsOwnVersion() {
+        XCTAssertEqual(MCPInstall.currentVersion, OnyxVersion.current)
+    }
+
+    func testTheVersionLooksLikeAVersion() {
+        XCTAssertFalse(OnyxVersion.current.isEmpty)
+        XCTAssertTrue(OnyxVersion.current.allSatisfy { $0.isNumber || $0 == "." },
+                      "the scripts and the git tag use it verbatim")
+    }
+
+    /// 0.17 was claimed by the bridge alone, including the builds with the
+    /// notification bug — a host reporting it could be either, so the
+    /// number can never mean one thing. Never reuse it.
+    func testTheAmbiguousVersionIsNotReused() {
+        XCTAssertNotEqual(OnyxVersion.current, "0.17")
+    }
+
+    /// Every script that stamps or tags must read the constant rather than
+    /// keep its own copy. This is the check a compiler can't make.
+    func testTheBuildScriptsReadTheConstantRatherThanTheGitTag() throws {
+        for script in ["install.sh", "package.sh", "release.sh"] {
+            let text = try String(contentsOf: root.appendingPathComponent(script),
+                                  encoding: .utf8)
+            XCTAssertTrue(text.contains("OnyxVersion/OnyxVersion.swift"),
+                          "\(script) must take the release version from the shared constant")
+        }
+    }
+
+    /// The bundle's static value is a placeholder the scripts overwrite.
+    /// A real number there would be a second copy to forget.
+    func testTheInfoPlistDoesNotCarryASecondCopyOfTheVersion() throws {
+        let plist = try String(contentsOf: root.appendingPathComponent("Sources/OnyxApp/Info.plist"),
+                               encoding: .utf8)
+        XCTAssertFalse(plist.contains(">\(OnyxVersion.current)<"),
+                       "Info.plist should be stamped at package time, not edited by hand")
     }
 }

@@ -90,7 +90,7 @@ Managers depend on Stores, Services, and Models — not on Views or other Manage
 
 - **Never answer a notification.** A JSON-RPC message with no id (or a null one) gets NO reply — `MCPMessageHandler.handleMessage` returns nil. Answering one produces `{"result":null}`, which is not a valid response object; Claude Code validates what it receives and drops the connection, and the visible symptom is "Failed to reconnect to onyx" against whatever ran next. `notifications/cancelled` (sent on every user interrupt) is the one that bites.
 - The bridge must not wait for a reply to a notification either, or it stalls for the full receive timeout three times over. `OnyxMCP.sendNotification` writes and drains briefly — the drain is what keeps an older desktop's stray reply from being read as the NEXT request's response.
-- The app and OnyxMCP are versioned together: bump `MCPInstall.currentVersion` and `onyxMCPVersion` in the same commit (`MCPInstallVersionTests` fails otherwise), and a host on an older bridge reports `outdated` rather than `ready`.
+- **One version number: `Sources/OnyxVersion/OnyxVersion.swift`.** Its own dependency-free target because the app and OnyxMCP can't import each other (the bridge builds on Linux). The bundle version, the bridge's `--version`, the per-host "update available" check and the release tag all derive from it — `install.sh`, `package.sh` and `release.sh` read the file, and release.sh refuses to tag a version that disagrees. Bumping a release means editing that one line. 0.17 is burned: the bridge alone claimed it, including the buggy builds.
 
 ## Remote command execution
 

@@ -84,10 +84,20 @@ esac
 # when you need to know. package.sh does the same; a script-installed
 # build has no less right to be identifiable.
 #
-# `git describe` (not the bare tag) so a build from a working tree that's
-# ahead of the tag says so, rather than claiming to be the release.
+# The release version is the shared constant; the build identifier stays
+# `git describe`, so a tree ahead of the tag still says which commit it is.
 cp "Sources/OnyxApp/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
-VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0")
+# The version comes from Sources/OnyxVersion/OnyxVersion.swift — the same
+# constant the app and the MCP bridge compile in. Reading it here is what
+# keeps the bundle, the bridge and the tag from drifting apart; `git
+# describe` is kept only for the BUILD identifier, which is about which
+# commit you are running, not which release it claims to be.
+onyx_version() {
+    sed -n 's/.*public static let current = "\(.*\)".*/\1/p' \
+        "Sources/OnyxVersion/OnyxVersion.swift" | head -1
+}
+VERSION="$(onyx_version)"
+[ -n "$VERSION" ] || VERSION="0.0"
 BUILD_VERSION=$(git describe --tags --dirty --always 2>/dev/null || echo "$VERSION")
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" \
     "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 || true

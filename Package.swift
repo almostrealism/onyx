@@ -21,10 +21,18 @@ let package = Package(
         // See docs/static-analysis.md for details.
     ],
     targets: [
+        // One string, shared by the app and the bridge — which can't
+        // import each other, since OnyxMCP is standalone and builds on
+        // Linux. Keep this target free of dependencies and platform code.
+        .target(
+            name: "OnyxVersion",
+            path: "Sources/OnyxVersion"
+        ),
         .target(
             name: "OnyxLib",
             dependencies: [
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
+                "OnyxVersion",
             ],
             path: "Sources/OnyxLib"
         ),
@@ -35,11 +43,12 @@ let package = Package(
             exclude: ["Info.plist"],
             resources: [.copy("AppIcon.icns")]
         ),
-        // OnyxMCP: cross-platform (macOS + Linux). No dependencies.
+        // OnyxMCP: cross-platform (macOS + Linux). Depends only on the
+        // version constant, which is deliberately dependency-free.
         // Build on Linux: swift build --product OnyxMCP
         .executableTarget(
             name: "OnyxMCP",
-            dependencies: [],
+            dependencies: ["OnyxVersion"],
             path: "Sources/OnyxMCP"
         ),
         .testTarget(

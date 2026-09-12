@@ -69,16 +69,33 @@ confirm() {   # confirm "question" [default_yes]
 # ---------------------------------------------------------------------
 echo "==> Version"
 
+# The source of truth is the constant the app and the MCP bridge both
+# compile in. Offering anything else as the default is how a release gets
+# tagged 0.16 while the bridge inside it says 0.17, which is precisely the
+# mess this is here to prevent.
+SOURCE_VERSION="$(sed -n 's/.*public static let current = "\(.*\)".*/\1/p' \
+    "Sources/OnyxVersion/OnyxVersion.swift" | head -1)"
+
 if [ -z "$VERSION" ]; then
-    VERSION="$(git describe --tags --abbrev=0 2>/dev/null || true)"
-    if [ -n "$VERSION" ]; then
-        ask REPLY_V "  Version to release [$VERSION]: "
-        VERSION="${REPLY_V:-$VERSION}"
+    if [ -n "$SOURCE_VERSION" ]; then
+        ask REPLY_V "  Version to release [$SOURCE_VERSION]: "
+        VERSION="${REPLY_V:-$SOURCE_VERSION}"
     else
         while [ -z "$VERSION" ]; do ask VERSION "  Version to release (e.g. 0.15): "; done
     fi
 fi
 VERSION="${VERSION#v}"
+
+# Releasing something other than what the tree says it is means the app
+# bundle, the bridge's --version and every host's "update available"
+# check would all disagree with the tag. Stop rather than explain it in
+# the release notes.
+if [ -n "$SOURCE_VERSION" ] && [ "$VERSION" != "$SOURCE_VERSION" ]; then
+    echo "  ERROR: Sources/OnyxVersion/OnyxVersion.swift says $SOURCE_VERSION,"
+    echo "         but you asked to release $VERSION."
+    echo "         Edit that constant (one line) and commit, then run this again."
+    exit 1
+fi
 echo "  Releasing $VERSION"
 
 DMG="$DIST_DIR/Onyx-$VERSION.dmg"
