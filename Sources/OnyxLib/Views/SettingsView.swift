@@ -251,6 +251,33 @@ struct SettingsView: View {
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
 
+                                // Menu bar item
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("MENU BAR")
+                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
+                                        .tracking(2)
+
+                                    Toggle(isOn: Binding(
+                                        get: { appState.appearance.showMenuBarItem },
+                                        set: {
+                                            appState.appearance.showMenuBarItem = $0
+                                            appState.saveAppearance()
+                                            MenuBarController.shared.setEnabled($0)
+                                        }
+                                    )) {
+                                        Text("Show sessions in the menu bar")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.8))
+                                    }
+                                    .toggleStyle(.switch)
+
+                                    Text("Lists the sessions that have notes and shows which of them an agent has alerted you about, with the alert text right in the menu. This is how you find out which session is bouncing the dock without switching to Onyx.")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(.gray.opacity(0.4))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+
                                 // Claude Code permission gating
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("CLAUDE CODE HOOKS")

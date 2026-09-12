@@ -1605,6 +1605,13 @@ public class AppState: ObservableObject {
         // Alerts attach to sessions, not to windows, so the delivery path
         // binds once to whichever window came up first.
         AlertDelivery.shared.register(appState: self)
+        // Same rationale for the menu bar item, which shows the same
+        // alerts against the same sessions. Never under XCTest: a test
+        // process has no business putting an icon in the user's menu bar.
+        if NSClassFromString("XCTest") == nil {
+            MenuBarController.shared.register(appState: self)
+            MenuBarController.shared.setEnabled(appearance.showMenuBarItem)
+        }
         // Wire up the screensaver pipeline. Both calls are no-ops under
         // XCTest so unit tests don't write to the user's real cpu-stream.json
         // or kick off real SSH fan-out polling.

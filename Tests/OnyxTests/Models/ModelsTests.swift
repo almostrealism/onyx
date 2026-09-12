@@ -487,6 +487,7 @@ final class CodableRoundTripTests: XCTestCase {
         config.showAllContainers = true      // default is false, so flip it
         config.prDraftFilter = .hideDrafts   // default is .all, so change it
         config.hasSeenWalkthrough = true     // default is false, so flip it
+        config.showMenuBarItem = false       // default is true, so flip it
 
         let data = try JSONEncoder().encode(config)
         let d = try JSONDecoder().decode(AppearanceConfig.self, from: data)
@@ -511,6 +512,7 @@ final class CodableRoundTripTests: XCTestCase {
         XCTAssertTrue(d.showAllContainers)
         XCTAssertEqual(d.prDraftFilter, .hideDrafts)
         XCTAssertTrue(d.hasSeenWalkthrough)
+        XCTAssertFalse(d.showMenuBarItem, "defaults true, so the round trip has to carry a false")
     }
 
     /// Tripwire: if you add a stored property to AppearanceConfig, this
@@ -519,9 +521,9 @@ final class CodableRoundTripTests: XCTestCase {
     /// missing one of those steps is wiping every user's settings.
     func testAppearanceConfig_storedPropertyCount_isLocked() {
         let count = Mirror(reflecting: AppearanceConfig()).children.count
-        XCTAssertEqual(count, 21, """
+        XCTAssertEqual(count, 22, """
             AppearanceConfig has \(count) stored properties but the test
-            expects 17. If you ADDED a field, you must also:
+            expects a different number. If you ADDED a field, you must also:
               1. Add it to `CodingKeys` in HostConfig.swift
               2. Add a `decodeIfPresent(...) ?? <default>` line in `init(from:)`
               3. Add a non-default mutation to testAppearanceConfig_roundtripsAllStoredFields

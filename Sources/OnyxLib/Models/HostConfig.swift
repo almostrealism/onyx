@@ -163,6 +163,13 @@ public struct AppearanceConfig: Codable {
     /// the overlay is up; persisted because it's a standing preference for
     /// how you want to read the list, not a transient peek.
     public var remindersDueSoonOnly: Bool = false
+    /// When true, Onyx puts an item in the menu bar listing the sessions
+    /// that have notes and which of them an agent has alerted you about.
+    ///
+    /// On by default: it is the only place that answers "which session is
+    /// bouncing" without switching to the app, and a menu bar item that
+    /// exists but is off is one nobody discovers.
+    public var showMenuBarItem: Bool = true
     /// When true, draws a 2px orange outline around whichever component
     /// currently holds keyboard focus (terminal / right panel / overlay).
     /// Useful when debugging focus-routing issues; off by default because
@@ -249,6 +256,7 @@ public struct AppearanceConfig: Codable {
         case claudeHooksGatePermissions, showFocusOutline
         case searchFileTypeIDs, remindersDueSoonOnly, simpleShowSidePanel
         case showAllContainers, prDraftFilter, hasSeenWalkthrough
+        case showMenuBarItem
     }
 
     public init(from decoder: Decoder) throws {
@@ -274,5 +282,6 @@ public struct AppearanceConfig: Codable {
         self.showAllContainers          = try c.decodeIfPresent(Bool.self,           forKey: .showAllContainers)          ?? false
         self.prDraftFilter              = try c.decodeIfPresent(PRDraftFilter.self, forKey: .prDraftFilter)              ?? .all
         self.hasSeenWalkthrough         = try c.decodeIfPresent(Bool.self,           forKey: .hasSeenWalkthrough)         ?? false
+        self.showMenuBarItem            = try c.decodeIfPresent(Bool.self,           forKey: .showMenuBarItem)            ?? true
     }
 }
