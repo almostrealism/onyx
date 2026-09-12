@@ -159,10 +159,10 @@ public final class ConnectionPair {
         public var consecutiveFailures: Int = 0
         public var consecutiveSmokeFailures: Int = 0
         public var establishFailures: Int = 0
-        public var lastEstablishAttemptAt: Date? = nil
-        public var establishedAt: Date? = nil
-        public var lastSmokeTestAt: Date? = nil
-        public var masterPID: pid_t? = nil
+        public var lastEstablishAttemptAt: Date?
+        public var establishedAt: Date?
+        public var lastSmokeTestAt: Date?
+        public var masterPID: pid_t?
     }
 
     public let hostID: UUID
@@ -172,7 +172,7 @@ public final class ConnectionPair {
 
     private var slots: [Slot]
     private var activeIndex = 0
-    private var lastRotationAt: Date? = nil
+    private var lastRotationAt: Date?
     private var generation: UInt64 = 0
     /// True once any slot has ever reached .alive — distinguishes
     /// `.connecting` (first contact) from `.down` (lost contact).
@@ -517,7 +517,7 @@ public final class ConnectionPair {
         // pair→registry here would be an ABBA deadlock.
         let attachedTerminals = terminalChannelCount()
         var toEstablish: [Int] = []
-        var rotationTeardown: (path: String, pid: pid_t?)? = nil
+        var rotationTeardown: (path: String, pid: pid_t?)?
         lock.lock()
         slots = s
 
@@ -664,7 +664,7 @@ public final class ConnectionPair {
         // PID while the socket file is fresh (it's the only reliable
         // handle for killing a master stuck in kernel D state later).
         var success = result.exit == 0
-        var capturedPID: pid_t? = nil
+        var capturedPID: pid_t?
         if success {
             success = checkAlive(path: path, userHost: uh)
             if success {

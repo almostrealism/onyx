@@ -695,7 +695,6 @@ private struct SessionRow: View {
     }
 }
 
-
 // MARK: - Rename
 
 /// The rename field, shown in place of the row it renames.

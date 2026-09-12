@@ -202,7 +202,6 @@ public struct PersistedSession: Codable {
     }
 }
 
-
 /// Which layout the monitor overlay is drawing. `S` toggles them.
 ///
 /// This is about DENSITY — how much detail fits and how far away you can
@@ -250,7 +249,6 @@ public enum FleetMode: String, CaseIterable, Codable {
         }
     }
 }
-
 
 /// How the merged PR list treats drafts.
 ///

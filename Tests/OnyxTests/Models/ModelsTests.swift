@@ -445,7 +445,7 @@ final class CodableRoundTripTests: XCTestCase {
           "use12HourClock": true
         }
         """
-        let data = json.data(using: .utf8)!
+        let data = Data(json.utf8)
         let config = try JSONDecoder().decode(AppearanceConfig.self, from: data)
         // Present fields preserved
         XCTAssertEqual(config.fontSize, 14)
@@ -534,7 +534,7 @@ final class CodableRoundTripTests: XCTestCase {
 
     func testSSHConfigDecodesFullJSON() throws {
         let json = #"{"host":"server.io","user":"bob","port":22,"tmuxSession":"onyx","identityFile":""}"#
-        let data = json.data(using: .utf8)!
+        let data = Data(json.utf8)
         let config = try JSONDecoder().decode(SSHConfig.self, from: data)
 
         XCTAssertEqual(config.host, "server.io")
@@ -546,7 +546,7 @@ final class CodableRoundTripTests: XCTestCase {
     func testSSHConfigPartialJSONThrows() {
         // SSHConfig uses synthesized Codable, so missing keys should fail
         let json = #"{"host":"server.io","user":"bob"}"#
-        let data = json.data(using: .utf8)!
+        let data = Data(json.utf8)
         XCTAssertThrowsError(try JSONDecoder().decode(SSHConfig.self, from: data))
     }
 }

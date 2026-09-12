@@ -259,11 +259,11 @@ public class DockerStatsManager: ObservableObject {
             let unit = parts[1].lowercased()
             if unit.hasPrefix("second") { return "\(n)s" }
             if unit.hasPrefix("minute") { return "\(n)m" }
-            if unit.hasPrefix("hour")   { return "\(n)h" }
-            if unit.hasPrefix("day")    { return "\(n)d" }
-            if unit.hasPrefix("week")   { return "\(n)w" }
-            if unit.hasPrefix("month")  { return "\(n)mo" }
-            if unit.hasPrefix("year")   { return "\(n)y" }
+            if unit.hasPrefix("hour") { return "\(n)h" }
+            if unit.hasPrefix("day") { return "\(n)d" }
+            if unit.hasPrefix("week") { return "\(n)w" }
+            if unit.hasPrefix("month") { return "\(n)mo" }
+            if unit.hasPrefix("year") { return "\(n)y" }
             return rest
         }
 
@@ -274,5 +274,4 @@ public class DockerStatsManager: ObservableObject {
         if lower.hasPrefix("about an hour") || lower == "an hour" { return "1h" }
         return rest
     }
-
 }

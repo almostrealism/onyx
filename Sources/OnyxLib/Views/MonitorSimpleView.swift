@@ -659,4 +659,3 @@ private struct SimpleSessionActivityPill: View {
         }
     }
 }
-

@@ -16,7 +16,8 @@ final class MenuBarRowTests: XCTestCase {
             key: key,
             label: key,
             note: note.map { SessionNote(sessionID: key, text: $0,
-                                         updated: Date().addingTimeInterval(-noteAge)) },
+                                         updated: Date().addingTimeInterval(-noteAge))
+            },
             alerts: alerts)
     }
 

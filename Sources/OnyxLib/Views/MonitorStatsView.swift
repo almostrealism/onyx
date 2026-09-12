@@ -231,8 +231,8 @@ func monitorCompactCPU(_ s: String) -> String {
         .replacingOccurrences(of: "%", with: "")
     guard let v = Double(cleaned) else { return s }
     if v >= 1000 { return String(format: "%.0f%%", v) }   // e.g. "1024%"
-    if v >= 100  { return String(format: "%.0f%%", v) }   // e.g. "150%"
-    if v >= 10   { return String(format: "%.1f%%", v) }   // e.g. "12.3%"
+    if v >= 100 { return String(format: "%.0f%%", v) }   // e.g. "150%"
+    if v >= 10 { return String(format: "%.1f%%", v) }   // e.g. "12.3%"
     return String(format: "%.2f%%", v)                    // e.g. "0.05%"
 }
 
@@ -255,9 +255,9 @@ func monitorCompactSize(_ part: String) -> String {
         let numStr = t.dropLast(input.count).trimmingCharacters(in: .whitespaces)
         guard let v = Double(numStr) else { return t }
         if v >= 1000 { return String(format: "%.0f%@", v / 1024, "T") }
-        if v >= 100  { return String(format: "%.0f%@", v, unit) }    // "888G"
-        if v >= 10   { return String(format: "%.1f%@", v, unit) }    // "12.3G"
-        if v >= 1    { return String(format: "%.1f%@", v, unit) }    // "1.2G"
+        if v >= 100 { return String(format: "%.0f%@", v, unit) }    // "888G"
+        if v >= 10 { return String(format: "%.1f%@", v, unit) }    // "12.3G"
+        if v >= 1 { return String(format: "%.1f%@", v, unit) }    // "1.2G"
         return String(format: "%.2f%@", v, unit)                     // "0.12G"
     }
     return t
@@ -651,4 +651,3 @@ struct TimingHeatmapGrid: View {
         .fixedSize()
     }
 }
-

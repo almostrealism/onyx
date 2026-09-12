@@ -20,7 +20,7 @@ final class CodeIntelConfigTests: XCTestCase {
         XCTAssertEqual(host.codeIntel.heapMB, 0)
     }
 
-    func test_legacyHostArray_decodes(){
+    func test_legacyHostArray_decodes() {
         // The exact path AppState uses: decode([HostConfig]) with try?.
         let legacy = """
         [{"id":"22222222-2222-2222-2222-222222222222","label":"a",

@@ -13,9 +13,9 @@ final class TimingDataStoreTests: XCTestCase {
     /// inside timespan. Earlier code looked at timespan.start_date and lost
     /// all data.
     func test_parseReport_startDateAtRowLevel() throws {
-        let json = """
+        let json = Data("""
         [{"start_date":"2026-04-01","duration":3600,"project":{"title":"Work","self":"/projects/1"}}]
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows[0].date, "2026-04-01")
@@ -25,9 +25,9 @@ final class TimingDataStoreTests: XCTestCase {
     /// Fallback path: some older payloads nested start_date inside timespan.
     /// Still supported.
     func test_parseReport_startDateNestedFallback() throws {
-        let json = """
+        let json = Data("""
         [{"timespan":{"start_date":"2026-04-02"},"duration":1800,"project":{"title":"X","self":"/p/2"}}]
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows[0].date, "2026-04-02")
@@ -40,9 +40,9 @@ final class TimingDataStoreTests: XCTestCase {
     /// Policy: accept only exactly 6 chars; 8-char values are rejected to
     /// force the palette fallback path.
     func test_parseReport_rejectsEightCharColor() throws {
-        let json = """
+        let json = Data("""
         [{"start_date":"2026-04-01","duration":100,"project":{"title":"X","self":"/p/1","color":"#6EBF1DFF"}}]
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows[0].projectColor, "",
@@ -50,17 +50,17 @@ final class TimingDataStoreTests: XCTestCase {
     }
 
     func test_parseReport_accepts6CharColor() throws {
-        let json = """
+        let json = Data("""
         [{"start_date":"2026-04-01","duration":100,"project":{"title":"X","self":"/p/1","color":"#6EBF1D"}}]
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertEqual(rows[0].projectColor, "6EBF1D")
     }
 
     func test_parseReport_emptyColorIsEmpty() throws {
-        let json = """
+        let json = Data("""
         [{"start_date":"2026-04-01","duration":100,"project":{"title":"X","self":"/p/1"}}]
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertEqual(rows[0].projectColor, "")
     }
@@ -71,26 +71,26 @@ final class TimingDataStoreTests: XCTestCase {
     /// not a bare string. Earlier code expected a string and all hierarchy
     /// was lost.
     func test_parseReport_parentAsObject() throws {
-        let json = """
+        let json = Data("""
         [{"start_date":"2026-04-01","duration":100,"project":{"title":"Child","self":"/p/2","parent":{"self":"/p/1"}}}]
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertEqual(rows[0].parentRef, "/p/1")
     }
 
     /// Both shapes must work — older payloads send a string ref.
     func test_parseReport_parentAsString() throws {
-        let json = """
+        let json = Data("""
         [{"start_date":"2026-04-01","duration":100,"project":{"title":"Child","self":"/p/2","parent":"/p/1"}}]
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertEqual(rows[0].parentRef, "/p/1")
     }
 
     func test_parseReport_noParent() throws {
-        let json = """
+        let json = Data("""
         [{"start_date":"2026-04-01","duration":100,"project":{"title":"Top","self":"/p/1"}}]
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertNil(rows[0].parentRef)
     }
@@ -98,33 +98,33 @@ final class TimingDataStoreTests: XCTestCase {
     // MARK: - parseReport: filtering
 
     func test_parseReport_filtersZeroDuration() throws {
-        let json = """
+        let json = Data("""
         [
           {"start_date":"2026-04-01","duration":0,"project":{"title":"X","self":"/p/1"}},
           {"start_date":"2026-04-01","duration":60,"project":{"title":"Y","self":"/p/2"}}
         ]
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows[0].projectTitle, "Y")
     }
 
     func test_parseReport_filtersMissingStartDate() throws {
-        let json = """
+        let json = Data("""
         [
           {"duration":100,"project":{"title":"X","self":"/p/1"}},
           {"start_date":"2026-04-01","duration":60,"project":{"title":"Y","self":"/p/2"}}
         ]
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows[0].projectTitle, "Y")
     }
 
     func test_parseReport_integerDuration() throws {
-        let json = """
+        let json = Data("""
         [{"start_date":"2026-04-01","duration":120,"project":{"title":"X","self":"/p/1"}}]
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertEqual(rows[0].seconds, 120)
     }
@@ -134,17 +134,17 @@ final class TimingDataStoreTests: XCTestCase {
     /// Timing API sometimes returns a bare array, sometimes a {"data": [...]}
     /// envelope. Both must parse.
     func test_parseReport_bareArray() throws {
-        let json = """
+        let json = Data("""
         [{"start_date":"2026-04-01","duration":60,"project":{"title":"X","self":"/p/1"}}]
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertEqual(rows.count, 1)
     }
 
     func test_parseReport_dataEnvelope() throws {
-        let json = """
+        let json = Data("""
         {"data":[{"start_date":"2026-04-01","duration":60,"project":{"title":"X","self":"/p/1"}}]}
-        """.data(using: .utf8)!
+        """.utf8)
         let rows = try XCTUnwrap(TimingDataStore.parseReportRows(json))
         XCTAssertEqual(rows.count, 1)
     }

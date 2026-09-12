@@ -164,8 +164,11 @@ public final class AlertDelivery {
         guard Bundle.main.bundleIdentifier != nil else { return }
         let content = UNMutableNotificationContent()
         content.title = alert.title
-        if let body = alert.body { content.body = body }
-        else if let label = alert.target?.label, !label.isEmpty { content.body = label }
+        if let body = alert.body {
+            content.body = body
+        } else if let label = alert.target?.label, !label.isEmpty {
+            content.body = label
+        }
         content.sound = alert.urgent ? .default : nil
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: alert.id.uuidString, content: content, trigger: nil))

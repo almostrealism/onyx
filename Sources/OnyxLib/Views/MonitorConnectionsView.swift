@@ -330,7 +330,7 @@ private struct SSHDiagnosticPanel: View {
     let onReset: () -> Void
     let onTestConnect: () -> Void
     @Environment(\.monitorFontScale) private var fontScale
-    @State private var lastReapResult: String? = nil
+    @State private var lastReapResult: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

@@ -13,8 +13,7 @@ final class TimingProjectOrderTests: XCTestCase {
     }
 
     private func day(_ label: String, projects: [TimingManager.ProjectSlice])
-        -> TimingManager.DailyTime
-    {
+        -> TimingManager.DailyTime {
         TimingManager.DailyTime(
             id: label, dayLabel: label, date: Date(),
             hours: projects.reduce(0) { $0 + $1.hours },

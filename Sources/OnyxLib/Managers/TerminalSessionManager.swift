@@ -840,7 +840,6 @@ class OnyxTerminalView: NSView {
         }
     }
 
-
     // MARK: - File drops
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {

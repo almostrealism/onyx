@@ -34,7 +34,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var watch: AnyCancellable?
 
-    private override init() { super.init() }
+    override private init() { super.init() }
 
     /// Called once per window; the first one wins. Sessions and alerts are
     /// app-wide, so any window's state answers the same questions.

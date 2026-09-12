@@ -456,8 +456,10 @@ private struct PipelineRow: View {
     }
 
     private func openRun() {
-        if let s = status.runURL, let url = URL(string: s) { NSWorkspace.shared.open(url) }
-        else if let url = URL(string: status.spec.url) { NSWorkspace.shared.open(url) }
+        // The run itself when we know it, the pipeline's page otherwise.
+        guard let target = status.runURL.flatMap(URL.init(string:))
+                ?? URL(string: status.spec.url) else { return }
+        NSWorkspace.shared.open(target)
     }
 }
 
@@ -645,4 +647,3 @@ private struct SuggestionRow: View {
         }
     }
 }
-

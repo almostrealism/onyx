@@ -199,10 +199,11 @@ public final class LSPManager: ObservableObject {
         if !pf.javaOK {
             // Surface exactly what the host reported so a mis-detection is
             // self-diagnosing rather than a flat "needs Java" dead end.
-            let found: String
-            if let major = pf.javaMajor { found = "found Java \(major)" }
-            else if let line = pf.javaLine { found = "saw: \(line)" }
-            else { found = "no java on the host's PATH / JAVA_HOME" }
+            let found: String = {
+                if let major = pf.javaMajor { return "found Java \(major)" }
+                if let line = pf.javaLine { return "saw: \(line)" }
+                return "no java on the host's PATH / JAVA_HOME"
+            }()
             return .setupRequired(reason: "Code intelligence needs Java \(JDTLSBootstrap.minJavaMajor)+ — \(found).",
                                   canInstall: false)
         }
@@ -385,10 +386,15 @@ public final class LSPManager: ObservableObject {
     /// Map an LSP result (array of Location / LocationLink / TypeHierarchyItem,
     /// or a single object) into NavResults.
     static func results(fromLocations raw: Any?) -> [NavResult] {
+        // `definition` may answer with a single object rather than a list.
         let array: [[String: Any]]
-        if let a = raw as? [[String: Any]] { array = a }
-        else if let o = raw as? [String: Any] { array = [o] }   // definition can be a single object
-        else { return [] }
+        if let a = raw as? [[String: Any]] {
+            array = a
+        } else if let o = raw as? [String: Any] {
+            array = [o]
+        } else {
+            return []
+        }
         return array.compactMap(navResult(from:))
     }
 

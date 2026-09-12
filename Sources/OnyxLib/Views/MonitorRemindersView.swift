@@ -332,7 +332,6 @@ public class RemindersManager: ObservableObject {
     }
 }
 
-
 struct RemindersSection: View {
     @ObservedObject var appState: AppState
     @StateObject private var reminders = RemindersManager()
@@ -417,7 +416,8 @@ struct RemindersSection: View {
                 // survives; lists left empty by the filter drop out.
                 let nonEmpty = reminders.groupedReminders
                     .map { ReminderListGroup(id: $0.id, name: $0.name,
-                                             reminders: visible($0.reminders)) }
+                                             reminders: visible($0.reminders))
+                    }
                     .filter { !$0.reminders.isEmpty }
                 if nonEmpty.isEmpty {
                     Text(dueSoonOnly ? "Nothing due today or tomorrow" : reminders.emptyMessage)

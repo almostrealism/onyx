@@ -31,7 +31,6 @@ opt_in_rules:
   - legacy_multiple
   - literal_expression_end_indentation
   - modifier_order
-  - operator_usage_whitespace
   - overridden_super_call
   - prefer_self_type_over_type_of_self
   - prefer_zero_over_explicit_init
@@ -46,6 +45,19 @@ opt_in_rules:
   - yoda_condition
 
 disabled_rules:
+  # This codebase aligns tables deliberately — the file-type presets, the
+  # decodeIfPresent block in AppearanceConfig, the SSH flag lists — and
+  # both of these rules read the padding that produces those columns as
+  # sloppiness. Their autofix silently flattens the tables, which is a
+  # real loss of readability in exchange for nothing. (operator_usage_
+  # whitespace was opt-in and has been removed from that list for the
+  # same reason.)
+  - comma
+  # SwiftUI's own spelling. `Button(action:) { label }` is two closures
+  # with one trailing, and so is nearly every modifier that takes content
+  # — 74 violations for writing SwiftUI the way SwiftUI is written. The
+  # rule is aimed at non-UI APIs where the trailing closure is ambiguous.
+  - multiple_closures_with_trailing_closure
   - trailing_comma
   - todo
   - line_length
@@ -62,6 +74,15 @@ disabled_rules:
 # Listed here so the lint pass doesn't emit a config warning.
 analyzer_rules:
   - unused_import
+
+# `master` is ssh's own vocabulary — ControlMaster, the mux master
+# process, the master socket — and the ConnectionPair architecture is
+# named after it throughout. Renaming our side would make the code stop
+# matching the manual page it implements, which is worse for the next
+# reader than the term is. Other flagged terms stay flagged.
+inclusive_language:
+  override_allowed_terms:
+    - master
 
 # File-level thresholds
 # NOTE: error threshold raised to 2000 because TerminalSessionManager.swift is

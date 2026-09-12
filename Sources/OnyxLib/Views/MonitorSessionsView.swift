@@ -1,6 +1,5 @@
 import SwiftUI
 
-
 struct ClaudeSessionsSection: View {
     @ObservedObject var appState: AppState
 
@@ -233,7 +232,8 @@ struct SessionNotesSection: View {
                         // activates) and drops the overlays covering it —
                         // clicking a note always means "take me there".
                         onTap: { appState.jumpToSession(entry.session,
-                                                        dismissIfAlreadyActive: false) }
+                                                        dismissIfAlreadyActive: false)
+                        }
                     )
                 }
             }
@@ -345,4 +345,3 @@ private struct SessionNoteRow: View {
         }
     }
 }
-

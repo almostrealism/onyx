@@ -225,7 +225,7 @@ public final class PullRequestManager: ObservableObject {
             : ["query": Self.query, "variables": ["owner": repo.owner, "name": repo.name]]
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
 
-        let task = session.dataTask(with: req) { data, response, error in
+        let task = session.dataTask(with: req) { data, _, error in
             if let error = error { completion(.failure(error)); return }
             guard let data = data else {
                 completion(.failure(PRError.emptyResponse)); return
@@ -253,7 +253,7 @@ public final class PullRequestManager: ObservableObject {
                     pairs = (decoded.data?.repository?.pullRequests?.nodes ?? [])
                         .map { (repo.fullName, $0) }
                 }
-                let prs = pairs.map { (fullName, node) in
+                let prs = pairs.map { fullName, node in
                     PullRequest(
                         provider: .github,
                         repoFullName: fullName,

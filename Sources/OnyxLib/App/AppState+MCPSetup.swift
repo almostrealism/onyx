@@ -98,7 +98,7 @@ extension AppState {
             settings = existing
         }
 
-        if let hooksObj = try? JSONSerialization.jsonObject(with: hooksJson.data(using: .utf8)!) {
+        if let hooksObj = try? JSONSerialization.jsonObject(with: Data(hooksJson.utf8)) {
             settings["hooks"] = hooksObj
         }
 

@@ -41,7 +41,7 @@ public class TimingManager: ObservableObject {
     @Published public var avgHoursPerDayLast30: Double = 0
 
     /// The Monday that anchors the heatmap's rightmost column (current week).
-    @Published public var heatmapAnchorMonday: Date = Date()
+    @Published public var heatmapAnchorMonday = Date()
 
     private var storeCancellable: AnyCancellable?
     private let windowIndex: Int

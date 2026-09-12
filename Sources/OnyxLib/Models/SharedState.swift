@@ -93,8 +93,11 @@ public enum SharedStateMerge {
             guard base != nil else {
                 // No shadow: union. Both present → the newer edit; one
                 // present → that one. Never a deletion.
-                if let l, let r { result[key] = l.updated >= r.updated ? l : r }
-                else if let value = l ?? r { result[key] = value }
+                if let l, let r {
+                    result[key] = l.updated >= r.updated ? l : r
+                } else if let value = l ?? r {
+                    result[key] = value
+                }
                 continue
             }
 

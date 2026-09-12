@@ -75,7 +75,6 @@ final class PRMergeStatusMappingTests: XCTestCase {
         XCTAssertEqual(PRMergeStatus.fromGraphQL(state: nil, mergeable: nil),
                        .unknown)
     }
-
 }
 
 /// Bare owners and orgs — one entry instead of a hand-maintained list.

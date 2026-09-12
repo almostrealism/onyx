@@ -627,7 +627,6 @@ public class AppState: ObservableObject {
         return nil
     }
 
-
     /// The key a session's note and favourite are stored under.
     ///
     /// Identity-based (`host:user@machine:name`) when we know which host
@@ -903,7 +902,6 @@ public class AppState: ObservableObject {
         showMonitor = false
         showSessionManager = false
     }
-
 
     // MARK: - Session administration
 

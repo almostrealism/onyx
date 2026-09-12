@@ -147,8 +147,11 @@ public final class CPUStreamStore: ObservableObject {
     @Published public private(set) var revision: Int = 0
 
     private func bumpRevision() {
-        if Thread.isMainThread { revision &+= 1 }
-        else { DispatchQueue.main.async { self.revision &+= 1 } }
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.revision &+= 1 }
+            return
+        }
+        revision &+= 1
     }
 
     /// Per-host newest-N samples. 360 ≈ 60 min @ 10s polling — an hour is

@@ -355,14 +355,19 @@ public final class WorkflowMonitor: ObservableObject {
                 default: queued += 1
                 }
             }
-            let overall: PipelineOverallStatus
-            if failed > 0 && succeeded > 0 { overall = .mixed }
-            else if failed > 0 { overall = .failure }
-            else if inProgress > 0 { overall = .running }
-            else if queued > 0 && succeeded == 0 { overall = .queued }
-            else if jobs.isEmpty { overall = .unknown }
-            else if skipped > 0 && succeeded == 0 && failed == 0 { overall = .skipped }
-            else { overall = .success }
+            // Ordered by what the user needs to know first: a failure
+            // outranks anything still running, and "some of both" outranks
+            // a plain failure because it means part of the pipeline is
+            // still worth reading.
+            let overall: PipelineOverallStatus = {
+                if failed > 0 && succeeded > 0 { return .mixed }
+                if failed > 0 { return .failure }
+                if inProgress > 0 { return .running }
+                if queued > 0 && succeeded == 0 { return .queued }
+                if jobs.isEmpty { return .unknown }
+                if skipped > 0 && succeeded == 0 && failed == 0 { return .skipped }
+                return .success
+            }()
 
             let status = PipelineStatus(
                 spec: spec,

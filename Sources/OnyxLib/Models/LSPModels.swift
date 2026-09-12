@@ -144,9 +144,13 @@ public enum LSPJSONValue: Codable, Hashable {
         case is NSNull: self = .null
         case let n as NSNumber:
             // Distinguish bool from numeric (NSNumber bridges both).
-            if CFGetTypeID(n) == CFBooleanGetTypeID() { self = .bool(n.boolValue) }
-            else if n.stringValue.contains(".") { self = .double(n.doubleValue) }
-            else { self = .int(n.intValue) }
+            if CFGetTypeID(n) == CFBooleanGetTypeID() {
+                self = .bool(n.boolValue)
+            } else if n.stringValue.contains(".") {
+                self = .double(n.doubleValue)
+            } else {
+                self = .int(n.intValue)
+            }
         case let s as String: self = .string(s)
         case let a as [Any]: self = .array(a.map(LSPJSONValue.init(foundation:)))
         case let o as [String: Any]: self = .object(o.mapValues(LSPJSONValue.init(foundation:)))

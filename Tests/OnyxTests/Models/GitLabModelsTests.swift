@@ -240,7 +240,6 @@ final class ConfigStoreProviderRoutingTests: XCTestCase {
         XCTAssertEqual(GitLabConfigStore.shared.pipelineURLs,
                        ["https://gitlab.com/g/p/-/pipelines/3"])
     }
-
 }
 
 /// Group entries — one line for a whole group instead of every project.

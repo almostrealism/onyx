@@ -91,7 +91,6 @@ extension AppState {
         return dir
     }
 
-
     /// Jump to file search (Cmd+Shift+F). Opens the file browser in search
     /// mode at the "search home" (the last-opened favorite). If text is
     /// selected in the file viewer, run a search for it immediately;
