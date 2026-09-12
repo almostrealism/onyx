@@ -131,4 +131,37 @@ final class SCPCommandTests: XCTestCase {
         guard let i = args.firstIndex(of: "-i") else { return XCTFail("identity not passed") }
         XCTAssertEqual(args[i + 1], "/keys/id_ed25519")
     }
+
+    // MARK: - Downloads (shared state)
+
+    /// The arguments end remote-then-local, which is the opposite of the
+    /// upload. Reversing them by accident would copy the LOCAL file over
+    /// the remote one — a silent, total loss of whatever was on the host.
+    func testFetchPutsTheRemoteFirstAndTheLocalLast() {
+        let (cmd, args) = AppState().scpFetchCommand(remotePath: "$HOME/.onyx/shared-state.json",
+                                                    localPath: "/tmp/pulled.json",
+                                                    host: host())
+        XCTAssertEqual(cmd, "/usr/bin/scp")
+        XCTAssertEqual(args[args.count - 2], "me@build.example.com:$HOME/.onyx/shared-state.json")
+        XCTAssertEqual(args.last, "/tmp/pulled.json")
+    }
+
+    func testFetchRidesTheExistingConnectionToo() {
+        let (_, args) = AppState().scpFetchCommand(remotePath: "x", localPath: "/tmp/y",
+                                                  host: host())
+        XCTAssertTrue(args.contains("ControlMaster=no"),
+                      "a sync must never open a third connection to a host")
+        XCTAssertTrue(args.contains { $0.hasPrefix("ControlPath=") })
+        XCTAssertTrue(args.contains("BatchMode=yes"),
+                      "a background sync must never sit waiting for a passphrase")
+    }
+
+    func testFetchSpellsThePortTheScpWay() {
+        let (_, args) = AppState().scpFetchCommand(remotePath: "x", localPath: "/tmp/y",
+                                                  host: host(port: 2222))
+        guard let i = args.firstIndex(of: "-P") else {
+            return XCTFail("port must be passed as -P for scp")
+        }
+        XCTAssertEqual(args[i + 1], "2222")
+    }
 }

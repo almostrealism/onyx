@@ -455,6 +455,8 @@ struct SettingsView: View {
                                 }
                         }
 
+                        SharedStateSettingsSection(appState: appState)
+
                         SearchFilterSettingsSection(appState: appState)
 
                         // Applies to the merged GitHub + GitLab list, so
@@ -1456,4 +1458,81 @@ private struct WatchRow: View {
         f.dateFormat = "MMM d HH:mm"
         return f
     }()
+}
+
+// MARK: - Shared state (home host)
+
+/// Where session notes and favourites live.
+///
+/// The picker is the whole answer to "how do I get my notes on my other
+/// Mac": pick a host both machines can reach and they meet in a file in
+/// its `~/.onyx/`. Moving between homes MERGES rather than adopting, so
+/// this control can't lose anything — which is why it's safe to have as a
+/// one-click picker rather than an import/export dance.
+private struct SharedStateSettingsSection: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject private var sync = SharedStateSync.shared
+
+    /// Local hosts are excluded: "share via this Mac" is what the default
+    /// already is, and syncing a file to yourself is a round trip that
+    /// achieves nothing.
+    private var candidates: [HostConfig] {
+        appState.hosts.filter { !$0.isLocal }
+    }
+
+    private var homeLabel: String? {
+        sync.homeHost(in: appState.hosts)?.label
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionHeader(title: "SHARED STATE")
+
+            Picker("", selection: Binding(
+                get: { sync.homeHostID },
+                set: { SharedStateSync.shared.setHomeHost($0) }
+            )) {
+                Text("This Mac only").tag(UUID?.none)
+                ForEach(candidates) { host in
+                    Text(host.label).tag(UUID?.some(host.id))
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+
+            HStack(spacing: 10) {
+                Text(SharedStateSync.statusLine(sync.status, hostLabel: homeLabel,
+                                                lastWrittenBy: sync.lastWrittenBy))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(statusColor)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                if sync.homeHostID != nil {
+                    Button(action: { SharedStateSync.shared.syncNow() }) {
+                        Text("Sync now")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(appState.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text("Session notes and favourite sessions are kept in ~/.onyx/shared-state.json on the chosen host, so every Mac running Onyx sees the same set. Your Mac keeps its own copy and works normally when the host is unreachable. Changing hosts merges the two sets — nothing is replaced or deleted.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var statusColor: Color {
+        switch sync.status {
+        case .failed:         return Color.onyxRed.opacity(0.8)
+        case .waitingForHost: return Color.onyxAmber.opacity(0.7)
+        case .synced:         return .gray.opacity(0.6)
+        case .syncing:        return appState.accentColor.opacity(0.8)
+        case .localOnly:      return .gray.opacity(0.45)
+        }
+    }
 }

@@ -1080,6 +1080,13 @@ public class AppState: ObservableObject {
         appSupportDir.appendingPathComponent("alerts.json")
     }
 
+    /// Where the home host and the shadow of the last sync are kept. Not
+    /// the shared state itself — that IS favorites.json and
+    /// session-notes.json, which stay the working copy.
+    private var sharedStateURL: URL {
+        appSupportDir.appendingPathComponent("shared-sync.json")
+    }
+
     private var pageWatchesURL: URL {
         appSupportDir.appendingPathComponent("page-watches.json")
     }
@@ -1611,6 +1618,11 @@ public class AppState: ObservableObject {
         if NSClassFromString("XCTest") == nil {
             MenuBarController.shared.register(appState: self)
             MenuBarController.shared.setEnabled(appearance.showMenuBarItem)
+            // Shared state. Configured AFTER both stores are loaded, so
+            // the first sync merges against real local content rather than
+            // an empty set — merging an empty local copy into the host's
+            // would look exactly like "this Mac deleted everything".
+            SharedStateSync.shared.configure(url: sharedStateURL, appState: self)
         }
         // Wire up the screensaver pipeline. Both calls are no-ops under
         // XCTest so unit tests don't write to the user's real cpu-stream.json
@@ -1810,6 +1822,28 @@ public class AppState: ObservableObject {
     public func scpCommandAbsolute(localPath: String, remotePath: String,
                                    host: HostConfig) -> (cmd: String, args: [String]) {
         scpCommand(localPath: localPath, remotePath: remotePath, host: host)
+    }
+
+    /// `scp` the other way — a remote file down to a local path.
+    ///
+    /// Same flags as the upload, built from the same mux args, so the two
+    /// directions can't drift apart on port or identity handling. `-p` is
+    /// the port here only via the same `-P` special case; scp's `-p` means
+    /// "preserve times", which is why the upload has both.
+    public func scpFetchCommand(remotePath: String, localPath: String,
+                                host: HostConfig) -> (cmd: String, args: [String]) {
+        var args = sshMuxArgs(for: host)
+        args.append(contentsOf: ["-o", "BatchMode=yes", "-p", "-q"])
+        if host.ssh.port != 22 {
+            args.append(contentsOf: ["-P", "\(host.ssh.port)"])
+        }
+        if !host.ssh.identityFile.isEmpty {
+            args.append(contentsOf: ["-i", host.ssh.identityFile])
+        }
+        let target = host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
+        args.append("\(target):\(remotePath)")
+        args.append(localPath)
+        return ("/usr/bin/scp", args)
     }
 
     /// Report an SSH failure (exit 255) against a host — marks the pair's

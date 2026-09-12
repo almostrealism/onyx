@@ -91,6 +91,20 @@ public class SessionNotesStore: ObservableObject {
         writeToDisk()
     }
 
+    /// Replace every note at once — what a sync applies after merging.
+    ///
+    /// A wholesale replacement rather than a series of edits: the merge
+    /// already decided the final answer, and applying it note by note
+    /// would publish half-merged states to the UI and make deletions
+    /// indistinguishable from edits on the way through.
+    public func replaceAll(_ incoming: [String: SessionNote]) {
+        guard incoming != notes else { return }
+        notes = incoming
+        lock.lock()
+        writeToDisk()
+        lock.unlock()
+    }
+
     /// Read the note for a session, if any.
     public func note(for sessionID: String) -> SessionNote? {
         notes[sessionID]

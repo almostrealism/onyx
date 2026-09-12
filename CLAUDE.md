@@ -54,6 +54,8 @@ Models       ← Pure data types; no dependencies on anything else
 - `BrowserManager` — WKWebView pool + KVO-based state
 - `FileBrowserManager` — file listing, search, recent files
 - `ArtifactManager` — diagram/model/text artifacts
+- `SharedStateSync` — session notes + favourites on a chosen "home host" (`~/.onyx/shared-state.json`), three-way merged against a local shadow. Moving home hosts UNIONS instead of adopting, and the local files stay the working copy — a missing shadow must never delete anything.
+- `MenuBarController` — the menu bar item: sessions with notes, and which have unread agent alerts
 - `NotesManager`, `ClaudeSessionManager`, `TimingManager`
 
 Managers depend on Stores, Services, and Models — not on Views or other Managers (prefer communication through AppState or Stores).
@@ -80,6 +82,8 @@ Managers depend on Stores, Services, and Models — not on Views or other Manage
 - SSH-driven pollers must gate on `appState.hostUsable(host)` and claim a slot with `appState.acquireUtilityChannel(label:host:)` (in-flight dedup + per-host cap) — this is what prevents poll pileup on slow networks.
 - `HostConfig.paused` is the user's "leave this host alone" switch (Settings → HOSTS). A paused host reports `HostConnectionState.paused` (never usable), its pair tears both masters down and then costs zero ssh calls per tick, enumeration skips it, and terminals show `SessionConnectionState.hostPaused` instead of retrying. Any new remote feature must respect it — `hostUsable` and `acquireUtilityChannel` both refuse paused hosts, so gate on those.
 - Topology-based session enumeration never wipes the session list on a single failed `docker ps` — it uses a grace period via `NetworkTopologyStore`.
+- Anything bigger than ~1KB travels to a host as a FILE (`scpCommand` / `scpFetchCommand`), never inside a remote script — and lands via upload-then-`mv`, because scp writes in the clear and a truncated `shared-state.json` is every note gone. See `SharedStateSync`.
+- Alert routing trusts host + tmux session over the user: an agent started with `su` reports a `whoami` that Onyx never connected as. A user alone never resolves.
 
 ## Remote command execution
 
