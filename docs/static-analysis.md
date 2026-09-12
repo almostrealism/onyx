@@ -71,28 +71,33 @@ noisy default rules:
 ```yaml
 file_length:
   warning: 1000
-  error: 2000     # target: 1500 — see note below
+  error: 1500
 type_body_length:
   warning: 500
-  error: 1500     # target: 800 — see note below
+  error: 1500     # target: 1000 — see note below
 ```
 
 The `file_length` warning is set at **1000 lines** and the `type_body_length`
 warning at **500 lines**. Files / types that exceed these warn but do not
 fail the lint pass.
 
-The error thresholds were intentionally raised above the documented targets
-of 1500 / 800 because three files currently exceed them and refactoring is
-tracked separately:
+`file_length.error` is back at **1500**. It had been raised to 2000 while
+TerminalSessionManager.swift and AppState.swift were pending splits; both have
+since been split into extensions by subject, so nothing is near the limit and
+the threshold is a ratchet again rather than a documented exception.
 
-| File / type | Lines | Notes |
+`type_body_length.error` stays at 1500 for now. The two largest types are the
+terminal pool and the file browser:
+
+| Type | Body lines | Notes |
 |---|---|---|
-| `Sources/OnyxLib/Managers/TerminalSessionManager.swift` | 1519 (file), 1054 (type) | pending split |
-| `Sources/OnyxLib/App/AppState.swift` | 1367 (file), 971 (type) | pending split |
-| `Sources/OnyxLib/Views/MonitorView.swift` | 1278 (file) | pending split |
+| `OnyxTerminalView` (TerminalSessionManager.swift) | 989 | enumeration + switching already split out into TerminalSessionSwitching.swift |
+| `FileBrowserManager` | 906 | next candidate |
 
-Once those files are refactored, restore `file_length.error` to `1500` and
-`type_body_length.error` to `800`.
+Lower the error to 1000 once those two are under it. Prefer splitting by
+SUBJECT into `extension` files over moving code to reach a number — the point
+is that a file can be read as one thing, and the line count is only the signal
+that it can't be.
 
 ## Adding exceptions
 
