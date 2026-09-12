@@ -175,9 +175,19 @@ final class MCPRegistrationStatusTests: XCTestCase {
         """)
     }
 
-    func testReadyMeansClaudeListsIt() {
-        XCTAssertEqual(out(bin: "OnyxMCP 0.16", reg: "REGISTERED").state,
-                       .installed(version: "0.16"))
+    func testReadyMeansClaudeListsItAndTheVersionMatchesThisBuild() {
+        XCTAssertEqual(out(bin: "OnyxMCP \(MCPInstall.currentVersion)", reg: "REGISTERED").state,
+                       .installed(version: MCPInstall.currentVersion))
+    }
+
+    /// An older bridge still works, and still needs saying: the app and
+    /// the bridge speak a protocol to each other, so a fix to one usually
+    /// needs the other. Reported as "ready" it would never be reinstalled.
+    func testAnOlderBridgeIsReportedAsOutdatedRatherThanReady() {
+        let s = out(bin: "OnyxMCP 0.16", reg: "REGISTERED")
+        XCTAssertEqual(s.state, .outdated(version: "0.16"))
+        XCTAssertTrue(s.isWorking, "it does work — it is just behind")
+        XCTAssertTrue(s.label.contains("update"))
     }
 
     /// The exact case that shipped broken: the binary is there and runs,
@@ -239,5 +249,33 @@ final class MCPForwardedPortTests: XCTestCase {
     func testTheForwardedPortMatchesWhatTheBridgeHardcodes() {
         XCTAssertEqual(MCPSocketServer.defaultRemotePort, 19432,
                        "Sources/OnyxMCP/main.swift hardcodes 19432 as defaultForwardedPort")
+    }
+}
+
+/// The two halves of the bridge are versioned together.
+///
+/// The app and OnyxMCP speak a protocol to each other, and OnyxMCP is a
+/// separate executable target that tests cannot import — so this reads its
+/// source. Crude, and the alternative is a version constant that drifts
+/// silently while every host reports "ready" on a bridge that predates the
+/// fix you just shipped.
+final class MCPInstallVersionTests: XCTestCase {
+
+    func testTheBundledVersionMatchesTheBridgeSource() throws {
+        // Tests/OnyxTests/Services/… → repo root
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // Services
+            .deletingLastPathComponent()   // OnyxTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // repo
+        let source = try String(contentsOf: root
+            .appendingPathComponent("Sources/OnyxMCP/main.swift"), encoding: .utf8)
+        XCTAssertTrue(
+            source.contains("let onyxMCPVersion = \"\(MCPInstall.currentVersion)\""),
+            """
+            MCPInstall.currentVersion is \(MCPInstall.currentVersion) but \
+            Sources/OnyxMCP/main.swift declares something else. Bump both, or \
+            every host will keep reporting a stale bridge as ready.
+            """)
     }
 }

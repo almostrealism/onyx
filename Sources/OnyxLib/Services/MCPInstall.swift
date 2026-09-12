@@ -72,6 +72,15 @@ public struct RemotePlatform: Equatable {
 
 public enum MCPInstall {
 
+    /// The bridge version this build of Onyx ships.
+    ///
+    /// MUST match `onyxMCPVersion` in Sources/OnyxMCP/main.swift —
+    /// MCPInstallVersionTests reads that file and fails if the two drift.
+    /// A host running an older bridge otherwise reports "ready" forever,
+    /// which is how a protocol fix can be shipped and quietly not applied
+    /// anywhere.
+    public static let currentVersion = "0.18"
+
     /// Where the bridge goes, relative to the chosen base directory.
     public static let relativeBinaryPath = ".onyx/bin/OnyxMCP"
 

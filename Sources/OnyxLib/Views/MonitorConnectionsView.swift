@@ -627,6 +627,7 @@ private struct MCPHostRow: View {
     private func color(for status: MCPHostStatus) -> Color {
         switch status.state {
         case .installed:   return Color.onyxGreen
+        case .outdated:    return Color.onyxAmber
         case .broken:      return Color.onyxRed
         case .unsupported: return Color.onyxAmber
         case .notInstalled, .unknown: return .gray.opacity(0.45)
@@ -636,6 +637,7 @@ private struct MCPHostRow: View {
     private func detail(for status: MCPHostStatus) -> String {
         switch status.state {
         case .installed(let v):     return "ready · \(v)"
+        case .outdated(let v):      return "v\(v) — reinstall for \(MCPInstall.currentVersion)"
         case .broken(let why):      return why
         case .unsupported(let p):   return "no bridge for \(p) in this build"
         case .notInstalled:         return "not installed"

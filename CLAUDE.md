@@ -86,6 +86,12 @@ Managers depend on Stores, Services, and Models — not on Views or other Manage
 - Anything bigger than ~1KB travels to a host as a FILE (`scpCommand` / `scpFetchCommand`), never inside a remote script — and lands via upload-then-`mv`, because scp writes in the clear and a truncated `shared-state.json` is every note gone. See `SharedStateSync`.
 - Alert routing trusts host + tmux session over the user: an agent started with `su` reports a `whoami` that Onyx never connected as. A user alone never resolves.
 
+## MCP protocol rules
+
+- **Never answer a notification.** A JSON-RPC message with no id (or a null one) gets NO reply — `MCPMessageHandler.handleMessage` returns nil. Answering one produces `{"result":null}`, which is not a valid response object; Claude Code validates what it receives and drops the connection, and the visible symptom is "Failed to reconnect to onyx" against whatever ran next. `notifications/cancelled` (sent on every user interrupt) is the one that bites.
+- The bridge must not wait for a reply to a notification either, or it stalls for the full receive timeout three times over. `OnyxMCP.sendNotification` writes and drains briefly — the drain is what keeps an older desktop's stray reply from being read as the NEXT request's response.
+- The app and OnyxMCP are versioned together: bump `MCPInstall.currentVersion` and `onyxMCPVersion` in the same commit (`MCPInstallVersionTests` fails otherwise), and a host on an older bridge reports `outdated` rather than `ready`.
+
 ## Remote command execution
 
 **Before writing any new SSH-driven feature, read this section.** Hostile remote shells are real, and the lesson is hard-won.

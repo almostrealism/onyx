@@ -193,6 +193,30 @@ final class OnyxConnection {
         return true
     }
 
+    /// Send a notification — a message with no id — and expect nothing
+    /// back.
+    ///
+    /// Waiting for a reply to one is how this bridge used to stall: the
+    /// desktop sends nothing (correctly), so the read blocks for the full
+    /// receive timeout, three times, before the client is told the backend
+    /// is unreachable. At session start that reads as "Failed to reconnect
+    /// to onyx".
+    ///
+    /// The short drain afterwards is for an OLDER desktop that still
+    /// answers notifications: its stray `{"result":null}` has to be
+    /// consumed here, or the next real request would read it as its own
+    /// response and every reply after that would be off by one.
+    func sendNotification(_ message: String) {
+        let payload = Array((message + "\n").utf8)
+        guard ensureConnected(), writeAll(fd: fd, data: payload) else {
+            closeFd()
+            return
+        }
+        setReceiveTimeout(fd: fd, seconds: 1)
+        _ = readLine(fd: fd)
+        setReceiveTimeout(fd: fd, seconds: receiveTimeout)
+    }
+
     /// Send a request and read one response line, transparently reconnecting
     /// on failure. Up to `attempts` total tries with exponential backoff.
     func sendRequest(_ message: String, attempts: Int = 3) -> String? {
@@ -237,6 +261,22 @@ final class OnyxConnection {
 
 // MARK: - JSON-RPC helpers
 
+/// Whether a client message is a notification: no id, or an explicit
+/// null one. Parsed properly rather than pattern-matched — an "id" inside
+/// a tool argument would fool a regex, and getting this wrong either
+/// stalls the bridge or desynchronises every response after it.
+///
+/// An unparseable line is treated as a REQUEST, so the desktop's parse
+/// error still reaches the client instead of vanishing.
+func isNotification(_ json: String) -> Bool {
+    guard let data = json.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return false
+    }
+    guard let id = object["id"] else { return true }
+    return id is NSNull
+}
+
 /// Extract the "id" field from a JSON-RPC request string for error responses
 func extractRequestId(_ json: String) -> String {
     if let range = json.range(of: #""id"\s*:\s*"#, options: .regularExpression) {
@@ -265,7 +305,7 @@ func errorResponse(id: String, message: String) -> String {
 
 /// Build identity, stamped by package.sh / CI so an installed bridge can
 /// be tied back to what produced it.
-let onyxMCPVersion = "0.17"
+let onyxMCPVersion = "0.18"
 
 // `--version` answers "is this thing installed and can it start", which
 // is the question both CI and the app's installer ask. It must not touch
@@ -356,6 +396,14 @@ if isHookMode {
     // may come up later (e.g. desktop launch after MCP started).
     while let line = Swift.readLine(strippingNewline: true) {
         guard !line.isEmpty else { continue }
+
+        // A notification gets no answer, and must produce no output — a
+        // client that receives a response to something it never gave an
+        // id to treats the stream as broken.
+        if isNotification(line) {
+            conn.sendNotification(line)
+            continue
+        }
 
         if let response = conn.sendRequest(line) {
             print(response)

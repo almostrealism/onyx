@@ -31,6 +31,10 @@ public struct MCPHostStatus: Equatable {
         case notInstalled
         /// Installed, runs, and reports this version.
         case installed(version: String)
+        /// Installed and working, but older than the bridge this build
+        /// carries. Worth saying out loud: the app and the bridge are
+        /// versioned together, and a fix to one usually needs the other.
+        case outdated(version: String)
         /// Installed but something is wrong — the message is the remote's.
         case broken(String)
         /// This build carries no binary for that platform.
@@ -49,8 +53,10 @@ public struct MCPHostStatus: Equatable {
     }
 
     public var isWorking: Bool {
-        if case .installed = state { return true }
-        return false
+        switch state {
+        case .installed, .outdated: return true
+        default:                    return false
+        }
     }
 
     /// Short label for the monitor overlay.
@@ -59,6 +65,7 @@ public struct MCPHostStatus: Equatable {
         case .unknown:                 return "unknown"
         case .notInstalled:            return "not installed"
         case .installed(let v):        return v
+        case .outdated(let v):         return "\(v) — update available"
         case .broken:                  return "broken"
         case .unsupported(let p):      return "no binary for \(p)"
         }
@@ -204,8 +211,11 @@ public final class MCPInstaller: ObservableObject {
             // success on hosts where Claude never listed the server.
             switch section("---REG---").first {
             case "REGISTERED":
-                return MCPHostStatus(state: .installed(version: version),
-                                     checkedAt: Date(), path: path)
+                return MCPHostStatus(
+                    state: version == MCPInstall.currentVersion
+                        ? .installed(version: version)
+                        : .outdated(version: version),
+                    checkedAt: Date(), path: path)
             case "NO_CLAUDE":
                 return MCPHostStatus(state: .broken("installed, but Claude Code isn't on this host"),
                                      checkedAt: Date(), path: path)

@@ -143,14 +143,55 @@ public class MCPMessageHandler {
         self.claudeSessions = claudeSessions
     }
 
-    /// Handle message.
+    /// Handle message. Returns nil when nothing may be sent back.
+    ///
+    /// A JSON-RPC message with no id is a NOTIFICATION, and answering one
+    /// is a protocol violation — the reply has no id to carry, so it goes
+    /// out as `{"result":null}`, which is not a valid response object.
+    /// Claude Code validates what it receives and rejects that; the visible
+    /// symptom is "Failed to reconnect to onyx" with the detail buried in
+    /// its MCP log, because the connection is dropped on the invalid
+    /// message rather than on anything that actually went wrong.
+    ///
+    /// The one that bites in practice is `notifications/cancelled`, which
+    /// the client sends whenever the user interrupts — so the server would
+    /// answer it, get dropped, and the fault would look like it belonged
+    /// to whatever ran next.
     public func handleMessage(_ data: Data) -> Data? {
         guard let request = try? JSONDecoder().decode(JSONRPCRequest.self, from: data) else {
+            // A parse error is the one case the spec DOES want a null id:
+            // there was no readable id to echo.
             let response = JSONRPCResponse(id: nil, error: .parseError)
             return try? JSONEncoder().encode(response)
         }
+        guard !Self.isNotification(request) else {
+            dispatchNotification(request)
+            return nil
+        }
         let response = dispatch(request)
         return try? JSONEncoder().encode(response)
+    }
+
+    /// No id, or an explicit JSON null, means "don't answer this".
+    static func isNotification(_ request: JSONRPCRequest) -> Bool {
+        switch request.id {
+        case .none, .some(.null): return true
+        default:                  return false
+        }
+    }
+
+    /// Side effects for the notifications we care about. Most are pure
+    /// acknowledgements with nothing to do — but a notification we don't
+    /// recognise must still produce NO reply, which is why this is not
+    /// routed through `dispatch`: that one answers unknown methods with
+    /// methodNotFound, and an unanswerable request can't be told off.
+    private func dispatchNotification(_ request: JSONRPCRequest) {
+        switch request.method {
+        case "notifications/initialized", "notifications/cancelled":
+            break
+        default:
+            break
+        }
     }
 
     /// Dispatch.
@@ -159,8 +200,9 @@ public class MCPMessageHandler {
         case "initialize":
             return handleInitialize(request)
         case "notifications/initialized":
-            // Client acknowledgment, no response needed for notifications
-            return JSONRPCResponse(id: request.id, result: .null)
+            // Only reachable if a client sends this WITH an id, which is
+            // malformed but harmless to humour.
+            return JSONRPCResponse(id: request.id, result: .object([:]))
         case "tools/list":
             return handleToolsList(request)
         case "tools/call":

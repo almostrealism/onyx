@@ -70,12 +70,16 @@ final class MCPMessageHandlerTests: XCTestCase {
 
     // MARK: - Notifications
 
-    func testNotificationsInitialized() {
+    /// Only reachable when a client puts an id on a notification, which is
+    /// malformed. The real path — no id at all — is asserted in
+    /// MCPNotificationTests, where the answer is NO REPLY.
+    func testNotificationsInitializedWithAnIdIsHumoured() {
         let (handler, _) = makeHandler()
         let request = JSONRPCRequest(id: .int(4), method: "notifications/initialized")
         let response = handler.dispatch(request)
         XCTAssertNil(response.error)
-        XCTAssertEqual(response.result, .null)
+        XCTAssertEqual(response.result, .object([:]),
+                       "a null result is not a valid JSON-RPC result object")
     }
 
     // MARK: - handleMessage parse error
@@ -437,5 +441,74 @@ final class AlertStoreTests: XCTestCase {
         record("gone", key: "k")
         AlertStore.shared.forget(key: "k")
         XCTAssertTrue(AlertStore.shared.alerts(for: "k").isEmpty)
+    }
+}
+
+/// Notifications. A JSON-RPC message with no id must get NO reply.
+///
+/// This one shipped broken for months and was invisible from inside the
+/// app: the server answered `notifications/cancelled` — sent by the client
+/// every time the user interrupts — with `{"result":null}`, which is not a
+/// valid response object. Claude Code validates what it receives and drops
+/// the connection, reporting "Failed to reconnect to onyx" against whatever
+/// ran next rather than against the interrupt that caused it.
+final class MCPNotificationTests: XCTestCase {
+
+    private func handler() -> MCPMessageHandler {
+        MCPMessageHandler(artifactManager: ArtifactManager(),
+                          claudeSessions: ClaudeSessionManager())
+    }
+
+    private func send(_ json: String) -> Data? {
+        handler().handleMessage(Data(json.utf8))
+    }
+
+    func testTheInitializedNotificationIsNotAnswered() {
+        XCTAssertNil(send(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#))
+    }
+
+    /// The one that actually breaks sessions: sent on every interrupt.
+    func testTheCancelledNotificationIsNotAnswered() {
+        XCTAssertNil(send(
+            #"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}"#))
+    }
+
+    /// An unknown notification must not get methodNotFound either — an
+    /// error response with no id is just as invalid as a result with none.
+    func testAnUnknownNotificationIsNotAnswered() {
+        XCTAssertNil(send(#"{"jsonrpc":"2.0","method":"notifications/somethingNew"}"#))
+    }
+
+    func testAnExplicitNullIdIsAlsoANotification() {
+        XCTAssertNil(send(#"{"jsonrpc":"2.0","id":null,"method":"notifications/initialized"}"#))
+    }
+
+    // MARK: - …and real requests still get answered
+
+    func testARequestWithAnIdIsStillAnswered() {
+        guard let data = send(#"{"jsonrpc":"2.0","id":7,"method":"tools/list"}"#) else {
+            return XCTFail("a request with an id must be answered")
+        }
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        XCTAssertNotNil(json?["result"])
+        XCTAssertNotNil(json?["id"])
+    }
+
+    /// A parse error is the one case where a null id is correct: there was
+    /// no readable id to echo back.
+    func testAnUnparseableMessageStillGetsAParseError() {
+        guard let data = send("{not json") else {
+            return XCTFail("a malformed message must still be reported")
+        }
+        XCTAssertTrue(String(data: data, encoding: .utf8)?.contains("-32700") == true)
+    }
+
+    /// Unknown METHODS with an id are a different thing entirely and must
+    /// still be told off.
+    func testAnUnknownMethodWithAnIdStillGetsMethodNotFound() {
+        guard let data = send(#"{"jsonrpc":"2.0","id":3,"method":"no/such"}"#) else {
+            return XCTFail("a request with an id must be answered")
+        }
+        XCTAssertTrue(String(data: data, encoding: .utf8)?.contains("-32601") == true)
     }
 }
