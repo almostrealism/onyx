@@ -152,9 +152,15 @@ public class SessionNotesStore: ObservableObject {
         for session in allSessions {
             for key in keys(session) where byID[key] == nil { byID[key] = session }
         }
+        // One row per SESSION, not per stored note. A note written before
+        // the re-keying and one written after both resolve to the same
+        // session, and listing it twice is the favourites-bar bug in
+        // another costume. Newest wins, which is also the sort order.
+        var seen = Set<String>()
         return notes.values
             .compactMap { note in byID[note.sessionID].map { (session: $0, note: note) } }
             .sorted { $0.note.updated > $1.note.updated }
+            .filter { seen.insert($0.session.id).inserted }
     }
 
     private func legacyActiveNotes(in allSessions: [TmuxSession]) -> [(session: TmuxSession, note: SessionNote)] {

@@ -370,3 +370,137 @@ final class StorageKeyMutationTests: XCTestCase {
         }
     }
 }
+
+/// One entry per session, however the file got that way.
+///
+/// The bug this locks: a session favourited BEFORE the re-keying and
+/// touched after it had an entry under each spelling, the migration
+/// renamed the old one onto the new key without checking whether that key
+/// was taken, and every affected favourite was then drawn twice in the bar
+/// — and answered to two ⌘-numbers, silently costing one.
+final class DuplicateFavouriteTests: XCTestCase {
+
+    private let host = HostConfig(label: "build",
+                                  ssh: SSHConfig(host: "build.example.com", user: "me"))
+
+    private func makeState() -> AppState {
+        let state = AppState()
+        FavoritesStore.shared.reset()
+        SessionNotesStore.shared.reset()
+        state.hosts = [host]
+        return state
+    }
+
+    private func session(_ name: String) -> TmuxSession {
+        TmuxSession(name: name, source: .host(hostID: host.id))
+    }
+
+    /// Every AppState claims the next index from a shared pool, so "window
+    /// 0" belongs to this state only when the test runs alone. Entries
+    /// have to name the state's OWN window, and the union test needs a
+    /// second one that isn't it.
+    private func otherWindow(_ state: AppState) -> Int {
+        state.windowIndex == 0 ? 1 : 0
+    }
+
+    func testASessionStoredUnderBothKeysAppearsOnce() {
+        let state = makeState()
+        let s = session("api")
+        FavoritesStore.shared.entries = [
+            FavoriteEntry(sessionID: s.id, windows: [state.windowIndex]),                    // legacy
+            FavoriteEntry(sessionID: state.storageKey(for: s), windows: [state.windowIndex]), // identity
+        ]
+        state.allSessions = [s]   // the repair runs here
+
+        XCTAssertEqual(state.favoriteSessions.map(\.name), ["api"])
+        XCTAssertEqual(FavoritesStore.shared.entries.count, 1,
+                       "the duplicate should be repaired on disk, not just hidden")
+    }
+
+    /// Two entries can disagree about which windows show the favourite.
+    /// Losing one would make it vanish from a window it was in.
+    func testWindowsAreUnionedWhenEntriesCollapse() {
+        let state = makeState()
+        let s = session("api")
+        FavoritesStore.shared.entries = [
+            FavoriteEntry(sessionID: s.id, windows: [state.windowIndex]),
+            FavoriteEntry(sessionID: state.storageKey(for: s), windows: [otherWindow(state)]),
+        ]
+        state.allSessions = [s]
+
+        XCTAssertEqual(FavoritesStore.shared.entries.first?.windows,
+                       [state.windowIndex, otherWindow(state)])
+    }
+
+    func testTheUsersOrderIsPreserved() {
+        let state = makeState()
+        let a = session("alpha"), b = session("beta"), c = session("gamma")
+        FavoritesStore.shared.entries = [
+            FavoriteEntry(sessionID: a.id, windows: [state.windowIndex]),
+            FavoriteEntry(sessionID: b.id, windows: [state.windowIndex]),
+            FavoriteEntry(sessionID: state.storageKey(for: a), windows: [state.windowIndex]), // dupe
+            FavoriteEntry(sessionID: c.id, windows: [state.windowIndex]),
+        ]
+        state.allSessions = [a, b, c]
+
+        XCTAssertEqual(state.favoriteSessions.map(\.name), ["alpha", "beta", "gamma"],
+                       "the collapse keeps the first position, not the last")
+    }
+
+    /// A host that is merely switched off must not have its favourites
+    /// rewritten or dropped — they can't be resolved, which is not the
+    /// same as being wrong.
+    func testEntriesForSessionsThatArentRunningAreLeftAlone() {
+        let state = makeState()
+        let live = session("api")
+        FavoritesStore.shared.entries = [
+            FavoriteEntry(sessionID: "host:someone@elsewhere:offline", windows: [state.windowIndex]),
+            FavoriteEntry(sessionID: live.id, windows: [state.windowIndex]),
+        ]
+        state.allSessions = [live]
+
+        XCTAssertTrue(FavoritesStore.shared.entries.contains { $0.sessionID.contains("offline") })
+    }
+
+    func testTheRepairIsIdempotent() {
+        let state = makeState()
+        let s = session("api")
+        FavoritesStore.shared.entries = [
+            FavoriteEntry(sessionID: s.id, windows: [state.windowIndex]),
+            FavoriteEntry(sessionID: state.storageKey(for: s), windows: [state.windowIndex]),
+        ]
+        state.allSessions = [s]
+        let once = FavoritesStore.shared.entries
+        state.collapseDuplicateFavorites()
+        XCTAssertEqual(FavoritesStore.shared.entries, once)
+    }
+
+    /// The view-level guard, for the moment before the repair has run.
+    func testTheBarNeverDrawsASessionTwiceEvenWithADuplicateOnDisk() {
+        let state = makeState()
+        let s = session("api")
+        state.allSessions = [s]
+        // Sneak past the repair: write duplicates after the list arrived.
+        FavoritesStore.shared.entries = [
+            FavoriteEntry(sessionID: s.id, windows: [state.windowIndex]),
+            FavoriteEntry(sessionID: state.storageKey(for: s), windows: [state.windowIndex]),
+        ]
+        XCTAssertEqual(state.favoriteSessions.count, 1)
+        XCTAssertEqual(state.allFavoriteSessions.count, 1)
+    }
+
+    /// The same bug wearing a different hat: two notes resolving to one
+    /// session listed that session twice in the monitor.
+    func testTheNotesListShowsASessionOnce() {
+        let state = makeState()
+        let s = session("api")
+        state.allSessions = [s]
+        SessionNotesStore.shared.setNote("older", for: s.id)
+        SessionNotesStore.shared.setNote("newer", for: state.storageKey(for: s))
+
+        let rows = SessionNotesStore.shared.activeNotes(in: [s],
+                                                        keys: { state.storageKeys(for: $0) })
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.note.text, "newer", "newest wins")
+    }
+}

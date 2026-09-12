@@ -314,7 +314,15 @@ public class AppState: ObservableObject {
     @Published public var connectionPool: [ConnectionInfo] = []
     /// Sessions that are in a transient state (reconnecting, enumerating, connecting)
     @Published public var pendingConnections: [ConnectionInfo] = []
-    @Published public var allSessions: [TmuxSession] = []
+    @Published public var allSessions: [TmuxSession] = [] {
+        didSet {
+            // Telling the legacy key and the identity key apart needs a
+            // live session to resolve them against, so the repair can't
+            // finish at load — it finishes here, the first time the list
+            // arrives. A no-op once there's nothing left to collapse.
+            collapseDuplicateFavorites()
+        }
+    }
     @Published public var activeSession: TmuxSession?
     @Published public var switchToSession: TmuxSession?
     @Published public var createNewSession: TmuxSession?  // session to create, nil = none
@@ -647,15 +655,26 @@ public class AppState: ObservableObject {
     /// Only favorited sessions visible in this window, ordered by position
     public var favoriteSessions: [TmuxSession] {
         let sessionMap = sessionsByStorageKey(allSessions)
-        return favoriteEntries
+        return Self.firstPerSession(favoriteEntries
             .filter { windowIndex > 3 || $0.windows.contains(windowIndex) }
-            .compactMap { sessionMap[$0.sessionID] }
+            .compactMap { sessionMap[$0.sessionID] })
     }
 
     /// All favorited sessions regardless of window assignment
     public var allFavoriteSessions: [TmuxSession] {
         let sessionMap = sessionsByStorageKey(allSessions)
-        return favoriteEntries.compactMap { sessionMap[$0.sessionID] }
+        return Self.firstPerSession(favoriteEntries.compactMap { sessionMap[$0.sessionID] })
+    }
+
+    /// Keep the first appearance of each session, drop later ones.
+    ///
+    /// Belt to `collapseDuplicateFavorites`' braces. Two stored entries
+    /// naming one session get repaired on disk, but the bar must not draw
+    /// it twice in the meantime — and ⌘1-9 index this list, so a duplicate
+    /// silently costs a number as well as looking wrong.
+    static func firstPerSession(_ sessions: [TmuxSession]) -> [TmuxSession] {
+        var seen = Set<String>()
+        return sessions.filter { seen.insert($0.id).inserted }
     }
 
     /// Docker container names for a specific host
@@ -1599,9 +1618,60 @@ public class AppState: ObservableObject {
         }
         favoriteEntries = entries
         saveFavorites()
+        // Renaming in place can land two entries on the same key — a
+        // session favourited before the re-keying and touched after it has
+        // one of each. The notes store has always merged on collision;
+        // this didn't, and the result was every affected favourite drawn
+        // twice in the bar.
+        collapseDuplicateFavorites()
 
         DiagnosticLog.shared.record(
             "config", "session keys moved to user@host (\(mapping.count) entries)")
+    }
+
+    /// One entry per session, whatever the file says.
+    ///
+    /// Two entries can name the same session while spelling it
+    /// differently — the legacy in-memory id and the identity key — and a
+    /// favourite stored twice is drawn twice in the bar and answers to two
+    /// ⌘-numbers. Entries are collapsed onto the identity key, keeping the
+    /// FIRST position (the user arranged that) and the union of the
+    /// windows (so a favourite visible in two windows stays visible in
+    /// both).
+    ///
+    /// Entries that resolve to no live session are left exactly as they
+    /// are: a host that's merely switched off must not have its
+    /// favourites rewritten or dropped.
+    ///
+    /// Runs at load as a repair, not just after the migration, because the
+    /// duplicates are already in people's files.
+    func collapseDuplicateFavorites() {
+        var positions: [String: Int] = [:]
+        var collapsed: [FavoriteEntry] = []
+        var changed = false
+        let map = sessionsByStorageKey(allSessions)
+
+        for entry in favoriteEntries {
+            // The canonical spelling, when we can work one out.
+            let key = map[entry.sessionID].map { storageKey(for: $0) } ?? entry.sessionID
+            if let index = positions[key] {
+                collapsed[index].windows.formUnion(entry.windows)
+                changed = true
+                continue
+            }
+            positions[key] = collapsed.count
+            var normalised = entry
+            if normalised.sessionID != key {
+                normalised.sessionID = key
+                changed = true
+            }
+            collapsed.append(normalised)
+        }
+
+        guard changed else { return }
+        favoriteEntries = collapsed
+        saveFavorites()
+        DiagnosticLog.shared.record("config", "favourites collapsed to one entry per session")
     }
 
     private func loadFavorites() {
