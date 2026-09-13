@@ -29,6 +29,14 @@ public struct SharedState: Codable, Equatable {
     public var notes: [String: SessionNote]
     /// Favourite sessions, in the order they're shown.
     public var favorites: [FavoriteEntry]
+    /// Tracked pipeline URLs, verbatim as the user gave them, per forge.
+    ///
+    /// The URLs travel; the TOKENS never do. A personal access token is a
+    /// credential for one person on one machine, and putting one in a
+    /// file on a shared host — to save typing it twice — is not a trade
+    /// this feature gets to make on the user's behalf.
+    public var githubPipelines: [String]
+    public var gitlabPipelines: [String]
     /// When this copy was written, for the status line.
     public var updated: Date
     /// Which Mac wrote it, so the status line can say "last written by
@@ -37,12 +45,38 @@ public struct SharedState: Codable, Equatable {
 
     public init(notes: [String: SessionNote] = [:],
                 favorites: [FavoriteEntry] = [],
+                githubPipelines: [String] = [],
+                gitlabPipelines: [String] = [],
                 updated: Date = Date(),
                 writtenBy: String = "") {
         self.notes = notes
         self.favorites = favorites
+        self.githubPipelines = githubPipelines
+        self.gitlabPipelines = gitlabPipelines
         self.updated = updated
         self.writtenBy = writtenBy
+    }
+
+    /// Decoded field by field, every one optional.
+    ///
+    /// The synthesized decoder REQUIRES every key, default values and
+    /// all — so adding a field would make this type fail to decode any
+    /// file written before it existed. That failure is not cosmetic: the
+    /// sync refuses to overwrite a copy it cannot read, so one new field
+    /// would stop two machines syncing until someone deleted the file by
+    /// hand. Adding a field here must stay free.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        notes = try c.decodeIfPresent([String: SessionNote].self, forKey: .notes) ?? [:]
+        favorites = try c.decodeIfPresent([FavoriteEntry].self, forKey: .favorites) ?? []
+        githubPipelines = try c.decodeIfPresent([String].self, forKey: .githubPipelines) ?? []
+        gitlabPipelines = try c.decodeIfPresent([String].self, forKey: .gitlabPipelines) ?? []
+        updated = try c.decodeIfPresent(Date.self, forKey: .updated) ?? .distantPast
+        writtenBy = try c.decodeIfPresent(String.self, forKey: .writtenBy) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case notes, favorites, githubPipelines, gitlabPipelines, updated, writtenBy
     }
 
     public static let empty = SharedState(updated: .distantPast)
@@ -53,6 +87,8 @@ public struct SharedState: Codable, Equatable {
     /// two Macs doing it to each other would never settle.
     public func sameContent(as other: SharedState) -> Bool {
         notes == other.notes && favorites == other.favorites
+            && githubPipelines == other.githubPipelines
+            && gitlabPipelines == other.gitlabPipelines
     }
 }
 
@@ -71,6 +107,12 @@ public enum SharedStateMerge {
             favorites: mergeFavorites(base: base?.favorites,
                                       local: local.favorites,
                                       remote: remote.favorites),
+            githubPipelines: mergePipelines(base: base?.githubPipelines,
+                                            local: local.githubPipelines,
+                                            remote: remote.githubPipelines),
+            gitlabPipelines: mergePipelines(base: base?.gitlabPipelines,
+                                            local: local.gitlabPipelines,
+                                            remote: remote.gitlabPipelines),
             updated: Date(),
             writtenBy: local.writtenBy)
     }
@@ -121,6 +163,39 @@ public enum SharedStateMerge {
             case (.none, .some(let r)):        result[key] = r
             case (.none, .none):               break
             }
+        }
+        return result
+    }
+
+    // MARK: - Tracked pipelines
+
+    /// Same membership rules as favourites, matched on the PARSED id
+    /// rather than the URL text.
+    ///
+    /// One pipeline has several spellings — a workflow page, a run page,
+    /// with or without a query string — and two machines that added the
+    /// same pipeline by different routes must end up with one entry, not
+    /// two that produce colliding ids downstream. The local spelling wins
+    /// because it is the one the user here typed.
+    static func mergePipelines(base: [String]?,
+                               local: [String],
+                               remote: [String]) -> [String] {
+        func id(_ url: String) -> String { PipelineSpec.parse(url)?.id ?? url }
+
+        let localIDs = Set(local.map(id))
+        let remoteIDs = Set(remote.map(id))
+        let baseIDs = base.map { Set($0.map(id)) }
+
+        func keep(_ key: String) -> Bool {
+            if localIDs.contains(key) && remoteIDs.contains(key) { return true }
+            guard let baseIDs else { return true }   // no shadow: never remove
+            return !baseIDs.contains(key)
+        }
+
+        var seen = Set<String>()
+        var result = local.filter { seen.insert(id($0)).inserted && keep(id($0)) }
+        for url in remote where !localIDs.contains(id(url)) && keep(id(url)) {
+            if seen.insert(id(url)).inserted { result.append(url) }
         }
         return result
     }

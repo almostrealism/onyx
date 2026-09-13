@@ -311,3 +311,119 @@ final class SharedStateCadenceTests: XCTestCase {
                           "activation must beat the regular tick or it adds nothing")
     }
 }
+
+/// Tracked pipelines travel with notes and favourites.
+///
+/// Matched on the PARSED id, not the URL text. The same pipeline has
+/// several spellings — a trailing slash, http vs https, a pasted trailing
+/// newline — and two machines that added it by different routes must end
+/// up with ONE entry, since duplicates produce colliding ids downstream.
+///
+/// Note what is deliberately NOT collapsed: a workflow page and a run page
+/// on the same repo are different targets (track-over-time vs one frozen
+/// run) and keep separate ids, so both survive.
+final class SharedStatePipelineMergeTests: XCTestCase {
+
+    private func merge(base: [String]?, local: [String], remote: [String]) -> [String] {
+        SharedStateMerge.mergePipelines(base: base, local: local, remote: remote)
+    }
+
+    private let workflowPage =
+        "https://github.com/acme/api/actions/workflows/ci.yml"
+    private let runPage =
+        "https://github.com/acme/api/actions/runs/123456"
+
+    func testAPipelineAddedElsewhereArrives() {
+        let merged = merge(base: [], local: [], remote: [workflowPage])
+        XCTAssertEqual(merged, [workflowPage])
+    }
+
+    func testRemovingOneElsewhereRemovesItHere() {
+        let merged = merge(base: [workflowPage], local: [workflowPage], remote: [])
+        XCTAssertTrue(merged.isEmpty)
+    }
+
+    func testWithoutAShadowNothingIsRemoved() {
+        let merged = merge(base: nil, local: [workflowPage], remote: [])
+        XCTAssertEqual(merged, [workflowPage], "adopting a host must not untrack anything")
+    }
+
+    /// The same pipeline reached by two routes is one pipeline.
+    func testTwoSpellingsOfOnePipelineCollapse() throws {
+        let withSlash = workflowPage + "/"
+        XCTAssertEqual(PipelineSpec.parse(workflowPage)?.id,
+                       PipelineSpec.parse(withSlash)?.id,
+                       "premise: these are the same pipeline to the parser")
+
+        let merged = merge(base: [], local: [workflowPage], remote: [withSlash])
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged.first, workflowPage, "the local spelling is the one typed here")
+    }
+
+    /// …but two genuinely different targets on the same repo both stay.
+    func testAWorkflowAndAFrozenRunAreNotTheSamePipeline() {
+        XCTAssertNotEqual(PipelineSpec.parse(workflowPage)?.id,
+                          PipelineSpec.parse(runPage)?.id)
+        let merged = merge(base: [], local: [workflowPage], remote: [runPage])
+        XCTAssertEqual(merged.count, 2)
+    }
+
+    func testLocalOrderIsKeptAndRemoteAdditionsAppended() {
+        let a = "https://github.com/acme/a/actions/workflows/ci.yml"
+        let b = "https://github.com/acme/b/actions/workflows/ci.yml"
+        let c = "https://github.com/acme/c/actions/workflows/ci.yml"
+        XCTAssertEqual(merge(base: [], local: [b, a], remote: [c]), [b, a, c])
+    }
+
+    func testDuplicatesAlreadyInTheListAreCollapsed() {
+        let merged = merge(base: nil, local: [workflowPage, workflowPage], remote: [])
+        XCTAssertEqual(merged.count, 1)
+    }
+
+    // MARK: - The bundle
+
+    /// A token is a credential for one person on one machine. Putting one
+    /// in a file on a shared host to save typing it twice is not a trade
+    /// this feature gets to make for the user.
+    func testTokensAreNotInTheSharedBundle() throws {
+        var state = SharedState()
+        state.githubPipelines = ["https://github.com/acme/api/actions/workflows/ci.yml"]
+        let json = try XCTUnwrap(String(data: try JSONEncoder().encode(state), encoding: .utf8))
+        XCTAssertFalse(json.lowercased().contains("token"))
+        XCTAssertTrue(json.contains("githubPipelines"))
+    }
+
+    /// Adding a field must never stop two machines syncing. The
+    /// synthesized decoder requires every key — so this type decodes field
+    /// by field, and a file written before pipelines existed still reads.
+    func testAFileFromAnOlderVersionStillDecodes() throws {
+        let old = """
+        {"notes":{},"favorites":[],"updated":"2026-01-01T00:00:00Z","writtenBy":"laptop"}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let state = try decoder.decode(SharedState.self, from: Data(old.utf8))
+        XCTAssertEqual(state.writtenBy, "laptop")
+        XCTAssertTrue(state.githubPipelines.isEmpty)
+        XCTAssertTrue(state.gitlabPipelines.isEmpty)
+    }
+
+    /// …and one from a FUTURE version, with fields we don't know, must not
+    /// throw either — the sync refuses to overwrite what it can't read.
+    func testAFileFromANewerVersionStillDecodes() throws {
+        let future = """
+        {"notes":{},"favorites":[],"somethingNew":{"a":1},"writtenBy":"studio"}
+        """
+        let state = try JSONDecoder().decode(SharedState.self, from: Data(future.utf8))
+        XCTAssertEqual(state.writtenBy, "studio")
+    }
+
+    func testPipelineChangesCountAsAContentChangeWorthPushing() {
+        var a = SharedState()
+        var b = SharedState()
+        b.githubPipelines = ["https://github.com/acme/api/actions/workflows/ci.yml"]
+        XCTAssertFalse(a.sameContent(as: b))
+        a.githubPipelines = b.githubPipelines
+        XCTAssertTrue(a.sameContent(as: b))
+    }
+}

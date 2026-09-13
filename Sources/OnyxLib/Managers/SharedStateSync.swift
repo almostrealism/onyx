@@ -124,9 +124,14 @@ public final class SharedStateSync: ObservableObject {
 
         // Local edits schedule a push. Debounced, because typing a note
         // publishes on every keystroke and each push is three round trips.
+        // The forge stores publish objectWillChange for any of their
+        // fields, tokens included — a token change simply produces a sync
+        // that finds no content difference and pushes nothing.
         SessionNotesStore.shared.$notes
             .map { _ in () }
-            .merge(with: FavoritesStore.shared.$entries.map { _ in () })
+            .merge(with: FavoritesStore.shared.$entries.map { _ in () },
+                   GitHubConfigStore.shared.objectWillChange.map { _ in () },
+                   GitLabConfigStore.shared.objectWillChange.map { _ in () })
             .debounce(for: .seconds(4), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.localChanged() }
             .store(in: &watches)
@@ -321,16 +326,20 @@ public final class SharedStateSync: ObservableObject {
             DiagnosticLog.shared.record(
                 "config",
                 "shared state synced with \(host.label) (\(reason)): "
-                + "\(merged.notes.count) notes, \(merged.favorites.count) favourites")
+                + "\(merged.notes.count) notes, \(merged.favorites.count) favourites, "
+                + "\(merged.githubPipelines.count + merged.gitlabPipelines.count) pipelines")
         }
     }
 
     private func currentLocalState() -> SharedState {
-        let snapshot: ([String: SessionNote], [FavoriteEntry]) = DispatchQueue.main.sync {
-            (SessionNotesStore.shared.notes, FavoritesStore.shared.entries)
+        DispatchQueue.main.sync {
+            SharedState(notes: SessionNotesStore.shared.notes,
+                        favorites: FavoritesStore.shared.entries,
+                        githubPipelines: GitHubConfigStore.shared.pipelineURLs,
+                        gitlabPipelines: GitLabConfigStore.shared.pipelineURLs,
+                        updated: Date(),
+                        writtenBy: Self.thisMachine)
         }
-        return SharedState(notes: snapshot.0, favorites: snapshot.1,
-                           updated: Date(), writtenBy: Self.thisMachine)
     }
 
     private func apply(_ state: SharedState) {
@@ -340,6 +349,16 @@ public final class SharedStateSync: ObservableObject {
             if FavoritesStore.shared.entries != state.favorites {
                 FavoritesStore.shared.entries = state.favorites
                 FavoritesStore.shared.save()
+            }
+            // Pipelines: write, then tell the monitor, so a pipeline added
+            // on the other Mac starts reporting here without a restart.
+            if GitHubConfigStore.shared.pipelineURLs != state.githubPipelines {
+                GitHubConfigStore.shared.pipelineURLs = state.githubPipelines
+                WorkflowMonitor.shared.refresh()
+            }
+            if GitLabConfigStore.shared.pipelineURLs != state.gitlabPipelines {
+                GitLabConfigStore.shared.pipelineURLs = state.gitlabPipelines
+                GitLabPipelineMonitor.shared.refresh()
             }
             applying = false
         }
