@@ -841,7 +841,7 @@ final class SessionAdminTests: XCTestCase {
     }
 
     /// A session's identity is source:name, so a rename changes its id.
-    /// The note and the favourite slot are keyed by that id and would be
+    /// The note and the favorite slot are keyed by that id and would be
     /// orphaned — a rename that silently drops your note reads as a bug.
     func testRenameChangesTheIdentityTheNoteIsKeyedBy() {
         let source = SessionSource.host(hostID: UUID())
@@ -852,7 +852,7 @@ final class SessionAdminTests: XCTestCase {
 }
 
 /// New sessions get a ⌘-number automatically, so keyboard switching works
-/// before anyone has met the favourites system.
+/// before anyone has met the favorites system.
 final class AutoFavoriteTests: XCTestCase {
 
     private func state() -> AppState {
@@ -866,7 +866,7 @@ final class AutoFavoriteTests: XCTestCase {
     }
 
     /// Register sessions as existing, since ⌘1–9 indexes visible
-    /// favourites rather than stored entries.
+    /// favorites rather than stored entries.
     private func makeVisible(_ sessions: [TmuxSession], in s: AppState) {
         s.allSessions = sessions
     }
@@ -888,7 +888,7 @@ final class AutoFavoriteTests: XCTestCase {
         for one in sessions { s.autoFavoriteNewSession(one) }
 
         XCTAssertEqual(s.favoriteSessions.count, 9,
-                       "⌘1–9 is nine keys; the tenth session has to be favourited deliberately")
+                       "⌘1–9 is nine keys; the tenth session has to be favorited deliberately")
         XCTAssertFalse(s.isFavorited(sessions[9]))
     }
 
@@ -901,11 +901,11 @@ final class AutoFavoriteTests: XCTestCase {
 
         s.autoFavoriteNewSession(kept)
         XCTAssertEqual(s.favoriteEntries.count, before.count,
-                       "favouriting an already-favourited session must not duplicate it")
+                       "favoriting an already-favorited session must not duplicate it")
         XCTAssertTrue(s.isFavorited(kept))
     }
 
-    /// Unfavouriting has to stick. If the automatic pass could re-add a
+    /// Unfavoriting has to stick. If the automatic pass could re-add a
     /// session the user removed, the setting would look broken.
     func testItDoesNotResurrectSomethingTheUserRemoved() {
         let s = state()
@@ -915,7 +915,7 @@ final class AutoFavoriteTests: XCTestCase {
         s.toggleFavorite(one)               // user removes it
         XCTAssertFalse(s.isFavorited(one))
 
-        // Only *creation* triggers the automatic favourite, and a session
+        // Only *creation* triggers the automatic favorite, and a session
         // is created once — so nothing re-adds it.
         XCTAssertFalse(s.favoriteSessions.contains { $0.id == one.id })
     }

@@ -653,7 +653,7 @@ public class AppState: ObservableObject {
         return nil
     }
 
-    /// The key a session's note and favourite are stored under.
+    /// The key a session's note and favorite are stored under.
     ///
     /// Identity-based (`host:user@machine:name`) when we know which host
     /// the session belongs to, falling back to the in-memory id when we
@@ -674,7 +674,7 @@ public class AppState: ObservableObject {
     /// this before any migration: an un-migrated file keeps working, a
     /// migrated one works, and a half-migrated one works too. Changing
     /// the stored format before the reader could do this is what made a
-    /// favourites list vanish.
+    /// favorites list vanish.
     public func storageKeys(for session: TmuxSession) -> [String] {
         let preferred = storageKey(for: session)
         return preferred == session.id ? [preferred] : [preferred, session.id]
@@ -754,14 +754,14 @@ public class AppState: ObservableObject {
     /// Give a newly created session a ⌘-number in this window, if one is
     /// free.
     ///
-    /// Switching sessions by keyboard requires a favourite, and users were
-    /// having to discover the favouriting system before they could switch
+    /// Switching sessions by keyboard requires a favorite, and users were
+    /// having to discover the favoriting system before they could switch
     /// at all — the feature that makes the app fast was gated behind a
     /// concept nobody had met yet. Now the first nine sessions in a window
-    /// arrive with a number already on them, and favouriting only becomes
+    /// arrive with a number already on them, and favoriting only becomes
     /// something to think about once there are more sessions than keys.
     ///
-    /// Counts VISIBLE favourites rather than stored entries, because
+    /// Counts VISIBLE favorites rather than stored entries, because
     /// that's what ⌘1–9 actually indexes: an entry whose host is
     /// unreachable isn't reachable by a number either, so it shouldn't
     /// hold a slot shut.
@@ -970,7 +970,7 @@ public class AppState: ObservableObject {
         }
     }
 
-    /// Rename a tmux session, carrying its note and favourite slot over.
+    /// Rename a tmux session, carrying its note and favorite slot over.
     ///
     /// A session's identity is `source:name`, so renaming changes its id
     /// — the note and the ⌘-number slot are keyed by that id and would
@@ -1058,7 +1058,7 @@ public class AppState: ObservableObject {
         FavoritesStore.shared.save()
     }
 
-    /// Move a session's note and favourite slot to its new name.
+    /// Move a session's note and favorite slot to its new name.
     ///
     /// Resolved through `storageKeys` on BOTH sides. The session's name is
     /// part of its storage key, so a rename changes that key — and an
@@ -1080,7 +1080,7 @@ public class AppState: ObservableObject {
         where oldKeys.contains(FavoritesStore.shared.entries[i].sessionID) {
             // Edited in place so the ⌘-number keeps its position in the
             // bar — remove-and-append would silently renumber every
-            // favourite after it.
+            // favorite after it.
             FavoritesStore.shared.entries[i].sessionID = newKey
             moved = true
         }

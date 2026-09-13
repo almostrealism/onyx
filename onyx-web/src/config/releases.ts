@@ -30,7 +30,7 @@ export const RELEASES: Release[] = [
       'The first release shaped mostly by other people using it — several things here exist because someone asked a question whose real answer was "you can\'t, actually".',
     highlights: [
       'Drag a file onto the terminal to insert its path — uploaded to the remote machine first when the session is remote.',
-      'New sessions get a ⌘-number automatically, so keyboard switching works before you have met the favourites system.',
+      'New sessions get a ⌘-number automatically, so keyboard switching works before you have met the favorites system.',
       'Rename and end sessions from the session list.',
       'Two fleet layouts: every remote host as its own row sharing a time axis, or the whole fleet as one pair of charts showing the max across machines.',
       'Watch a whole GitHub owner or GitLab group instead of listing repositories one at a time, and filter drafts in or out.',
@@ -44,9 +44,9 @@ export const RELEASES: Release[] = [
     version: '0.15',
     date: '2026-08-22',
     summary:
-      'Favourite folders became a treemap, AMD GPUs and Ryzen AI NPUs became visible, and the remote-execution layer stopped losing output on hostile shells.',
+      'Favorite folders became a treemap, AMD GPUs and Ryzen AI NPUs became visible, and the remote-execution layer stopped losing output on hostile shells.',
     highlights: [
-      'Favourite folders are drawn as a treemap, so a folder inside a folder looks like one and same-named folders are told apart by what contains them.',
+      'Favorite folders are drawn as a treemap, so a folder inside a folder looks like one and same-named folders are told apart by what contains them.',
       'GPU stats for AMD hosts through amdgpu’s own counters, plus Ryzen AI NPU residency — no rocm-smi, no root, nothing to install.',
       'The git panel returned to the file browser: branch, staged files and working changes above the listing.',
       'R filters reminders to what is due today or tomorrow, keeping the by-list grouping.',

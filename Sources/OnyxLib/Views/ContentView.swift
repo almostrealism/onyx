@@ -1422,7 +1422,7 @@ struct SelectableTerminalText: NSViewRepresentable {
     }
 }
 
-/// One favourite in the bar along the bottom.
+/// One favorite in the bar along the bottom.
 ///
 /// The ⋯ sits BESIDE the button rather than inside it: a menu nested in
 /// a button gives the two a single click target, and neither ends up

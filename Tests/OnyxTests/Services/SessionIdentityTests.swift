@@ -1,7 +1,7 @@
 import XCTest
 @testable import OnyxLib
 
-/// How a session's note and favourite are keyed on disk. This decides
+/// How a session's note and favorite are keyed on disk. This decides
 /// whether they survive a reinstall, follow you to another machine, and
 /// stay apart when they belong to different people — so the rules are
 /// pinned rather than assumed.

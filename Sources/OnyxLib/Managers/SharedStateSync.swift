@@ -1,7 +1,7 @@
 //
 // SharedStateSync.swift
 //
-// Responsibility: Keeping session notes and favourites on a chosen remote
+// Responsibility: Keeping session notes and favorites on a chosen remote
 //                 host, so every Mac running Onyx sees the same set.
 // Scope: Shared singleton. Owns the home-host choice, the shadow copy of
 //        what was last synced, and the transfer.
@@ -326,7 +326,7 @@ public final class SharedStateSync: ObservableObject {
             DiagnosticLog.shared.record(
                 "config",
                 "shared state synced with \(host.label) (\(reason)): "
-                + "\(merged.notes.count) notes, \(merged.favorites.count) favourites, "
+                + "\(merged.notes.count) notes, \(merged.favorites.count) favorites, "
                 + "\(merged.githubPipelines.count + merged.gitlabPipelines.count) pipelines")
         }
     }
@@ -514,7 +514,7 @@ public final class SharedStateSync: ObservableObject {
                                  lastWrittenBy: String?, now: Date = Date()) -> String {
         switch status {
         case .localOnly:
-            return "Notes and favourites are stored on this Mac only."
+            return "Notes and favorites are stored on this Mac only."
         case .syncing:
             return "Syncing with \(hostLabel ?? "the host")…"
         case .waitingForHost:

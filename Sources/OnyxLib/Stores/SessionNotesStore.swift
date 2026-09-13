@@ -154,7 +154,7 @@ public class SessionNotesStore: ObservableObject {
         }
         // One row per SESSION, not per stored note. A note written before
         // the re-keying and one written after both resolve to the same
-        // session, and listing it twice is the favourites-bar bug in
+        // session, and listing it twice is the favorites-bar bug in
         // another costume. Newest wins, which is also the sort order.
         var seen = Set<String>()
         return notes.values

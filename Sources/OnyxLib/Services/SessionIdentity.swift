@@ -1,13 +1,13 @@
 //
 // SessionIdentity.swift
 //
-// Responsibility: The key under which a session's note and favourite are
+// Responsibility: The key under which a session's note and favorite are
 //                 STORED — as opposed to `SessionSource.stableKey`, which
 //                 identifies a session within one running app.
 // Scope: Service. Pure functions over HostConfig; no state, no I/O.
 // STEP 1 of the move to shared state: this makes the READER understand
 // both key forms. Nothing is rewritten on disk yet. Doing it the other
-// way round is what wiped a favourites list — the migration landed
+// way round is what wiped a favorites list — the migration landed
 // first, the lookups still searched by UUID, and everything went
 // invisible while 980 tests passed.
 //

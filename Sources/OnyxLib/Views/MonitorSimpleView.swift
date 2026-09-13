@@ -238,7 +238,7 @@ struct SimpleSessionNotes: View {
     @Environment(\.monitorFontScale) private var fontScale
 
     /// The column is shared with reminders, so sessions can't have all
-    /// of it. Favourites come first, so the ones that overflow are the
+    /// of it. Favorites come first, so the ones that overflow are the
     /// ones without a ⌘N anyway.
     private let maxShown = 6
 

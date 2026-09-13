@@ -3,7 +3,7 @@ import XCTest
 
 /// THE test that was missing. The previous attempt at this had thorough
 /// unit tests of the key functions and none of what actually matters —
-/// that a favourite and a note still resolve to a live session. The keys
+/// that a favorite and a note still resolve to a live session. The keys
 /// were rewritten, the lookups weren't, everything went invisible, and
 /// 980 tests passed while it happened.
 ///
@@ -28,7 +28,7 @@ final class StorageKeyResolutionTests: XCTestCase {
 
     // MARK: - Both key forms resolve
 
-    func testAFavouriteStoredUnderTheLegacyKeyStillResolves() {
+    func testAFavoriteStoredUnderTheLegacyKeyStillResolves() {
         let state = makeState(host: host)
         let s = session("api", on: host)
         state.allSessions = [s]
@@ -41,7 +41,7 @@ final class StorageKeyResolutionTests: XCTestCase {
         XCTAssertEqual(state.favoriteSessions.map(\.name), ["api"])
     }
 
-    func testAFavouriteStoredUnderTheIdentityKeyResolves() {
+    func testAFavoriteStoredUnderTheIdentityKeyResolves() {
         let state = makeState(host: host)
         let s = session("api", on: host)
         state.allSessions = [s]
@@ -95,7 +95,7 @@ final class StorageKeyResolutionTests: XCTestCase {
 
     /// New writes use the identity key, so the file migrates itself as
     /// people touch things even before any bulk migration runs.
-    func testNewFavouritesAreWrittenUnderTheIdentityKey() {
+    func testNewFavoritesAreWrittenUnderTheIdentityKey() {
         let state = makeState(host: host)
         let s = session("api", on: host)
         state.allSessions = [s]
@@ -106,9 +106,9 @@ final class StorageKeyResolutionTests: XCTestCase {
         XCTAssertTrue(state.isFavorited(s))
     }
 
-    /// Un-favouriting something stored under the OLD key must remove it,
+    /// Un-favoriting something stored under the OLD key must remove it,
     /// not add a second entry under the new one.
-    func testUnfavouritingALegacyEntryRemovesIt() {
+    func testUnfavoritingALegacyEntryRemovesIt() {
         let state = makeState(host: host)
         let s = session("api", on: host)
         state.allSessions = [s]
@@ -274,7 +274,7 @@ final class StorageKeyMutationTests: XCTestCase {
         TmuxSession(name: name, source: .host(hostID: host.id))
     }
 
-    // MARK: - Per-window favourites
+    // MARK: - Per-window favorites
 
     func testWindowToggleFindsAnEntryUnderEitherKey() {
         for legacy in [true, false] {
@@ -298,7 +298,7 @@ final class StorageKeyMutationTests: XCTestCase {
     /// The session's NAME is part of its storage key, so a rename moves
     /// the key. Carrying the note across is the whole reason rename is
     /// more than a tmux call.
-    func testRenameCarriesTheNoteAndTheFavouriteSlot() {
+    func testRenameCarriesTheNoteAndTheFavoriteSlot() {
         let state = self.state()
         let before = session("old")
         let after = session("new")
@@ -373,12 +373,12 @@ final class StorageKeyMutationTests: XCTestCase {
 
 /// One entry per session, however the file got that way.
 ///
-/// The bug this locks: a session favourited BEFORE the re-keying and
+/// The bug this locks: a session favorited BEFORE the re-keying and
 /// touched after it had an entry under each spelling, the migration
 /// renamed the old one onto the new key without checking whether that key
-/// was taken, and every affected favourite was then drawn twice in the bar
+/// was taken, and every affected favorite was then drawn twice in the bar
 /// — and answered to two ⌘-numbers, silently costing one.
-final class DuplicateFavouriteTests: XCTestCase {
+final class DuplicateFavoriteTests: XCTestCase {
 
     private let host = HostConfig(label: "build",
                                   ssh: SSHConfig(host: "build.example.com", user: "me"))
@@ -417,7 +417,7 @@ final class DuplicateFavouriteTests: XCTestCase {
                        "the duplicate should be repaired on disk, not just hidden")
     }
 
-    /// Two entries can disagree about which windows show the favourite.
+    /// Two entries can disagree about which windows show the favorite.
     /// Losing one would make it vanish from a window it was in.
     func testWindowsAreUnionedWhenEntriesCollapse() {
         let state = makeState()
@@ -447,7 +447,7 @@ final class DuplicateFavouriteTests: XCTestCase {
                        "the collapse keeps the first position, not the last")
     }
 
-    /// A host that is merely switched off must not have its favourites
+    /// A host that is merely switched off must not have its favorites
     /// rewritten or dropped — they can't be resolved, which is not the
     /// same as being wrong.
     func testEntriesForSessionsThatArentRunningAreLeftAlone() {

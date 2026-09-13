@@ -3,7 +3,7 @@
 //
 // Responsibility: The bundle of state that can live on a remote host so
 //                 every Mac running Onyx sees the same thing — session
-//                 notes and favourites — and the rules for merging two
+//                 notes and favorites — and the rules for merging two
 //                 copies of it.
 // Scope: Model. Pure data and pure functions; no I/O, no SSH, no stores.
 //        The merge is the part that can lose a user's work, so it is
@@ -27,7 +27,7 @@ import Foundation
 public struct SharedState: Codable, Equatable {
     /// storage key → note.
     public var notes: [String: SessionNote]
-    /// Favourite sessions, in the order they're shown.
+    /// Favorite sessions, in the order they're shown.
     public var favorites: [FavoriteEntry]
     /// Tracked pipeline URLs, verbatim as the user gave them, per forge.
     ///
@@ -169,7 +169,7 @@ public enum SharedStateMerge {
 
     // MARK: - Tracked pipelines
 
-    /// Same membership rules as favourites, matched on the PARSED id
+    /// Same membership rules as favorites, matched on the PARSED id
     /// rather than the URL text.
     ///
     /// One pipeline has several spellings — a workflow page, a run page,
@@ -200,14 +200,14 @@ public enum SharedStateMerge {
         return result
     }
 
-    // MARK: - Favourites
+    // MARK: - Favorites
 
     /// Membership is merged; PLACEMENT is not.
     ///
-    /// `windows` says which of this Mac's four windows shows a favourite,
+    /// `windows` says which of this Mac's four windows shows a favorite,
     /// which is a fact about one desk and not about the work. So a
-    /// favourite both sides know keeps the local placement, and only the
-    /// list of what's favourited is shared.
+    /// favorite both sides know keeps the local placement, and only the
+    /// list of what's favorited is shared.
     static func mergeFavorites(base: [FavoriteEntry]?,
                                local: [FavoriteEntry],
                                remote: [FavoriteEntry]) -> [FavoriteEntry] {

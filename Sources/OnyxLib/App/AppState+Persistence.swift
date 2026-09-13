@@ -11,10 +11,10 @@
 // file could be read as one thing. Nothing here changed in the move.
 //
 // The migrations are the part to read carefully. `migrateStorageKeysIfNeeded`
-// rewrites keys people's notes and favourites are filed under, and the
+// rewrites keys people's notes and favorites are filed under, and the
 // rule learned the hard way is that the READER must accept both forms
 // before anything on disk is touched — see the commit that wiped a
-// favourites list, and StorageKeyResolutionTests, which exists so it
+// favorites list, and StorageKeyResolutionTests, which exists so it
 // can't happen twice.
 //
 
@@ -256,7 +256,7 @@ extension AppState {
     /// Safe only because step 1 landed first — every read already accepts
     /// both forms, so a file that is un-migrated, migrated, or caught
     /// half-way all resolve identically. That ordering is the whole
-    /// lesson from the attempt that wiped a favourites list.
+    /// lesson from the attempt that wiped a favorites list.
     ///
     /// Idempotent: an already-migrated key has "@" in its machine field
     /// and is skipped, so this runs on every launch and does nothing
@@ -309,9 +309,9 @@ extension AppState {
         favoriteEntries = entries
         saveFavorites()
         // Renaming in place can land two entries on the same key — a
-        // session favourited before the re-keying and touched after it has
+        // session favorited before the re-keying and touched after it has
         // one of each. The notes store has always merged on collision;
-        // this didn't, and the result was every affected favourite drawn
+        // this didn't, and the result was every affected favorite drawn
         // twice in the bar.
         collapseDuplicateFavorites()
 
@@ -323,15 +323,15 @@ extension AppState {
     ///
     /// Two entries can name the same session while spelling it
     /// differently — the legacy in-memory id and the identity key — and a
-    /// favourite stored twice is drawn twice in the bar and answers to two
+    /// favorite stored twice is drawn twice in the bar and answers to two
     /// ⌘-numbers. Entries are collapsed onto the identity key, keeping the
     /// FIRST position (the user arranged that) and the union of the
-    /// windows (so a favourite visible in two windows stays visible in
+    /// windows (so a favorite visible in two windows stays visible in
     /// both).
     ///
     /// Entries that resolve to no live session are left exactly as they
     /// are: a host that's merely switched off must not have its
-    /// favourites rewritten or dropped.
+    /// favorites rewritten or dropped.
     ///
     /// Runs at load as a repair, not just after the migration, because the
     /// duplicates are already in people's files.
@@ -361,7 +361,7 @@ extension AppState {
         guard changed else { return }
         favoriteEntries = collapsed
         saveFavorites()
-        DiagnosticLog.shared.record("config", "favourites collapsed to one entry per session")
+        DiagnosticLog.shared.record("config", "favorites collapsed to one entry per session")
     }
 
     func loadFavorites() {

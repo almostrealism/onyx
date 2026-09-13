@@ -43,7 +43,7 @@ struct WalkthroughOverlay: View {
                         ("right-click", "rename or end a session")]),
 
             Step(title: "Files, git and search on the far machine",
-                 body: "Browse the remote filesystem with the branch, staged files and working changes right above the listing. Search by name or type across a deep tree. Favourite folders are drawn as a treemap, so two folders with the same name are told apart by what contains them.\n\nWhen the panel is open it takes the keyboard, so typing goes to it rather than the shell. ⌘⌥← sends the keyboard back to the terminal and ⌘⌥→ returns it to the panel; the panel says which way round it currently is.",
+                 body: "Browse the remote filesystem with the branch, staged files and working changes right above the listing. Search by name or type across a deep tree. Favorite folders are drawn as a treemap, so two folders with the same name are told apart by what contains them.\n\nWhen the panel is open it takes the keyboard, so typing goes to it rather than the shell. ⌘⌥← sends the keyboard back to the terminal and ⌘⌥→ returns it to the panel; the panel says which way round it currently is.",
                  keys: [("⌘O", "file browser"), ("⌘⌥←", "keyboard to the terminal"),
                         ("⌘⌥→", "keyboard to the panel"), ("⌘Y", "preview a file")]),
 

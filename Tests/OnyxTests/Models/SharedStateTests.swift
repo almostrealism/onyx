@@ -96,7 +96,7 @@ final class SharedStateNoteMergeTests: XCTestCase {
     }
 }
 
-/// Favourites merge by MEMBERSHIP. Which window shows a favourite is a
+/// Favorites merge by MEMBERSHIP. Which window shows a favorite is a
 /// fact about one desk, not about the work.
 final class SharedStateFavoriteMergeTests: XCTestCase {
 
@@ -130,14 +130,14 @@ final class SharedStateFavoriteMergeTests: XCTestCase {
         XCTAssertEqual(merged.first?.windows, [2])
     }
 
-    func testUnfavouritingElsewhereIsHonouredWithAShadow() {
+    func testUnfavoritingElsewhereIsHonouredWithAShadow() {
         let merged = merge(base: [fav("a"), fav("b")],
                            local: [fav("a"), fav("b")],
                            remote: [fav("a")])
         XCTAssertEqual(merged.map(\.sessionID), ["a"])
     }
 
-    func testWithoutAShadowNothingIsUnfavourited() {
+    func testWithoutAShadowNothingIsUnfavorited() {
         let merged = merge(base: nil, local: [fav("a"), fav("b")], remote: [fav("a")])
         XCTAssertEqual(merged.map(\.sessionID), ["a", "b"])
     }
@@ -312,7 +312,7 @@ final class SharedStateCadenceTests: XCTestCase {
     }
 }
 
-/// Tracked pipelines travel with notes and favourites.
+/// Tracked pipelines travel with notes and favorites.
 ///
 /// Matched on the PARSED id, not the URL text. The same pipeline has
 /// several spellings — a trailing slash, http vs https, a pasted trailing

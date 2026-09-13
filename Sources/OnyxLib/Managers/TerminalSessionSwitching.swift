@@ -464,7 +464,7 @@ extension OnyxTerminalView {
 
     func createNewTmuxSession(_ session: TmuxSession) {
         // Claim a ⌘-number for it while there's one free, so keyboard
-        // switching works before the user has met the favourites system.
+        // switching works before the user has met the favorites system.
         DispatchQueue.main.async { self.appState.autoFavoriteNewSession(session) }
         rapidDeaths = 0
         stopPairRecoveryWait()

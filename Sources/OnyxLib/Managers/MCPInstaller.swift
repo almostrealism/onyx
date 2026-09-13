@@ -318,7 +318,7 @@ public final class MCPInstaller: ObservableObject {
             .filter { !$0.isEmpty } ?? []
         guard unameLines.count >= 2,
               let platform = RemotePlatform.parse(uname: unameLines[0], machine: unameLines[1]) else {
-            fail("\(host.label) reported an architecture Onyx doesn't recognise", for: host.id)
+            fail("\(host.label) reported an architecture Onyx doesn't recognize", for: host.id)
             return false
         }
 

@@ -3,7 +3,7 @@ import SwiftUI
 /// The bell that lights when an agent has said something about a session.
 ///
 /// Appears beside the session's note in the monitor, and on its chip in
-/// the favourites bar — the bar is the fallback, because a session with
+/// the favorites bar — the bar is the fallback, because a session with
 /// no note has no row in the monitor for the indicator to sit next to.
 ///
 /// Clicking shows the history and marks it seen, so the light can go out
