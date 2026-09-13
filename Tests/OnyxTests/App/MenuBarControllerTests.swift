@@ -129,3 +129,92 @@ final class MenuBarIconTests: XCTestCase {
         XCTAssertTrue(MenuBarController.markImage(unread: true)?.isTemplate == true)
     }
 }
+
+/// Pipelines in the menu bar. Same question as the sessions list — "do I
+/// need to go and look" — answered without switching to the app.
+final class MenuBarPipelineTests: XCTestCase {
+
+    private func status(_ name: String = "ci.yml",
+                        repo: String = "acme/api",
+                        overall: PipelineOverallStatus = .success,
+                        attempt: Int? = nil,
+                        branch: String? = "main") -> PipelineStatus {
+        PipelineStatus(
+            spec: PipelineSpec(url: "https://github.com/\(repo)/actions/workflows/\(name)",
+                               provider: .github, path: repo,
+                               target: .workflow(file: name, branch: nil)),
+            runNumber: 42, runURL: "https://github.com/\(repo)/actions/runs/1",
+            headBranch: branch, title: "t",
+            succeeded: 1, inProgress: 0, queued: 0, skipped: 0, failed: 0,
+            overall: overall, lastUpdated: Date(), attempt: attempt)
+    }
+
+    // MARK: - The attempt
+
+    /// The ask: when a pipeline is on its second or later try, say so.
+    /// It's invisible on the run's own page until you open it.
+    func testARetryShowsItsAttemptNumber() {
+        let line = MenuBarController.pipelineLine(status(attempt: 3))
+        XCTAssertTrue(line.contains("attempt 3"), line)
+    }
+
+    /// "attempt 1" is every pipeline nobody has retried — printing it on
+    /// all of them would hide the ones where it matters.
+    func testAFirstAttemptSaysNothing() {
+        XCTAssertFalse(MenuBarController.pipelineLine(status(attempt: 1)).contains("attempt"))
+        XCTAssertFalse(MenuBarController.pipelineLine(status(attempt: nil)).contains("attempt"))
+    }
+
+    func testIsRetryTreatsAMissingAttemptAsTheFirst() {
+        XCTAssertFalse(status(attempt: nil).isRetry)
+        XCTAssertFalse(status(attempt: 1).isRetry)
+        XCTAssertTrue(status(attempt: 2).isRetry)
+    }
+
+    // MARK: - The line
+
+    func testTheLineNamesTheWorkflowAndTheRepo() {
+        let line = MenuBarController.pipelineLine(status())
+        XCTAssertTrue(line.contains("ci"))
+        XCTAssertTrue(line.contains("acme/api"))
+    }
+
+    /// A default branch adds nothing; a feature branch is the reason the
+    /// run looks unfamiliar.
+    func testOnlyANonDefaultBranchIsNamed() {
+        XCTAssertFalse(MenuBarController.pipelineLine(status(branch: "main")).contains("("))
+        XCTAssertTrue(MenuBarController.pipelineLine(status(branch: "fix/thing"))
+            .contains("fix/thing"))
+    }
+
+    func testTheLineStaysOneMenuWidth() {
+        let long = status("really-long-workflow-name-that-goes-on.yml",
+                          repo: "some-organisation/some-very-long-repository-name",
+                          attempt: 12, branch: "feature/a-branch-with-a-long-name")
+        XCTAssertLessThanOrEqual(MenuBarController.pipelineLine(long).count, 64)
+    }
+
+    // MARK: - Order
+
+    /// "Is something wrong" before "what is happening".
+    func testFailuresSortAboveRunningAndRunningAboveSuccess() {
+        let ordered = [status("ok.yml", overall: .success),
+                       status("go.yml", overall: .running),
+                       status("bad.yml", overall: .failure)]
+            .sorted(by: MenuBarController.mostInterestingFirst)
+        XCTAssertEqual(ordered.map(\.overall), [.failure, .running, .success])
+    }
+
+    func testAMixedRunIsTreatedAsAFailure() {
+        let ordered = [status("go.yml", overall: .running),
+                       status("half.yml", overall: .mixed)]
+            .sorted(by: MenuBarController.mostInterestingFirst)
+        XCTAssertEqual(ordered.first?.overall, .mixed)
+    }
+
+    func testEqualUrgencySortsByName() {
+        let ordered = [status("zebra.yml"), status("alpha.yml")]
+            .sorted(by: MenuBarController.mostInterestingFirst)
+        XCTAssertTrue(ordered.first!.spec.displayName.hasPrefix("alpha"))
+    }
+}

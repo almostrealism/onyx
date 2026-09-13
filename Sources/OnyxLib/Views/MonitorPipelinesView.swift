@@ -403,11 +403,16 @@ private struct PipelineRow: View {
         return nil
     }
 
-    /// `owner/repo #123` — branch lives in the chip above, so this
+    /// `owner/repo #123 ↻2` — branch lives in the chip above, so this
     /// stays compact and survives narrow columns.
+    ///
+    /// The attempt is shown only when it isn't the first: "attempt 1" is
+    /// every pipeline nobody has retried, and saying so on all of them
+    /// would hide the ones where it matters.
     private var secondaryLine: String {
         var line = status.spec.fullName
         if let n = status.runNumber { line += " #\(n)" }
+        if status.isRetry, let attempt = status.attempt { line += "  ↻\(attempt)" }
         return line
     }
 

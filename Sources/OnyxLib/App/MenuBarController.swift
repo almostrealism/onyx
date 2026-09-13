@@ -242,6 +242,8 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
             }
         }
 
+        addPipelines(to: menu)
+
         // Alerts that named a session we couldn't find. Rare, and
         // invisible everywhere else in the menu bar — so if any exist,
         // they get a line rather than being silently dropped.
@@ -264,6 +266,82 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         let show = NSMenuItem(title: "Show Onyx", action: #selector(showOnyx), keyEquivalent: "")
         show.target = self
         menu.addItem(show)
+    }
+
+    /// Tracked pipelines, if any.
+    ///
+    /// The menu bar is where you look when you don't want to switch to the
+    /// app, and "did CI go green" is the other question in that category.
+    /// One line each: a status glyph, the workflow, and the attempt when
+    /// it is a re-run — a pipeline on its third try is a different thing
+    /// from one on its first, and that is invisible on the run's own page
+    /// until you open it.
+    private func addPipelines(to menu: NSMenu) {
+        let pipelines = WorkflowMonitor.shared.pipelines + GitLabPipelineMonitor.shared.pipelines
+        guard !pipelines.isEmpty else { return }
+
+        menu.addItem(.separator())
+        let failing = pipelines.filter { $0.overall == .failure || $0.overall == .mixed }.count
+        menu.addItem(header(failing > 0 ? "PIPELINES — \(failing) FAILING" : "PIPELINES"))
+
+        for status in pipelines.sorted(by: Self.mostInterestingFirst) {
+            let item = NSMenuItem(title: Self.pipelineLine(status),
+                                  action: #selector(openPipeline(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = status.runURL ?? status.spec.url
+            item.image = Self.glyph(for: status.overall)
+            item.toolTip = "\(status.spec.fullName) — open in your browser"
+            menu.addItem(item)
+        }
+    }
+
+    /// Failures first, then anything still running, then the rest. The
+    /// order answers "is something wrong" before "what is happening".
+    static func mostInterestingFirst(_ a: PipelineStatus, _ b: PipelineStatus) -> Bool {
+        func rank(_ s: PipelineStatus) -> Int {
+            switch s.overall {
+            case .failure, .mixed: return 0
+            case .running, .queued: return 1
+            default:                return 2
+            }
+        }
+        if rank(a) != rank(b) { return rank(a) < rank(b) }
+        return a.spec.displayName.localizedCaseInsensitiveCompare(b.spec.displayName)
+            == .orderedAscending
+    }
+
+    /// "ci · acme/api  ↻3" — the workflow, where it lives, and the attempt
+    /// when it is a re-run.
+    static func pipelineLine(_ status: PipelineStatus) -> String {
+        var line = "\(status.spec.displayName) · \(status.spec.fullName)"
+        if let branch = status.headBranch, !branch.isEmpty,
+           branch != "main", branch != "master" {
+            line += " (\(branch))"
+        }
+        if status.isRetry, let attempt = status.attempt {
+            line += "  ↻ attempt \(attempt)"
+        }
+        return clip(line, 64)
+    }
+
+    /// Template symbols, so the glyph reads in a light or dark menu bar.
+    /// Shape carries the meaning, not colour — the menu bar will not give
+    /// us colour reliably in both appearances.
+    private static func glyph(for overall: PipelineOverallStatus) -> NSImage? {
+        let name: String
+        switch overall {
+        case .success:  name = "checkmark.circle"
+        case .failure:  name = "xmark.circle"
+        case .mixed:    name = "exclamationmark.triangle"
+        case .running:  name = "arrow.triangle.2.circlepath"
+        case .queued:   name = "clock"
+        case .skipped:  name = "minus.circle"
+        case .unknown:  name = "questionmark.circle"
+        }
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .regular))
+        image?.isTemplate = true
+        return image
     }
 
     /// "15:04  Migration needs a decision" — time first, so a column of
@@ -331,6 +409,13 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
             appState.storageKeys(for: $0).contains(key)
         }) else { return }
         appState.jumpToSession(session)
+    }
+
+    @objc private func openPipeline(_ sender: NSMenuItem) {
+        guard let url = (sender.representedObject as? String).flatMap(URL.init(string:)) else {
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     @objc private func markAllRead() {

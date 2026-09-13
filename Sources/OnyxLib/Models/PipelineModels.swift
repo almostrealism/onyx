@@ -196,17 +196,27 @@ public struct PipelineStatus: Identifiable, Equatable {
     public let failed: Int
     public let overall: PipelineOverallStatus
     public let lastUpdated: Date
+    /// GitHub's `run_attempt`: 1 for a first run, higher after a re-run.
+    /// nil where the forge doesn't report one (GitLab re-runs are per-job,
+    /// not per-pipeline, so there is no equivalent number).
+    public let attempt: Int?
+
+    /// True when this is a re-run — the only case worth showing, since
+    /// "attempt 1" is every pipeline that has never been retried.
+    public var isRetry: Bool { (attempt ?? 1) > 1 }
 
     public init(spec: PipelineSpec, runNumber: Int?, runURL: String?,
                 headBranch: String?, title: String?,
                 succeeded: Int, inProgress: Int, queued: Int,
                 skipped: Int, failed: Int,
-                overall: PipelineOverallStatus, lastUpdated: Date) {
+                overall: PipelineOverallStatus, lastUpdated: Date,
+                attempt: Int? = nil) {
         self.spec = spec; self.runNumber = runNumber; self.runURL = runURL
         self.headBranch = headBranch; self.title = title
         self.succeeded = succeeded; self.inProgress = inProgress
         self.queued = queued; self.skipped = skipped; self.failed = failed
         self.overall = overall; self.lastUpdated = lastUpdated
+        self.attempt = attempt
     }
 }
 

@@ -43,3 +43,47 @@ final class WorkflowMonitorTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), [a.id])
     }
 }
+
+/// The GitHub run payload, decoded from the shape the API actually sends.
+///
+/// Key names here are load-bearing and fail silently: a wrong one compiles
+/// and yields nil forever. `run_attempt` is the reason this exists — the
+/// retry indicator would simply never appear.
+final class WorkflowRunDecodingTests: XCTestCase {
+
+    /// Trimmed from a real /actions/runs response.
+    private let payload = Data("""
+    {"workflow_runs":[{
+      "id": 1234567890,
+      "name": "CI",
+      "display_title": "Fix the flaky test",
+      "run_number": 412,
+      "run_attempt": 3,
+      "html_url": "https://github.com/acme/api/actions/runs/1234567890",
+      "head_branch": "fix/flake",
+      "status": "in_progress",
+      "conclusion": null
+    }]}
+    """.utf8)
+
+    func testARerunReportsItsAttempt() throws {
+        let decoded = try JSONDecoder().decode(
+            WorkflowMonitor.WorkflowRunsResponse.self, from: payload)
+        let run = try XCTUnwrap(decoded.workflow_runs?.first)
+        XCTAssertEqual(run.run_attempt, 3, "GitHub spells it run_attempt")
+        XCTAssertEqual(run.run_number, 412, "the run number is a different thing")
+        XCTAssertEqual(run.head_branch, "fix/flake")
+    }
+
+    /// Every field is optional except the id: GitHub omits some on older
+    /// runs, and a strict decode would drop the whole pipeline rather than
+    /// show it with one detail missing.
+    func testAMinimalRunStillDecodes() throws {
+        let minimal = Data(#"{"workflow_runs":[{"id": 7}]}"#.utf8)
+        let decoded = try JSONDecoder().decode(
+            WorkflowMonitor.WorkflowRunsResponse.self, from: minimal)
+        let run = try XCTUnwrap(decoded.workflow_runs?.first)
+        XCTAssertEqual(run.id, 7)
+        XCTAssertNil(run.run_attempt)
+    }
+}

@@ -262,7 +262,7 @@ public final class WorkflowMonitor: ObservableObject {
                     // at least the counts populate.
                     self?.fetchJobs(spec: spec, runID: id, token: token,
                                     runNumber: nil, runURL: nil,
-                                    headBranch: nil, title: nil,
+                                    headBranch: nil, title: nil, attempt: nil,
                                     completion: completion)
                     return
                 }
@@ -271,6 +271,7 @@ public final class WorkflowMonitor: ObservableObject {
                                 runURL: run.html_url,
                                 headBranch: run.head_branch,
                                 title: run.name ?? run.display_title,
+                                attempt: run.run_attempt,
                                 completion: completion)
             }.resume()
         case .workflow(let file, let branch):
@@ -306,6 +307,7 @@ public final class WorkflowMonitor: ObservableObject {
                                 runURL: latest.html_url,
                                 headBranch: latest.head_branch,
                                 title: latest.display_title ?? latest.name,
+                                attempt: latest.run_attempt,
                                 completion: completion)
             }.resume()
         }
@@ -318,6 +320,7 @@ public final class WorkflowMonitor: ObservableObject {
                            runURL: String?,
                            headBranch: String?,
                            title: String?,
+                           attempt: Int?,
                            completion: @escaping (Result<PipelineStatus, Error>) -> Void) {
         var components = URLComponents()
         components.scheme = "https"
@@ -381,7 +384,8 @@ public final class WorkflowMonitor: ObservableObject {
                 skipped: skipped,
                 failed: failed,
                 overall: overall,
-                lastUpdated: Date()
+                lastUpdated: Date(),
+                attempt: attempt
             )
             completion(.success(status))
         }.resume()
@@ -395,11 +399,17 @@ public final class WorkflowMonitor: ObservableObject {
 
     // MARK: - REST response shapes
 
-    private struct WorkflowRunsResponse: Decodable {
+    /// Internal rather than private so the decoding can be tested against
+    /// a real payload shape. A typo in one of these key names compiles
+    /// perfectly and simply yields nil forever — which for `run_attempt`
+    /// would mean the retry indicator never appearing, with nothing to
+    /// suggest why.
+    struct WorkflowRunsResponse: Decodable {
         let workflow_runs: [Run]?
         struct Run: Decodable {
             let id: Int
             let run_number: Int?
+            let run_attempt: Int?     // 1 first time, 2+ after a re-run
             let name: String?
             let display_title: String?
             let html_url: String?
