@@ -78,7 +78,7 @@ final class MCPScriptHazardTests: XCTestCase {
                        "the inner quote has to be escaped or it ends the quoting")
     }
 
-    // MARK: - Behaviour the scripts must keep
+    // MARK: - Behavior the scripts must keep
 
     /// Hooks are merged into whatever is already there. A setup step that
     /// silently dropped someone's other hooks — or their other MCP

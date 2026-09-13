@@ -95,7 +95,7 @@ private struct AlertHistoryPopover: View {
                     ForEach(alerts) { alert in
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 6) {
-                                // Only urgent earns a colour; if everything
+                                // Only urgent earns a color; if everything
                                 // is highlighted then nothing is.
                                 if alert.urgent {
                                     Image(systemName: "exclamationmark.triangle.fill")

@@ -875,7 +875,7 @@ class OnyxTerminalView: NSView {
         switch session.source {
         case .host(let hostID) where isLocalHost(hostID):
             // Same machine: the path already means something. This is
-            // Terminal.app's behaviour exactly.
+            // Terminal.app's behavior exactly.
             insertPaths(urls.map(\.path))
 
         case .host(let hostID):

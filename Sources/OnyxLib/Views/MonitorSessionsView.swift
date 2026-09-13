@@ -291,7 +291,7 @@ private struct SessionNoteRow: View {
                 SessionAlertIndicator(sessionKey: alertKey, accentColor: accentColor,
                                       size: 11 * fontScale)
                 // Terminal-output activity: how long since this session last
-                // produced output. Green when it just printed something, grey
+                // produced output. Green when it just printed something, gray
                 // "idle" once it's been quiet — so a test run that finished
                 // (or hung) stands out from one still churning.
                 activityIndicator
@@ -315,7 +315,7 @@ private struct SessionNoteRow: View {
     }
 
     /// Time-since-last-output chip. A TimelineView re-evaluates it every few
-    /// seconds so the colour drifts active → idle as a session goes quiet,
+    /// seconds so the color drifts active → idle as a session goes quiet,
     /// even when no new output (hence no store update) is arriving.
     @ViewBuilder
     private var activityIndicator: some View {

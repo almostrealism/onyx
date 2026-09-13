@@ -256,7 +256,7 @@ public class FileBrowserManager: ObservableObject {
     public func navigateTo(_ path: String) {
         // Navigating into a directory leaves search behind. Without this,
         // a still-active search from before masks the directory listing and
-        // its git landing (the content chain prioritises SearchResultsView),
+        // its git landing (the content chain prioritizes SearchResultsView),
         // so changed files appeared to vanish after tapping a folder.
         if isSearchActive { clearSearch() }
         fileContent = nil
@@ -382,7 +382,7 @@ public class FileBrowserManager: ObservableObject {
 
     /// Open a file by full path (used by search results and the git
     /// landing page). The synchronous state setup is split out so the
-    /// back-to-search behaviour is unit-testable without remote I/O.
+    /// back-to-search behavior is unit-testable without remote I/O.
     public func readFileFromSearch(_ path: String, name: String) {
         beginOpenFromSearch(parentOf: path)
         readFile(path, name: name)
@@ -790,7 +790,7 @@ public class FileBrowserManager: ObservableObject {
     ///      with `-tt`. A missing marker is the noexec signature — the
     ///      remote profile refusing to execute a non-interactive shell —
     ///      which is precisely what the interactive form defeats. So the
-    ///      defence is intact; we just stop paying a terminal's
+    ///      defense is intact; we just stop paying a terminal's
     ///      constraints for every call on every healthy host.
     ///
     /// Local hosts have neither problem and run once.
@@ -1044,7 +1044,7 @@ public class FileBrowserManager: ObservableObject {
 
     /// Whether a listed entry matches the active search type filter.
     /// Directories and the no-filter case always match (nothing dimmed);
-    /// files are matched on extension. Used to grey out non-matching files
+    /// files are matched on extension. Used to gray out non-matching files
     /// in the directory listing.
     public func matchesSearchFilter(_ entry: RemoteEntry) -> Bool {
         if entry.isDirectory { return true }

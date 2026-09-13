@@ -7,11 +7,11 @@
 //
 // Why not a squarified treemap
 // ----------------------------
-// Squarified (Bruls et al.) minimises |aspect ratio − 1|. That is the
+// Squarified (Bruls et al.) minimizes |aspect ratio − 1|. That is the
 // wrong objective here. A cell has to hold a folder name, so what it
 // needs is WIDTH: a 110×190 cell is beautifully square and shows "c…n",
 // while a 300×30 cell is a terrible rectangle and perfectly readable.
-// Optimising squareness spends the one scarce resource (width) to buy
+// Optimizing squareness spends the one scarce resource (width) to buy
 // something worthless (height), which is how six siblings ended up as
 // c…n / r…p / s…A while a third of the panel sat empty.
 //
@@ -19,7 +19,7 @@
 // ---------
 // Width is fixed (the panel); height is free (the section scrolls, and
 // there is usually slack). So we fix legibility as a HARD CONSTRAINT and
-// minimise height:
+// minimize height:
 //
 //   * Every node has a minimum readable width, `minWidth`:
 //       leaf      → icon + its label at the rendered font, clamped

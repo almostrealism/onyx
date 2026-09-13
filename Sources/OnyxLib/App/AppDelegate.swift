@@ -9,7 +9,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Dark for the whole APPLICATION, not per window.
         //
-        // Onyx is a jet-black overlay: every colour in it assumes a dark
+        // Onyx is a jet-black overlay: every color in it assumes a dark
         // backdrop. Setting this per window left everything that isn't a
         // window drawing in the SYSTEM appearance — menus, popovers,
         // sheets, the field editor behind every text field — and left
@@ -122,13 +122,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     /// so SwiftUI content sits where the title bar would be and swallows
     /// the click AppKit would have zoomed on. Dragging still works —
     /// that's handled for background drags — but double-click doesn't,
-    /// which is why the window can't be maximised the way every other Mac
+    /// which is why the window can't be maximized the way every other Mac
     /// window can.
     ///
     /// Deliberately narrow. It only acts on clicks inside the top
     /// `titleBarHeight` points, so a double-click in the terminal still
-    /// selects a word, and it honours the system preference — someone who
-    /// set double-click to minimise, or to nothing, gets what they asked
+    /// selects a word, and it honors the system preference — someone who
+    /// set double-click to minimize, or to nothing, gets what they asked
     /// for.
     private static let titleBarHeight: CGFloat = 28
     private static var doubleClickMonitor: Any?

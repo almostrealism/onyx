@@ -350,12 +350,12 @@ extension AppState {
                 continue
             }
             positions[key] = collapsed.count
-            var normalised = entry
-            if normalised.sessionID != key {
-                normalised.sessionID = key
+            var normalized = entry
+            if normalized.sessionID != key {
+                normalized.sessionID = key
                 changed = true
             }
-            collapsed.append(normalised)
+            collapsed.append(normalized)
         }
 
         guard changed else { return }

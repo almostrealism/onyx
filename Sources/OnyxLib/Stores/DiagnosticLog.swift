@@ -2,7 +2,7 @@
 // DiagnosticLog.swift
 //
 // Responsibility: A short in-app history of the events that explain
-//                 connection behaviour — probe failures, key-setup
+//                 connection behavior — probe failures, key-setup
 //                 decisions, slot deaths, promotions, failed polls.
 // Scope: Shared singleton, memory only (never persisted; it's a
 //        troubleshooting aid, not a record).

@@ -181,7 +181,7 @@ final class SessionModelTests: XCTestCase {
 
     /// The stored list keeps favorites whose session is currently gone (a
     /// stopped container, an unreachable host). Those rows aren't rendered,
-    /// so a move must step over them — swapping with an invisible neighbour
+    /// so a move must step over them — swapping with an invisible neighbor
     /// looks like the up/down button did nothing at all.
     func testMoveFavoriteByID_skipsSessionsNotCurrentlyVisible() {
         let state = AppState()

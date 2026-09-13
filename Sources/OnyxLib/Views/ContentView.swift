@@ -1132,7 +1132,7 @@ struct FavoritesBar: View {
         case .connected: return Color.onyxGreen
         case .reattaching: return Color.onyxAmber
         case .failed, .needsKeySetup: return Color.onyxRed
-        // Paused is a deliberate state, not a fault — grey, not red.
+        // Paused is a deliberate state, not a fault — gray, not red.
         case .hostPaused: return .gray.opacity(0.6)
         }
     }
@@ -1383,11 +1383,11 @@ struct SelectableTerminalText: NSViewRepresentable {
         }
     }
 
-    /// Convert to an NSAttributedString AppKit will honour.
+    /// Convert to an NSAttributedString AppKit will honor.
     ///
-    /// The colours in the AttributedString live in SwiftUI's attribute
-    /// scope, which AppKit ignores — so the base colour and the link
-    /// colour are applied here instead, keyed off the `.link` attribute
+    /// The colors in the AttributedString live in SwiftUI's attribute
+    /// scope, which AppKit ignores — so the base color and the link
+    /// color are applied here instead, keyed off the `.link` attribute
     /// that does survive the conversion.
     static func attributed(_ content: AttributedString, fontSize: CGFloat) -> NSAttributedString {
         let result = NSMutableAttributedString(content)
@@ -1401,10 +1401,10 @@ struct SelectableTerminalText: NSViewRepresentable {
             guard let value else { return }
             let url = (value as? URL) ?? URL(string: "\(value)")
             // A path opens in the file browser, a URL leaves the app —
-            // different destinations, so they're coloured differently.
-            let colour: NSColor = url?.scheme == "onyxfile"
+            // different destinations, so they're colored differently.
+            let color: NSColor = url?.scheme == "onyxfile"
                 ? NSColor.systemOrange : NSColor.systemBlue
-            result.addAttribute(.foregroundColor, value: colour, range: range)
+            result.addAttribute(.foregroundColor, value: color, range: range)
         }
         return result
     }

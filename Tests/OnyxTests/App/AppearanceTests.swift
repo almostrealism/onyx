@@ -2,7 +2,7 @@ import XCTest
 import AppKit
 @testable import OnyxLib
 
-/// Onyx is a jet-black overlay: every colour in it assumes a dark
+/// Onyx is a jet-black overlay: every color in it assumes a dark
 /// backdrop. This is pinned because the failure is invisible to anyone
 /// working in Dark Mode — the system appearance happens to match, so a
 /// developer sees nothing while Light Mode users get white text fields

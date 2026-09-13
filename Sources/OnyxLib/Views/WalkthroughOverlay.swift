@@ -7,7 +7,7 @@ import SwiftUI
 /// for missing features — they were for features that already shipped
 /// ("how do I switch between sessions with the keyboard"). The help
 /// screen lists every key, but a list of keys answers "what does ⌘J do",
-/// not "what can this thing do for me". So the tour is organised by the
+/// not "what can this thing do for me". So the tour is organized by the
 /// job you're trying to do, names the keys as a consequence, and is
 /// short enough to finish.
 struct WalkthroughOverlay: View {

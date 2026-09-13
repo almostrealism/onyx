@@ -163,7 +163,7 @@ final class MonitorFailureClassificationTests: XCTestCase {
         XCTAssertNil(MonitorManager.remoteComplaint(in: "\u{1B}[0m%   \r\n"))
     }
 
-    /// The message must carry it, not summarise it away.
+    /// The message must carry it, not summarize it away.
     func testTimeoutMessageQuotesTheHostWhenItSaidSomething() {
         let quiet = MonitorManager.message(for: .timedOut, exit: 15, remoteSaid: nil)
         XCTAssertTrue(quiet.contains("sent nothing back"),

@@ -181,8 +181,8 @@ public class MCPMessageHandler {
     }
 
     /// Side effects for the notifications we care about. Most are pure
-    /// acknowledgements with nothing to do — but a notification we don't
-    /// recognise must still produce NO reply, which is why this is not
+    /// acknowledgments with nothing to do — but a notification we don't
+    /// recognize must still produce NO reply, which is why this is not
     /// routed through `dispatch`: that one answers unknown methods with
     /// methodNotFound, and an unanswerable request can't be told off.
     private func dispatchNotification(_ request: JSONRPCRequest) {
@@ -201,7 +201,7 @@ public class MCPMessageHandler {
             return handleInitialize(request)
         case "notifications/initialized":
             // Only reachable if a client sends this WITH an id, which is
-            // malformed but harmless to humour.
+            // malformed but harmless to humor.
             return JSONRPCResponse(id: request.id, result: .object([:]))
         case "tools/list":
             return handleToolsList(request)

@@ -265,7 +265,7 @@ final class OnyxConnection {
 /// Whether a client message is a notification: no id, or an explicit
 /// null one. Parsed properly rather than pattern-matched — an "id" inside
 /// a tool argument would fool a regex, and getting this wrong either
-/// stalls the bridge or desynchronises every response after it.
+/// stalls the bridge or desynchronizes every response after it.
 ///
 /// An unparseable line is treated as a REQUEST, so the desktop's parse
 /// error still reaches the client instead of vanishing.
@@ -315,7 +315,7 @@ let onyxMCPVersion = OnyxVersion.current
 if CommandLine.arguments.contains("--version") {
     // The proto number is what the installer actually reads. A bridge
     // that prints none is older than the idea of printing one, which is
-    // how a stale install is recognised without relying on the release
+    // how a stale install is recognized without relying on the release
     // number — the old bridge shipped claiming 0.17 too.
     print("OnyxMCP \(onyxMCPVersion) (proto \(OnyxVersion.bridgeProtocol))")
     exit(0)

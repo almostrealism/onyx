@@ -50,6 +50,44 @@ final class SpellingTests: XCTestCase {
                       """)
     }
 
+    /// The rest of the sweep, kept from drifting back.
+    ///
+    /// Deliberately a list of STEMS that only ever continue one way —
+    /// "analysis" and "emphasis" are correct US English and are not here,
+    /// which is why this checks `analyse` and `emphasise` as whole words
+    /// instead. If a legitimate identifier ever needs one of these (an
+    /// Apple API spelled `grey`, say), narrow the entry rather than
+    /// deleting the test.
+    func testTheCodeUsesUSSpelling() throws {
+        let stems = ["colour", "behaviour", "neighbour", "honour", "favour", "humour",
+                     "flavour", "labour", "normalis", "recognis", "organis", "minimis",
+                     "maximis", "optimis", "summaris", "prioritis", "synchronis",
+                     "initialis", "customis", "serialis", "defence", "licence", "grey",
+                     "labelled", "acknowledgement", "artefact", "judgement", "centre",
+                     "whilst", "amongst", "sceptic", "manoeuvr", "programme"]
+        let words = ["emphasise", "emphasised", "emphasising",
+                     "analyse", "analysed", "analysing", "practise"]
+
+        let selfPath = URL(fileURLWithPath: #filePath).standardizedFileURL.path
+        var offenders: [String] = []
+        for directory in ["Sources", "Tests"] {
+            for file in swiftFiles(under: directory)
+            where file.standardizedFileURL.path != selfPath {
+                let text = try String(contentsOf: file, encoding: .utf8).lowercased()
+                for stem in stems where text.contains(stem) {
+                    offenders.append("\(file.lastPathComponent): \(stem)")
+                }
+                for word in words
+                where text.range(of: "\\b\(word)\\b", options: .regularExpression) != nil {
+                    offenders.append("\(file.lastPathComponent): \(word)")
+                }
+            }
+        }
+        XCTAssertTrue(offenders.isEmpty,
+                      "US spelling, in comments as much as in code — found: "
+                      + offenders.sorted().joined(separator: ", "))
+    }
+
     /// The stored keys are the reason the spelling matters: they're on
     /// disk, in `favorites.json`, and in the shared-state bundle other
     /// machines read. Renaming them would be a migration, so they're

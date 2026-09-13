@@ -219,7 +219,7 @@ extension OnyxTerminalView {
                 DispatchQueue.main.async {
                     // Guard against race: host may have been removed while probe was running
                     guard self.appState.hosts.contains(where: { $0.id == hostID }) else { return }
-                    // Last line of defence: never demand a key for a host
+                    // Last line of defense: never demand a key for a host
                     // we're demonstrably connected to. The probe and the
                     // connection pair are independent, and the pair is the
                     // one with actual evidence.
@@ -329,7 +329,7 @@ extension OnyxTerminalView {
     ///
     /// A tmux too old to know `session_activity` expands it to nothing,
     /// leaving "name|", which parses to a session with no timestamp. That
-    /// degrades to the previous behaviour rather than losing the session.
+    /// degrades to the previous behavior rather than losing the session.
     static func parseSessionList(_ output: String,
                                  source: SessionSource) -> [(session: TmuxSession, activity: Date?)] {
         output.components(separatedBy: "\n")

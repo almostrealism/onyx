@@ -45,7 +45,7 @@ final class FavoriteTreeTests: XCTestCase {
             "/Users/agent0/Projects", "/Users/agent1/Projects",
         ])
         XCTAssertEqual(labels(tree), ["agent0", "agent1"],
-                       "the parents disambiguate — no two boxes labelled Projects")
+                       "the parents disambiguate — no two boxes labeled Projects")
         XCTAssertTrue(tree.allSatisfy { !$0.isFavorite },
                       "invented containers are not favorites and can't be removed")
         XCTAssertEqual(tree[0].children.map(\.path), ["/Users/agent0/Projects"])

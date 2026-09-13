@@ -229,7 +229,7 @@ struct SimpleSidePanel: View {
 
 /// Session notes for simple mode: a status dot, the ⌘N that reaches it,
 /// and the note. No idle clock — the detailed overlay has the seconds;
-/// here the colour IS the status, which is all you can read at distance.
+/// here the color IS the status, which is all you can read at distance.
 struct SimpleSessionNotes: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var notesStore = SessionNotesStore.shared
@@ -246,7 +246,7 @@ struct SimpleSessionNotes: View {
         let entries = orderedSessionNotes(appState: appState, store: notesStore)
         if !entries.isEmpty {
             // One timeline for the whole list rather than one per row:
-            // the dots only change colour as idle time crosses 15s and
+            // the dots only change color as idle time crosses 15s and
             // 120s, so a 5s tick is plenty and costs one invalidation.
             TimelineView(.periodic(from: .now, by: 5)) { context in
                 VStack(alignment: .leading, spacing: 6) {
@@ -285,7 +285,7 @@ struct SimpleSessionNotes: View {
         }
     }
 
-    /// Grey when the session has never reported output — an unknown
+    /// Gray when the session has never reported output — an unknown
     /// state reads as "not working", which is the safe way round.
     private func dotColor(for session: TmuxSession, now: Date) -> Color {
         guard let last = activity.lastOutput(for: session.id) else {
@@ -598,7 +598,7 @@ private struct SimplePipelinePill: View {
 
 // MARK: - Session output-activity (shared visual language)
 
-/// Green when output is fresh, amber while winding down, grey once a
+/// Green when output is fresh, amber while winding down, gray once a
 /// session has been quiet long enough to read as idle. Shared by the full
 /// session-notes rows and the simple-mode activity strip.
 func monitorSessionActivityColor(_ idleSeconds: TimeInterval) -> Color {
@@ -613,7 +613,7 @@ func monitorSessionActivityIcon(_ idleSeconds: TimeInterval) -> String {
 }
 
 /// Simple-mode strip of session output-activity pills — one per noted
-/// session that has a terminal-output reading. Icon + colour only (no note
+/// session that has a terminal-output reading. Icon + color only (no note
 /// text; hover for it), mirroring SimplePipelinesStrip so the two read the
 /// same. Sits just left of the pipeline pills in the bottom-right.
 struct SimpleSessionActivityStrip: View {

@@ -184,7 +184,7 @@ final class FleetSeriesTests: XCTestCase {
 
     func testStreamWithNoMatchingHostConfigIsIgnored() {
         // A removed host can linger in the stream file; it has no SSH
-        // identity to dedupe on and no way to be labelled honestly.
+        // identity to dedupe on and no way to be labeled honestly.
         let built = FleetSeries.build(
             streams: [stream(UUID(), label: "ghost", samples: [sample(0, cpu: 50)])],
             hosts: [], now: now)

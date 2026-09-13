@@ -157,7 +157,7 @@ public final class MCPInstaller: ObservableObject {
     /// own shell found the Homebrew one and worked. Same command, same
     /// host, different binary.
     ///
-    /// So PATH is honoured FIRST — it is the user's own answer — and
+    /// So PATH is honored FIRST — it is the user's own answer — and
     /// only if that one can't even print its version do we look in the
     /// usual places. The criterion is "it runs", not "it exists".
     static let claudePickerScript = """

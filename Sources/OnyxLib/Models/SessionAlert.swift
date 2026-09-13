@@ -8,7 +8,7 @@
 //
 // Deliberately not Apple-shaped. An alert carries two intentions —
 // "this is urgent" and "tell me even if I'm not looking at Onyx" — and
-// the platform decides how to honour them. On a Mac that happens to be
+// the platform decides how to honor them. On a Mac that happens to be
 // dock bouncing and Notification Center; the tool says so, but the
 // vocabulary stays about what the agent MEANS rather than what macOS
 // does with it.

@@ -144,7 +144,7 @@ public class SessionNotesStore: ObservableObject {
     /// `keys` maps a session to every id it might be STORED under — the
     /// identity key and the legacy in-memory one — so an un-migrated
     /// file, a migrated one, and a half-migrated one all resolve. Default
-    /// preserves the old behaviour for callers that have no host list.
+    /// preserves the old behavior for callers that have no host list.
     public func activeNotes(in allSessions: [TmuxSession],
                             keys: (TmuxSession) -> [String] = { [$0.id] })
         -> [(session: TmuxSession, note: SessionNote)] {

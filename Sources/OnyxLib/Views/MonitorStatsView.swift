@@ -32,7 +32,7 @@ struct WeeklyTimingTile: View {
                 if timing.projectTotals.count > 1 {
                     // Deliberately chunky. This is the only place the
                     // week's split across projects is shown in simple
-                    // mode, and at 5pt the colour bands were too fine to
+                    // mode, and at 5pt the color bands were too fine to
                     // read at a glance — which is the whole job of a
                     // simple-mode tile.
                     WeeklyTimeRatioBar(totals: timing.projectTotals,

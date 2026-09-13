@@ -538,14 +538,14 @@ public class MonitorManager: ObservableObject {
 
     /// Did this sample actually bring back a metric? `parse` always
     /// returns a sample — an all-nil one just means nothing in the output
-    /// was recognisable, which is a failure however the process exited.
+    /// was recognizable, which is a failure however the process exited.
     static func isUsable(_ sample: MonitorSample) -> Bool {
         sample.cpuUsage != nil || sample.memUsed != nil
             || sample.loadAvg1 != nil || sample.gpuUsage != nil
     }
 
     /// Commit a sample for a host. `slow` records that the poll ran past
-    /// its budget — the numbers are good, the command is just laboured,
+    /// its budget — the numbers are good, the command is just labored,
     /// and the overlay says so rather than pretending everything is fine.
     private func publish(_ sample: MonitorSample,
                          hostID: UUID,

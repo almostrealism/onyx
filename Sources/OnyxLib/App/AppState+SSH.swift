@@ -113,7 +113,7 @@ extension AppState {
 
     /// Kept as a name for call sites that pass an absolute remote path.
     ///
-    /// There is no behavioural difference and there cannot be: scp speaks
+    /// There is no behavioral difference and there cannot be: scp speaks
     /// SFTP (OpenSSH 9.0+), so the remote path is interpreted by the SFTP
     /// server, not a shell. Absolute paths work, relative ones resolve
     /// against the remote home directory, and SHELL SYNTAX DOES NOT WORK

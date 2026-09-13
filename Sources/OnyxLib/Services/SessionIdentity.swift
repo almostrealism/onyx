@@ -51,7 +51,7 @@ public enum SessionIdentity {
     /// Lower-cased and trimmed, with a trailing dot removed (an FQDN's
     /// root label is invisible to the user and would otherwise split
     /// `build.example.com.` from `build.example.com`). Nothing else is
-    /// normalised: `.local` names and IPs stay as typed, because
+    /// normalized: `.local` names and IPs stay as typed, because
     /// "whatever we see it as from here" is the whole rule.
     public static func normalizedHost(for host: HostConfig) -> String {
         if host.isLocal { return "localhost" }

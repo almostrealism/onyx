@@ -139,7 +139,7 @@ final class FavoriteLayoutTests: XCTestCase {
     /// dp must beat first-fit: packing the first row as full as possible
     /// can force a taller total. Whatever it returns, no other partition
     /// may be shorter.
-    func testRowBreakingMinimisesTotalHeight() {
+    func testRowBreakingMinimizesTotalHeight() {
         let t = tree(["/alpha", "/beta", "/gamma", "/delta", "/epsilon"])
         let width: CGFloat = 300
         let chosen = FavoriteTreemapLayout.requiredHeight(t, width: width)

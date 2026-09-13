@@ -48,13 +48,13 @@ final class SharedStateNoteMergeTests: XCTestCase {
 
     // MARK: - Three-way
 
-    func testADeletionOnTheOtherMachineIsHonoured() {
+    func testADeletionOnTheOtherMachineIsHonored() {
         let shared = note("both had this")
         let merged = merge(base: ["a": shared], local: ["a": shared], remote: [:])
         XCTAssertNil(merged["a"], "local never touched it, so the remote's deletion stands")
     }
 
-    func testADeletionHereIsHonoured() {
+    func testADeletionHereIsHonored() {
         let shared = note("both had this")
         let merged = merge(base: ["a": shared], local: [:], remote: ["a": shared])
         XCTAssertNil(merged["a"])
@@ -130,7 +130,7 @@ final class SharedStateFavoriteMergeTests: XCTestCase {
         XCTAssertEqual(merged.first?.windows, [2])
     }
 
-    func testUnfavoritingElsewhereIsHonouredWithAShadow() {
+    func testUnfavoritingElsewhereIsHonoredWithAShadow() {
         let merged = merge(base: [fav("a"), fav("b")],
                            local: [fav("a"), fav("b")],
                            remote: [fav("a")])
@@ -239,7 +239,7 @@ final class SharedStateSyncTests: XCTestCase {
         XCTAssertNil(SharedStateSync.shortError("   \n  "))
     }
 
-    func testAnUnrecognisedComplaintIsStillShown() {
+    func testAnUnrecognizedComplaintIsStillShown() {
         XCTAssertEqual(SharedStateSync.shortError("something odd happened"),
                        "something odd happened")
     }

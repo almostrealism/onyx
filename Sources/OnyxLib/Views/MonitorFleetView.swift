@@ -139,7 +139,7 @@ struct FleetMergedCharts: View {
                     // Side by side, so each host's memory gets a slice of the
                     // width. These deliberately DON'T share the time axis
                     // above them — they can't, at this width — so they're
-                    // labelled per host and read as small multiples.
+                    // labeled per host and read as small multiples.
                     HStack(alignment: .bottom, spacing: 8) {
                         ForEach(memHosts) { host in
                             VStack(alignment: .leading, spacing: 2) {

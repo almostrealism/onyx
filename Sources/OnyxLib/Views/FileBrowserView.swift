@@ -965,7 +965,7 @@ struct SearchResultsView: View {
     /// the view that renders it, instead of invalidating a node object
     /// that the layout then has to chase through the hierarchy.
     ///
-    /// Empty means everything is expanded, which is the behaviour this
+    /// Empty means everything is expanded, which is the behavior this
     /// replaces — and, unexpanded, is also the cheap case now.
     @State private var collapsedNodes: Set<UUID> = []
 

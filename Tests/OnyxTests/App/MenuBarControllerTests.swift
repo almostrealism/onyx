@@ -189,7 +189,7 @@ final class MenuBarPipelineTests: XCTestCase {
 
     func testTheLineStaysOneMenuWidth() {
         let long = status("really-long-workflow-name-that-goes-on.yml",
-                          repo: "some-organisation/some-very-long-repository-name",
+                          repo: "some-organization/some-very-long-repository-name",
                           attempt: 12, branch: "feature/a-branch-with-a-long-name")
         XCTAssertLessThanOrEqual(MenuBarController.pipelineLine(long).count, 64)
     }

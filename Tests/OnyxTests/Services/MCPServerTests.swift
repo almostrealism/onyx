@@ -73,7 +73,7 @@ final class MCPMessageHandlerTests: XCTestCase {
     /// Only reachable when a client puts an id on a notification, which is
     /// malformed. The real path — no id at all — is asserted in
     /// MCPNotificationTests, where the answer is NO REPLY.
-    func testNotificationsInitializedWithAnIdIsHumoured() {
+    func testNotificationsInitializedWithAnIdIsHumored() {
         let (handler, _) = makeHandler()
         let request = JSONRPCRequest(id: .int(4), method: "notifications/initialized")
         let response = handler.dispatch(request)

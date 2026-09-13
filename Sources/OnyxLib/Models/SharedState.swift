@@ -97,7 +97,7 @@ public enum SharedStateMerge {
     /// Combine two copies of the shared state.
     ///
     /// `base` is what we last saw at both ends. With it, a value missing
-    /// from one side is a DELETION and is honoured. Without it, nothing is
+    /// from one side is a DELETION and is honored. Without it, nothing is
     /// deleted — see the file comment.
     public static func merge(base: SharedState?,
                              local: SharedState,

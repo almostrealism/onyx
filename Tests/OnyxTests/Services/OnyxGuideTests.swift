@@ -90,7 +90,7 @@ final class OnyxGuideTests: XCTestCase {
         XCTAssertTrue(OnyxGuide.topic("recipes").body.contains("BEFORE"))
     }
 
-    /// The flags are described by intent, with the macOS behaviour named
+    /// The flags are described by intent, with the macOS behavior named
     /// rather than assumed — an agent should know what `urgent` costs the
     /// user before spending it.
     func testAlertsExplainWhatTheFlagsActuallyDo() {

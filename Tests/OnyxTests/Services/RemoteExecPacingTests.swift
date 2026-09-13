@@ -39,7 +39,7 @@ final class RemoteExecPacingTests: XCTestCase {
     }
 
     func testDeliveryIsActuallySpreadOverTime() {
-        // Guards against someone "optimising" the pause away: a payload of
+        // Guards against someone "optimizing" the pause away: a payload of
         // several chunks must take at least the pauses between them.
         let data = Data(String(repeating: "x", count: RemoteExec.stdinChunk * 4).utf8)
         let pipe = Pipe()

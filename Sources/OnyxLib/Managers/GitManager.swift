@@ -132,7 +132,7 @@ public class GitManager: ObservableObject {
     ///
     /// One statement, so the remote's line editor never sees a
     /// continuation; the `&&` before the block preserves the old
-    /// behaviour that nothing is emitted at all when it isn't a repo
+    /// behavior that nothing is emitted at all when it isn't a repo
     /// (the parser keys on `---GIT_BRANCH---` being present).
     static func statusScript(for path: String) -> String {
         let e = Self.escapeForShell(path)

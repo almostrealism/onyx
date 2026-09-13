@@ -25,7 +25,7 @@ public struct RemotePlatform: Equatable {
         case linux
     }
     public let os: OS
-    /// Normalised: "arm64" or "x86_64".
+    /// Normalized: "arm64" or "x86_64".
     public let arch: String
 
     public init(os: OS, arch: String) {
@@ -47,7 +47,7 @@ public struct RemotePlatform: Equatable {
     ///
     /// The architecture names are a mess in practice — Apple reports
     /// `arm64`, Linux reports `aarch64` for the same silicon, and x86 has
-    /// three spellings — so they're normalised here rather than at each
+    /// three spellings — so they're normalized here rather than at each
     /// call site.
     public static func parse(uname os: String, machine: String) -> RemotePlatform? {
         let sys = os.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

@@ -228,7 +228,7 @@ public enum MonitorLayout: String, CaseIterable, Codable {
 /// Which machines the overlay's charts are about. `F` cycles them, and
 /// the choice applies to whichever layout you're in.
 public enum FleetMode: String, CaseIterable, Codable {
-    /// Just the host you're looking at — the original behaviour.
+    /// Just the host you're looking at — the original behavior.
     case currentHost
     /// The busiest few remote hosts, one row each, sharing a time axis.
     case topHosts

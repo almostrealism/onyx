@@ -881,7 +881,7 @@ public class AppState: ObservableObject {
     /// this window renders. Swapping with one of those moved the favorite
     /// in the file while nothing changed on screen, so the button read as
     /// broken and you had to click it repeatedly to crawl past rows you
-    /// can't see. Skip straight to the nearest neighbour the user can
+    /// can't see. Skip straight to the nearest neighbor the user can
     /// actually see, which is also the one the ⌘N numbering counts.
     public func moveFavoriteByID(_ sessionID: String, direction: Int) {
         guard direction != 0 else { return }

@@ -12,17 +12,17 @@ final class MCPPlatformTests: XCTestCase {
 
     /// The same silicon answers `arm64` on macOS and `aarch64` on Linux.
     /// Two spellings, one artifact.
-    func testArmIsRecognisedUnderEitherName() {
+    func testArmIsRecognizedUnderEitherName() {
         XCTAssertEqual(RemotePlatform.parse(uname: "Darwin", machine: "arm64"),
                        RemotePlatform(os: .macOS, arch: "arm64"))
         XCTAssertEqual(RemotePlatform.parse(uname: "Linux", machine: "aarch64"),
                        RemotePlatform(os: .linux, arch: "arm64"))
     }
 
-    func testIntelSpellingsAllNormalise() {
+    func testIntelSpellingsAllNormalize() {
         for machine in ["x86_64", "amd64", "x64"] {
             XCTAssertEqual(RemotePlatform.parse(uname: "Linux", machine: machine)?.arch,
-                           "x86_64", "\(machine) should normalise")
+                           "x86_64", "\(machine) should normalize")
         }
     }
 
@@ -31,7 +31,7 @@ final class MCPPlatformTests: XCTestCase {
                        RemotePlatform(os: .linux, arch: "arm64"))
     }
 
-    /// Better to say "I don't recognise this" than to upload an x86
+    /// Better to say "I don't recognize this" than to upload an x86
     /// binary to a RISC-V box and let it fail as "cannot execute".
     func testUnknownPlatformsAreRefusedRatherThanGuessed() {
         XCTAssertNil(RemotePlatform.parse(uname: "FreeBSD", machine: "x86_64"))

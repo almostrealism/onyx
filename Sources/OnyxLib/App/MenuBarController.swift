@@ -75,7 +75,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     /// The glyph, and a count beside it when there's more than one.
     ///
     /// Template images only: the menu bar inverts them for light and dark
-    /// and for the highlight state, and a coloured icon gets that wrong in
+    /// and for the highlight state, and a colored icon gets that wrong in
     /// at least one of the three.
     private func refreshIcon() {
         guard let button = statusItem?.button else { return }
@@ -231,14 +231,14 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
             // The alert text itself, in the menu. Not a submenu: finding
             // out which session is shouting shouldn't need a second click.
             for alert in row.alerts.prefix(3) where !alert.seen {
-                menu.addItem(detail(Self.alertLine(alert), emphasised: true))
+                menu.addItem(detail(Self.alertLine(alert), emphasized: true))
             }
             let moreUnseen = row.unseen - row.alerts.prefix(3).filter { !$0.seen }.count
             if moreUnseen > 0 {
-                menu.addItem(detail("+ \(moreUnseen) more", emphasised: true))
+                menu.addItem(detail("+ \(moreUnseen) more", emphasized: true))
             }
             if let note = row.note {
-                menu.addItem(detail(Self.clip(note.text, 64), emphasised: false))
+                menu.addItem(detail(Self.clip(note.text, 64), emphasized: false))
             }
         }
 
@@ -252,7 +252,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
             menu.addItem(.separator())
             menu.addItem(dim("Not matched to a session"))
             for alert in unattached.prefix(3) {
-                menu.addItem(detail(Self.alertLine(alert), emphasised: true))
+                menu.addItem(detail(Self.alertLine(alert), emphasized: true))
             }
         }
 
@@ -325,8 +325,8 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     /// Template symbols, so the glyph reads in a light or dark menu bar.
-    /// Shape carries the meaning, not colour — the menu bar will not give
-    /// us colour reliably in both appearances.
+    /// Shape carries the meaning, not color — the menu bar will not give
+    /// us color reliably in both appearances.
     private static func glyph(for overall: PipelineOverallStatus) -> NSImage? {
         let name: String
         switch overall {
@@ -386,13 +386,13 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     /// An indented information line under a session. Disabled: there is
     /// nothing to click, and a menu that highlights unclickable rows
     /// invites clicking them.
-    private func detail(_ text: String, emphasised: Bool) -> NSMenuItem {
+    private func detail(_ text: String, emphasized: Bool) -> NSMenuItem {
         let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
         item.attributedTitle = NSAttributedString(string: text, attributes: [
-            .font: emphasised
+            .font: emphasized
                 ? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
                 : NSFont.systemFont(ofSize: 11),
-            .foregroundColor: emphasised ? NSColor.labelColor : NSColor.secondaryLabelColor,
+            .foregroundColor: emphasized ? NSColor.labelColor : NSColor.secondaryLabelColor,
         ])
         item.indentationLevel = 1
         item.isEnabled = false
