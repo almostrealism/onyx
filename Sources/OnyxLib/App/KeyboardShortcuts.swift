@@ -94,10 +94,16 @@ public class ShortcutManager {
                 return nil
             }
 
-            // Shift+Tab → cycle tmux sessions
+            // Shift+Tab → cycle tmux sessions, unless the user has given
+            // the key back to the terminal. Claude Code uses ⇧⇥ to switch
+            // permission modes, and a swallowed key looks exactly like a
+            // program ignoring it — nothing points at Onyx.
             if flags == .shift && event.keyCode == 48 {
-                NotificationCenter.default.post(name: .cycleTmuxSession, object: nil)
-                return nil
+                if appState(for: event)?.appearance.shiftTabCyclesSessions ?? true {
+                    NotificationCenter.default.post(name: .cycleTmuxSession, object: nil)
+                    return nil
+                }
+                return event   // straight through to the terminal
             }
 
             // Cmd+1 through Cmd+9 → switch to favorite by index

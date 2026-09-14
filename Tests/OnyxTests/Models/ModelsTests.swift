@@ -488,6 +488,7 @@ final class CodableRoundTripTests: XCTestCase {
         config.prDraftFilter = .hideDrafts   // default is .all, so change it
         config.hasSeenWalkthrough = true     // default is false, so flip it
         config.showMenuBarItem = false       // default is true, so flip it
+        config.shiftTabCyclesSessions = false // default is true, so flip it
 
         let data = try JSONEncoder().encode(config)
         let d = try JSONDecoder().decode(AppearanceConfig.self, from: data)
@@ -513,6 +514,7 @@ final class CodableRoundTripTests: XCTestCase {
         XCTAssertEqual(d.prDraftFilter, .hideDrafts)
         XCTAssertTrue(d.hasSeenWalkthrough)
         XCTAssertFalse(d.showMenuBarItem, "defaults true, so the round trip has to carry a false")
+        XCTAssertFalse(d.shiftTabCyclesSessions, "same — a false must survive the trip")
     }
 
     /// Tripwire: if you add a stored property to AppearanceConfig, this
@@ -521,7 +523,7 @@ final class CodableRoundTripTests: XCTestCase {
     /// missing one of those steps is wiping every user's settings.
     func testAppearanceConfig_storedPropertyCount_isLocked() {
         let count = Mirror(reflecting: AppearanceConfig()).children.count
-        XCTAssertEqual(count, 22, """
+        XCTAssertEqual(count, 23, """
             AppearanceConfig has \(count) stored properties but the test
             expects a different number. If you ADDED a field, you must also:
               1. Add it to `CodingKeys` in HostConfig.swift
@@ -945,5 +947,38 @@ final class SessionSourceGroupingTests: XCTestCase {
         let a = SessionSource.browser(url: "https://a.com")
         let b = SessionSource.browser(url: "https://b.com")
         XCTAssertNotEqual(a.subGroupKey, b.subGroupKey)
+    }
+}
+
+/// Keys Onyx takes from the terminal.
+///
+/// Shift-Tab is the one that bites: Claude Code uses it to switch
+/// permission modes, and a key the terminal never receives looks exactly
+/// like a program ignoring it — there is nothing on screen to suggest the
+/// terminal emulator ate it.
+final class KeyboardPassthroughTests: XCTestCase {
+
+    /// On by default: it predates the conflict, and silently changing what
+    /// a key does for everyone who isn't running Claude Code would be its
+    /// own bug report.
+    func testShiftTabCyclesSessionsByDefault() {
+        XCTAssertTrue(AppearanceConfig().shiftTabCyclesSessions)
+    }
+
+    /// A config written before the setting existed must keep the old
+    /// behavior rather than silently handing the key away.
+    func testAnOlderConfigKeepsTheOldBehavior() throws {
+        let json = Data(#"{"fontSize": 13}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppearanceConfig.self, from: json)
+        XCTAssertTrue(decoded.shiftTabCyclesSessions)
+    }
+
+    func testTheChoiceSurvivesASaveAndLoad() throws {
+        var config = AppearanceConfig()
+        config.shiftTabCyclesSessions = false
+        let round = try JSONDecoder().decode(AppearanceConfig.self,
+                                             from: try JSONEncoder().encode(config))
+        XCTAssertFalse(round.shiftTabCyclesSessions,
+                       "otherwise the key is taken back on the next launch")
     }
 }

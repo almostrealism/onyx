@@ -15,7 +15,11 @@ struct HelpOverlay: View {
     }
 
     /// Global shortcuts — work anywhere.
-    private let globalShortcuts: [Shortcut] = [
+    ///
+    /// Computed rather than static because one entry depends on a setting,
+    /// and a help screen that lists a shortcut the user has turned off is
+    /// worse than one that omits it.
+    private var globalShortcuts: [Shortcut] { [
         .init(keys: "⌘K", label: "Command palette"),
         .init(keys: "⌘/", label: "This help screen"),
         .init(keys: "`", label: "Toggle the monitor overlay"),
@@ -33,14 +37,17 @@ struct HelpOverlay: View {
         .init(keys: "⌘R", label: "Reconnect / refresh the session"),
         .init(keys: "⌘\\", label: "Cycle the side-panel split width"),
         .init(keys: "⇧⌘C", label: "Selectable terminal-text mode"),
-        .init(keys: "⇧⇥", label: "Cycle tmux sessions"),
+        .init(keys: "⇧⇥",
+              label: appState.appearance.shiftTabCyclesSessions
+                  ? "Cycle tmux sessions  ·  turn off in Settings → KEYBOARD to give it to the terminal"
+                  : "Passed through to the terminal (Claude Code uses it) — Settings → KEYBOARD"),
         .init(keys: "⌘1–9", label: "Switch to a favorite session"),
         .init(keys: "⌘⌃ ←↑↓→", label: "Resize the tmux pane"),
         .init(keys: "Space", label: "Preview the selected file (file browser)"),
         .init(keys: "right-click", label: "Rename, end or (un)favorite a session — in the ⌘J list or the favorites bar"),
         .init(keys: "drag", label: "Drop a file on the terminal to insert its path (uploaded first if the session is remote)"),
         .init(keys: "Esc", label: "Dismiss the top overlay"),
-    ]
+    ] }
 
     /// Single-key shortcuts that only fire while the monitor overlay is up.
     private let monitorShortcuts: [Shortcut] = [

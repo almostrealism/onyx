@@ -251,6 +251,32 @@ struct SettingsView: View {
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
 
+                                // Keyboard: keys Onyx takes from the terminal
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("KEYBOARD")
+                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
+                                        .tracking(2)
+
+                                    Toggle(isOn: Binding(
+                                        get: { appState.appearance.shiftTabCyclesSessions },
+                                        set: {
+                                            appState.appearance.shiftTabCyclesSessions = $0
+                                            appState.saveAppearance()
+                                        }
+                                    )) {
+                                        Text("⇧⇥ cycles tmux sessions")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.8))
+                                    }
+                                    .toggleStyle(.switch)
+
+                                    Text("Off, Shift-Tab goes to the terminal untouched — which is what you want if you use Claude Code, where it switches permission modes. ⌘1–9 and ⌘J switch sessions either way.")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(.gray.opacity(0.4))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+
                                 // Menu bar item
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("MENU BAR")

@@ -163,6 +163,15 @@ public struct AppearanceConfig: Codable {
     /// the overlay is up; persisted because it's a standing preference for
     /// how you want to read the list, not a transient peek.
     public var remindersDueSoonOnly: Bool = false
+    /// When true, ⇧⇥ cycles tmux sessions. When false it is passed
+    /// through to the terminal untouched.
+    ///
+    /// The reason to turn it off: Claude Code uses ⇧⇥ to switch permission
+    /// modes, and a shortcut the terminal never receives is indistinguishable
+    /// from one the program inside it ignores — the feature simply appears
+    /// broken, with nothing pointing at Onyx. On by default because it
+    /// predates the conflict; ⌘1–9 and ⌘J do the same job when it's off.
+    public var shiftTabCyclesSessions: Bool = true
     /// When true, Onyx puts an item in the menu bar listing the sessions
     /// that have notes and which of them an agent has alerted you about.
     ///
@@ -256,7 +265,7 @@ public struct AppearanceConfig: Codable {
         case claudeHooksGatePermissions, showFocusOutline
         case searchFileTypeIDs, remindersDueSoonOnly, simpleShowSidePanel
         case showAllContainers, prDraftFilter, hasSeenWalkthrough
-        case showMenuBarItem
+        case showMenuBarItem, shiftTabCyclesSessions
     }
 
     public init(from decoder: Decoder) throws {
@@ -283,5 +292,6 @@ public struct AppearanceConfig: Codable {
         self.prDraftFilter              = try c.decodeIfPresent(PRDraftFilter.self, forKey: .prDraftFilter)              ?? .all
         self.hasSeenWalkthrough         = try c.decodeIfPresent(Bool.self,           forKey: .hasSeenWalkthrough)         ?? false
         self.showMenuBarItem            = try c.decodeIfPresent(Bool.self,           forKey: .showMenuBarItem)            ?? true
+        self.shiftTabCyclesSessions     = try c.decodeIfPresent(Bool.self,           forKey: .shiftTabCyclesSessions)     ?? true
     }
 }

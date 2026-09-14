@@ -47,7 +47,11 @@ struct CommandPaletteView: View {
                 appState.showCommandPalette = false
                 NotificationCenter.default.post(name: .createTmuxSession, object: nil)
             },
-            PaletteAction(title: "Next Session", shortcut: "⇧⇥") {
+            // The shortcut shown here is the one the user still has: with
+            // ⇧⇥ given back to the terminal, advertising it would be a lie
+            // — the action itself works either way.
+            PaletteAction(title: "Next Session",
+                          shortcut: appState.appearance.shiftTabCyclesSessions ? "⇧⇥" : "") {
                 appState.showCommandPalette = false
                 NotificationCenter.default.post(name: .cycleTmuxSession, object: nil)
             },
