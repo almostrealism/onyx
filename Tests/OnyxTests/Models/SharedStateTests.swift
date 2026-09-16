@@ -607,3 +607,71 @@ final class SharedStateConcurrentEditTests: XCTestCase {
         XCTAssertEqual(merged["a"]?.text, "changed my mind")
     }
 }
+
+/// What a failed transfer means.
+///
+/// The distinction that lost a user's data: "the file isn't there" and "I
+/// couldn't ask" look the same from outside, and treating the second as
+/// the first let a flapping connection read as "the remote deleted
+/// everything". Buried inside the I/O it was untestable, which is part of
+/// why it was wrong.
+final class SharedStateFetchVerdictTests: XCTestCase {
+
+    private typealias Verdict = SharedStateSync.FetchVerdict
+
+    /// 255 is ssh's own "I couldn't connect". Never a deletion.
+    func testAConnectionFailureIsNotAMissingFile() {
+        let verdict = SharedStateSync.classify(
+            exit: 255, stderr: "ssh: connect to host build-01 port 22: Operation timed out")
+        guard case .connectionFailure = verdict else {
+            return XCTFail("expected a connection failure, got \(verdict)")
+        }
+    }
+
+    /// The ordinary first sync against a host nobody has written to.
+    func testAMissingFileIsReportedAsMissing() {
+        let verdict = SharedStateSync.classify(
+            exit: 1, stderr: "scp: .onyx/shared-state.json: No such file or directory")
+        guard case .missing = verdict else {
+            return XCTFail("expected missing, got \(verdict)")
+        }
+    }
+
+    /// Reached the host, and it said no for a reason worth showing. This
+    /// must NOT be read as "there is nothing there" — that is the shape of
+    /// the wipe.
+    func testARefusedTransferIsAFailureNotAnAbsence() {
+        let verdict = SharedStateSync.classify(
+            exit: 1, stderr: "scp: .onyx/shared-state.json: Permission denied")
+        XCTAssertEqual(verdict, .transferFailure("scp: .onyx/shared-state.json: Permission denied"))
+    }
+
+    func testAQuietFailureWithNoMessageIsTreatedAsMissing() {
+        guard case .missing(nil) = SharedStateSync.classify(exit: 1, stderr: "   ") else {
+            return XCTFail("a silent exit 1 is the empty-host case")
+        }
+    }
+
+    /// A login banner must not be mistaken for the reason.
+    func testTheBannerIsNotTheVerdict() {
+        let stderr = """
+        ===========================================
+        Authorized uses only. All activity monitored.
+        ===========================================
+        scp: .onyx/shared-state.json: No such file or directory
+        """
+        guard case .missing(let complaint) = SharedStateSync.classify(exit: 1, stderr: stderr) else {
+            return XCTFail("expected missing")
+        }
+        XCTAssertTrue(complaint?.contains("No such file") == true, complaint ?? "nil")
+    }
+
+    /// A disk-full or quota error is a failure; silently treating it as an
+    /// empty host would push our copy over whatever is there.
+    func testAnUnrecognizedErrorIsAFailure() {
+        guard case .transferFailure = SharedStateSync.classify(
+            exit: 1, stderr: "scp: write failed: Disc quota exceeded") else {
+            return XCTFail("an unknown error must not read as an absence")
+        }
+    }
+}

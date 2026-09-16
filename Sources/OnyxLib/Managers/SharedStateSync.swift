@@ -441,10 +441,6 @@ public final class SharedStateSync: ObservableObject {
             .appendingPathComponent("shared-state.backup.json")
     }
 
-    private func apply(_ state: SharedState) {
-        DispatchQueue.main.sync { applyNow(state) }
-    }
-
     /// Caller must already be on main.
     private func applyNow(_ state: SharedState) {
         applying = true
@@ -532,18 +528,17 @@ public final class SharedStateSync: ObservableObject {
         defer { try? FileManager.default.removeItem(at: local) }
 
         guard let data = try? Data(contentsOf: local) else {
-            // scp says 1 for "no such file" and 255 for a connection
-            // problem. The first is a host that simply hasn't been written
-            // to yet — the common case on the very first sync — and must
-            // not be reported as an error.
-            if result.exit == 255 {
+            let verdict = Self.classify(exit: result.exit, stderr: result.stderr)
+            switch verdict {
+            case .connectionFailure(let why):
                 appState.reportSSHFailure(host: host)
-                return .failure(Self.shortError(result.stderr) ?? "couldn't reach \(host.label)")
+                return .failure(why ?? "couldn't reach \(host.label)")
+            case .transferFailure(let why):
+                return .failure(why)
+            case .missing(let complaint):
+                _ = complaint
             }
             let complaint = Self.shortError(result.stderr)
-            if let complaint, !complaint.lowercased().contains("no such file") {
-                return .failure(complaint)
-            }
             // Nothing at the primary path. Before accepting that, look
             // for the backup: on a genuinely fresh host there isn't one,
             // and where there IS one the primary going missing is the
@@ -633,6 +628,37 @@ public final class SharedStateSync: ObservableObject {
             return false
         }
         return true
+    }
+
+    /// What a failed transfer MEANS.
+    ///
+    /// Pure, and separated from the I/O, because this is the decision that
+    /// wiped a user's data: "the file isn't there" and "I couldn't ask"
+    /// look identical from the outside, and treating the second as the
+    /// first is what let a flapping connection read as "the remote deleted
+    /// everything". It deserves to be testable on its own.
+    ///
+    /// scp exits 255 for connection problems and 1 for everything else,
+    /// so the message is what separates a missing file from a refused one.
+    enum FetchVerdict: Equatable {
+        /// Couldn't reach the host at all. Skip the cycle.
+        case connectionFailure(String?)
+        /// Reached it; the transfer was refused for a reason worth showing.
+        case transferFailure(String)
+        /// Reached it, and there is nothing there — which is NOT evidence
+        /// that anything was deleted.
+        case missing(String?)
+    }
+
+    static func classify(exit: Int32, stderr: String) -> FetchVerdict {
+        let complaint = shortError(stderr)
+        if exit == 255 { return .connectionFailure(complaint) }
+        guard let complaint else { return .missing(nil) }
+        let lowered = complaint.lowercased()
+        if lowered.contains("no such file") || lowered.contains("not found") {
+            return .missing(complaint)
+        }
+        return .transferFailure(complaint)
     }
 
     /// The one line of an scp failure worth showing. scp is chatty and

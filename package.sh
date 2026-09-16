@@ -140,8 +140,14 @@ mkdir -p "$MCP_DIR"
 cp "$BUILD_DIR/OnyxMCP" "$MCP_DIR/OnyxMCP-macos-arm64"
 chmod +x "$MCP_DIR/OnyxMCP-macos-arm64"
 
-# Linux binaries: from dist/mcp/ if they've been fetched, otherwise from
-# the GitHub release for this version.
+# Linux binaries, in order of preference:
+#   1. dist/mcp/            — fetched by hand, or by the step below
+#   2. this version's release
+#   3. the CI RUN on master — the case that matters when packaging a
+#      version that hasn't been tagged yet, which is every build before a
+#      release. The workflow only attaches binaries to a release on a tag,
+#      so during packaging the artifacts exist only on the run.
+#   4. an older release      — closer to right than shipping none
 for arch in linux-x86_64 linux-arm64; do
     if [ -f "$DIST_DIR/mcp/OnyxMCP-$arch" ]; then
         cp "$DIST_DIR/mcp/OnyxMCP-$arch" "$MCP_DIR/"
@@ -149,6 +155,9 @@ for arch in linux-x86_64 linux-arm64; do
         && gh release download "$VERSION" --pattern "OnyxMCP-$arch" \
              --dir "$MCP_DIR" --clobber >/dev/null 2>&1; then
         :
+    elif command -v gh >/dev/null 2>&1 \
+        && gh run download --name "OnyxMCP-$arch" --dir "$MCP_DIR" >/dev/null 2>&1; then
+        echo "  OnyxMCP-$arch came from the latest 'MCP binaries' run (not yet released)."
     elif command -v gh >/dev/null 2>&1 \
         && gh release download --pattern "OnyxMCP-$arch" \
              --dir "$MCP_DIR" --clobber >/dev/null 2>&1; then

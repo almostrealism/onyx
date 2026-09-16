@@ -114,22 +114,27 @@ public final class AlertDelivery {
         lock.lock(); let state = appState; lock.unlock()
         guard let state else { return AlertRouting.Match(key: nil) }
 
-        var candidates: [(key: String, user: String, host: String, session: String)] = []
-        // Snapshot on main — allSessions and hosts are @Published.
-        let snapshot: ([TmuxSession], [HostConfig]) = DispatchQueue.main.sync {
-            (state.allSessions, state.hosts)
-        }
-        for s in snapshot.0 {
-            let hostID = s.source.hostID
-            guard let cfg = snapshot.1.first(where: { $0.id == hostID })
-                    ?? (hostID == HostConfig.localhostID ? HostConfig.localhost : nil) else { continue }
-            candidates.append((
-                key: DispatchQueue.main.sync { state.storageKey(for: s) },
-                user: SessionIdentity.effectiveUser(for: cfg),
-                host: SessionIdentity.normalizedHost(for: cfg),
-                session: s.name
-            ))
-        }
+        // ONE hop to main, not one per session.
+        //
+        // This ran a `main.sync` inside the loop to fetch each storage
+        // key, so a host with twenty sessions made twenty round trips —
+        // on the connection's queue, while an agent waits for its notify
+        // to return, and each one pausing behind whatever the UI happens
+        // to be doing. The whole snapshot is cheap; taking it in pieces
+        // was the expensive part.
+        let candidates: [(key: String, user: String, host: String, session: String)]
+            = DispatchQueue.main.sync {
+                state.allSessions.compactMap { session in
+                    let hostID = session.source.hostID
+                    guard let cfg = state.hosts.first(where: { $0.id == hostID })
+                            ?? (hostID == HostConfig.localhostID ? HostConfig.localhost : nil)
+                    else { return nil }
+                    return (key: state.storageKey(for: session),
+                            user: SessionIdentity.effectiveUser(for: cfg),
+                            host: SessionIdentity.normalizedHost(for: cfg),
+                            session: session.name)
+                }
+            }
         return AlertRouting.match(user: user, host: host, session: session,
                                   candidates: candidates)
     }

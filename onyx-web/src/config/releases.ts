@@ -24,6 +24,21 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.17',
+    date: null,
+    upcoming: true,
+    summary:
+      'The release where agents got a way to reach you: notify, HTML status pages, alerts on your phone and watch, and a menu bar that says which session is waiting.',
+    highlights: [
+      'Agents can interrupt you — notify, with urgent and external, attached to the session it came from',
+      'Alerts on your phone and watch via ntfy, Pushover, a webhook, or iMessage to yourself',
+      'A menu bar item: sessions with notes, their unread alerts, and tracked pipelines',
+      'show_html — agents publish a real page you can click through',
+      'Session notes, favorites and pipelines shared across your Macs via a host you choose',
+      'One-click MCP install per host, which now tells you if it cannot reach Onyx afterwards',
+    ],
+  },
+  {
     version: '0.16',
     date: '2026-09-06',
     summary:
