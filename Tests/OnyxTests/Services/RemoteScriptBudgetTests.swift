@@ -95,8 +95,11 @@ final class RemoteScriptBudgetTests: XCTestCase {
         let (state, host) = makeState()
         assertFits(payload(SharedStateSync.makeDirectoryScript, state: state, host: host),
                    "the shared-state mkdir")
-        assertFits(payload(SharedStateSync.moveIntoPlaceScript, state: state, host: host),
-                   "the shared-state move")
+        for backingUp in [true, false] {
+            assertFits(payload(SharedStateSync.moveIntoPlaceScript(backingUp: backingUp),
+                               state: state, host: host),
+                       "the shared-state move (backingUp: \(backingUp))")
+        }
     }
 
     // MARK: - Code intelligence

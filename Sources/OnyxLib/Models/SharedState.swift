@@ -81,6 +81,18 @@ public struct SharedState: Codable, Equatable {
 
     public static let empty = SharedState(updated: .distantPast)
 
+    /// Nothing in it at all.
+    ///
+    /// The shape of the disaster this guards: a copy with zero of
+    /// everything is never a legitimate destination once anything existed.
+    /// It means something upstream failed and produced an absence, and
+    /// absence is what a three-way merge reads as "the other side deleted
+    /// it all".
+    public var isEmpty: Bool {
+        notes.isEmpty && favorites.isEmpty
+            && githubPipelines.isEmpty && gitlabPipelines.isEmpty
+    }
+
     /// Whether two copies carry the same content. Deliberately ignores
     /// `updated` and `writtenBy`: a push whose only difference is the
     /// timestamp is a push that does nothing but cost a round trip, and

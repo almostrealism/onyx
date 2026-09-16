@@ -177,15 +177,15 @@ final class SCPCommandTests: XCTestCase {
     /// than assume a working directory.
     func testTheShellScriptsDoUseHome() {
         XCTAssertTrue(SharedStateSync.makeDirectoryScript.contains("$HOME"))
-        XCTAssertTrue(SharedStateSync.moveIntoPlaceScript.contains("$HOME"))
+        XCTAssertTrue(SharedStateSync.moveIntoPlaceScript(backingUp: true).contains("$HOME"))
     }
 
     /// The two halves have to name the same file, or the upload lands
     /// somewhere the move never looks.
     func testTheStagedUploadIsWhatTheMoveScriptRenames() {
         XCTAssertTrue(SharedStateSync.remoteStagingPath.hasSuffix(".incoming"))
-        XCTAssertTrue(SharedStateSync.moveIntoPlaceScript.contains(".incoming"))
-        XCTAssertTrue(SharedStateSync.moveIntoPlaceScript
+        XCTAssertTrue(SharedStateSync.moveIntoPlaceScript(backingUp: true).contains(".incoming"))
+        XCTAssertTrue(SharedStateSync.moveIntoPlaceScript(backingUp: true)
             .contains(SharedStateSync.remoteFilename))
         XCTAssertTrue(SharedStateSync.remoteStagingPath
             .contains(SharedStateSync.remoteFilename))

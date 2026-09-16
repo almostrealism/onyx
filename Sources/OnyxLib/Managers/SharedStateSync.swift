@@ -49,6 +49,8 @@ public final class SharedStateSync: ObservableObject {
     public static let remotePath = ".onyx/\(remoteFilename)"
     /// For scp, before the atomic move into place.
     public static let remoteStagingPath = "\(remotePath).incoming"
+    /// The previous copy, kept on the host. For scp, when restoring.
+    public static let remoteBackupPath = ".onyx/shared-state.backup.json"
     /// For shell scripts only.
     public static let remoteDirectoryScript = "$HOME/.onyx"
 
@@ -294,19 +296,52 @@ public final class SharedStateSync: ObservableObject {
         case .failure(let message):
             report(.failed(message))
             return
-        case .success(let remote):
+        case .success(let fetched):
             lock.lock(); let base = shadow; lock.unlock()
-            let merged = SharedStateMerge.merge(base: base, local: local,
-                                                remote: remote ?? .empty)
+
+            let merged: SharedState
+            if let remote = fetched {
+                merged = SharedStateMerge.merge(base: base, local: local, remote: remote)
+            } else {
+                // NO COPY ON THE HOST. This is the line that wiped
+                // everything: it used to merge against `.empty`, and with a
+                // shadow in hand the merge reads "present in the shadow,
+                // gone from the remote" as a DELETION — of every note,
+                // every favorite, every pipeline. Then it pushed that,
+                // making the loss permanent and propagating it.
+                //
+                // A missing file is not a deletion. It is the absence of
+                // evidence, and the transfer that reports it is the same
+                // transfer that fails when ssh is flapping. So nothing is
+                // merged: we have the only copy, and the host gets it.
+                merged = local
+                DiagnosticLog.shared.record(
+                    "config",
+                    "shared state: \(host.label) has no copy — sending ours "
+                    + "(\(local.notes.count) notes, \(local.favorites.count) favorites) "
+                    + "rather than treating the absence as a deletion")
+            }
+
+            // The backstop, for the failure NOT yet imagined. Wiping
+            // everything is never a legitimate outcome of a sync once
+            // there was something to lose, whatever the path that
+            // produced it.
+            if let refusal = Self.refusal(previous: base ?? local, next: merged) {
+                report(.failed(refusal))
+                DiagnosticLog.shared.record("config", "shared state REFUSED: \(refusal)",
+                                            failure: true)
+                return
+            }
 
             // Apply to the stores first: even if the push fails, the user
             // gets the other machine's notes, and the next run retries.
+            backUpLocally(local, replacedBy: merged)
             apply(merged)
 
             // Only write when the host's copy would actually change —
             // otherwise two Macs on a timer rewrite the file at each other
             // forever, for nothing.
-            if let remote, merged.sameContent(as: remote) {
+            if let remote = fetched, merged.sameContent(as: remote) {
                 // Nothing to send.
             } else if !push(merged, host: host, appState: appState) {
                 return
@@ -318,7 +353,7 @@ public final class SharedStateSync: ObservableObject {
             let stamp = lastSync!
             persist()
             lock.unlock()
-            let writer = remote?.writtenBy
+            let writer = fetched?.writtenBy
             DispatchQueue.main.async {
                 self.lastWrittenBy = writer?.isEmpty == false ? writer : nil
                 self.status = .synced(stamp)
@@ -331,6 +366,28 @@ public final class SharedStateSync: ObservableObject {
         }
     }
 
+    /// Why a sync result must not be applied, or nil to go ahead.
+    ///
+    /// One rule, and it is deliberately blunt: a state with zero of
+    /// everything cannot follow a state that had something. There is no
+    /// legitimate route to it — a user clearing every note, every favorite
+    /// and every pipeline in the same four-second window is not a thing
+    /// that happens, and if it did, doing it again after seeing this
+    /// message costs them one more click. A wipe costs them everything.
+    ///
+    /// Refusing rather than repairing is the point. The known cause is
+    /// fixed above; this catches the one nobody has thought of yet, and
+    /// says so in the log instead of leaving the user to notice that their
+    /// notes are gone.
+    static func refusal(previous: SharedState, next: SharedState) -> String? {
+        guard next.isEmpty, !previous.isEmpty else { return nil }
+        return "refused to empty \(previous.notes.count) notes, "
+            + "\(previous.favorites.count) favorites and "
+            + "\(previous.githubPipelines.count + previous.gitlabPipelines.count) pipelines "
+            + "in one step — nothing was changed. If this is genuinely what you want, "
+            + "clear them on this Mac and they will sync normally."
+    }
+
     private func currentLocalState() -> SharedState {
         DispatchQueue.main.sync {
             SharedState(notes: SessionNotesStore.shared.notes,
@@ -340,6 +397,25 @@ public final class SharedStateSync: ObservableObject {
                         updated: Date(),
                         writtenBy: Self.thisMachine)
         }
+    }
+
+    /// Keep a copy of what we are about to replace.
+    ///
+    /// Written before the stores are touched, and NEVER when the incoming
+    /// state is empty — see `moveIntoPlaceScript`. The local copy matters
+    /// as much as the host's: it is the one you still have when the host
+    /// is the thing that went wrong.
+    private func backUpLocally(_ current: SharedState, replacedBy next: SharedState) {
+        guard !next.isEmpty, !current.isEmpty, let url = backupURL else { return }
+        guard let data = try? JSONEncoder().encode(current) else { return }
+        try? data.write(to: url)
+    }
+
+    /// Where the local backup lives — beside the sync record.
+    var backupURL: URL? {
+        lock.lock(); let u = url; lock.unlock()
+        return u?.deletingLastPathComponent()
+            .appendingPathComponent("shared-state.backup.json")
     }
 
     private func apply(_ state: SharedState) {
@@ -388,9 +464,23 @@ public final class SharedStateSync: ObservableObject {
     static let makeDirectoryScript =
         "mkdir -p \"\(remoteDirectoryScript)\" && echo READY"
 
-    static let moveIntoPlaceScript =
-        "mv \"\(remoteDirectoryScript)/\(remoteFilename).incoming\" "
-        + "\"\(remoteDirectoryScript)/\(remoteFilename)\" && echo MOVED"
+    /// Put the uploaded file in place, keeping the one it replaces.
+    ///
+    /// `backingUp` is false when the state being written is empty. The
+    /// rule is the user's and it is the right one: a backup must never be
+    /// overwritten by a copy with nothing in it, because that is exactly
+    /// the moment it is needed. Losing the data twice — once in the file,
+    /// once in the backup on the next tick — is how a backup becomes
+    /// theatre.
+    static func moveIntoPlaceScript(backingUp: Bool) -> String {
+        var script = "D=\"\(remoteDirectoryScript)\"; F=\"$D/\(remoteFilename)\"\n"
+        if backingUp {
+            script += "[ -f \"$F\" ] && cp \"$F\" \"$D/\(backupFilename)\"\n"
+        }
+        return script + "mv \"$F.incoming\" \"$F\" && echo MOVED"
+    }
+
+    public static let backupFilename = "shared-state.backup.json"
 
     private enum Fetched {
         /// nil = the host has no copy yet, which is the normal first run.
@@ -426,6 +516,18 @@ public final class SharedStateSync: ObservableObject {
             if let complaint, !complaint.lowercased().contains("no such file") {
                 return .failure(complaint)
             }
+            // Nothing at the primary path. Before accepting that, look
+            // for the backup: on a genuinely fresh host there isn't one,
+            // and where there IS one the primary going missing is the
+            // failure this whole commit is about.
+            if let rescued = fetchBackup(host: host, appState: appState) {
+                DiagnosticLog.shared.record(
+                    "config",
+                    "shared state: \(host.label) lost its copy — recovered "
+                    + "\(rescued.notes.count) notes and \(rescued.favorites.count) "
+                    + "favorites from the backup beside it", failure: true)
+                return .success(rescued)
+            }
             // Nothing there yet — the normal first sync against a host.
             // Logged rather than silent: this branch once swallowed a
             // malformed remote path ("$HOME/…", which scp sends to an
@@ -444,6 +546,23 @@ public final class SharedStateSync: ObservableObject {
             return .failure("the copy on \(host.label) isn't readable; not touching it")
         }
         return .success(decoded)
+    }
+
+    /// Read the host's backup copy, if it has one.
+    private func fetchBackup(host: HostConfig, appState: AppState) -> SharedState? {
+        let local = scratch.deletingLastPathComponent()
+            .appendingPathComponent("onyx-shared-state-backup.json")
+        try? FileManager.default.removeItem(at: local)
+        let (cmd, args) = appState.scpFetchCommand(remotePath: Self.remoteBackupPath,
+                                                   localPath: local.path, host: host)
+        _ = RemoteExec.shared.run(cmd, args: args, stdin: nil, softTimeout: 30,
+                                  captureStdout: true, captureStderr: true,
+                                  label: "sharedStateBackup:\(host.label)")
+        defer { try? FileManager.default.removeItem(at: local) }
+        guard let data = try? Data(contentsOf: local),
+              let decoded = try? JSONDecoder().decode(SharedState.self, from: data),
+              !decoded.isEmpty else { return nil }
+        return decoded
     }
 
     private func push(_ state: SharedState, host: HostConfig, appState: AppState) -> Bool {
@@ -479,7 +598,8 @@ public final class SharedStateSync: ObservableObject {
         }
 
         let move = FileBrowserManager.runScriptWithFallback(
-            Self.moveIntoPlaceScript, appState: appState, host: host, timeout: 20)
+            Self.moveIntoPlaceScript(backingUp: !state.isEmpty),
+            appState: appState, host: host, timeout: 20)
         guard move.cleaned?.contains("MOVED") == true else {
             report(.failed(move.failureDetail))
             return false

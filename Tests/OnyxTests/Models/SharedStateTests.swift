@@ -427,3 +427,111 @@ final class SharedStatePipelineMergeTests: XCTestCase {
         XCTAssertTrue(a.sameContent(as: b))
     }
 }
+
+/// The wipe.
+///
+/// From a real event log, one machine, no other Onyx connected:
+///
+///   2:24  shared state: no copy at mac-studio:.onyx/shared-state.json yet
+///   2:29  mac-studio: no marker over a plain pipe — retrying with a terminal
+///   3:03  mac-studio: failed over to standby connection
+///   3:12  shared state synced with mac-studio: 0 notes, 0 favorites, 0 pipelines
+///
+/// A fetch came back empty-handed while the connection was flapping. The
+/// sync merged against `.empty`, and with a shadow in hand the three-way
+/// merge reads "in the shadow, absent from the remote" as a DELETION — so
+/// it deleted everything, then pushed the emptiness to the host, where the
+/// next machine would have picked it up as the truth.
+///
+/// A missing file is not a deletion. It is the absence of evidence, and
+/// the transfer that reports it is the same transfer that fails when the
+/// network is unhappy.
+final class SharedStateWipeTests: XCTestCase {
+
+    private func populated() -> SharedState {
+        SharedState(notes: ["a": SessionNote(sessionID: "a", text: "keep me")],
+                    favorites: [FavoriteEntry(sessionID: "a", windows: [0])],
+                    githubPipelines: ["https://github.com/acme/api/actions/workflows/ci.yml"])
+    }
+
+    /// The merge itself, at the moment it went wrong: shadow present,
+    /// local intact, remote reporting nothing.
+    func testMergingAgainstAnEmptyRemoteWouldHaveDeletedEverything() {
+        let state = populated()
+        let merged = SharedStateMerge.merge(base: state, local: state, remote: .empty)
+        XCTAssertTrue(merged.isEmpty,
+                      """
+                      This is the BUG, asserted so the reasoning stays visible: a \
+                      three-way merge against an empty remote is a total deletion. \
+                      The fix is never to call it with one — see the refusal below \
+                      and SharedStateSync's handling of a missing copy.
+                      """)
+    }
+
+    // MARK: - The backstop
+
+    func testEmptyingEverythingInOneStepIsRefused() {
+        let refusal = SharedStateSync.refusal(previous: populated(), next: .empty)
+        XCTAssertNotNil(refusal)
+        XCTAssertTrue(refusal?.contains("1 notes") == true, "say what was at stake")
+        XCTAssertTrue(refusal?.contains("nothing was changed") == true)
+    }
+
+    /// A fresh machine with nothing on it must still be able to sync.
+    func testAnEmptyStateIsFineWhenThereWasNothingToLose() {
+        XCTAssertNil(SharedStateSync.refusal(previous: .empty, next: .empty))
+    }
+
+    /// Ordinary deletions are still allowed — the guard is about losing
+    /// EVERYTHING at once, not about losing anything.
+    func testClearingTheLastNoteIsAllowedWhileOtherThingsRemain() {
+        let before = populated()
+        var after = before
+        after.notes = [:]
+        XCTAssertNil(SharedStateSync.refusal(previous: before, next: after))
+    }
+
+    func testRemovingMostThingsIsAllowed() {
+        var after = SharedState()
+        after.notes = ["a": SessionNote(sessionID: "a", text: "the only survivor")]
+        XCTAssertNil(SharedStateSync.refusal(previous: populated(), next: after))
+    }
+
+    // MARK: - Backups
+
+    /// The user's rule: a backup must never be replaced by a copy with
+    /// nothing in it, because that is exactly when it is needed. Otherwise
+    /// the data is lost twice — once in the file, once in the backup on
+    /// the next tick.
+    func testTheRemoteBackupIsTakenWhenWritingRealContent() {
+        let script = SharedStateSync.moveIntoPlaceScript(backingUp: true)
+        XCTAssertTrue(script.contains("cp "), script)
+        XCTAssertTrue(script.contains(SharedStateSync.backupFilename))
+        XCTAssertTrue(script.contains("mv "), "and the move still happens")
+    }
+
+    func testTheRemoteBackupIsNotTouchedWhenWritingNothing() {
+        let script = SharedStateSync.moveIntoPlaceScript(backingUp: false)
+        XCTAssertFalse(script.contains("cp "),
+                       "an empty write must leave the last good backup alone")
+        XCTAssertFalse(script.contains(SharedStateSync.backupFilename))
+        XCTAssertTrue(script.contains("mv "))
+    }
+
+    /// Both remote paths are scp paths: no shell expansion (see the SFTP
+    /// lesson), and the backup sits beside the file it backs up.
+    func testTheBackupPathIsFetchableByScp() {
+        XCTAssertFalse(SharedStateSync.remoteBackupPath.contains("$"))
+        XCTAssertTrue(SharedStateSync.remoteBackupPath.hasPrefix(".onyx/"))
+        XCTAssertTrue(SharedStateSync.moveIntoPlaceScript(backingUp: true)
+            .contains(SharedStateSync.backupFilename))
+    }
+
+    func testIsEmptyMeansAllOfIt() {
+        XCTAssertTrue(SharedState.empty.isEmpty)
+        XCTAssertFalse(populated().isEmpty)
+        var onlyPipelines = SharedState()
+        onlyPipelines.gitlabPipelines = ["https://gitlab.com/a/b/-/pipelines/1"]
+        XCTAssertFalse(onlyPipelines.isEmpty, "one entry anywhere is not empty")
+    }
+}
