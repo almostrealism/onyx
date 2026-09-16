@@ -25,6 +25,12 @@
 //
 
 import Foundation
+// flock/open/close come from the platform's C library. Foundation
+// re-exports Darwin on a Mac, which is why this file built there without
+// it; on Linux it does not.
+#if canImport(Glibc)
+import Glibc
+#endif
 
 final class Outbox {
     /// One queued request, with when the agent actually sent it.
@@ -62,7 +68,14 @@ final class Outbox {
     /// process as well. Best-effort: if the lock file can't be opened, do
     /// the work anyway rather than dropping the alert.
     private func withFileLock<T>(_ body: () -> T) -> T {
-        let fd = open(lockPath, O_CREAT | O_RDWR, 0o644)
+        // Two-argument `open`: the three-argument form is variadic in
+        // Glibc's headers and isn't reliably importable, so the file is
+        // created through FileManager first. Both processes racing to
+        // create it is fine — they end in the same place.
+        if !FileManager.default.fileExists(atPath: lockPath) {
+            FileManager.default.createFile(atPath: lockPath, contents: nil)
+        }
+        let fd = open(lockPath, O_RDWR)
         guard fd >= 0 else { return body() }
         flock(fd, LOCK_EX)
         defer { flock(fd, LOCK_UN); close(fd) }

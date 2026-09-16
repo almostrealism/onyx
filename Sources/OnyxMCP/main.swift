@@ -28,6 +28,15 @@ import Glibc
 /// so the process never accumulates CLOSE_WAIT half-open sockets. Read framing
 /// loops on `read()` until a newline so multi-packet responses don't truncate.
 
+/// `SOCK_STREAM` is an `Int32` in Darwin's headers and a `__socket_type`
+/// enum in Glibc's, so the literal that compiles on a Mac does not
+/// compile on Linux. This is the portable spelling.
+#if canImport(Glibc)
+let streamSocket = Int32(SOCK_STREAM.rawValue)
+#else
+let streamSocket = SOCK_STREAM
+#endif
+
 let socketPath: String = {
     let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
     return home + "/.onyx/mcp.sock"
@@ -36,7 +45,7 @@ let socketPath: String = {
 // MARK: - Low-level socket helpers
 
 func connectToUnixSocket() -> Int32 {
-    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    let fd = socket(AF_UNIX, streamSocket, 0)
     guard fd >= 0 else { return -1 }
 
     var addr = sockaddr_un()
@@ -65,7 +74,7 @@ func connectToUnixSocket() -> Int32 {
 }
 
 func connectToTCP(port: UInt16) -> Int32 {
-    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    let fd = socket(AF_INET, streamSocket, 0)
     guard fd >= 0 else { return -1 }
 
     var addr = sockaddr_in()
@@ -371,6 +380,50 @@ final class OnyxConnection {
     }
 }
 
+/// The bridge's shared state, in one place that can cross a thread.
+///
+/// This was a set of local functions closing over a connection, an outbox
+/// and a lock — which the compiler rightly objects to the moment one of
+/// them is called from a `Thread`: "concurrently-executed local function
+/// must be marked @Sendable", an error in Swift 6. Local functions that
+/// share mutable state across threads are the wrong shape for it anyway.
+///
+/// `@unchecked` because the safety is the lock's doing rather than the
+/// type system's: one connection, used by the stdin loop and the retry
+/// heartbeat, serialized here.
+final class Bridge: @unchecked Sendable {
+    private let connection: OnyxConnection
+    let outbox: Outbox
+    private let wire = NSLock()
+
+    init(connection: OnyxConnection, outbox: Outbox) {
+        self.connection = connection
+        self.outbox = outbox
+    }
+
+    func deliver(_ line: String) -> String? {
+        wire.lock(); defer { wire.unlock() }
+        return connection.sendRequest(line)
+    }
+
+    func sendNotification(_ line: String) {
+        wire.lock(); defer { wire.unlock() }
+        connection.sendNotification(line)
+    }
+
+    /// Try the queue. Cheap when it's empty, which is almost always.
+    func flushOutbox(why: String) {
+        outbox.purgeExpired()
+        guard !outbox.isEmpty else { return }
+        let result = outbox.flush { self.deliver($0) }
+        guard result.delivered > 0 else { return }
+        let note = "OnyxMCP: delivered \(result.delivered) queued alert(s) [\(why)]"
+            + (result.remaining > 0 ? ", \(result.remaining) still waiting" : "")
+            + "\n"
+        FileHandle.standardError.write(Data(note.utf8))
+    }
+}
+
 // MARK: - JSON-RPC helpers
 
 /// Whether a client message is a notification: no id, or an explicit
@@ -551,37 +604,16 @@ if isHookMode {
     // when the backend is unreachable, but subsequent requests will
     // automatically reconnect once it comes back.
 
-    let conn = OnyxConnection(receiveTimeout: 30)
-    let outbox = Outbox()
-    // One connection, two threads (the stdin loop and the retry timer).
-    let wire = NSLock()
-
-    func deliver(_ line: String) -> String? {
-        wire.lock(); defer { wire.unlock() }
-        return conn.sendRequest(line)
-    }
-
-    /// Try the queue. Cheap when it's empty, which is almost always.
-    func flushOutbox(why: String) {
-        outbox.purgeExpired()
-        guard !outbox.isEmpty else { return }
-        let result = outbox.flush { deliver($0) }
-        if result.delivered > 0 {
-            let note = "OnyxMCP: delivered \(result.delivered) queued alert(s) [\(why)]"
-                + (result.remaining > 0 ? ", \(result.remaining) still waiting" : "")
-                + "\n"
-            FileHandle.standardError.write(Data(note.utf8))
-        }
-    }
+    let bridge = Bridge(connection: OnyxConnection(receiveTimeout: 30), outbox: Outbox())
 
     // A bridge that only retried when the agent spoke would hold an alert
     // until the agent happened to do something else — and an agent that
     // finishes its work and goes quiet is exactly the one whose last
     // message matters. So the queue gets its own heartbeat.
-    let retry = Thread {
+    let retry = Thread { [bridge] in
         while true {
             Thread.sleep(forTimeInterval: 60)
-            flushOutbox(why: "retry")
+            bridge.flushOutbox(why: "retry")
         }
     }
     retry.stackSize = 512 * 1024
@@ -589,7 +621,7 @@ if isHookMode {
 
     // A new session is a new chance: whatever the last one couldn't
     // deliver goes out before anything else.
-    flushOutbox(why: "session start")
+    bridge.flushOutbox(why: "session start")
 
     // Best-effort first connect, but DO NOT exit on failure: the backend
     // may come up later (e.g. desktop launch after MCP started).
@@ -600,22 +632,20 @@ if isHookMode {
         // client that receives a response to something it never gave an
         // id to treats the stream as broken.
         if isNotification(line) {
-            wire.lock()
-            conn.sendNotification(line)
-            wire.unlock()
+            bridge.sendNotification(line)
             continue
         }
 
-        if let response = deliver(line) {
+        if let response = bridge.deliver(line) {
             print(response)
             fflush(stdout)
-            flushOutbox(why: "backend is up")
+            bridge.flushOutbox(why: "backend is up")
         } else if Outbox.isWorthQueueing(line) {
             // The point of the outbox. The desktop being unreachable is an
             // infrastructure problem; the alert is still true, and the
             // person still wants it. Tell the agent plainly so it doesn't
             // retry and queue a second copy.
-            let waiting = outbox.enqueue(line)
+            let waiting = bridge.outbox.enqueue(line)
             FileHandle.standardError.write(Data(
                 "OnyxMCP: backend unreachable — queued this alert (\(waiting) waiting)\n".utf8))
             print(toolResult(
