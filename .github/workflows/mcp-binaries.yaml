@@ -24,13 +24,19 @@ on:
     branches:
       - master
     paths:
-      # Only the bridge and its manifest affect these outputs.
+      # Only the bridge and what it compiles in affect these outputs.
+      # OnyxVersion is one of those: it carries the version and the
+      # bridge-protocol number, so a release bump MUST rebuild these or
+      # they ship announcing the previous version and every host reports
+      # "update available" forever.
       - 'Sources/OnyxMCP/**'
+      - 'Sources/OnyxVersion/**'
       - 'Package.swift'
       - '.github/workflows/mcp-binaries.yaml'
   pull_request:
     paths:
       - 'Sources/OnyxMCP/**'
+      - 'Sources/OnyxVersion/**'
       - 'Package.swift'
       - '.github/workflows/mcp-binaries.yaml'
 
@@ -62,8 +68,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # --static-swift-stdlib because this binary is installed onto other
+      # people's machines. A stock Linux host has no Swift runtime, and a
+      # dynamically linked build dies at exec with a missing libswiftCore
+      # — which the app would report as "installed but broken" with no
+      # hint that the cause is a shared library nobody asked for.
       - name: Build
-        run: swift build -c release --product OnyxMCP
+        run: swift build -c release --static-swift-stdlib --product OnyxMCP
 
       # A bridge that can't start is worse than a missing one: the app
       # would install it, report success, and every MCP call would fail
@@ -71,13 +82,32 @@ jobs:
       # startup without needing a socket to talk to.
       - name: Verify it runs
         run: |
-          BIN=$(swift build -c release --product OnyxMCP --show-bin-path)/OnyxMCP
+          BIN=$(swift build -c release --static-swift-stdlib --product OnyxMCP --show-bin-path)/OnyxMCP
           file "$BIN"
           "$BIN" --version
 
+          # Prove the Swift runtime is baked in. If this ever starts
+          # listing libswift*, the binary works here and nowhere else.
+          if ldd "$BIN" | grep -q libswift; then
+            echo "::error::OnyxMCP links the Swift runtime dynamically; it will not run on a host without Swift"
+            ldd "$BIN"
+            exit 1
+          fi
+
+          # --probe exercises the socket paths (which differ on Linux) and
+          # must exit 1 here, where there is no Onyx to find. A crash or a
+          # false "reachable" is a bug worth catching before install time.
+          set +e
+          ONYX_MCP_FORWARD_PORT=0 "$BIN" --probe > probe.txt 2>&1
+          code=$?
+          set -e
+          cat probe.txt
+          test "$code" = "1" || { echo "::error::--probe should exit 1 with no backend"; exit 1; }
+          grep -q "NOT REACHABLE" probe.txt
+
       - name: Stage
         run: |
-          BIN=$(swift build -c release --product OnyxMCP --show-bin-path)/OnyxMCP
+          BIN=$(swift build -c release --static-swift-stdlib --product OnyxMCP --show-bin-path)/OnyxMCP
           mkdir -p dist
           cp "$BIN" "dist/OnyxMCP-${{ matrix.arch }}"
           chmod +x "dist/OnyxMCP-${{ matrix.arch }}"

@@ -120,3 +120,84 @@ final class OutboxTests: XCTestCase {
                        "the queue records the moment the agent sent it")
     }
 }
+
+/// Losing an alert INSIDE the outbox would be the worst version of this
+/// bug, so the concurrent cases get their own coverage.
+///
+/// The race, found by reading rather than by a failure: `flush` read the
+/// queue, delivered (tens of seconds, no lock held — deliberately, so the
+/// agent isn't blocked), then wrote back the list it had captured BEFORE
+/// sending. Anything queued in between was in the file and not in that
+/// list, so the write deleted it.
+final class OutboxConcurrencyTests: XCTestCase {
+
+    private func sandbox() throws -> (env: [String: String], home: URL) {
+        var env = ProcessInfo.processInfo.environment
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("onyx-outbox-race-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".onyx"), withIntermediateDirectories: true)
+        env["HOME"] = home.path
+        env["ONYX_MCP_FORWARD_PORT"] = "0"
+        env.removeValue(forKey: "ONYX_MCP_PORT")
+        return (env, home)
+    }
+
+    private func outbox(_ home: URL) -> URL {
+        home.appendingPathComponent(".onyx/outbox.jsonl")
+    }
+
+    private func lines(_ home: URL) throws -> [String] {
+        try String(contentsOf: outbox(home), encoding: .utf8)
+            .components(separatedBy: "\n").filter { !$0.isEmpty }
+    }
+
+    /// Queue from several processes at once — two Claude sessions on one
+    /// host is ordinary, and each appends through its own bridge.
+    func testConcurrentQueueingLosesNothing() throws {
+        let binary = try IntegrationTestHelpers.requireOnyxMCPBinary()
+        let (env, home) = try sandbox()
+
+        let group = DispatchGroup()
+        for i in 1...4 {
+            DispatchQueue.global().async(group: group) {
+                let call = #"{"jsonrpc":"2.0","id":\#(i),"method":"tools/call","params":"# +
+                    #"{"name":"notify","arguments":{"title":"alert \#(i)"}}}"# + "\n"
+                _ = IntegrationTestHelpers.runProcess(binary, stdin: call,
+                                                      environment: env, timeout: 20.0)
+            }
+        }
+        XCTAssertEqual(group.wait(timeout: .now() + 60), .success)
+
+        let queued = try lines(home)
+        XCTAssertEqual(queued.count, 4,
+                       "every alert should be waiting; got \(queued.count)")
+        for i in 1...4 {
+            XCTAssertTrue(queued.contains { $0.contains("alert \(i)") },
+                          "alert \(i) was lost: \(queued)")
+        }
+    }
+
+    /// An alert older than a day is dropped rather than replayed — a
+    /// day-old "the build is done" is noise, and noise is how people learn
+    /// to ignore alerts.
+    func testAnExpiredAlertIsDroppedAndAFreshOneIsNot() throws {
+        let binary = try IntegrationTestHelpers.requireOnyxMCPBinary()
+        let (env, home) = try sandbox()
+
+        let old = Date().addingTimeInterval(-25 * 3600).timeIntervalSince1970
+        let stale = #"{"at":\#(old),"request":"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"notify\",\"arguments\":{\"title\":\"yesterday\"}}}"}"#
+        try (stale + "\n").write(to: outbox(home), atomically: true, encoding: .utf8)
+
+        let call = #"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":"# +
+            #"{"name":"notify","arguments":{"title":"today"}}}"# + "\n"
+        _ = IntegrationTestHelpers.runProcess(binary, stdin: call,
+                                              environment: env, timeout: 20.0)
+
+        let queued = try lines(home)
+        XCTAssertFalse(queued.contains { $0.contains("yesterday") },
+                       "the day-old alert should have aged out: \(queued)")
+        XCTAssertTrue(queued.contains { $0.contains("today") },
+                      "and today's should be kept: \(queued)")
+    }
+}

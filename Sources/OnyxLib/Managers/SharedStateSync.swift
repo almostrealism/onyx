@@ -325,7 +325,13 @@ public final class SharedStateSync: ObservableObject {
                     merged = local
                 }
                 // The backstop, for the failure not yet imagined.
-                if let refusal = Self.refusal(previous: base ?? local, next: merged) {
+                //
+                // Compared against whichever side HAD something: an empty
+                // shadow (a first sync, or one just reset by a home-host
+                // change) with a populated local would otherwise have let
+                // a wipe through the one guard meant to catch it.
+                let previous = (base?.isEmpty == false) ? base! : local
+                if let refusal = Self.refusal(previous: previous, next: merged) {
                     return Outcome(local: local, merged: merged, refusal: refusal)
                 }
                 applyNow(merged)
@@ -406,15 +412,11 @@ public final class SharedStateSync: ObservableObject {
             + "clear them on this Mac and they will sync normally."
     }
 
-    private func currentLocalState() -> SharedState {
-        DispatchQueue.main.sync { localStateNow() }
-    }
-
     /// Caller must already be on main.
     private func localStateNow() -> SharedState {
         SharedState(notes: SessionNotesStore.shared.notes,
-                        favorites: FavoritesStore.shared.entries,
-                        githubPipelines: GitHubConfigStore.shared.pipelineURLs,
+                    favorites: FavoritesStore.shared.entries,
+                    githubPipelines: GitHubConfigStore.shared.pipelineURLs,
                     gitlabPipelines: GitLabConfigStore.shared.pipelineURLs,
                     updated: Date(),
                     writtenBy: Self.thisMachine)
@@ -471,7 +473,9 @@ public final class SharedStateSync: ObservableObject {
     /// Must hold `lock`.
     private func persist() {
         guard let url else { return }
-        let record = Record(homeHostID: homeHostID, shadow: shadow, lastSync: lastSync)
+        // storedHome, not the @Published mirror: this runs on the sync
+        // queue, and the mirror belongs to main.
+        let record = Record(homeHostID: storedHome, shadow: shadow, lastSync: lastSync)
         guard let data = try? JSONEncoder().encode(record) else { return }
         try? data.write(to: url)
     }

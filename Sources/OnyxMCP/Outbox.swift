@@ -39,13 +39,34 @@ final class Outbox {
     static let maxEntries = 200
 
     private let url: URL
-    private let lock = NSLock()
+    private let lockPath: String
 
     init(directory: String? = nil) {
         let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
         let dir = directory ?? (home + "/.onyx")
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         url = URL(fileURLWithPath: dir + "/outbox.jsonl")
+        lockPath = dir + "/outbox.lock"
+    }
+
+    /// Serialize read-modify-write ACROSS PROCESSES, not just threads.
+    ///
+    /// An NSLock was wrong here and a test caught it: one host routinely
+    /// runs several Claude sessions, each with its own bridge process, all
+    /// appending to the same file. Every one of them did load-modify-save,
+    /// and the last writer erased the others' alerts — losing an alert
+    /// inside the mechanism whose entire purpose is not losing alerts.
+    ///
+    /// `flock` is the portable answer (macOS and Linux both), and because
+    /// each call opens its own descriptor it serializes threads in one
+    /// process as well. Best-effort: if the lock file can't be opened, do
+    /// the work anyway rather than dropping the alert.
+    private func withFileLock<T>(_ body: () -> T) -> T {
+        let fd = open(lockPath, O_CREAT | O_RDWR, 0o644)
+        guard fd >= 0 else { return body() }
+        flock(fd, LOCK_EX)
+        defer { flock(fd, LOCK_UN); close(fd) }
+        return body()
     }
 
     // MARK: - Reading and writing
@@ -77,21 +98,24 @@ final class Outbox {
     /// now waiting.
     @discardableResult
     func enqueue(_ line: String, at: Date = Date()) -> Int {
-        lock.lock(); defer { lock.unlock() }
-        var entries = Self.live(load())
-        entries.append(Entry(at: at, line: line))
-        if entries.count > Self.maxEntries {
-            entries.removeFirst(entries.count - Self.maxEntries)
+        withFileLock {
+            var entries = Self.live(load())
+            entries.append(Entry(at: at, line: line))
+            if entries.count > Self.maxEntries {
+                entries.removeFirst(entries.count - Self.maxEntries)
+            }
+            save(entries)
+            return entries.count
         }
-        save(entries)
-        return entries.count
     }
 
     /// Entries still worth delivering, oldest first.
+    ///
+    /// Unlocked on purpose: `save` writes atomically (temp file, then
+    /// rename), so a reader sees one whole version or another, never a
+    /// half-written one. Only read-modify-write needs the lock.
     func pending() -> [Entry] {
-        lock.lock(); defer { lock.unlock() }
-        let live = Self.live(load())
-        return live.sorted { $0.at < $1.at }
+        Self.live(load()).sorted { $0.at < $1.at }
     }
 
     var count: Int { pending().count }
@@ -100,11 +124,12 @@ final class Outbox {
     /// Drop everything that has aged out, and report how many went.
     @discardableResult
     func purgeExpired(now: Date = Date()) -> Int {
-        lock.lock(); defer { lock.unlock() }
-        let all = load()
-        let live = Self.live(all, now: now)
-        if live.count != all.count { save(live) }
-        return all.count - live.count
+        withFileLock {
+            let all = load()
+            let live = Self.live(all, now: now)
+            if live.count != all.count { save(live) }
+            return all.count - live.count
+        }
     }
 
     static func live(_ entries: [Entry], now: Date = Date()) -> [Entry] {
@@ -123,21 +148,34 @@ final class Outbox {
         let queued = pending()
         guard !queued.isEmpty else { return (0, 0) }
 
-        var delivered = 0
-        var remaining: [Entry] = []
-        for (index, entry) in queued.enumerated() {
-            if remaining.isEmpty, send(Self.replayable(entry)) != nil {
-                delivered += 1
-            } else {
-                remaining = Array(queued[index...])
-                break
-            }
+        // Delivering can take tens of seconds, and the lock is NOT held
+        // across it: the agent must be able to queue another alert while
+        // this runs.
+        var delivered: [Entry] = []
+        for entry in queued {
+            guard send(Self.replayable(entry)) != nil else { break }
+            delivered.append(entry)
         }
 
-        lock.lock()
-        save(Self.live(remaining, now: now))
-        lock.unlock()
-        return (delivered, remaining.count)
+        // …which is exactly why the file is re-read here and only the
+        // DELIVERED entries are removed. Writing back a list captured
+        // before the sends would silently drop anything queued in the
+        // meantime — losing an alert inside the mechanism whose whole
+        // purpose is not losing alerts.
+        let live: [Entry] = withFileLock {
+            var keep = load()
+            for entry in delivered {
+                if let index = keep.firstIndex(where: {
+                    $0.line == entry.line && $0.at == entry.at
+                }) {
+                    keep.remove(at: index)
+                }
+            }
+            let live = Self.live(keep, now: now)
+            save(live)
+            return live
+        }
+        return (delivered.count, live.count)
     }
 
     /// The line to send, carrying WHEN it was originally sent.
