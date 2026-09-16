@@ -474,3 +474,42 @@ final class ConnectionPairTests: XCTestCase {
         XCTAssertTrue(budget.acquire("c"))
     }
 }
+
+/// The MCP reverse forward, which is how agents on a host reach Onyx.
+///
+/// The failure it guards: `-R` is requested with `ExitOnForwardFailure=no`,
+/// so a master whose forward request is REFUSED still comes up — just
+/// without any forwarding. The usual way in is a rotation, where the
+/// outgoing master still holds the remote port for a moment. Nothing
+/// noticed, and from an agent's side it reads as "worked for a while, then
+/// said nobody was connected".
+final class MCPForwardRepairTests: XCTestCase {
+
+    func testTheForwardSpecIsFoundInTheMasterArguments() {
+        let args = ["-o", "ExitOnForwardFailure=no", "-R", "19432:127.0.0.1:64127"]
+        XCTAssertEqual(ConnectionPair.forwardSpec(in: args), "19432:127.0.0.1:64127")
+    }
+
+    /// No MCP server yet (or a local host) means no flags and nothing to
+    /// repair — not a crash, and not a bogus request.
+    func testNoForwardingMeansNothingToClaim() {
+        XCTAssertNil(ConnectionPair.forwardSpec(in: []))
+        XCTAssertNil(ConnectionPair.forwardSpec(in: ["-o", "BatchMode=yes"]))
+    }
+
+    /// A `-R` at the very end with no value must not crash the lookup.
+    func testATruncatedArgumentListIsHandled() {
+        XCTAssertNil(ConnectionPair.forwardSpec(in: ["-o", "X=y", "-R"]))
+    }
+
+    /// `ExitOnForwardFailure=no` is deliberate and must stay: a terminal
+    /// session matters more than a forward, so a busy port must never stop
+    /// the connection coming up. The repair is what makes that safe.
+    func testTheMasterStillComesUpWhenTheForwardCannot() {
+        let state = AppState()
+        let flags = state.mcpMasterForwardingFlags()
+        guard !flags.isEmpty else { return }    // no MCP server in this process
+        XCTAssertTrue(flags.contains("ExitOnForwardFailure=no"),
+                      "a forward must never be able to break a terminal")
+    }
+}

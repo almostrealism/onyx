@@ -685,6 +685,9 @@ public final class ConnectionPair {
                 master established: host=\(h.label, privacy: .public) \
                 slot=\(index, privacy: .public)
                 """)
+            // The `-R` above may have lost a race with the master this one
+            // is replacing. Claim it explicitly now that we are up.
+            repairMCPForward(path: path, userHost: uh, host: h)
         }
 
         lock.lock()
@@ -719,6 +722,53 @@ public final class ConnectionPair {
             runner.killAndVerify(pid: pid)
         }
         runner.killMaster(at: path, userHost: userHost)
+    }
+
+    /// The `host:port:host:port` out of `["-o", …, "-R", "<spec>"]`.
+    ///
+    /// Pure, so the repair below can be tested without a network.
+    static func forwardSpec(in args: [String]) -> String? {
+        guard let index = args.firstIndex(of: "-R"), index + 1 < args.count else { return nil }
+        return args[index + 1]
+    }
+
+    /// Make sure the MCP reverse forward really belongs to THIS master.
+    ///
+    /// `-R` is requested when the master is established, with
+    /// `ExitOnForwardFailure=no` so a busy port can't stop the connection
+    /// coming up. That flag is right — a terminal is more important than a
+    /// forward — but it means the master can come up with NO forwarding at
+    /// all and nothing notices. The usual way in: a rotation, where the
+    /// outgoing master still holds the remote port for a moment, so the
+    /// incoming one's request is refused and the forward is silently gone
+    /// for the life of that master.
+    ///
+    /// From the agent's side that is "it worked for a while, then said
+    /// nobody was connected" — which is precisely what users report.
+    ///
+    /// Cancel-then-forward over the control socket, which is idempotent:
+    /// a forward that already exists is replaced by an identical one, and
+    /// a missing one is created. A failure here means something on the
+    /// remote holds the port that isn't ours, which is worth saying out
+    /// loud because no amount of retrying will fix it.
+    private func repairMCPForward(path: String, userHost: String, host h: HostConfig) {
+        guard let spec = Self.forwardSpec(in: masterExtraArgs()) else { return }
+        _ = runner.run(["-o", "ControlPath=\(path)", "-O", "cancel", "-R", spec, userHost],
+                       softTimeout: 3, captureStderr: false)
+        let result = runner.run(
+            ["-o", "ControlPath=\(path)", "-O", "forward", "-R", spec, userHost],
+            softTimeout: 5, captureStderr: true)
+        if result.exit != 0 {
+            OnyxLog.ssh.error("""
+                MCP forward NOT established: host=\(h.label, privacy: .public) \
+                spec=\(spec, privacy: .public) stderr=\(result.stderr, privacy: .public)
+                """)
+            DiagnosticLog.shared.record(
+                "ssh",
+                "\(h.label): couldn't claim the MCP port — agents there won't reach Onyx "
+                + "until it frees up (\(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)))",
+                failure: true)
+        }
     }
 
     private func checkAlive(path: String, userHost: String) -> Bool {
