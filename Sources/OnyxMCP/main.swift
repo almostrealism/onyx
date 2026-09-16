@@ -102,19 +102,55 @@ let defaultForwardedPort: UInt16 = {
     return 19432
 }()
 
-func connectToOnyx() -> Int32 {
-    if let portStr = ProcessInfo.processInfo.environment["ONYX_MCP_PORT"],
-       let port = UInt16(portStr) {
-        let fd = connectToTCP(port: port)
-        if fd >= 0 { return fd }
+/// The ways the bridge can reach Onyx, in the order they're tried.
+///
+/// A route that CONNECTS is not a route that works. The forwarded port is
+/// a well-known number on a machine we don't own: another user's stale
+/// `-R` forward, a forward whose far end died with the app that made it,
+/// or any unrelated service can be sitting on it. Each of those accepts
+/// the connection and then says nothing — and a bridge that waits on
+/// silence looks, from Claude's side, exactly like a server that hangs.
+/// That is the 30-second timeout users hit on a shared host.
+///
+/// So a route has to ANSWER before it is believed. Until it does, it gets
+/// a short deadline and is dropped for the rest of the process the moment
+/// it fails to speak JSON-RPC.
+enum Route: CaseIterable {
+    case envPort          // ONYX_MCP_PORT — set inside Onyx's own sessions
+    case unixSocket       // same machine as the app
+    case forwardedPort    // the connection pair's -R, on any host Onyx uses
+
+    var describe: String {
+        switch self {
+        case .envPort:
+            return "ONYX_MCP_PORT=\(ProcessInfo.processInfo.environment["ONYX_MCP_PORT"] ?? "?")"
+        case .unixSocket:    return socketPath
+        case .forwardedPort: return "127.0.0.1:\(defaultForwardedPort) (ssh -R)"
+        }
     }
-    // Same machine as the app.
-    let unix = connectToUnixSocket()
-    if unix >= 0 { return unix }
-    // A host Onyx is connected to: the master's -R forwarding makes the
-    // app answer here, with nothing needed in the environment.
-    guard defaultForwardedPort > 0 else { return -1 }
-    return connectToTCP(port: defaultForwardedPort)
+
+    func connect() -> Int32 {
+        switch self {
+        case .envPort:
+            guard let raw = ProcessInfo.processInfo.environment["ONYX_MCP_PORT"],
+                  let port = UInt16(raw) else { return -1 }
+            return connectToTCP(port: port)
+        case .unixSocket:
+            return connectToUnixSocket()
+        case .forwardedPort:
+            guard defaultForwardedPort > 0 else { return -1 }
+            return connectToTCP(port: defaultForwardedPort)
+        }
+    }
+}
+
+/// Whether a reply came from Onyx rather than from whatever else happens
+/// to hold the port. Cheap on purpose: a JSON object carrying "jsonrpc".
+func looksLikeOnyx(_ line: String) -> Bool {
+    guard let data = line.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return false }
+    return object["jsonrpc"] != nil || object["result"] != nil || object["error"] != nil
 }
 
 func setReceiveTimeout(fd: Int32, seconds: Int) {
@@ -169,6 +205,24 @@ func readLine(fd: Int32) -> String? {
 final class OnyxConnection {
     private var fd: Int32 = -1
     private let receiveTimeout: Int
+    /// The route the current fd came from.
+    private var route: Route?
+    /// Routes that have answered with JSON-RPC at least once. A proven
+    /// route gets the full timeout, because a real tool call may take a
+    /// moment; an unproven one gets seconds.
+    private var proven: Set<Int> = []
+    /// Routes that connected and then didn't speak. Not retried: the thing
+    /// on that port is not going to become Onyx later, and trying it again
+    /// on every request is how the whole session becomes unusable.
+    private var rejected: Set<Int> = []
+
+    /// How long to wait on a route that hasn't proved itself.
+    ///
+    /// Claude gives an MCP server 30 seconds to come up. Waiting that long
+    /// on one suspect route spends the entire budget and reports nothing;
+    /// five seconds is far longer than a loopback needs and leaves room to
+    /// try the others.
+    private let handshakeTimeout = 5
 
     init(receiveTimeout: Int) {
         self.receiveTimeout = receiveTimeout
@@ -180,18 +234,38 @@ final class OnyxConnection {
 
     private func closeFd() {
         if fd >= 0 { close(fd); fd = -1 }
+        route = nil
     }
+
+    private func key(_ route: Route) -> Int {
+        Route.allCases.firstIndex(of: route) ?? -1
+    }
+
+    private func isProven(_ route: Route) -> Bool { proven.contains(key(route)) }
 
     /// Ensure we have a live fd. Returns true on success.
     @discardableResult
     private func ensureConnected() -> Bool {
         if fd >= 0 { return true }
-        let newFd = connectToOnyx()
-        guard newFd >= 0 else { return false }
-        setReceiveTimeout(fd: newFd, seconds: receiveTimeout)
-        setSendTimeout(fd: newFd, seconds: 10)
-        fd = newFd
-        return true
+        for candidate in Route.allCases where !rejected.contains(key(candidate)) {
+            let newFd = candidate.connect()
+            guard newFd >= 0 else { continue }
+            setReceiveTimeout(fd: newFd,
+                              seconds: isProven(candidate) ? receiveTimeout : handshakeTimeout)
+            setSendTimeout(fd: newFd, seconds: 10)
+            fd = newFd
+            route = candidate
+            return true
+        }
+        return false
+    }
+
+    /// Give up on a route that connected and then failed to speak.
+    private func reject(_ route: Route, why: String) {
+        rejected.insert(key(route))
+        FileHandle.standardError.write(Data(
+            "OnyxMCP: \(route.describe) is not Onyx (\(why)) — trying the next route\n".utf8))
+        closeFd()
     }
 
     /// Send a notification — a message with no id — and expect nothing
@@ -215,35 +289,72 @@ final class OnyxConnection {
         }
         setReceiveTimeout(fd: fd, seconds: 1)
         _ = readLine(fd: fd)
-        setReceiveTimeout(fd: fd, seconds: receiveTimeout)
+        setReceiveTimeout(fd: fd, seconds: route.map { isProven($0) ? receiveTimeout : handshakeTimeout } ?? handshakeTimeout)
     }
 
     /// Send a request and read one response line, transparently reconnecting
     /// on failure. Up to `attempts` total tries with exponential backoff.
     func sendRequest(_ message: String, attempts: Int = 3) -> String? {
         let payload = Array((message + "\n").utf8)
-        for attempt in 0..<attempts {
+        // Rotating past a peer that isn't Onyx does NOT spend an attempt:
+        // it is a different machine's problem, not this one having a bad
+        // moment, and it needs no backoff. Rejection is self-limiting —
+        // a rejected route is never tried again — so the loop is still
+        // bounded. Charging rotations to the retry budget broke hook mode,
+        // which runs on every tool call and has seconds to work with.
+        var attempt = 0
+
+        while attempt < attempts {
             if !ensureConnected() {
                 logRetry(attempt: attempt, reason: "connect failed")
-                backoff(attempt: attempt)
+                backoff(attempt: attempt); attempt += 1
                 continue
             }
+            let current = route
 
-            // Send
             if !writeAll(fd: fd, data: payload) {
                 logRetry(attempt: attempt, reason: "write failed (peer likely closed)")
                 closeFd()
-                backoff(attempt: attempt)
+                backoff(attempt: attempt); attempt += 1
                 continue
             }
 
-            // Receive one line
-            if let response = readLine(fd: fd) {
-                return response
+            guard let response = readLine(fd: fd) else {
+                // Silence from a route that has never answered is the
+                // signature of something else holding the port: a stale
+                // -R forward whose far end is gone, another user's
+                // forward, an unrelated service. Drop it and move on
+                // rather than spending Claude's whole startup budget
+                // waiting for it.
+                if let current, !isProven(current) {
+                    reject(current, why: "no answer in \(handshakeTimeout)s")
+                    continue      // a different route, not a retry
+                }
+                logRetry(attempt: attempt, reason: "read failed/EOF")
+                closeFd()
+                backoff(attempt: attempt); attempt += 1
+                continue
             }
-            logRetry(attempt: attempt, reason: "read failed/EOF")
-            closeFd()
-            backoff(attempt: attempt)
+
+            guard looksLikeOnyx(response) else {
+                if let current, !isProven(current) {
+                    reject(current, why: "answered, but not JSON-RPC")
+                    continue      // a different route, not a retry
+                }
+                logRetry(attempt: attempt, reason: "reply was not JSON-RPC")
+                closeFd()
+                backoff(attempt: attempt); attempt += 1
+                continue
+            }
+
+            // It spoke. Trust it with the full timeout from here on.
+            if let current, !isProven(current) {
+                proven.insert(key(current))
+                setReceiveTimeout(fd: fd, seconds: receiveTimeout)
+                FileHandle.standardError.write(Data(
+                    "OnyxMCP: connected to Onyx via \(current.describe)\n".utf8))
+            }
+            return response
         }
         return nil
     }
@@ -319,6 +430,41 @@ if CommandLine.arguments.contains("--version") {
     // number — the old bridge shipped claiming 0.17 too.
     print("OnyxMCP \(onyxMCPVersion) (proto \(OnyxVersion.bridgeProtocol))")
     exit(0)
+}
+
+// `--probe` answers "can this host actually reach Onyx", route by route,
+// which is the question an install should be able to settle on the spot.
+// Without it the first sign of trouble is Claude hanging for 30 seconds
+// and then saying "connection timed out", which names no cause at all.
+if CommandLine.arguments.contains("--probe") {
+    var reachable = false
+    for route in Route.allCases {
+        let fd = route.connect()
+        guard fd >= 0 else {
+            print("no    \(route.describe) — nothing listening")
+            continue
+        }
+        setReceiveTimeout(fd: fd, seconds: 5)
+        setSendTimeout(fd: fd, seconds: 5)
+        let request = #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#
+        if !writeAll(fd: fd, data: Array((request + "\n").utf8)) {
+            print("no    \(route.describe) — connected, but the write failed")
+        } else if let reply = readLine(fd: fd) {
+            if looksLikeOnyx(reply) {
+                print("YES   \(route.describe) — Onyx answered")
+                reachable = true
+            } else {
+                // The five9 case: something holds the port and is not Onyx.
+                print("no    \(route.describe) — answered, but it is not Onyx")
+            }
+        } else {
+            print("no    \(route.describe) — connected, then silence "
+                  + "(a stale ssh -R forward looks exactly like this)")
+        }
+        close(fd)
+    }
+    print(reachable ? "reachable" : "NOT REACHABLE from this host")
+    exit(reachable ? 0 : 1)
 }
 
 let hookIndex = CommandLine.arguments.firstIndex(of: "--hook")

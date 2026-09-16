@@ -171,6 +171,28 @@ public final class MCPInstaller: ObservableObject {
     done
     """
 
+    /// What `--probe` concluded, or nil when it could reach Onyx.
+    ///
+    /// The probe prints one line per route and a final verdict. Only the
+    /// failure is interesting here, and the most specific route line is
+    /// what makes it actionable — "connected, then silence" points at a
+    /// stale forward, "not Onyx" at something else holding the port.
+    static func reachability(in output: String) -> String? {
+        guard let marker = output.range(of: "---REACH---", options: .backwards) else {
+            return nil   // an older bridge, with no probe to run
+        }
+        let section = output[marker.upperBound...]
+        let stop = section.range(of: "---")?.lowerBound ?? section.endIndex
+        let lines = section[..<stop]
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard lines.contains(where: { $0.contains("NOT REACHABLE") }) else { return nil }
+        let detail = lines.first { $0.contains("silence") || $0.contains("not Onyx") }
+            ?? lines.first { $0.hasPrefix("no ") }
+        return detail ?? "no route from that host reaches Onyx"
+    }
+
     /// Pull the version and protocol out of `OnyxMCP 0.17 (proto 2)`.
     ///
     /// A bare `OnyxMCP 0.17` is a bridge from before protocol numbers,
@@ -394,6 +416,13 @@ public final class MCPInstaller: ObservableObject {
         chmod +x \(Self.shellQuote(remotePath))
         echo "---RUNS---"
         \(Self.shellQuote(remotePath)) --version
+        # Can Claude on THIS host actually reach Onyx? The install is the
+        # moment to find out: the alternative first symptom is Claude
+        # hanging for 30 seconds and reporting a timeout that names no
+        # cause. A well-known forwarded port on a machine we don't own can
+        # be held by a stale forward or an unrelated service.
+        echo "---REACH---"
+        \(Self.shellQuote(remotePath)) --probe 2>&1 || true
         \(Self.claudePickerScript)
         echo "---REG---"
         if [ -n "$ONYX_CLAUDE" ]; then
@@ -482,6 +511,19 @@ public final class MCPInstaller: ObservableObject {
         }
 
         DiagnosticLog.shared.record("mcp", "installed and registered on \(host.label) at \(remotePath)")
+
+        // Registered is not the same as reachable. If Claude on that host
+        // can't get to Onyx, the next thing the user sees is a 30-second
+        // hang and "connection timed out", which names no cause — so the
+        // probe's verdict is surfaced here, where it can still be acted on.
+        if let verdict = Self.reachability(in: out) {
+            DiagnosticLog.shared.record("mcp", "\(host.label): \(verdict)",
+                                        failure: true)
+            fail("Bridge installed and registered on \(host.label), but Claude there "
+                 + "can't reach Onyx — \(verdict). Run `\(remotePath) --probe` on that "
+                 + "host to see each route.", for: host.id)
+            return false
+        }
 
         // A shared install can be adopted by the machine's other accounts;
         // a home-directory one can't, and saying so is more useful than

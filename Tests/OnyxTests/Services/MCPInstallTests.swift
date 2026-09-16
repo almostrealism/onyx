@@ -333,3 +333,62 @@ final class OnyxVersionTests: XCTestCase {
                        "Info.plist should be stamped at package time, not edited by hand")
     }
 }
+
+/// What the install says when the bridge lands fine but can't reach Onyx.
+///
+/// The user's report: installing on a tailnet host made Claude there hang
+/// for 30 seconds and report "connection timed out". The install itself
+/// said nothing — it had verified the binary runs and that Claude
+/// registered it, neither of which is the same as being able to reach us.
+final class MCPReachabilityTests: XCTestCase {
+
+    private func output(_ reach: String) -> String {
+        """
+        ---RUNS---
+        OnyxMCP 0.17 (proto 2)
+        ---REACH---
+        \(reach)
+        ---REG---
+        REGISTERED
+        ---DONE---
+        """
+    }
+
+    func testASilentPortIsReportedWithItsSymptom() {
+        let verdict = MCPInstaller.reachability(in: output("""
+        no    ONYX_MCP_PORT=? — nothing listening
+        no    127.0.0.1:19432 (ssh -R) — connected, then silence (a stale ssh -R forward looks exactly like this)
+        NOT REACHABLE from this host
+        """))
+        XCTAssertNotNil(verdict)
+        XCTAssertTrue(verdict?.contains("silence") == true,
+                      "the symptom is what makes it actionable: \(verdict ?? "nil")")
+    }
+
+    func testSomethingElseHoldingThePortIsNamed() {
+        let verdict = MCPInstaller.reachability(in: output("""
+        no    127.0.0.1:19432 (ssh -R) — answered, but it is not Onyx
+        NOT REACHABLE from this host
+        """))
+        XCTAssertTrue(verdict?.contains("not Onyx") == true, verdict ?? "nil")
+    }
+
+    func testAReachableHostSaysNothing() {
+        XCTAssertNil(MCPInstaller.reachability(in: output("""
+        YES   127.0.0.1:19432 (ssh -R) — Onyx answered
+        reachable
+        """)))
+    }
+
+    /// A bridge from before `--probe` prints no section at all. That is
+    /// not a failure — it is an install that can't answer the question.
+    func testAnOlderBridgeWithNoProbeIsNotTreatedAsUnreachable() {
+        XCTAssertNil(MCPInstaller.reachability(in: """
+        ---RUNS---
+        OnyxMCP 0.16
+        ---REG---
+        REGISTERED
+        ---DONE---
+        """))
+    }
+}

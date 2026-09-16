@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+import Network
 @testable import OnyxLib
 
 /// Round-trip integration tests for the OnyxMCP stdio bridge.
@@ -122,5 +123,136 @@ final class MCPStdioTests: XCTestCase {
                        "Expected 2 error frames (bridge must survive first failure). stdout=\(result.stdout)")
         XCTAssertTrue(result.stdout.contains("\"id\":1"))
         XCTAssertTrue(result.stdout.contains("\"id\":2"))
+    }
+}
+
+/// A port that is NOT Onyx.
+///
+/// The failure this reproduces, from a user's tailnet host: Claude hung for
+/// 30 seconds and then said "MCP server onyx connection timed out". The
+/// forwarded port is a well-known number on a machine we don't own — a
+/// stale `ssh -R` whose far end died with the app that made it, another
+/// user's forward, or any unrelated service — and all of those ACCEPT the
+/// connection and then say nothing. The bridge used to connect, trust it,
+/// and wait out its full 30-second receive timeout, which is exactly
+/// Claude's startup budget.
+final class MCPRouteSelectionTests: XCTestCase {
+
+    /// Accepts connections. Optionally answers; by default, silence.
+    private final class FakePeer {
+        private let listener: NWListener
+        private var connections: [NWConnection] = []
+        private(set) var port: UInt16 = 0
+
+        init(answering: Bool) throws {
+            let params = NWParameters.tcp
+            params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+            listener = try NWListener(using: params)
+            let ready = DispatchSemaphore(value: 0)
+            listener.stateUpdateHandler = { if case .ready = $0 { ready.signal() } }
+            listener.newConnectionHandler = { [weak self] connection in
+                self?.connections.append(connection)
+                connection.start(queue: .global())
+                guard answering else { return }   // silence is the point of the other mode
+                func receive() {
+                    connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) {
+                        data, _, _, _ in
+                        if let data, !data.isEmpty,
+                           let text = String(data: data, encoding: .utf8),
+                           text.contains("\"id\"") {
+                            let reply = #"{"jsonrpc":"2.0","id":1,"result":{"ok":true}}"# + "\n"
+                            connection.send(content: Data(reply.utf8),
+                                            completion: .contentProcessed { _ in })
+                        }
+                        receive()
+                    }
+                }
+                receive()
+            }
+            listener.start(queue: .global())
+            guard ready.wait(timeout: .now() + 5) == .success,
+                  let bound = listener.port?.rawValue else {
+                throw XCTSkip("couldn't bind a local listener")
+            }
+            port = bound
+        }
+
+        func stop() { listener.cancel(); connections.forEach { $0.cancel() } }
+    }
+
+    private func environment(envPort: UInt16?, forwardPort: UInt16) -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        let temp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("onyx-route-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        env["HOME"] = temp.path          // no real ~/.onyx/mcp.sock in reach
+        env["ONYX_MCP_FORWARD_PORT"] = String(forwardPort)
+        if let envPort { env["ONYX_MCP_PORT"] = String(envPort) } else {
+            env.removeValue(forKey: "ONYX_MCP_PORT")
+        }
+        return env
+    }
+
+    /// The bug: silence must not cost Claude its whole startup budget.
+    func testASilentPortDoesNotHangTheBridge() throws {
+        let squatter = try FakePeer(answering: false)
+        defer { squatter.stop() }
+
+        let started = Date()
+        let result = IntegrationTestHelpers.runProcess(
+            try IntegrationTestHelpers.requireOnyxMCPBinary(),
+            stdin: #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"# + "\n",
+            environment: environment(envPort: nil, forwardPort: squatter.port),
+            timeout: 28.0)
+        let elapsed = Date().timeIntervalSince(started)
+
+        XCTAssertFalse(result.timedOut, "the bridge hung on a port that never answers")
+        XCTAssertLessThan(elapsed, 25,
+                          "took \(Int(elapsed))s — Claude gives an MCP server 30s, and a "
+                          + "bridge that spends it all reports nothing at all")
+        XCTAssertTrue(result.stdout.contains("\"error\""),
+                      "an unreachable backend should still answer: \(result.stdout)")
+        XCTAssertTrue(result.stderr.contains("not Onyx"),
+                      "and should say WHICH route was wrong: \(result.stderr)")
+    }
+
+    /// Having rejected the impostor, it must go on and find the real one.
+    func testItRotatesPastASilentPortToAWorkingOne() throws {
+        let squatter = try FakePeer(answering: false)
+        let real = try FakePeer(answering: true)
+        defer { squatter.stop(); real.stop() }
+
+        let result = IntegrationTestHelpers.runProcess(
+            try IntegrationTestHelpers.requireOnyxMCPBinary(),
+            stdin: #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"# + "\n",
+            // The squatter is FIRST in the route order.
+            environment: environment(envPort: squatter.port, forwardPort: real.port),
+            timeout: 28.0)
+
+        XCTAssertFalse(result.timedOut)
+        XCTAssertTrue(result.stdout.contains("\"ok\""),
+                      "should have reached the answering peer: \(result.stdout)")
+        XCTAssertTrue(result.stderr.contains("connected to Onyx via"),
+                      "and should say which route worked: \(result.stderr)")
+    }
+
+    /// `--probe` exists so an install can answer "can this host reach
+    /// Onyx" on the spot, instead of the first symptom being a 30-second
+    /// hang that names no cause.
+    func testProbeReportsASilentPortRatherThanClaimingSuccess() throws {
+        let squatter = try FakePeer(answering: false)
+        defer { squatter.stop() }
+
+        let result = IntegrationTestHelpers.runProcess(
+            try IntegrationTestHelpers.requireOnyxMCPBinary(),
+            arguments: ["--probe"],
+            stdin: "",
+            environment: environment(envPort: nil, forwardPort: squatter.port),
+            timeout: 20.0)
+
+        XCTAssertFalse(result.timedOut)
+        XCTAssertTrue(result.stdout.contains("NOT REACHABLE"), result.stdout)
+        XCTAssertTrue(result.stdout.contains("silence"),
+                      "name the symptom so a user can act on it: \(result.stdout)")
     }
 }
