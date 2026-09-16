@@ -290,58 +290,69 @@ public final class SharedStateSync: ObservableObject {
     }
 
     private func run(host: HostConfig, appState: AppState, reason: String) {
-        let local = currentLocalState()
+        // The fetch first, and NO local snapshot before it.
+        //
+        // Taking one here was a race with the user: the fetch takes
+        // seconds over ssh, and anything typed in that window — a session
+        // note, most often — was merged away by a snapshot that predated
+        // it. The apply then wrote the old set back over the store and the
+        // note vanished, which from the outside looks like "I had to type
+        // it three times". Activation triggers a sync, so the worst window
+        // is the few seconds after you switch to Onyx: exactly when you
+        // sit down and write a note.
         let fetched = fetch(host: host, appState: appState)
         switch fetched {
         case .failure(let message):
             report(.failed(message))
             return
-        case .success(let fetched):
+        case .success(let remoteCopy):
             lock.lock(); let base = shadow; lock.unlock()
 
-            let merged: SharedState
-            if let remote = fetched {
-                merged = SharedStateMerge.merge(base: base, local: local, remote: remote)
-            } else {
-                // NO COPY ON THE HOST. This is the line that wiped
-                // everything: it used to merge against `.empty`, and with a
-                // shadow in hand the merge reads "present in the shadow,
-                // gone from the remote" as a DELETION — of every note,
-                // every favorite, every pipeline. Then it pushed that,
-                // making the loss permanent and propagating it.
-                //
-                // A missing file is not a deletion. It is the absence of
-                // evidence, and the transfer that reports it is the same
-                // transfer that fails when ssh is flapping. So nothing is
-                // merged: we have the only copy, and the host gets it.
-                merged = local
-                DiagnosticLog.shared.record(
-                    "config",
-                    "shared state: \(host.label) has no copy — sending ours "
-                    + "(\(local.notes.count) notes, \(local.favorites.count) favorites) "
-                    + "rather than treating the absence as a deletion")
+            // Snapshot, merge, check and apply in ONE main-thread block.
+            // Nothing the user does can land in the middle of it.
+            let outcome: Outcome = DispatchQueue.main.sync {
+                let local = localStateNow()
+                let merged: SharedState
+                if let remote = remoteCopy {
+                    merged = SharedStateMerge.merge(base: base, local: local, remote: remote)
+                } else {
+                    // NO COPY ON THE HOST. This used to merge against
+                    // `.empty`, and with a shadow in hand the merge reads
+                    // "present in the shadow, gone from the remote" as a
+                    // DELETION — of everything. A missing file is not a
+                    // deletion; it is the absence of evidence, reported by
+                    // the same transfer that fails when ssh is unhappy.
+                    merged = local
+                }
+                // The backstop, for the failure not yet imagined.
+                if let refusal = Self.refusal(previous: base ?? local, next: merged) {
+                    return Outcome(local: local, merged: merged, refusal: refusal)
+                }
+                applyNow(merged)
+                return Outcome(local: local, merged: merged, refusal: nil)
             }
 
-            // The backstop, for the failure NOT yet imagined. Wiping
-            // everything is never a legitimate outcome of a sync once
-            // there was something to lose, whatever the path that
-            // produced it.
-            if let refusal = Self.refusal(previous: base ?? local, next: merged) {
+            if let refusal = outcome.refusal {
                 report(.failed(refusal))
                 DiagnosticLog.shared.record("config", "shared state REFUSED: \(refusal)",
                                             failure: true)
                 return
             }
+            if remoteCopy == nil {
+                DiagnosticLog.shared.record(
+                    "config",
+                    "shared state: \(host.label) has no copy — sending ours "
+                    + "(\(outcome.merged.notes.count) notes, "
+                    + "\(outcome.merged.favorites.count) favorites) "
+                    + "rather than treating the absence as a deletion")
+            }
+            backUpLocally(outcome.local, replacedBy: outcome.merged)
 
-            // Apply to the stores first: even if the push fails, the user
-            // gets the other machine's notes, and the next run retries.
-            backUpLocally(local, replacedBy: merged)
-            apply(merged)
-
+            let merged = outcome.merged
             // Only write when the host's copy would actually change —
             // otherwise two Macs on a timer rewrite the file at each other
             // forever, for nothing.
-            if let remote = fetched, merged.sameContent(as: remote) {
+            if let remote = remoteCopy, merged.sameContent(as: remote) {
                 // Nothing to send.
             } else if !push(merged, host: host, appState: appState) {
                 return
@@ -353,7 +364,7 @@ public final class SharedStateSync: ObservableObject {
             let stamp = lastSync!
             persist()
             lock.unlock()
-            let writer = fetched?.writtenBy
+            let writer = remoteCopy?.writtenBy
             DispatchQueue.main.async {
                 self.lastWrittenBy = writer?.isEmpty == false ? writer : nil
                 self.status = .synced(stamp)
@@ -364,6 +375,13 @@ public final class SharedStateSync: ObservableObject {
                 + "\(merged.notes.count) notes, \(merged.favorites.count) favorites, "
                 + "\(merged.githubPipelines.count + merged.gitlabPipelines.count) pipelines")
         }
+    }
+
+    /// What one main-thread pass decided.
+    private struct Outcome {
+        let local: SharedState
+        let merged: SharedState
+        let refusal: String?
     }
 
     /// Why a sync result must not be applied, or nil to go ahead.
@@ -389,14 +407,17 @@ public final class SharedStateSync: ObservableObject {
     }
 
     private func currentLocalState() -> SharedState {
-        DispatchQueue.main.sync {
-            SharedState(notes: SessionNotesStore.shared.notes,
+        DispatchQueue.main.sync { localStateNow() }
+    }
+
+    /// Caller must already be on main.
+    private func localStateNow() -> SharedState {
+        SharedState(notes: SessionNotesStore.shared.notes,
                         favorites: FavoritesStore.shared.entries,
                         githubPipelines: GitHubConfigStore.shared.pipelineURLs,
-                        gitlabPipelines: GitLabConfigStore.shared.pipelineURLs,
-                        updated: Date(),
-                        writtenBy: Self.thisMachine)
-        }
+                    gitlabPipelines: GitLabConfigStore.shared.pipelineURLs,
+                    updated: Date(),
+                    writtenBy: Self.thisMachine)
     }
 
     /// Keep a copy of what we are about to replace.
@@ -419,25 +440,28 @@ public final class SharedStateSync: ObservableObject {
     }
 
     private func apply(_ state: SharedState) {
-        DispatchQueue.main.sync {
-            applying = true
-            SessionNotesStore.shared.replaceAll(state.notes)
-            if FavoritesStore.shared.entries != state.favorites {
-                FavoritesStore.shared.entries = state.favorites
-                FavoritesStore.shared.save()
-            }
-            // Pipelines: write, then tell the monitor, so a pipeline added
-            // on the other Mac starts reporting here without a restart.
-            if GitHubConfigStore.shared.pipelineURLs != state.githubPipelines {
-                GitHubConfigStore.shared.pipelineURLs = state.githubPipelines
-                WorkflowMonitor.shared.refresh()
-            }
-            if GitLabConfigStore.shared.pipelineURLs != state.gitlabPipelines {
-                GitLabConfigStore.shared.pipelineURLs = state.gitlabPipelines
-                GitLabPipelineMonitor.shared.refresh()
-            }
-            applying = false
+        DispatchQueue.main.sync { applyNow(state) }
+    }
+
+    /// Caller must already be on main.
+    private func applyNow(_ state: SharedState) {
+        applying = true
+        SessionNotesStore.shared.replaceAll(state.notes)
+        if FavoritesStore.shared.entries != state.favorites {
+            FavoritesStore.shared.entries = state.favorites
+            FavoritesStore.shared.save()
         }
+        // Pipelines: write, then tell the monitor, so a pipeline added
+        // on the other Mac starts reporting here without a restart.
+        if GitHubConfigStore.shared.pipelineURLs != state.githubPipelines {
+            GitHubConfigStore.shared.pipelineURLs = state.githubPipelines
+            WorkflowMonitor.shared.refresh()
+        }
+        if GitLabConfigStore.shared.pipelineURLs != state.gitlabPipelines {
+            GitLabConfigStore.shared.pipelineURLs = state.gitlabPipelines
+            GitLabPipelineMonitor.shared.refresh()
+        }
+        applying = false
     }
 
     private func report(_ status: Status) {

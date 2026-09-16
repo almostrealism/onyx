@@ -535,3 +535,75 @@ final class SharedStateWipeTests: XCTestCase {
         XCTAssertFalse(onlyPipelines.isEmpty, "one entry anywhere is not empty")
     }
 }
+
+/// A note typed WHILE a sync is in flight must survive it.
+///
+/// The report: "I have to enter session notes a bunch of times before they
+/// actually attach." The cause was a read-modify-write race. `run()` took a
+/// snapshot of local state, then spent seconds fetching over ssh, then
+/// merged using that stale snapshot and wrote the result back over the
+/// store — erasing anything typed in between. Activation triggers a sync,
+/// so the worst window is the few seconds after switching to Onyx, which
+/// is exactly when someone sits down and writes a note.
+///
+/// These assert the MERGE ARITHMETIC of both orderings, since the fix is
+/// which snapshot is fed in.
+final class SharedStateConcurrentEditTests: XCTestCase {
+
+    private let existing = SessionNote(sessionID: "a", text: "already here")
+    private func justTyped() -> SessionNote {
+        SessionNote(sessionID: "b", text: "typed while the sync was running")
+    }
+
+    /// What the old code did: merge with the snapshot from BEFORE the edit.
+    /// Against an unchanged remote, the new note isn't in local, isn't in
+    /// the shadow, and simply never appears — and the apply then writes
+    /// that set over the store, deleting it.
+    func testTheStaleSnapshotLosesTheNote() {
+        let base: [String: SessionNote] = ["a": existing]
+        let staleLocal = base                       // taken before typing
+        let merged = SharedStateMerge.mergeNotes(base: base, local: staleLocal,
+                                                 remote: base)
+        XCTAssertNil(merged["b"],
+                     "this is the bug, kept visible: the note is not in the result, "
+                     + "so applying the result removes it from the store")
+    }
+
+    /// What it does now: the snapshot is taken at apply time, so the note
+    /// is part of `local` and reads as an addition.
+    func testTheFreshSnapshotKeepsIt() {
+        let base: [String: SessionNote] = ["a": existing]
+        var freshLocal = base
+        freshLocal["b"] = justTyped()               // typed during the fetch
+        let merged = SharedStateMerge.mergeNotes(base: base, local: freshLocal,
+                                                 remote: base)
+        XCTAssertEqual(merged["b"]?.text, "typed while the sync was running")
+        XCTAssertNotNil(merged["a"], "and the note that was already there stays")
+    }
+
+    /// And it still survives when the other machine changed something else
+    /// in the same window — the common case once two Macs are syncing.
+    func testItSurvivesAlongsideARemoteChange() {
+        let base: [String: SessionNote] = ["a": existing]
+        var freshLocal = base
+        freshLocal["b"] = justTyped()
+        var remote = base
+        remote["c"] = SessionNote(sessionID: "c", text: "from the other Mac")
+
+        let merged = SharedStateMerge.mergeNotes(base: base, local: freshLocal, remote: remote)
+        XCTAssertNotNil(merged["b"], "mine")
+        XCTAssertNotNil(merged["c"], "theirs")
+        XCTAssertNotNil(merged["a"], "and the one we both had")
+    }
+
+    /// An edit to an EXISTING note during the window is the same race with
+    /// a different ending — the text would revert rather than vanish.
+    func testAnEditDuringTheWindowIsNotReverted() {
+        let base: [String: SessionNote] = ["a": existing]
+        let edited = SessionNote(sessionID: "a", text: "changed my mind",
+                                 updated: Date().addingTimeInterval(1))
+        let merged = SharedStateMerge.mergeNotes(base: base, local: ["a": edited],
+                                                 remote: base)
+        XCTAssertEqual(merged["a"]?.text, "changed my mind")
+    }
+}
