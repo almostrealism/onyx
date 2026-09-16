@@ -56,15 +56,20 @@ public final class AlertDelivery {
     /// Deliver an alert. Returns what happened, so the tool can tell the
     /// agent whether its aim landed rather than silently swallowing it.
     @discardableResult
+    /// `at` is when the agent SENT it, which is not always when it
+    /// arrived: an alert the bridge couldn't deliver is queued and
+    /// replayed later, and stamping it with the delivery time would make
+    /// it say "finished at 9am" about work that finished at 2am.
     public func deliver(title: String, body: String?,
                         urgent: Bool, external: Bool,
-                        user: String?, host: String?, session: String?) -> Outcome {
+                        user: String?, host: String?, session: String?,
+                        at: Date = Date()) -> Outcome {
         let target = (user == nil && host == nil && session == nil)
             ? nil
             : SessionAlert.Target(user: user, host: host, session: session)
 
         let match = resolveSession(user: user, host: host, session: session)
-        let alert = SessionAlert(title: title, body: body, urgent: urgent,
+        let alert = SessionAlert(at: at, title: title, body: body, urgent: urgent,
                                  external: external, sessionKey: match.key, target: target)
         AlertStore.shared.record(alert)
 

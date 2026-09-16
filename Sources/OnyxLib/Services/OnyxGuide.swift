@@ -118,6 +118,11 @@ public enum OnyxGuide {
             watch. Assume a real person is interrupted, possibly away from the desk, \
             and do not spend that on progress they didn't ask for.
 
+            If Onyx can't be reached when you call `notify`, the alert is QUEUED on this \
+            host and delivered when it can be — the reply says so. Don't resend it; that \
+            arrives twice. Queued alerts carry the time you sent them, and are dropped \
+            after 24 hours.
+
             Write the title for someone glancing at it. "Migration finished, 3 conflicts \
             need a decision" is useful; "done" is not.
             """

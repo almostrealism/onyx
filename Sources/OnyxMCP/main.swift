@@ -405,6 +405,16 @@ func extractRequestId(_ json: String) -> String {
     return "null"
 }
 
+/// A successful tool result carrying one line of text — the MCP shape for
+/// "this worked, and here is what happened".
+func toolResult(id: String, text: String) -> String {
+    let escaped = text
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+    return "{\"jsonrpc\":\"2.0\",\"id\":\(id),\"result\":{\"content\":"
+        + "[{\"type\":\"text\",\"text\":\"\(escaped)\"}]}}"
+}
+
 func errorResponse(id: String, message: String) -> String {
     // Escape quotes and backslashes in the message
     let escaped = message
@@ -542,6 +552,44 @@ if isHookMode {
     // automatically reconnect once it comes back.
 
     let conn = OnyxConnection(receiveTimeout: 30)
+    let outbox = Outbox()
+    // One connection, two threads (the stdin loop and the retry timer).
+    let wire = NSLock()
+
+    func deliver(_ line: String) -> String? {
+        wire.lock(); defer { wire.unlock() }
+        return conn.sendRequest(line)
+    }
+
+    /// Try the queue. Cheap when it's empty, which is almost always.
+    func flushOutbox(why: String) {
+        outbox.purgeExpired()
+        guard !outbox.isEmpty else { return }
+        let result = outbox.flush { deliver($0) }
+        if result.delivered > 0 {
+            let note = "OnyxMCP: delivered \(result.delivered) queued alert(s) [\(why)]"
+                + (result.remaining > 0 ? ", \(result.remaining) still waiting" : "")
+                + "\n"
+            FileHandle.standardError.write(Data(note.utf8))
+        }
+    }
+
+    // A bridge that only retried when the agent spoke would hold an alert
+    // until the agent happened to do something else — and an agent that
+    // finishes its work and goes quiet is exactly the one whose last
+    // message matters. So the queue gets its own heartbeat.
+    let retry = Thread {
+        while true {
+            Thread.sleep(forTimeInterval: 60)
+            flushOutbox(why: "retry")
+        }
+    }
+    retry.stackSize = 512 * 1024
+    retry.start()
+
+    // A new session is a new chance: whatever the last one couldn't
+    // deliver goes out before anything else.
+    flushOutbox(why: "session start")
 
     // Best-effort first connect, but DO NOT exit on failure: the backend
     // may come up later (e.g. desktop launch after MCP started).
@@ -552,17 +600,33 @@ if isHookMode {
         // client that receives a response to something it never gave an
         // id to treats the stream as broken.
         if isNotification(line) {
+            wire.lock()
             conn.sendNotification(line)
+            wire.unlock()
             continue
         }
 
-        if let response = conn.sendRequest(line) {
+        if let response = deliver(line) {
             print(response)
             fflush(stdout)
+            flushOutbox(why: "backend is up")
+        } else if Outbox.isWorthQueueing(line) {
+            // The point of the outbox. The desktop being unreachable is an
+            // infrastructure problem; the alert is still true, and the
+            // person still wants it. Tell the agent plainly so it doesn't
+            // retry and queue a second copy.
+            let waiting = outbox.enqueue(line)
+            FileHandle.standardError.write(Data(
+                "OnyxMCP: backend unreachable — queued this alert (\(waiting) waiting)\n".utf8))
+            print(toolResult(
+                id: extractRequestId(line),
+                text: "Onyx is not reachable from here right now, so this alert is QUEUED and "
+                    + "will be delivered when it is (\(waiting) waiting; queued alerts are "
+                    + "dropped after 24 hours). Don't resend it — that would arrive twice."))
+            fflush(stdout)
         } else {
-            let reqId = extractRequestId(line)
             let err = errorResponse(
-                id: reqId,
+                id: extractRequestId(line),
                 message: "Onyx backend unreachable after retries. The next request will retry automatically."
             )
             FileHandle.standardError.write(Data("OnyxMCP: request failed after retries\n".utf8))

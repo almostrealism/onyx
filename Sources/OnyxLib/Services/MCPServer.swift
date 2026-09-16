@@ -104,6 +104,14 @@ public enum AnyCodableValue: Codable, Equatable {
         return nil
     }
 
+    /// Double value. Accepts an int too — JSON makes no distinction and a
+    /// timestamp arrives as either.
+    public var doubleValue: Double? {
+        if case .double(let v) = self { return v }
+        if case .int(let v) = self { return Double(v) }
+        return nil
+    }
+
     /// Int value.
     public var intValue: Int? {
         if case .int(let v) = self { return v }
@@ -566,6 +574,16 @@ public class MCPMessageHandler {
             return JSONRPCResponse(id: id, error: .invalidParams)
         }
 
+        // `queued_at` is added by the bridge when replaying an alert it
+        // couldn't deliver at the time. Only trust it to move an alert
+        // BACKWARDS: a clock-skewed host claiming the future would sort
+        // itself above everything real.
+        let sentAt: Date = {
+            guard let seconds = args["queued_at"]?.doubleValue else { return Date() }
+            let claimed = Date(timeIntervalSince1970: seconds)
+            return claimed < Date() ? claimed : Date()
+        }()
+
         let outcome = AlertDelivery.shared.deliver(
             title: title,
             body: args["body"]?.stringValue,
@@ -573,7 +591,8 @@ public class MCPMessageHandler {
             external: args["external"]?.boolValue ?? false,
             user: args["user"]?.stringValue,
             host: args["host"]?.stringValue,
-            session: args["session"]?.stringValue)
+            session: args["session"]?.stringValue,
+            at: sentAt)
 
         // Tell the agent where it landed. "Delivered" when it named no
         // session; when it named one that matched nothing, say so — an

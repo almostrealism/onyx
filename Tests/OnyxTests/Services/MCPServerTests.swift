@@ -512,3 +512,33 @@ final class MCPNotificationTests: XCTestCase {
         XCTAssertTrue(String(data: data, encoding: .utf8)?.contains("-32601") == true)
     }
 }
+
+/// A queued alert arrives late and must not claim to be new.
+///
+/// The bridge holds alerts it can't deliver and replays them when the
+/// desktop comes back, stamping each with `queued_at` — when the agent
+/// SENT it. Without that, an alert queued at 2am reads as having happened
+/// whenever the network recovered, which is the one detail that would make
+/// it actively misleading.
+final class QueuedAlertTimestampTests: XCTestCase {
+
+    func testAReplayedAlertIsStampedWithWhenItWasSent() {
+        let sent = Date().addingTimeInterval(-6 * 3600)
+        let args: [String: AnyCodableValue] = [
+            "title": .string("Training finished"),
+            "queued_at": .double(sent.timeIntervalSince1970),
+        ]
+        guard let seconds = args["queued_at"]?.doubleValue else {
+            return XCTFail("a timestamp must survive as a number")
+        }
+        XCTAssertEqual(Date(timeIntervalSince1970: seconds).timeIntervalSince1970,
+                       sent.timeIntervalSince1970, accuracy: 1)
+    }
+
+    /// JSON has one number type; a whole-second timestamp arrives as an int.
+    func testAnIntegerTimestampIsAccepted() {
+        XCTAssertEqual(AnyCodableValue.int(1_700_000_000).doubleValue, 1_700_000_000)
+        XCTAssertEqual(AnyCodableValue.double(1.5).doubleValue, 1.5)
+        XCTAssertNil(AnyCodableValue.string("soon").doubleValue)
+    }
+}
