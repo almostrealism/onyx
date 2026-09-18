@@ -14,6 +14,10 @@ public extension Notification.Name {
     static let toggleFullFileBrowser = Notification.Name("toggleFullFileBrowser")
     static let toggleFilePreview = Notification.Name("toggleFilePreview")
     static let cycleTmuxSession = Notification.Name("cycleTmuxSession")
+    /// A session was deliberately killed — object is its id. The terminal
+    /// pool tears down its entry so enumeration's "keep what is provably
+    /// connected" rule can't put it back.
+    static let sessionKilled = Notification.Name("sessionKilled")
     static let createTmuxSession = Notification.Name("createTmuxSession")
     static let toggleSessionManager = Notification.Name("toggleSessionManager")
     static let switchToFavorite = Notification.Name("switchToFavorite")
@@ -1040,6 +1044,26 @@ public class AppState: ObservableObject {
                     return
                 }
                 self.forgetSessionEntries(session)
+
+                // Take it off the list NOW, and make sure nothing puts it
+                // back. Three things used to resurrect a killed session:
+                //
+                //  - the topology store keeps a session that stopped being
+                //    enumerated: still marked ALIVE for 30 seconds — so it
+                //    sits in the list looking healthy with a dead terminal
+                //    behind it — and then grayed out for ten minutes;
+                //  - enumeration re-adds any session whose pool entry is
+                //    still running, and the terminal's ssh outlives the
+                //    tmux session it was attached to;
+                //  - and the list only refreshed on the next enumeration
+                //    anyway, so for seconds it was simply still there.
+                //
+                // The grace period is right for a session that vanished
+                // because a probe failed. This one didn't vanish; it was
+                // killed, and we are the ones who killed it.
+                NetworkTopologyStore.shared.forget(sessionID: id)
+                NotificationCenter.default.post(name: .sessionKilled, object: id)
+                self.allSessions.removeAll { $0.id == id }
                 self.refreshSessionList = true
             }
         }

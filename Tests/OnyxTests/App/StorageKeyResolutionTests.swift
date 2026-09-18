@@ -584,3 +584,96 @@ final class SessionNoteClearingTests: XCTestCase {
         XCTAssertNil(state.note(for: s))
     }
 }
+
+/// Killing a session removes it, rather than leaving a broken-looking one.
+///
+/// The report: "killing a session leaves it in a weird broken state rather
+/// than removing it from the list". Three separate things put it back —
+/// the topology store's ten-minute grace period re-derived it as
+/// `unavailable`, enumeration preserved any session whose pool entry was
+/// still running (the terminal's ssh outlives the tmux session it was
+/// attached to), and the list only refreshed on the next enumeration
+/// anyway.
+///
+/// The grace period is right for a session that vanished because a probe
+/// failed. A killed one didn't vanish — we killed it.
+final class KilledSessionTests: XCTestCase {
+
+    private let host = HostConfig(label: "build",
+                                  ssh: SSHConfig(host: "build.example.com", user: "me"))
+
+    private func session(_ name: String) -> TmuxSession {
+        TmuxSession(name: name, source: .host(hostID: host.id))
+    }
+
+    override func setUp() {
+        super.setUp()
+        NetworkTopologyStore.shared.reset()
+    }
+
+    /// The core of it: a session the store has been told to forget must
+    /// not come back as an unavailable entry.
+    func testAForgottenSessionIsNotDerivedAsUnavailable() {
+        let dead = session("doomed")
+        let other = session("keeper")
+        NetworkTopologyStore.shared.mergeEnumeration(
+            hostID: host.id, sessions: [dead, other], probeResult: .ok)
+
+        // It stops being enumerated — as it would, having been killed.
+        NetworkTopologyStore.shared.mergeEnumeration(
+            hostID: host.id, sessions: [other], probeResult: .ok)
+        XCTAssertTrue(NetworkTopologyStore.shared.deriveSessions()
+            .contains { $0.name == "doomed" },
+            """
+            Precondition, and the bug in one line: the store keeps it. For \
+            the first 30 seconds it is even still marked ALIVE, so a killed \
+            session sits in the list looking perfectly healthy with a dead \
+            terminal behind it; after that it is grayed out for ten minutes.
+            """)
+
+        XCTAssertTrue(NetworkTopologyStore.shared.forget(sessionID: dead.id))
+        let derived = NetworkTopologyStore.shared.deriveSessions()
+        XCTAssertFalse(derived.contains { $0.name == "doomed" },
+                       "a killed session is gone, not grayed out")
+        XCTAssertTrue(derived.contains { $0.name == "keeper" },
+                      "and nothing else is disturbed")
+    }
+
+    /// A session that merely stopped answering must STILL get the grace
+    /// period — that is what stops one failed probe wiping the list.
+    func testAnUnkilledSessionKeepsItsGracePeriod() {
+        let flaky = session("flaky")
+        NetworkTopologyStore.shared.mergeEnumeration(
+            hostID: host.id, sessions: [flaky], probeResult: .ok)
+        NetworkTopologyStore.shared.mergeEnumeration(
+            hostID: host.id, sessions: [], probeResult: .ok)
+
+        XCTAssertTrue(NetworkTopologyStore.shared.deriveSessions()
+            .contains { $0.name == "flaky" },
+            "vanishing is not the same as being killed — this one is kept")
+    }
+
+    func testForgettingSomethingUnknownIsHarmless() {
+        XCTAssertFalse(NetworkTopologyStore.shared.forget(sessionID: "host:nope:nothing"))
+    }
+
+    /// Killing also clears what was filed against the session, so a new
+    /// one with the same name doesn't inherit a dead one's note.
+    func testKillingForgetsWhatWasStoredAgainstIt() {
+        let state = AppState()
+        state.hosts = [host]
+        FavoritesStore.shared.reset()
+        SessionNotesStore.shared.reset()
+
+        let doomed = session("doomed")
+        state.setNote("waiting on the build", for: doomed)
+        FavoritesStore.shared.entries = [
+            FavoriteEntry(sessionID: state.storageKey(for: doomed), windows: [state.windowIndex])
+        ]
+
+        state.forgetSessionEntries(doomed)
+
+        XCTAssertNil(state.note(for: doomed))
+        XCTAssertFalse(state.isFavorited(doomed))
+    }
+}

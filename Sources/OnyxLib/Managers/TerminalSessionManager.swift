@@ -159,6 +159,16 @@ class OnyxTerminalView: NSView {
 
         installFocusMonitor()
         installCmdClickMonitor()
+        // A killed session's terminal must go with it. Without this its
+        // ssh process keeps running — attached to a tmux session that no
+        // longer exists — and enumeration's "keep what is provably
+        // connected" rule reads that as a reason to put the session back.
+        NotificationCenter.default.addObserver(
+            forName: .sessionKilled, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let id = note.object as? String else { return }
+            self?.destroyPoolEntry(id)
+        }
         NotificationCenter.default.addObserver(forName: .refreshPoolStatus, object: nil, queue: .main) { [weak self] _ in
             self?.publishPoolStatus()
         }

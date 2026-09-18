@@ -225,6 +225,25 @@ public class NetworkTopologyStore: ObservableObject {
         return result
     }
 
+    /// Forget a session outright, rather than remembering it as dead.
+    ///
+    /// `deriveSessions` keeps a session that stopped being enumerated for
+    /// ten minutes, shown as unavailable — which is right when it vanished
+    /// because a probe failed, and wrong when the user killed it. Then it
+    /// is not stale data, it is gone, and leaving it on the list as a
+    /// broken-looking entry is the opposite of what they asked for.
+    @discardableResult
+    public func forget(sessionID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        for (hostID, var topo) in hosts where topo.sessions[sessionID] != nil {
+            topo.sessions.removeValue(forKey: sessionID)
+            hosts[hostID] = topo
+            return true
+        }
+        return false
+    }
+
     /// Garbage-collect entries not seen in 24 hours
     public func gc() {
         lock.lock()
