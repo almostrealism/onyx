@@ -42,5 +42,9 @@ public enum OnyxVersion {
     ///
     /// 1 — the original: answered notifications, waited for replies to them.
     /// 2 — notifications are one-way in both directions.
-    public static let bridgeProtocol = 2
+    /// 3 — the desktop identifies itself in `initialize` (machine, version,
+    ///     proto); the bridge answers the handshake, the tool list and
+    ///     `onyx_status` on its own when the desktop is away, and keeps a
+    ///     per-host ledger of what it has seen.
+    public static let bridgeProtocol = 3
 }

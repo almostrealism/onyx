@@ -51,6 +51,14 @@ becomes a bug worth fixing.
   registering it with Claude Code — with a status light per host in the
   monitor's CONNECTIONS section. A machine with several accounts gets a
   command you can hand to the others.
+- **The bridge can explain itself.** When Onyx can't be reached, an agent
+  used to be told "unreachable" and nothing more, and had to conclude "it's
+  broken". Now every failure says what this host has seen: whether Onyx has
+  *ever* answered from here, which desktop, how long ago, over which route,
+  and what the last attempt found. An `onyx_status` tool answers the same
+  from the host's own records without the desktop running, and
+  `OnyxMCP --status` prints it for a person. A session that starts while
+  Onyx is closed no longer stays dead — the tools appear when it opens.
 - **The install now tells you if it can't reach Onyx afterwards**, naming
   the symptom. Registered is not the same as reachable, and the alternative
   first symptom was Claude hanging for thirty seconds and reporting a
@@ -100,6 +108,8 @@ becomes a bug worth fixing.
 - **A note typed while a sync was running would vanish**, or an edit would
   revert a few seconds later. The sync merged against a snapshot taken
   before the fetch, so anything typed during it was written away.
+- **Killing a session left it in the list looking healthy** for thirty
+  seconds, then grayed out for ten minutes. It's removed at once now.
 - **Favorites appeared twice** in the bar, and each duplicate silently ate
   a ⌘-number.
 - **Clearing a session note didn't always clear it** — it would come back,

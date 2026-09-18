@@ -214,6 +214,16 @@ func readLine(fd: Int32) -> String? {
 final class OnyxConnection {
     private var fd: Int32 = -1
     private let receiveTimeout: Int
+    /// Host-wide notes on what has and hasn't worked. Every outcome here
+    /// is written down, so a later error message — or a human at the
+    /// prompt — can say more than "unreachable".
+    let ledger = Ledger()
+    /// The desktop currently answering, once it has said who it is.
+    private(set) var desktop: (machine: String, version: String)?
+    /// Whether the LAST request got through. The transition from false to
+    /// true is when the client should be told the tool list may have
+    /// changed — because while the backend was down, the list was ours.
+    private(set) var backendUp = false
     /// The route the current fd came from.
     private var route: Route?
     /// Routes that have answered with JSON-RPC at least once. A proven
@@ -272,6 +282,7 @@ final class OnyxConnection {
     /// Give up on a route that connected and then failed to speak.
     private func reject(_ route: Route, why: String) {
         rejected.insert(key(route))
+        ledger.sawFailure(route: route.describe, reason: why)
         FileHandle.standardError.write(Data(
             "OnyxMCP: \(route.describe) is not Onyx (\(why)) — trying the next route\n".utf8))
         closeFd()
@@ -316,6 +327,10 @@ final class OnyxConnection {
         while attempt < attempts {
             if !ensureConnected() {
                 logRetry(attempt: attempt, reason: "connect failed")
+                if attempt == 0 {
+                    ledger.sawFailure(route: "every route",
+                                      reason: "nothing listening on any of them")
+                }
                 backoff(attempt: attempt); attempt += 1
                 continue
             }
@@ -360,13 +375,47 @@ final class OnyxConnection {
             if let current, !isProven(current) {
                 proven.insert(key(current))
                 setReceiveTimeout(fd: fd, seconds: receiveTimeout)
-                FileHandle.standardError.write(Data(
-                    "OnyxMCP: connected to Onyx via \(current.describe)\n".utf8))
+                identify(via: current)
+                let who = desktop.map { " — \($0.machine), Onyx \($0.version)" } ?? ""
+                let note = "OnyxMCP: connected to Onyx via \(current.describe)\(who)\n"
+                FileHandle.standardError.write(Data(note.utf8))
+            } else if let current {
+                ledger.sawSuccess(route: current.describe)
             }
+            backendUp = true
             return response
         }
         return nil
     }
+
+    /// Ask the desktop who it is, and write it down.
+    ///
+    /// One extra `initialize` on the wire when a route first proves
+    /// itself. The reply's serverInfo names the machine and the version,
+    /// which is the difference between a ledger that says "something
+    /// answered" and one that says "mac-studio, Onyx 0.17, 2 minutes ago".
+    private func identify(via route: Route) {
+        let request = #"{"jsonrpc":"2.0","id":"onyx-identify","method":"initialize"}"#
+        guard writeAll(fd: fd, data: Array((request + "\n").utf8)),
+              let reply = readLine(fd: fd),
+              let data = reply.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let result = object["result"] as? [String: Any],
+              let info = result["serverInfo"] as? [String: Any] else {
+            // Answered, but not with an identity — an older desktop. Still
+            // worth recording that SOMETHING answers here.
+            ledger.sawDesktop(machine: "unknown desktop", version: "pre-0.17",
+                              route: route.describe)
+            return
+        }
+        let machine = info["machine"] as? String ?? "unknown desktop"
+        let version = info["version"] as? String ?? "?"
+        desktop = (machine, version)
+        ledger.sawDesktop(machine: machine, version: version, route: route.describe)
+    }
+
+    /// Note that the backend stopped answering, for the up→down→up edge.
+    func markDown() { backendUp = false }
 
     private func logRetry(attempt: Int, reason: String) {
         let msg = "OnyxMCP: attempt \(attempt + 1) — \(reason)\n"
@@ -403,7 +452,44 @@ final class Bridge: @unchecked Sendable {
 
     func deliver(_ line: String) -> String? {
         wire.lock(); defer { wire.unlock() }
-        return connection.sendRequest(line)
+        let reply = connection.sendRequest(line)
+        if reply == nil {
+            connection.markDown()
+            return nil
+        }
+        // The edge that matters: the client was handed OUR tool list
+        // (because the desktop was away, possibly since before the session
+        // began), and the desktop has now answered. Tell the client the
+        // list moved so it asks again — otherwise a session that started
+        // while Onyx was closed never sees Onyx's tools at all.
+        if clientHasLocalToolList {
+            clientHasLocalToolList = false
+            print(toolsChangedNotification())
+            fflush(stdout)
+            FileHandle.standardError.write(Data(
+                "OnyxMCP: desktop reachable now — told the client the tool list changed\n".utf8))
+        }
+        return reply
+    }
+
+    /// True after `initialize` or `tools/list` was answered locally,
+    /// until the desktop answers something.
+    var clientHasLocalToolList = false
+
+    var ledger: Ledger { connection.ledger }
+
+    /// The full picture, as text an agent or a person can read.
+    func statusReport() -> String {
+        Ledger.report(ledger.snapshot(),
+                      host: ProcessInfo.processInfo.hostName,
+                      version: "\(onyxMCPVersion) (proto \(OnyxVersion.bridgeProtocol))",
+                      routes: probeRoutes(),
+                      outboxWaiting: outbox.count)
+    }
+
+    /// The paragraph that replaces "unreachable" in every error.
+    func unreachableExplanation() -> String {
+        Ledger.summary(ledger.snapshot(), outboxWaiting: outbox.count)
     }
 
     func sendNotification(_ line: String) {
@@ -422,6 +508,100 @@ final class Bridge: @unchecked Sendable {
             + "\n"
         FileHandle.standardError.write(Data(note.utf8))
     }
+}
+
+// MARK: - What the bridge answers on its own
+
+/// The tool the bridge serves WITHOUT a desktop. It exists so an agent
+/// always has something to call that explains the situation, instead of
+/// being left to conclude "it's broken" from a failed tool call and a
+/// one-word error.
+let statusToolName = "onyx_status"
+
+func statusToolJSON() -> String {
+    // Kept as a literal so it is byte-identical whether the desktop is
+    // reachable or not.
+    #"""
+    {"name":"onyx_status","description":"Is Onyx reachable from this host, and if not, why not and since when. Call this FIRST when any other Onyx tool fails or when the Onyx tools seem to be missing: it answers from this host's own records — which desktops have ever answered from here, when each was last heard from, what the last attempt saw, and whether alerts are queued — and never needs the desktop to be running.","inputSchema":{"type":"object","properties":{}}}
+    """#.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+func methodName(of line: String) -> String? {
+    guard let data = line.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return nil }
+    return object["method"] as? String
+}
+
+func toolName(of line: String) -> String? {
+    guard let data = line.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let params = object["params"] as? [String: Any] else { return nil }
+    return params["name"] as? String
+}
+
+/// An `initialize` answer the bridge can give with no desktop behind it.
+///
+/// This is the fix for a session that starts while Onyx is closed. The
+/// bridge used to fail `initialize`, and a client that sees initialize
+/// fail marks the server dead FOR THE WHOLE SESSION — Onyx opening a
+/// minute later changed nothing. Now the handshake always succeeds,
+/// `listChanged` tells the client the tool list can move, and when the
+/// desktop appears the bridge says so (see the main loop).
+func localInitializeResponse(id: String) -> String {
+    #"{"jsonrpc":"2.0","id":\#(id),"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{"listChanged":true}},"serverInfo":{"name":"onyx","version":"\#(onyxMCPVersion)","note":"bridge only — the Onyx desktop is not reachable from this host right now; call onyx_status"}}}"#
+}
+
+/// A `tools/list` with only what the bridge itself can serve.
+func localToolsListResponse(id: String) -> String {
+    #"{"jsonrpc":"2.0","id":\#(id),"result":{"tools":[\#(statusToolJSON())]}}"#
+}
+
+/// The desktop's own tools/list, with `onyx_status` added — so the tool
+/// is callable whether or not the desktop is up, from the same name.
+func withStatusTool(_ response: String) -> String {
+    guard let data = response.data(using: .utf8),
+          var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          var result = object["result"] as? [String: Any],
+          var tools = result["tools"] as? [[String: Any]],
+          let statusData = statusToolJSON().data(using: .utf8),
+          let status = try? JSONSerialization.jsonObject(with: statusData) as? [String: Any]
+    else { return response }
+    guard !tools.contains(where: { $0["name"] as? String == statusToolName }) else { return response }
+    tools.append(status)
+    result["tools"] = tools
+    object["result"] = result
+    guard let out = try? JSONSerialization.data(withJSONObject: object),
+          let line = String(data: out, encoding: .utf8) else { return response }
+    return line
+}
+
+/// Live verdict per route, the same probe `--probe` prints.
+func probeRoutes() -> [(route: String, verdict: String, ok: Bool)] {
+    Route.allCases.map { route in
+        let fd = route.connect()
+        guard fd >= 0 else { return (route.describe, "nothing listening", false) }
+        defer { close(fd) }
+        setReceiveTimeout(fd: fd, seconds: 5)
+        setSendTimeout(fd: fd, seconds: 5)
+        let request = #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#
+        guard writeAll(fd: fd, data: Array((request + "\n").utf8)) else {
+            return (route.describe, "connected, but the write failed", false)
+        }
+        guard let reply = readLine(fd: fd) else {
+            return (route.describe, "connected, then silence (a stale ssh -R forward looks exactly like this)", false)
+        }
+        return looksLikeOnyx(reply)
+            ? (route.describe, "Onyx answered", true)
+            : (route.describe, "answered, but it is not Onyx", false)
+    }
+}
+
+/// The server→client notice that the tool list moved. Allowed on stdio
+/// at any time; the client re-lists if it honors `listChanged`, and
+/// ignores it harmlessly if not.
+func toolsChangedNotification() -> String {
+    #"{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}"#
 }
 
 // MARK: - JSON-RPC helpers
@@ -458,22 +638,49 @@ func extractRequestId(_ json: String) -> String {
     return "null"
 }
 
-/// A successful tool result carrying one line of text — the MCP shape for
-/// "this worked, and here is what happened".
+/// A successful tool result carrying text — the MCP shape for "this
+/// worked, and here is what happened".
+///
+/// Built by the serializer, not by hand. The first version escaped
+/// quotes and backslashes itself and nothing else, which held until the
+/// status report — several lines long — went through it and came out as
+/// a JSON string with raw newlines in it, which is not JSON.
 func toolResult(id: String, text: String) -> String {
-    let escaped = text
-        .replacingOccurrences(of: "\\", with: "\\\\")
-        .replacingOccurrences(of: "\"", with: "\\\"")
-    return "{\"jsonrpc\":\"2.0\",\"id\":\(id),\"result\":{\"content\":"
-        + "[{\"type\":\"text\",\"text\":\"\(escaped)\"}]}}"
+    let payload: [String: Any] = [
+        "jsonrpc": "2.0",
+        "id": idValue(id),
+        "result": ["content": [["type": "text", "text": text]]],
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: payload),
+          let line = String(data: data, encoding: .utf8) else {
+        return #"{"jsonrpc":"2.0","id":\#(id),"result":{"content":[{"type":"text","text":"(unrepresentable)"}]}}"#
+    }
+    return line
+}
+
+/// `extractRequestId` hands back the id as it appeared in the request —
+/// a number, a quoted string, or `null` — so it can be spliced into raw
+/// JSON. The serializer needs the value instead.
+func idValue(_ raw: String) -> Any {
+    if raw == "null" { return NSNull() }
+    if let n = Int(raw) { return n }
+    if raw.hasPrefix("\""), raw.hasSuffix("\""), raw.count >= 2 {
+        return String(raw.dropFirst().dropLast())
+    }
+    return raw
 }
 
 func errorResponse(id: String, message: String) -> String {
-    // Escape quotes and backslashes in the message
-    let escaped = message
-        .replacingOccurrences(of: "\\", with: "\\\\")
-        .replacingOccurrences(of: "\"", with: "\\\"")
-    return "{\"jsonrpc\":\"2.0\",\"id\":\(id),\"error\":{\"code\":-32000,\"message\":\"\(escaped)\"}}"
+    let payload: [String: Any] = [
+        "jsonrpc": "2.0",
+        "id": idValue(id),
+        "error": ["code": -32000, "message": message],
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: payload),
+          let line = String(data: data, encoding: .utf8) else {
+        return #"{"jsonrpc":"2.0","id":\#(id),"error":{"code":-32000,"message":"unreachable"}}"#
+    }
+    return line
 }
 
 // MARK: - Modes
@@ -493,6 +700,21 @@ if CommandLine.arguments.contains("--version") {
     // number — the old bridge shipped claiming 0.17 too.
     print("OnyxMCP \(onyxMCPVersion) (proto \(OnyxVersion.bridgeProtocol))")
     exit(0)
+}
+
+// `--status` is the standalone answer to "what is going on": everything
+// this host has ever seen of Onyx, every route's state right now, and
+// what is queued. The same text the `onyx_status` tool returns to an
+// agent, so a human and an agent are reading the same facts.
+if CommandLine.arguments.contains("--status") {
+    let ledger = Ledger()
+    let routes = probeRoutes()
+    print(Ledger.report(ledger.snapshot(),
+                        host: ProcessInfo.processInfo.hostName,
+                        version: "\(onyxMCPVersion) (proto \(OnyxVersion.bridgeProtocol))",
+                        routes: routes,
+                        outboxWaiting: Outbox().count))
+    exit(routes.contains { $0.ok } ? 0 : 1)
 }
 
 // `--probe` answers "can this host actually reach Onyx", route by route,
@@ -614,6 +836,14 @@ if isHookMode {
         while true {
             Thread.sleep(forTimeInterval: 60)
             bridge.flushOutbox(why: "retry")
+            // If the client is holding OUR tool list, look for the desktop
+            // even though nobody asked: an idle agent would otherwise
+            // never learn that Onyx opened. `deliver` sends the
+            // list_changed notice itself on success; the reply is
+            // discarded because no one requested it.
+            if bridge.clientHasLocalToolList {
+                _ = bridge.deliver(#"{"jsonrpc":"2.0","id":"onyx-heartbeat","method":"initialize"}"#)
+            }
         }
     }
     retry.stackSize = 512 * 1024
@@ -636,10 +866,32 @@ if isHookMode {
             continue
         }
 
+        // Served here, desktop or no desktop. An agent that can call this
+        // never has to guess.
+        if methodName(of: line) == "tools/call", toolName(of: line) == statusToolName {
+            print(toolResult(id: extractRequestId(line), text: bridge.statusReport()))
+            fflush(stdout)
+            continue
+        }
+
         if let response = bridge.deliver(line) {
-            print(response)
+            print(methodName(of: line) == "tools/list" ? withStatusTool(response) : response)
             fflush(stdout)
             bridge.flushOutbox(why: "backend is up")
+        } else if methodName(of: line) == "initialize" {
+            // Never fail the handshake. A client that sees it fail marks
+            // this server dead for the whole session, and Onyx opening a
+            // minute later then changes nothing.
+            bridge.clientHasLocalToolList = true
+            print(localInitializeResponse(id: extractRequestId(line)))
+            fflush(stdout)
+            let note = "OnyxMCP: desktop unreachable at startup — answered initialize "
+                + "locally; tools will appear when it is\n"
+            FileHandle.standardError.write(Data(note.utf8))
+        } else if methodName(of: line) == "tools/list" {
+            bridge.clientHasLocalToolList = true
+            print(localToolsListResponse(id: extractRequestId(line)))
+            fflush(stdout)
         } else if Outbox.isWorthQueueing(line) {
             // The point of the outbox. The desktop being unreachable is an
             // infrastructure problem; the alert is still true, and the
@@ -655,9 +907,12 @@ if isHookMode {
                     + "dropped after 24 hours). Don't resend it — that would arrive twice."))
             fflush(stdout)
         } else {
+            // Not "unreachable": WHAT was seen, WHEN it last worked, and
+            // what to do. An agent can relay every sentence of this.
             let err = errorResponse(
                 id: extractRequestId(line),
-                message: "Onyx backend unreachable after retries. The next request will retry automatically."
+                message: "Onyx is not reachable from this host. " + bridge.unreachableExplanation()
+                    + " The next request will retry automatically."
             )
             FileHandle.standardError.write(Data("OnyxMCP: request failed after retries\n".utf8))
             print(err)

@@ -64,7 +64,11 @@ final class MCPStdioTests: XCTestCase {
         // exits cleanly. With no backend socket the bridge retries and then
         // emits a per-request error frame — but importantly does NOT exit
         // until stdin is closed.
-        let request = #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"# + "\n"
+        //
+        // A tool call, NOT `initialize`: the handshake deliberately
+        // succeeds with no backend now (BridgeDiagnosticsTests), because a
+        // client that sees it fail marks the server dead for the session.
+        let request = #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"show_html","arguments":{}}}"# + "\n"
         let result = IntegrationTestHelpers.runProcess(
             binary,
             arguments: [],
@@ -78,13 +82,13 @@ final class MCPStdioTests: XCTestCase {
         XCTAssertTrue(result.stdout.contains("\"error\""), "Missing error field. stdout=\(result.stdout)")
         XCTAssertTrue(result.stdout.contains("-32000"), "Expected error code -32000. stdout=\(result.stdout)")
         // The error should reference the new behavior (retries / unreachable)
-        XCTAssertTrue(result.stdout.contains("unreachable") || result.stdout.contains("retr"),
-                      "Error message should mention retries or unreachable backend. stdout=\(result.stdout)")
+        XCTAssertTrue(result.stdout.contains("not reachable") || result.stdout.contains("retry"),
+                      "Error message should say the backend isn't reachable. stdout=\(result.stdout)")
     }
 
     func testStderrMentionsRetries() throws {
         let binary = try IntegrationTestHelpers.requireOnyxMCPBinary()
-        let request = #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"# + "\n"
+        let request = #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"show_html","arguments":{}}}"# + "\n"
         let result = IntegrationTestHelpers.runProcess(
             binary,
             stdin: request,
@@ -99,10 +103,11 @@ final class MCPStdioTests: XCTestCase {
     }
 
     func testBridgeStaysAliveAfterFailedRequest() throws {
-        // Send TWO requests through the bridge with no backend. Both should
-        // produce error frames (the bridge does NOT exit after the first
-        // failure — it keeps reading stdin so a transient backend outage
-        // doesn't tear down the Claude session).
+        // Send TWO requests through the bridge with no backend. Both get a
+        // frame back — the handshake and the tool list are answered by the
+        // bridge itself now — and the bridge does NOT exit after either;
+        // it keeps reading stdin so a transient backend outage doesn't
+        // tear down the Claude session.
         let binary = try IntegrationTestHelpers.requireOnyxMCPBinary()
         let requests = """
         {"jsonrpc":"2.0","id":1,"method":"initialize"}
@@ -117,10 +122,10 @@ final class MCPStdioTests: XCTestCase {
             timeout: 15.0
         )
         XCTAssertFalse(result.timedOut)
-        // Should see TWO JSON-RPC error frames (one per request)
+        // Two JSON-RPC frames, one per request
         let lines = result.stdout.split(separator: "\n").filter { $0.contains("\"jsonrpc\"") }
         XCTAssertEqual(lines.count, 2,
-                       "Expected 2 error frames (bridge must survive first failure). stdout=\(result.stdout)")
+                       "Expected 2 frames (bridge must survive the first). stdout=\(result.stdout)")
         XCTAssertTrue(result.stdout.contains("\"id\":1"))
         XCTAssertTrue(result.stdout.contains("\"id\":2"))
     }
@@ -199,9 +204,11 @@ final class MCPRouteSelectionTests: XCTestCase {
         defer { squatter.stop() }
 
         let started = Date()
+        // A tool call rather than `initialize`, which now succeeds locally
+        // when nothing answers — see BridgeDiagnosticsTests.
         let result = IntegrationTestHelpers.runProcess(
             try IntegrationTestHelpers.requireOnyxMCPBinary(),
-            stdin: #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"# + "\n",
+            stdin: #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"show_html","arguments":{}}}"# + "\n",
             environment: environment(envPort: nil, forwardPort: squatter.port),
             timeout: 28.0)
         let elapsed = Date().timeIntervalSince(started)

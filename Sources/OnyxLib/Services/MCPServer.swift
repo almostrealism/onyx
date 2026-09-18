@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import OnyxVersion
 
 // MARK: - JSON-RPC Types
 
@@ -230,9 +231,16 @@ public class MCPMessageHandler {
             "capabilities": .object([
                 "tools": .object([:])
             ]),
+            // The bridge records who answered, so `OnyxMCP --status` on a
+            // host can say "mac-studio, Onyx 0.17, last answered 2 min
+            // ago" rather than "something spoke JSON-RPC once". Version
+            // was a hardcoded "1.0.0" before, which told nobody anything.
             "serverInfo": .object([
                 "name": .string("onyx"),
-                "version": .string("1.0.0")
+                "version": .string(OnyxVersion.current),
+                "machine": .string(Host.current().localizedName
+                                   ?? ProcessInfo.processInfo.hostName),
+                "proto": .int(OnyxVersion.bridgeProtocol)
             ])
         ])
         return JSONRPCResponse(id: request.id, result: result)
@@ -252,9 +260,33 @@ public class MCPMessageHandler {
                 notifyTool,
                 showHTMLTool,
                 guideTool,
+                statusTool,
             ])
         ])
         return JSONRPCResponse(id: request.id, result: tools)
+    }
+
+    /// Listed by the desktop so the tool list is identical whether an agent
+    /// sees it through the bridge or not. The bridge answers this one
+    /// ITSELF, from the host's own records, and never forwards it — which
+    /// is the point: it must work when the desktop can't be reached. A
+    /// call that does arrive here came over a direct connection, and the
+    /// only honest answer is that the desktop is, evidently, reachable.
+    private var statusTool: AnyCodableValue {
+        .object([
+            "name": .string("onyx_status"),
+            "description": .string("""
+                Is Onyx reachable from this host, and if not, why not and since when. Call \
+                this FIRST when any other Onyx tool fails or when the Onyx tools seem to be \
+                missing: it answers from this host's own records — which desktops have ever \
+                answered from here, when each was last heard from, what the last attempt \
+                saw, and whether alerts are queued — and never needs the desktop to be running.
+                """),
+            "inputSchema": .object([
+                "type": .string("object"),
+                "properties": .object([:])
+            ])
+        ])
     }
 
     /// Ask for the user's attention.
@@ -504,6 +536,12 @@ public class MCPMessageHandler {
         case "onyx_guide":
             return toolResult(id: request.id, success: true,
                               message: OnyxGuide.response(for: arguments["topic"]?.stringValue))
+        case "onyx_status":
+            // Reaching here at all is the diagnosis.
+            return toolResult(id: request.id, success: true,
+                              message: "The Onyx desktop answered this directly — it is reachable "
+                                     + "from here. (\(Host.current().localizedName ?? "this Mac"), "
+                                     + "Onyx \(OnyxVersion.current).)")
         default:
             return JSONRPCResponse(id: request.id, error: JSONRPCError(code: -32602, message: "Unknown tool: \(toolName)"))
         }

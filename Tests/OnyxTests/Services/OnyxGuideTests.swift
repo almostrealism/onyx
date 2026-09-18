@@ -38,7 +38,8 @@ final class OnyxGuideTests: XCTestCase {
     /// exist and have to recover from an error we could have prevented.
     func testTheGuideDoesNotInventTools() {
         let advertised = Set(advertisedToolNames)
-        let referenced = ["show_html", "show_text", "show_diagram", "show_model", "notify"]
+        let referenced = ["show_html", "show_text", "show_diagram", "show_model", "notify",
+                          "onyx_status"]
         for name in referenced {
             XCTAssertTrue(advertised.contains(name),
                           "the guide tells agents to call \(name), which is not offered")

@@ -49,6 +49,13 @@ public enum OnyxGuide {
             Topics: artifacts, alerts, sessions, recipes, skills.
 
             Before writing to a slot, `list_slots` shows what is already there.
+
+            IF A TOOL FAILS, or the Onyx tools seem to be missing, call `onyx_status` \
+            before concluding anything. It answers from this host's own records even when \
+            the desktop can't be reached: whether Onyx has EVER answered from here, which \
+            desktop, how long ago, what the last attempt saw, and what's queued. "Onyx is \
+            broken" is almost never the right conclusion — "Onyx last answered 3 hours ago \
+            from mac-studio and the port forward is gone" is, and that is what it tells you.
             """
         ),
 
