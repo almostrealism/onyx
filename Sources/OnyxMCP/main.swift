@@ -37,6 +37,18 @@ let streamSocket = Int32(SOCK_STREAM.rawValue)
 let streamSocket = SOCK_STREAM
 #endif
 
+// A write to a socket whose far end has closed raises SIGPIPE, and the
+// default action for SIGPIPE is to KILL THE PROCESS. From Claude's side
+// that is "Connection closed" with no result body — the bridge simply
+// died — followed, after it restarts the server, by a retry that works.
+// And the far end closes all the time: every connection-pair rotation
+// tears down the `-R` forward under the bridge, and the desktop drops
+// connections on error. Agents were seeing one or zero successful alerts
+// per session because of this line's absence. With it ignored, write()
+// returns EPIPE, `writeAll` reports false, and the reconnect path that
+// was always there finally gets to run.
+signal(SIGPIPE, SIG_IGN)
+
 let socketPath: String = {
     let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
     return home + "/.onyx/mcp.sock"
@@ -396,14 +408,20 @@ final class OnyxConnection {
     /// answered" and one that says "mac-studio, Onyx 0.17, 2 minutes ago".
     private func identify(via route: Route) {
         let request = #"{"jsonrpc":"2.0","id":"onyx-identify","method":"initialize"}"#
+        // A transport failure here is not a fact about the desktop — the
+        // socket may have been reset between the answer and this — so it
+        // records nothing, and the next request's reconnect will get a
+        // proper look. Only an ANSWER without an identity means "older
+        // desktop".
         guard writeAll(fd: fd, data: Array((request + "\n").utf8)),
-              let reply = readLine(fd: fd),
-              let data = reply.data(using: .utf8),
+              let reply = readLine(fd: fd) else {
+            closeFd()
+            return
+        }
+        guard let data = reply.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let result = object["result"] as? [String: Any],
               let info = result["serverInfo"] as? [String: Any] else {
-            // Answered, but not with an identity — an older desktop. Still
-            // worth recording that SOMETHING answers here.
             ledger.sawDesktop(machine: "unknown desktop", version: "pre-0.17",
                               route: route.describe)
             return
@@ -863,6 +881,17 @@ if isHookMode {
         // id to treats the stream as broken.
         if isNotification(line) {
             bridge.sendNotification(line)
+            continue
+        }
+
+        // `ping` is the client asking whether THIS SERVER is alive, and it
+        // is. Forwarding it was wrong twice over: the desktop answered
+        // methodNotFound, and with the desktop away the forward went to a
+        // dead socket — which, before SIGPIPE was ignored, killed the
+        // bridge on a request no agent ever made.
+        if methodName(of: line) == "ping" {
+            print(#"{"jsonrpc":"2.0","id":\#(extractRequestId(line)),"result":{}}"#)
+            fflush(stdout)
             continue
         }
 

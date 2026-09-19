@@ -208,6 +208,10 @@ public class MCPMessageHandler {
         switch request.method {
         case "initialize":
             return handleInitialize(request)
+        case "ping":
+            // Liveness. An empty result is the whole answer; methodNotFound
+            // here reads to a client as a server that can't be trusted.
+            return JSONRPCResponse(id: request.id, result: .object([:]))
         case "notifications/initialized":
             // Only reachable if a client sends this WITH an id, which is
             // malformed but harmless to humor.
@@ -327,7 +331,7 @@ public class MCPMessageHandler {
                     "external": .object(["type": .string("boolean"),
                                          "description": .string("Deliver outside Onyx as well, so it arrives when the app is not in front. macOS: Notification Center. Default false.")]),
                     "user": .object(["type": .string("string"),
-                                     "description": .string("Remote user of the session this is about, e.g. from `whoami`.")]),
+                                     "description": .string("Optional. The account Onyx CONNECTED to this host as — usually the ssh login, which is NOT `whoami` if you were started with su or sudo -u. Host and session alone are enough and are what is trusted; a user that doesn't match is ignored, not fatal.")]),
                     "host": .object(["type": .string("string"),
                                      "description": .string("Host of the session this is about, as the user refers to it, e.g. from `hostname`.")]),
                     "session": .object(["type": .string("string"),

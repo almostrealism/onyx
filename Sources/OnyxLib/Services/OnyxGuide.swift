@@ -139,19 +139,20 @@ public enum OnyxGuide {
             id: "sessions",
             summary: "Telling Onyx which session you are in",
             body: """
-            Onyx keys work by remote user, host and tmux session name. To find yours:
+            Two values identify your session, and you can read both:
 
-                whoami                            -> user
                 hostname                          -> host
                 tmux display-message -p '#S'      -> session
 
             Pass those to `notify`. The host should be how the USER refers to the \
-            machine; a short name and a fully-qualified one both match.
+            machine; a short name and a fully-qualified one both match. Together they \
+            are enough, and they are what Onyx trusts.
 
-            The session name and the host are the ones worth getting right. If they \
-            single out one session, Onyx trusts them even when the user disagrees — an \
-            agent started with `su` sees a different `whoami` than the account Onyx \
-            connected as, and that is not a reason to lose the alert.
+            There is also a `user` field. Leave it out unless you know it: it means the \
+            account Onyx CONNECTED to this host as — the ssh login — which is NOT \
+            `whoami` if you were started with `su` or `sudo -u`. A user that doesn't \
+            match is ignored rather than fatal, but the reply will say so, and sending a \
+            value that is wrong every time is worse than sending none.
 
             If you cannot work them out — no tmux, an unusual setup — ask the user. \
             "Which Onyx session am I running in?" is a reasonable question, and they can \
