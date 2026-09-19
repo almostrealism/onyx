@@ -11,8 +11,8 @@ final class AlertForwardingTests: XCTestCase {
 
     private func alert(_ title: String = "Migration needs a decision",
                        body: String? = "Keep the newer row, keep both, or stop?",
-                       urgent: Bool = true, external: Bool = true) -> SessionAlert {
-        SessionAlert(title: title, body: body, urgent: urgent, external: external)
+                       urgent: Bool = true) -> SessionAlert {
+        SessionAlert(title: title, body: body, urgent: urgent)
     }
 
     private func config(_ service: PushService) -> AlertForwardingConfig {
@@ -35,17 +35,30 @@ final class AlertForwardingTests: XCTestCase {
     func testUrgentOnlyIgnoresTheQuietOnes() {
         var c = config(.ntfy)
         c.threshold = .urgentOnly
-        XCTAssertTrue(c.shouldForward(alert(urgent: true, external: false)))
-        XCTAssertFalse(c.shouldForward(alert(urgent: false, external: true)))
+        XCTAssertTrue(c.shouldForward(alert(urgent: true)))
+        XCTAssertFalse(c.shouldForward(alert(urgent: false)))
     }
 
-    /// The default. `external` already means "reach me when I'm not
-    /// looking at Onyx", and a phone is where that's true.
-    func testTheDefaultForwardsUrgentAndExternal() {
+    /// The default: urgent means "this needs a person", and a phone is
+    /// where a person is. "For the record" stays in the app.
+    func testTheDefaultForwardsUrgentOnly() {
         let c = config(.ntfy)
-        XCTAssertEqual(c.threshold, .urgentAndExternal)
-        XCTAssertTrue(c.shouldForward(alert(urgent: false, external: true)))
-        XCTAssertFalse(c.shouldForward(alert(urgent: false, external: false)))
+        XCTAssertEqual(c.threshold, .urgentOnly)
+        XCTAssertTrue(c.shouldForward(alert(urgent: true)))
+        XCTAssertFalse(c.shouldForward(alert(urgent: false)))
+    }
+
+    /// The agent-side `external` flag was removed. A config saved with
+    /// the old threshold that leaned on it must still decode — a failed
+    /// decode resets the WHOLE forwarding config, service and tokens
+    /// included, which would look to the user like the feature turned
+    /// itself off.
+    func testAConfigWithTheRetiredThresholdStillDecodes() throws {
+        let old = Data(#"{"service":"pushover","threshold":"urgentAndExternal","pushoverUser":"u","pushoverToken":"t"}"#.utf8)
+        let decoded = try JSONDecoder().decode(AlertForwardingConfig.self, from: old)
+        XCTAssertEqual(decoded.service, .pushover, "the service must survive")
+        XCTAssertEqual(decoded.pushoverToken, "t", "and the token")
+        XCTAssertEqual(decoded.threshold, .urgentOnly, "the retired value maps to the default")
     }
 
     func testNothingIsForwardedWhileTheServiceIsOff() {
@@ -82,11 +95,11 @@ final class AlertForwardingTests: XCTestCase {
     }
 
     func testNtfyUrgencyMapsToMaxPriority() {
-        let urgent = AlertForwardRequest.build(alert(urgent: true, external: true),
+        let urgent = AlertForwardRequest.build(alert(urgent: true),
                                                sessionLabel: nil, config: config(.ntfy))!
         XCTAssertEqual(json(urgent)["priority"] as? Int, 5)
 
-        let quiet = AlertForwardRequest.build(alert(urgent: false, external: false),
+        let quiet = AlertForwardRequest.build(alert(urgent: false),
                                               sessionLabel: nil, config: config(.ntfy))!
         XCTAssertEqual(json(quiet)["priority"] as? Int, 3)
     }
@@ -122,7 +135,7 @@ final class AlertForwardingTests: XCTestCase {
     }
 
     func testAQuietAlertIsSentAtNormalPriority() {
-        let out = AlertForwardRequest.build(alert(urgent: false, external: true),
+        let out = AlertForwardRequest.build(alert(urgent: false),
                                            sessionLabel: nil, config: config(.pushover))!
         XCTAssertTrue(out.bodyText.contains("priority=0"))
     }
@@ -137,6 +150,7 @@ final class AlertForwardingTests: XCTestCase {
         let payload = json(out)
         XCTAssertEqual(payload["title"] as? String, "Migration needs a decision")
         XCTAssertEqual(payload["urgent"] as? Bool, true)
+        XCTAssertNil(payload["external"], "the agent no longer has a say in delivery, so it isn't relayed")
         XCTAssertEqual(payload["session"] as? String, "trainer")
         let text = payload["text"] as? String
         XCTAssertEqual(text, payload["content"] as? String)

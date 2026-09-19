@@ -692,6 +692,30 @@ struct AlertForwardingSettingsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            SectionHeader(title: "ALERTS ON THIS MAC")
+
+            // The person's choice, per machine. An agent says only whether
+            // an alert is urgent; where it goes from there is set here.
+            Picker("", selection: Binding(
+                get: { appState.appearance.externalDelivery },
+                set: {
+                    appState.appearance.externalDelivery = $0
+                    appState.saveAppearance()
+                }
+            )) {
+                ForEach(ExternalDelivery.allCases) { choice in
+                    Text(choice.label).tag(choice)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            Text("Which agent alerts reach Notification Center on this Mac. Every alert also shows in the app and the menu bar regardless. Agents send alerts as urgent unless you've told them to be quiet; \"Never\" is for a machine you aren't sitting at.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 8)
+
             SectionHeader(title: "ALERTS ON YOUR PHONE")
 
             Picker("", selection: Binding(

@@ -105,25 +105,22 @@ public enum OnyxGuide {
             when you have finished something they are waiting on, or when you need a \
             decision. Do not send one for progress they did not ask for.
 
-            Two flags escalate, and they mean different things:
+            ALERTS ARE URGENT BY DEFAULT. LEAVE THEM THAT WAY. Urgent is what reaches a \
+            person: the dock bounces, and — depending on how the user has set up this Mac \
+            and their phone — it goes to Notification Center and to their wrist. A \
+            non-urgent alert is a quiet indicator next to the session and nothing else; if \
+            the user is not looking at Onyx at that moment, they will not know it exists. \
+            `urgent: false` is for one situation: the user has told you to keep quiet and \
+            just keep a record of what is going on.
 
-            - Neither: a quiet indicator next to the session. They will see it when they \
-            look.
-            - `external`: delivered outside Onyx as well, so it arrives when the app is \
-            not in front. On macOS, Notification Center.
-            - `urgent`: interrupts. On macOS, the dock icon bounces until they come back. \
-            Reserve it for "I cannot continue without you".
+            Where an alert is delivered — Notification Center, phone, watch — is the \
+            user's choice in Onyx's settings, per machine. There is no flag for it, and \
+            that is deliberate: you cannot know which of their machines they are at.
 
             Say WHERE you are, so the alert lands against your session rather than in a \
-            general list: `user`, `host`, `session`. See the sessions topic for how to \
-            find those. You do not need all three — one unambiguous detail is enough. \
-            The reply tells you whether it matched; if it says nothing matched, ask the \
-            user which session they see your work in rather than guessing again.
-
-            Either of those two flags may leave the Mac entirely — the user can have \
-            urgent and external alerts pushed to their phone, and therefore their \
-            watch. Assume a real person is interrupted, possibly away from the desk, \
-            and do not spend that on progress they didn't ask for.
+            general list: `host` and `session` are enough (see the sessions topic). The \
+            reply tells you whether it matched; if it says nothing matched, ask the user \
+            which session they see your work in rather than guessing again.
 
             If Onyx can't be reached when you call `notify`, the alert is QUEUED on this \
             host and delivered when it can be — the reply says so. Don't resend it; that \
@@ -173,21 +170,26 @@ public enum OnyxGuide {
 
                 show_html(slot: 1, title: "Review: 12 open MRs", content: "<full page>")
                 notify(title: "Review ready — 4 need you, 8 waiting on authors",
-                       session: "<your tmux session>", external: true)
+                       session: "<your tmux session>")
 
             Publish BEFORE notifying, so the page is there when they look.
 
-            A LONG JOB. Do not narrate. One notify at the end, `external` so it reaches \
-            them wherever they are:
+            A LONG JOB. Do not narrate. One notify at the end — it is urgent by default, \
+            which is what gets it to them wherever they are:
 
                 notify(title: "Training finished — 94.1% on the holdout set",
-                       session: "trainer", external: true)
+                       session: "trainer")
 
-            A DECISION. This is what `urgent` is for, because you are stopped:
+            A DECISION. You are stopped, so say so and say what you need:
 
                 notify(title: "Migration needs a decision: 3 conflicting rows",
                        body: "Keep the newer row, keep both, or stop?",
-                       session: "migrate", urgent: true, external: true)
+                       session: "migrate")
+
+            FOR THE RECORD. The user said "don't ping me, just log it". This is the only \
+            time to turn urgent off:
+
+                notify(title: "Batch 7 of 20 done", session: "etl", urgent: false)
 
             Pair it with a page when the decision needs detail — publish the conflicts \
             with `show_html`, then notify pointing at the slot.

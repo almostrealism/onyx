@@ -8,11 +8,12 @@
 // Scope: Shared singleton; the MCP server calls in from whatever thread
 //        a request arrived on.
 //
-// The two flags are named for INTENT, not for macOS. `urgent` means
-// "interrupt me", `external` means "tell me even when Onyx isn't in
-// front". What a platform does with those is its own business; on a Mac
-// it's dock bouncing and Notification Center, and the tool description
-// says so rather than the vocabulary.
+// The agent says one thing — `urgent`, meaning "this needs a person" —
+// and the PERSON'S settings decide how far it goes on this Mac: whether it
+// reaches Notification Center, and whether it reaches their phone. The
+// agent used to hold a second flag for that. It was the wrong hands: an
+// agent can't know which machine the user is at, and reliably reaching
+// someone is a property of their setup, not of each call.
 //
 
 import Foundation
@@ -61,24 +62,25 @@ public final class AlertDelivery {
     /// replayed later, and stamping it with the delivery time would make
     /// it say "finished at 9am" about work that finished at 2am.
     public func deliver(title: String, body: String?,
-                        urgent: Bool, external: Bool,
+                        urgent: Bool,
                         user: String?, host: String?, session: String?,
                         at: Date = Date()) -> Outcome {
         let target = (user == nil && host == nil && session == nil)
             ? nil
             : SessionAlert.Target(user: user, host: host, session: session)
 
-        let match = resolveSession(user: user, host: host, session: session)
+        let (match, policy) = resolveSession(user: user, host: host, session: session)
         let alert = SessionAlert(at: at, title: title, body: body, urgent: urgent,
-                                 external: external, sessionKey: match.key, target: target)
+                                 sessionKey: match.key, target: target)
         AlertStore.shared.record(alert)
 
         if urgent { bounce() }
-        if external { postExternal(alert) }
+        // This Mac's own rule for what leaves the app.
+        if policy.allows(urgent: urgent) { postExternal(alert) }
         // And off the Mac entirely, if the user has set that up. A Mac
         // notification never reaches an Apple Watch — the watch mirrors a
         // phone — so this is the only path from "an agent is blocked" to
-        // "my wrist buzzed".
+        // "my wrist buzzed". The forwarder has its own threshold.
         AlertForwarder.shared.consider(alert, sessionLabel: target?.label)
 
         return Outcome(
@@ -109,10 +111,12 @@ public final class AlertDelivery {
 
     // MARK: - Routing
 
+    /// The routing match, plus this Mac's delivery policy — read in the
+    /// same hop to main, since both live on AppState.
     private func resolveSession(user: String?, host: String?, session: String?)
-        -> AlertRouting.Match {
+        -> (AlertRouting.Match, ExternalDelivery) {
         lock.lock(); let state = appState; lock.unlock()
-        guard let state else { return AlertRouting.Match(key: nil) }
+        guard let state else { return (AlertRouting.Match(key: nil), .urgentOnly) }
 
         // ONE hop to main, not one per session.
         //
@@ -122,9 +126,9 @@ public final class AlertDelivery {
         // to return, and each one pausing behind whatever the UI happens
         // to be doing. The whole snapshot is cheap; taking it in pieces
         // was the expensive part.
-        let candidates: [(key: String, user: String, host: String, session: String)]
+        let (candidates, policy): ([(key: String, user: String, host: String, session: String)], ExternalDelivery)
             = DispatchQueue.main.sync {
-                state.allSessions.compactMap { session in
+                (state.allSessions.compactMap { session in
                     let hostID = session.source.hostID
                     guard let cfg = state.hosts.first(where: { $0.id == hostID })
                             ?? (hostID == HostConfig.localhostID ? HostConfig.localhost : nil)
@@ -133,10 +137,10 @@ public final class AlertDelivery {
                             user: SessionIdentity.effectiveUser(for: cfg),
                             host: SessionIdentity.normalizedHost(for: cfg),
                             session: session.name)
-                }
+                }, state.appearance.externalDelivery)
             }
-        return AlertRouting.match(user: user, host: host, session: session,
-                                  candidates: candidates)
+        return (AlertRouting.match(user: user, host: host, session: session,
+                                   candidates: candidates), policy)
     }
 
     // MARK: - Getting noticed
@@ -171,7 +175,13 @@ public final class AlertDelivery {
     /// bundle, which is every `swift run`.
     private func postExternal(_ alert: SessionAlert) {
         #if canImport(UserNotifications)
-        guard Bundle.main.bundleIdentifier != nil else { return }
+        // The bundle check alone isn't enough: the xctest runner HAS an
+        // identifier, and UNUserNotificationCenter still traps in it
+        // ("bundleProxyForCurrentProcess is nil"). This never fired from
+        // tests while `external` defaulted to false; with urgent the
+        // default and delivery decided by settings, it does.
+        guard Bundle.main.bundleIdentifier != nil,
+              NSClassFromString("XCTest") == nil else { return }
         let content = UNMutableNotificationContent()
         content.title = alert.title
         if let body = alert.body {

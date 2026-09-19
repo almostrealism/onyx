@@ -94,11 +94,29 @@ final class OnyxGuideTests: XCTestCase {
     /// The flags are described by intent, with the macOS behavior named
     /// rather than assumed — an agent should know what `urgent` costs the
     /// user before spending it.
-    func testAlertsExplainWhatTheFlagsActuallyDo() {
+    /// The contract that decides whether alerts reach anyone: urgent is
+    /// the default and is what gets through; quiet is for one situation;
+    /// and WHERE an alert goes is the user's setting, never the agent's.
+    func testAlertsSayUrgentIsTheDefaultAndTheOnlyThingThatReachesAPerson() {
         let alerts = OnyxGuide.topic("alerts").body
-        XCTAssertTrue(alerts.contains("urgent") && alerts.contains("external"))
+        XCTAssertTrue(alerts.contains("URGENT BY DEFAULT"), "lead with it")
+        XCTAssertTrue(alerts.contains("urgent: false"), "and name the one case for turning it off")
+        XCTAssertTrue(alerts.contains("keep quiet") || alerts.contains("keep a record"),
+                      "which is: the user asked for quiet")
         XCTAssertTrue(alerts.contains("dock"), "say what urgent does on a Mac")
         XCTAssertTrue(alerts.contains("Notification Center"))
+        XCTAssertTrue(alerts.contains("user's choice") || alerts.contains("settings"),
+                      "delivery is configured by the person, per machine")
+    }
+
+    /// `external` was an agent-facing flag and is gone. Nothing in the
+    /// guide may still tell an agent to send it — the desktop ignores it,
+    /// so it would be a silent no-op the agent believes in.
+    func testTheGuideNoLongerMentionsTheRetiredExternalFlag() {
+        for topic in OnyxGuide.topics {
+            XCTAssertFalse(topic.body.contains("`external`") || topic.body.contains("external: true"),
+                           "\(topic.id) still tells agents about `external`")
+        }
     }
 
     /// The user's own test case is "write me a skill that reports and

@@ -304,20 +304,24 @@ public class MCPMessageHandler {
         .object([
             "name": .string("notify"),
             "description": .string("""
-                Tell the user you need their attention — you are blocked, you finished \
-                something they are waiting on, or something needs a decision. The message \
-                appears in Onyx against the session it came from.
+                Tell the user you need them — you are blocked, you finished something they \
+                are waiting on, or something needs a decision. The message appears in Onyx \
+                against the session it came from.
 
-                Two optional flags escalate it. `urgent` interrupts: on macOS the dock icon \
-                bounces until they come back to Onyx. `external` delivers outside the app so \
-                it arrives even when Onyx is not in front: on macOS that is Notification \
-                Center. Use neither for "for your information", `external` for "tell me \
-                wherever I am", `urgent` for "I cannot continue without you".
+                Alerts are URGENT BY DEFAULT, and you should leave it that way. Urgent is \
+                what actually reaches a person: the dock bounces, and depending on how the \
+                user has set up this Mac and their phone, it goes to Notification Center and \
+                to their wrist. A non-urgent alert is a quiet indicator next to the session \
+                and nothing more — if the user is not looking at Onyx at that moment, they \
+                will not know it exists. Set `urgent: false` ONLY when the user has told you \
+                to keep quiet and just keep a record of what is going on.
 
-                Say which session you are in — user, host and tmux session name — so the \
-                alert lands next to that session rather than in the general list. If you do \
-                not know, the user can tell you, and one unambiguous detail is often enough: \
-                a session name is sufficient when only one session has it.
+                Where the alert is delivered — Notification Center, phone, watch — is the \
+                user's choice in Onyx's settings, per machine. It is not something you \
+                decide per call, and there is no flag for it.
+
+                Say which session you are in: host and tmux session name are enough, and \
+                are what is trusted. If you do not know, the user can tell you.
                 """),
             "inputSchema": .object([
                 "type": .string("object"),
@@ -327,9 +331,7 @@ public class MCPMessageHandler {
                     "body": .object(["type": .string("string"),
                                      "description": .string("Optional detail shown when they open the alert.")]),
                     "urgent": .object(["type": .string("boolean"),
-                                       "description": .string("Interrupt them. macOS: bounces the dock icon until Onyx is brought forward. Default false.")]),
-                    "external": .object(["type": .string("boolean"),
-                                         "description": .string("Deliver outside Onyx as well, so it arrives when the app is not in front. macOS: Notification Center. Default false.")]),
+                                       "description": .string("Default TRUE, and leave it true. False is a quiet indicator the user will only see if they happen to look — use it only when they have asked you not to be noisy and just to keep a record.")]),
                     "user": .object(["type": .string("string"),
                                      "description": .string("Optional. The account Onyx CONNECTED to this host as — usually the ssh login, which is NOT `whoami` if you were started with su or sudo -u. Host and session alone are enough and are what is trusted; a user that doesn't match is ignored, not fatal.")]),
                     "host": .object(["type": .string("string"),
@@ -629,8 +631,10 @@ public class MCPMessageHandler {
         let outcome = AlertDelivery.shared.deliver(
             title: title,
             body: args["body"]?.stringValue,
-            urgent: args["urgent"]?.boolValue ?? false,
-            external: args["external"]?.boolValue ?? false,
+            // Urgent unless the agent says otherwise. `external`, if an older
+            // guide still sends it, is accepted and ignored: where an alert
+            // goes is the user's setting, not the caller's.
+            urgent: args["urgent"]?.boolValue ?? true,
             user: args["user"]?.stringValue,
             host: args["host"]?.stringValue,
             session: args["session"]?.stringValue,

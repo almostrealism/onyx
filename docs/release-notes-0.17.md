@@ -11,11 +11,15 @@ becomes a bug worth fixing.
 
 ## Agents can reach you
 
-- **`notify`** — an agent can get your attention. Two flags, named for what
-  they mean rather than for what macOS does with them: `urgent` interrupts
-  (the dock bounces), `external` delivers outside the app (Notification
-  Center). Alerts attach to the session they came from, so the indicator
-  lights next to the work that's waiting rather than in a general list.
+- **`notify`** — an agent can get your attention. Alerts are urgent by
+  default — the dock bounces, and depending on your settings it reaches
+  Notification Center and your phone — and the agent is told, firmly, that
+  a non-urgent alert reaches nobody and is only for when you've asked it to
+  keep quiet. *Where* an alert goes is your choice per Mac (Settings →
+  ALERTS ON THIS MAC: every alert, urgent only, never), not the agent's:
+  it can't know which machine you're sitting at. Alerts attach to the
+  session they came from, so the indicator lights next to the work that's
+  waiting rather than in a general list.
 - **Alerts on your phone, and therefore your watch.** An Apple Watch
   mirrors an iPhone, not a Mac — macOS notifications never reach it — so
   Onyx sends urgent alerts to something your phone already listens to:

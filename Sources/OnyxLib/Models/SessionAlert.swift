@@ -6,12 +6,15 @@
 // Scope: Model. Pure data plus the routing rules, which are pure
 //        functions over strings and therefore testable without an app.
 //
-// Deliberately not Apple-shaped. An alert carries two intentions —
-// "this is urgent" and "tell me even if I'm not looking at Onyx" — and
-// the platform decides how to honor them. On a Mac that happens to be
-// dock bouncing and Notification Center; the tool says so, but the
-// vocabulary stays about what the agent MEANS rather than what macOS
-// does with it.
+// Deliberately not Apple-shaped. An alert carries one intention from
+// the agent — "this needs a person" (urgent) or "this is for the record"
+// (not) — and the PERSON decides, per device, how far it travels: to
+// Notification Center, to their phone, or no further than the app. The
+// agent used to have a second flag for that (`external`), and it was the
+// wrong hands for the decision: an agent cannot know which of the user's
+// machines they are sitting at, and a preference that has to be re-chosen
+// on every call by something that can't know it is not a preference.
+// Old alerts on disk still carry the key; it is ignored.
 //
 
 import Foundation
@@ -23,12 +26,11 @@ public struct SessionAlert: Identifiable, Codable, Equatable {
     public let title: String
     /// Optional detail.
     public let body: String?
-    /// Ask for attention beyond a quiet indicator. macOS: bounce the
-    /// dock icon until Onyx is brought forward.
+    /// This needs a person. macOS: the dock bounces until Onyx is brought
+    /// forward, and — per the user's own settings — Notification Center
+    /// and their phone. False means "for the record": a quiet indicator
+    /// next to the session, nothing more.
     public let urgent: Bool
-    /// Deliver outside the app too, so it lands when Onyx isn't in
-    /// front. macOS: Notification Center.
-    public let external: Bool
     /// The session this is about, as a storage key, or nil when the
     /// agent didn't say (or we couldn't work it out).
     public let sessionKey: String?
@@ -59,14 +61,13 @@ public struct SessionAlert: Identifiable, Codable, Equatable {
     }
 
     public init(id: UUID = UUID(), at: Date = Date(), title: String, body: String? = nil,
-                urgent: Bool = false, external: Bool = false,
+                urgent: Bool = true,
                 sessionKey: String? = nil, target: Target? = nil, seen: Bool = false) {
         self.id = id
         self.at = at
         self.title = title
         self.body = body
         self.urgent = urgent
-        self.external = external
         self.sessionKey = sessionKey
         self.target = target
         self.seen = seen

@@ -56,7 +56,7 @@ public final class AlertForwarder: ObservableObject {
         let alert = SessionAlert(
             title: "Onyx test alert",
             body: "If this reached your watch, forwarding works.",
-            urgent: true, external: true)
+            urgent: true)
         let config = AlertForwardingStore.shared.config
         guard config.service != .off else {
             record("Pick a service first")

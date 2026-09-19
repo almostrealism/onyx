@@ -105,6 +105,37 @@ public struct HostConfig: Codable, Identifiable, Hashable {
 }
 
 /// AppearanceConfig.
+/// Where an alert goes on this Mac once it has landed in the app.
+public enum ExternalDelivery: String, Codable, CaseIterable, Identifiable {
+    /// Every alert reaches Notification Center.
+    case everything
+    /// Urgent ones do; "for the record" ones stay in the app. The default:
+    /// an agent's urgent is meant to reach a person, and its non-urgent is
+    /// meant not to.
+    case urgentOnly
+    /// Nothing leaves the app on this Mac — for the machine that isn't
+    /// the one you're sitting at.
+    case never
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .everything: return "Every alert"
+        case .urgentOnly: return "Urgent only"
+        case .never:      return "Never"
+        }
+    }
+
+    public func allows(urgent: Bool) -> Bool {
+        switch self {
+        case .everything: return true
+        case .urgentOnly: return urgent
+        case .never:      return false
+        }
+    }
+}
+
 public struct AppearanceConfig: Codable {
     /// Font size.
     public var fontSize: Double = 13           // legacy, maps to terminalFontSize
@@ -163,6 +194,10 @@ public struct AppearanceConfig: Codable {
     /// the overlay is up; persisted because it's a standing preference for
     /// how you want to read the list, not a transient peek.
     public var remindersDueSoonOnly: Bool = false
+    /// How far an agent's alert travels on this Mac, beyond the indicator
+    /// in the app. The person's choice per device — an agent can't know
+    /// which of the user's machines they are sitting at, so it has no say.
+    public var externalDelivery: ExternalDelivery = .urgentOnly
     /// When true, ⇧⇥ cycles tmux sessions. When false it is passed
     /// through to the terminal untouched.
     ///
@@ -265,7 +300,7 @@ public struct AppearanceConfig: Codable {
         case claudeHooksGatePermissions, showFocusOutline
         case searchFileTypeIDs, remindersDueSoonOnly, simpleShowSidePanel
         case showAllContainers, prDraftFilter, hasSeenWalkthrough
-        case showMenuBarItem, shiftTabCyclesSessions
+        case showMenuBarItem, shiftTabCyclesSessions, externalDelivery
     }
 
     public init(from decoder: Decoder) throws {
@@ -293,5 +328,6 @@ public struct AppearanceConfig: Codable {
         self.hasSeenWalkthrough         = try c.decodeIfPresent(Bool.self,           forKey: .hasSeenWalkthrough)         ?? false
         self.showMenuBarItem            = try c.decodeIfPresent(Bool.self,           forKey: .showMenuBarItem)            ?? true
         self.shiftTabCyclesSessions     = try c.decodeIfPresent(Bool.self,           forKey: .shiftTabCyclesSessions)     ?? true
+        self.externalDelivery           = try c.decodeIfPresent(ExternalDelivery.self, forKey: .externalDelivery)         ?? .urgentOnly
     }
 }

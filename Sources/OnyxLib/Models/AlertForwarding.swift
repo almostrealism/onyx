@@ -46,29 +46,34 @@ public enum PushService: String, Codable, CaseIterable, Identifiable {
 
 /// Which alerts get pushed to the phone.
 public enum ForwardThreshold: String, Codable, CaseIterable, Identifiable {
-    /// Only alerts the agent marked urgent — "I can't continue".
+    /// Only alerts the agent marked urgent — "this needs a person". The
+    /// default, and the one that matches what urgent means.
     case urgentOnly
-    /// Urgent, plus anything the agent asked to be told about outside the
-    /// app. This is the default: `external` already means "reach me when
-    /// I'm not looking at Onyx", and a phone is where that is true.
-    case urgentAndExternal
-    /// Everything, including the quiet ones.
+    /// Everything, including "for the record".
     case everything
 
     public var id: String { rawValue }
 
     public var label: String {
         switch self {
-        case .urgentOnly:       return "Urgent only"
-        case .urgentAndExternal: return "Urgent + external"
-        case .everything:       return "Every alert"
+        case .urgentOnly: return "Urgent only"
+        case .everything: return "Every alert"
         }
+    }
+
+    /// A value this build doesn't know — "urgentAndExternal" from before
+    /// the agent-side flag was removed — decodes to the default rather
+    /// than failing, because a failed decode here resets the WHOLE
+    /// forwarding config, service and tokens included.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ForwardThreshold(rawValue: raw) ?? .urgentOnly
     }
 }
 
 public struct AlertForwardingConfig: Codable, Equatable {
     public var service: PushService = .off
-    public var threshold: ForwardThreshold = .urgentAndExternal
+    public var threshold: ForwardThreshold = .urgentOnly
 
     /// ntfy: server (defaults to the public one) and topic. The topic IS
     /// the credential on ntfy.sh — anyone who knows it can publish to it —
@@ -90,13 +95,36 @@ public struct AlertForwardingConfig: Codable, Equatable {
 
     public init() {}
 
+    /// Field by field, every one optional.
+    ///
+    /// The synthesized decoder requires every key, so a config saved by an
+    /// older build — before a field existed — would fail to decode, and a
+    /// failed decode here resets the WHOLE config: the service switches
+    /// itself off and the tokens vanish, which to the user looks like the
+    /// feature quietly turned itself off. Adding a field must stay free.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        service = try c.decodeIfPresent(PushService.self, forKey: .service) ?? .off
+        threshold = try c.decodeIfPresent(ForwardThreshold.self, forKey: .threshold) ?? .urgentOnly
+        ntfyServer = try c.decodeIfPresent(String.self, forKey: .ntfyServer) ?? "https://ntfy.sh"
+        ntfyTopic = try c.decodeIfPresent(String.self, forKey: .ntfyTopic) ?? ""
+        pushoverToken = try c.decodeIfPresent(String.self, forKey: .pushoverToken) ?? ""
+        pushoverUser = try c.decodeIfPresent(String.self, forKey: .pushoverUser) ?? ""
+        webhookURL = try c.decodeIfPresent(String.self, forKey: .webhookURL) ?? ""
+        imessageRecipient = try c.decodeIfPresent(String.self, forKey: .imessageRecipient) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case service, threshold, ntfyServer, ntfyTopic, pushoverToken, pushoverUser,
+             webhookURL, imessageRecipient
+    }
+
     /// Whether this alert clears the bar the user set.
     public func shouldForward(_ alert: SessionAlert) -> Bool {
         guard service != .off else { return false }
         switch threshold {
-        case .urgentOnly:        return alert.urgent
-        case .urgentAndExternal: return alert.urgent || alert.external
-        case .everything:        return true
+        case .urgentOnly: return alert.urgent
+        case .everything: return true
         }
     }
 
@@ -168,7 +196,7 @@ public enum AlertForwardRequest {
                 "message": message(alert, sessionLabel: sessionLabel),
                 // 5 is ntfy's max: on iOS it's the one that insists rather
                 // than waiting to be noticed, which is what urgent means.
-                "priority": alert.urgent ? 5 : (alert.external ? 4 : 3),
+                "priority": alert.urgent ? 5 : 3,
                 "tags": [alert.urgent ? "warning" : "bell"],
             ]
             guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
@@ -202,7 +230,6 @@ public enum AlertForwardRequest {
                 "title": title(alert),
                 "body": alert.body ?? "",
                 "urgent": alert.urgent,
-                "external": alert.external,
                 "session": sessionLabel ?? "",
                 "at": ISO8601DateFormatter().string(from: alert.at),
                 // Aliases so the two webhooks people actually have work
