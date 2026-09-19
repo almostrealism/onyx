@@ -372,3 +372,154 @@ final class BridgeSurvivesHangupTests: XCTestCase {
                       "an empty result, immediately — not an error, not a wait: \(result.stdout)")
     }
 }
+
+/// What a queued alert is CALLED, given how recently the desktop was here.
+///
+/// The user's own account: their laptop is in contact with the host on and
+/// off, about once a minute. An agent's alert was queued, the reply said
+/// "not reachable, queued, dropped after 24h", the agent told the user the
+/// ping had failed — and the user received the alert a minute later. Every
+/// word of the reply was true and the impression it left was false. A
+/// bridge that has watched the desktop check in all afternoon must not
+/// describe a one-minute gap the way it describes a dead install.
+final class QueuedAlertWordingTests: XCTestCase {
+
+    private func sandbox() throws -> (env: [String: String], home: URL) {
+        var env = ProcessInfo.processInfo.environment
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("onyx-wording-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".onyx"), withIntermediateDirectories: true)
+        env["HOME"] = home.path
+        env["ONYX_MCP_FORWARD_PORT"] = "0"
+        env["ONYX_MCP_BRIEF_RETRY"] = "0"     // the wording, not the wait
+        env.removeValue(forKey: "ONYX_MCP_PORT")
+        return (env, home)
+    }
+
+    private func queuedReply(_ stdout: String) -> String {
+        let line = stdout.components(separatedBy: "\n").first { $0.contains("\"result\"") } ?? ""
+        guard let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = (object["result"] as? [String: Any])?["content"] as? [[String: Any]]
+        else { return "" }
+        return content.first?["text"] as? String ?? ""
+    }
+
+    private let notify = #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"notify","arguments":{"title":"round 10"}}}"# + "\n"
+
+    /// A desktop that answered a moment ago is between contacts, not gone.
+    func testAlertQueuedShortlyAfterContactIsCalledDelivered() throws {
+        var (env, _) = try sandbox()
+        let binary = try IntegrationTestHelpers.requireOnyxMCPBinary()
+
+        // Contact: one session sees the desktop.
+        let desktop = try FakeDesktopStandIn(machine: "laptop")
+        env["ONYX_MCP_PORT"] = String(desktop.port)
+        _ = IntegrationTestHelpers.runProcess(
+            binary, stdin: #"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"# + "\n",
+            environment: env, timeout: 20.0)
+        desktop.stop()
+
+        // Then it's gone, and an alert has to be queued.
+        let result = IntegrationTestHelpers.runProcess(
+            binary, stdin: notify, environment: env, timeout: 30.0)
+        let text = queuedReply(result.stdout)
+        XCTAssertTrue(text.contains("TREAT IT AS DELIVERED"), text)
+        XCTAssertTrue(text.contains("within a minute"), text)
+        XCTAssertTrue(text.contains("laptop"), "name the desktop it's waiting for: \(text)")
+        XCTAssertFalse(text.contains("NEVER"), text)
+        XCTAssertFalse(text.contains("not reachable from here right now"),
+                       "the old blanket wording: \(text)")
+    }
+
+    /// A host that has never reached Onyx is a different situation and
+    /// keeps the stronger words.
+    func testAlertQueuedOnAFreshHostIsNotCalledDelivered() throws {
+        let (env, _) = try sandbox()
+        let result = IntegrationTestHelpers.runProcess(
+            try IntegrationTestHelpers.requireOnyxMCPBinary(),
+            stdin: notify, environment: env, timeout: 30.0)
+        let text = queuedReply(result.stdout)
+        XCTAssertTrue(text.contains("NEVER answered"), text)
+        XCTAssertTrue(text.contains("tell the user directly"), text)
+        XCTAssertFalse(text.contains("TREAT IT AS DELIVERED"), text)
+    }
+
+    /// The brief wait exists to turn "queued" into "delivered" outright
+    /// when the desktop is only momentarily away — and it must be bounded,
+    /// because an agent's tool call has a timeout. Measured through the
+    /// binary with the budget set small.
+    func testTheBriefRetryWaitsAboutAsLongAsToldAndNoLonger() throws {
+        var (env, _) = try sandbox()
+        let binary = try IntegrationTestHelpers.requireOnyxMCPBinary()
+        env["ONYX_MCP_BRIEF_RETRY"] = "4"
+
+        let desktop = try FakeDesktopStandIn(machine: "laptop")
+        env["ONYX_MCP_PORT"] = String(desktop.port)
+        _ = IntegrationTestHelpers.runProcess(
+            binary, stdin: #"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"# + "\n",
+            environment: env, timeout: 20.0)
+        desktop.stop()
+
+        let started = Date()
+        let result = IntegrationTestHelpers.runProcess(
+            binary, stdin: notify, environment: env, timeout: 40.0)
+        let elapsed = Date().timeIntervalSince(started)
+
+        XCTAssertFalse(result.timedOut)
+        XCTAssertGreaterThanOrEqual(elapsed, 4, "it should have kept trying for the budget")
+        XCTAssertLessThan(elapsed, 20, "and then stopped — took \(Int(elapsed))s")
+        XCTAssertTrue(queuedReply(result.stdout).contains("TREAT IT AS DELIVERED"))
+    }
+}
+
+/// A minimal desktop stand-in shared by the wording tests.
+final class FakeDesktopStandIn {
+    private let listener: NWListener
+    private var connections: [NWConnection] = []
+    private(set) var port: UInt16 = 0
+
+    init(machine: String) throws {
+        let params = NWParameters.tcp
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+        listener = try NWListener(using: params)
+        let ready = DispatchSemaphore(value: 0)
+        listener.stateUpdateHandler = { if case .ready = $0 { ready.signal() } }
+        listener.newConnectionHandler = { [weak self] connection in
+            self?.connections.append(connection)
+            connection.start(queue: .global())
+            var buffer = Data()
+            func receive() {
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, done, _ in
+                    if let data { buffer.append(data) }
+                    while let nl = buffer.firstIndex(of: 0x0A) {
+                        let line = buffer[buffer.startIndex..<nl]
+                        buffer.removeSubrange(buffer.startIndex...nl)
+                        guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                              let id = object["id"] else { continue }
+                        let method = object["method"] as? String ?? ""
+                        let result: [String: Any] = method == "initialize"
+                            ? ["protocolVersion": "2024-11-05", "capabilities": ["tools": [:]],
+                               "serverInfo": ["name": "onyx", "version": "0.17", "machine": machine]]
+                            : ["tools": []]
+                        let reply: [String: Any] = ["jsonrpc": "2.0", "id": id, "result": result]
+                        if let out = try? JSONSerialization.data(withJSONObject: reply) {
+                            connection.send(content: out + Data("\n".utf8),
+                                            completion: .contentProcessed { _ in })
+                        }
+                    }
+                    if !done { receive() }
+                }
+            }
+            receive()
+        }
+        listener.start(queue: .global())
+        guard ready.wait(timeout: .now() + 5) == .success, let bound = listener.port?.rawValue else {
+            throw XCTSkip("couldn't bind a local listener")
+        }
+        port = bound
+    }
+
+    func stop() { listener.cancel(); connections.forEach { $0.cancel() } }
+}

@@ -189,6 +189,67 @@ final class Ledger {
         record.lastSuccess != nil
     }
 
+    /// How to read a failure right now, given what came before it.
+    ///
+    /// The desktop on a laptop is reachable ON AND OFF — sleep, lid,
+    /// wifi power-saving — and a bridge that sees it check in every minute
+    /// or so has no business telling an agent "not reachable, queued,
+    /// dropped after 24 hours". That is true and misleading at once: the
+    /// alert goes out on the very next contact, which is minutes away at
+    /// most, and the agent reads "queued" as "failed" and tells the user
+    /// so. The user then receives the alert anyway. So the verdict is
+    /// about RECENCY, and the words follow from it.
+    enum Recency: Equatable {
+        /// Never answered from this host. An install or connection problem.
+        case never
+        /// Answered, but not for a while. It may or may not come back.
+        case stale(TimeInterval)
+        /// Answered within the last few minutes. Between contacts, not gone.
+        case recent(TimeInterval)
+    }
+
+    /// "Recent" is generous on purpose: a laptop that wakes to check mail
+    /// and sleeps again is in contact every few minutes, and that is the
+    /// case the wording exists for.
+    static let recentWindow: TimeInterval = 10 * 60
+
+    static func recency(_ record: Record, now: Date = Date()) -> Recency {
+        guard let last = record.lastSuccess else { return .never }
+        let age = now.timeIntervalSince(last)
+        return age <= recentWindow ? .recent(age) : .stale(age)
+    }
+
+    /// What to tell an agent whose alert had to be queued.
+    ///
+    /// Three different situations, three different messages — the old
+    /// single one ("queued, dropped after 24h") was accurate for the
+    /// worst of them and misleading for the common one.
+    static func queuedExplanation(_ record: Record, waiting: Int, now: Date = Date()) -> String {
+        let who = record.desktops.values.max(by: { $0.lastSeen < $1.lastSeen })
+            .map { " (\($0.machine))" } ?? ""
+        switch recency(record, now: now) {
+        case .recent(let age):
+            return "Onyx answered \(ago(now.addingTimeInterval(-age), now: now))\(who) and is in "
+                + "contact with this host regularly — it is between contacts, not gone. This alert "
+                + "is queued here and goes out the moment it answers again, normally within a "
+                + "minute. TREAT IT AS DELIVERED. Do not resend it; that would arrive twice. "
+                + "(\(waiting) waiting.)"
+        case .stale(let age):
+            return "Onyx last answered \(ago(now.addingTimeInterval(-age), now: now))\(who) and "
+                + "hasn't since. This alert is queued here and will be delivered when it answers "
+                + "again; queued alerts are dropped after 24 hours. Do not resend it. If it "
+                + "matters that the user sees this soon, say so in your reply to them as well. "
+                + "(\(waiting) waiting.)"
+        case .never:
+            return "Onyx has NEVER answered from this host — the bridge is installed, but no "
+                + "route to a desktop has ever worked, which is an install or connection problem "
+                + "rather than a momentary one. This alert is queued in case that changes "
+                + "(dropped after 24 hours), but do not count on it: tell the user directly, "
+                + "and suggest `OnyxMCP --status` on this host. Do not resend it. "
+                + "(\(waiting) waiting.)"
+        }
+    }
+
     /// One paragraph for an error message. Every sentence is a fact an
     /// agent can act on or relay; "unreachable" alone is neither.
     static func summary(_ record: Record, outboxWaiting: Int = 0,

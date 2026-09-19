@@ -122,10 +122,15 @@ public enum OnyxGuide {
             reply tells you whether it matched; if it says nothing matched, ask the user \
             which session they see your work in rather than guessing again.
 
-            If Onyx can't be reached when you call `notify`, the alert is QUEUED on this \
-            host and delivered when it can be — the reply says so. Don't resend it; that \
-            arrives twice. Queued alerts carry the time you sent them, and are dropped \
-            after 24 hours.
+            If Onyx can't be reached at the moment you call `notify`, the alert is QUEUED \
+            on this host and goes out on the desktop's next contact. READ THE REPLY: it \
+            tells you how recently Onyx was here. "Answered 40s ago and in contact \
+            regularly" means the desktop is between contacts — a laptop lid, a wifi nap — \
+            and the alert will land within a minute: treat it as delivered, and do not \
+            tell the user the ping failed, because they are about to receive it. "Hasn't \
+            answered in 3 hours" or "has NEVER answered" is different, and the reply says \
+            what to do. Never resend a queued alert; that arrives twice. Queued alerts \
+            carry the time you sent them and are dropped after 24 hours.
 
             Write the title for someone glancing at it. "Migration finished, 3 conflicts \
             need a decision" is useful; "done" is not.

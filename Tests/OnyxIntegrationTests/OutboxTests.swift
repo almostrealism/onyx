@@ -57,8 +57,13 @@ final class OutboxTests: XCTestCase {
         let result = IntegrationTestHelpers.runProcess(
             binary, stdin: notifyCall, environment: env, timeout: 15.0)
 
-        XCTAssertTrue(result.stdout.contains("QUEUED"), result.stdout)
-        XCTAssertTrue(result.stdout.lowercased().contains("resend"), result.stdout)
+        // On a host that has never reached Onyx the wording is the strong
+        // one (QueuedAlertWordingTests covers the others); what every
+        // variant shares is that it is queued, a RESULT, and not to be
+        // resent.
+        XCTAssertTrue(result.stdout.contains("queued"), result.stdout)
+        XCTAssertTrue(result.stdout.lowercased().contains("resend"),
+                      "every variant says not to resend: \(result.stdout)")
         XCTAssertTrue(result.stdout.contains("\"result\""),
                       "a queued alert is an outcome, not a failure: \(result.stdout)")
         XCTAssertFalse(result.stdout.contains("\"error\""), result.stdout)

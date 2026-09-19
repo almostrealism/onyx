@@ -494,6 +494,24 @@ final class Bridge: @unchecked Sendable {
     /// until the desktop answers something.
     var clientHasLocalToolList = false
 
+    /// How long to keep trying before giving up on delivering right now.
+    /// Under the ~30s an MCP client allows a tool call, with margin.
+    static let briefRetryBudget: TimeInterval = {
+        if let raw = ProcessInfo.processInfo.environment["ONYX_MCP_BRIEF_RETRY"],
+           let seconds = TimeInterval(raw) { return seconds }
+        return 18
+    }()
+
+    /// A few more tries over a few seconds. Nil if it still won't go.
+    func retryBriefly(_ line: String) -> String? {
+        let deadline = Date().addingTimeInterval(Self.briefRetryBudget)
+        while Date() < deadline {
+            Thread.sleep(forTimeInterval: 3)
+            if let reply = deliver(line) { return reply }
+        }
+        return nil
+    }
+
     var ledger: Ledger { connection.ledger }
 
     /// The full picture, as text an agent or a person can read.
@@ -852,7 +870,10 @@ if isHookMode {
     // message matters. So the queue gets its own heartbeat.
     let retry = Thread { [bridge] in
         while true {
-            Thread.sleep(forTimeInterval: 60)
+            // Quicker while something is waiting: "delivered within a
+            // minute" is a promise made to the agent above, and a desktop
+            // that checks in every minute needs to be caught mid-contact.
+            Thread.sleep(forTimeInterval: bridge.outbox.isEmpty ? 60 : 15)
             bridge.flushOutbox(why: "retry")
             // If the client is holding OUR tool list, look for the desktop
             // even though nobody asked: an idle agent would otherwise
@@ -922,18 +943,32 @@ if isHookMode {
             print(localToolsListResponse(id: extractRequestId(line)))
             fflush(stdout)
         } else if Outbox.isWorthQueueing(line) {
+            // If the desktop was around a few minutes ago it is probably
+            // between contacts — a laptop lid, a wifi nap — not gone. Try a
+            // little longer before queueing: turning "queued" into
+            // "delivered" here spares the agent a judgment call it can't
+            // make well. Bounded so the agent's tool call can't time out.
+            if case .recent = Ledger.recency(bridge.ledger.snapshot()),
+               let reply = bridge.retryBriefly(line) {
+                print(reply)
+                fflush(stdout)
+                bridge.flushOutbox(why: "backend came back")
+                continue
+            }
+
             // The point of the outbox. The desktop being unreachable is an
             // infrastructure problem; the alert is still true, and the
-            // person still wants it. Tell the agent plainly so it doesn't
-            // retry and queue a second copy.
+            // person still wants it. What the agent is told depends on how
+            // recently the desktop was here — "queued" on a laptop that
+            // checks in every minute means "delivered shortly", and saying
+            // anything gloomier gets relayed to the user as a failure they
+            // then receive the alert about anyway.
             let waiting = bridge.outbox.enqueue(line)
             FileHandle.standardError.write(Data(
                 "OnyxMCP: backend unreachable — queued this alert (\(waiting) waiting)\n".utf8))
             print(toolResult(
                 id: extractRequestId(line),
-                text: "Onyx is not reachable from here right now, so this alert is QUEUED and "
-                    + "will be delivered when it is (\(waiting) waiting; queued alerts are "
-                    + "dropped after 24 hours). Don't resend it — that would arrive twice."))
+                text: Ledger.queuedExplanation(bridge.ledger.snapshot(), waiting: waiting)))
             fflush(stdout)
         } else {
             // Not "unreachable": WHAT was seen, WHEN it last worked, and

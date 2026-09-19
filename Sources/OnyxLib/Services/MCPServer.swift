@@ -322,6 +322,11 @@ public class MCPMessageHandler {
 
                 Say which session you are in: host and tmux session name are enough, and \
                 are what is trusted. If you do not know, the user can tell you.
+
+                If the reply says the alert was QUEUED, read it: a desktop that answered a \
+                minute ago is between contacts, not gone, and the alert lands on its next \
+                contact — treat that as delivered and do not tell the user it failed. Never \
+                resend a queued alert.
                 """),
             "inputSchema": .object([
                 "type": .string("object"),
