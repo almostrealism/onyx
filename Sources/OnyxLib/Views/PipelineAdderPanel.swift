@@ -43,7 +43,6 @@ struct PipelineAdderPanel: View {
     @State private var manualURL: String = ""
     @State private var suggestions: [WorkflowMonitor.Suggestion] = []
     @State private var loading = true
-    @FocusState private var urlFocused: Bool
 
     /// Per-row height: two text lines plus padding and inter-row spacing.
     private static let rowHeight: CGFloat = 36
@@ -82,15 +81,21 @@ struct PipelineAdderPanel: View {
                     .tracking(6)
 
                 HStack(spacing: 8) {
-                    TextField("Paste a workflow or run URL", text: $manualURL)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.85))
+                    // An NSTextField we focus ourselves, not SwiftUI's. After
+                    // one submit the SwiftUI field stopped accepting paste
+                    // and couldn't be refocused by clicking — adding a
+                    // second pipeline meant reopening the panel. See
+                    // FocusedTextField.swift.
+                    FocusedSelectAllField(
+                        text: $manualURL,
+                        placeholder: "Paste a workflow or run URL",
+                        font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+                        textColor: NSColor.white.withAlphaComponent(0.85),
+                        onSubmit: { addManual() },
+                        onCancel: { close() })
                         .padding(.horizontal, 8).padding(.vertical, 6)
                         .background(Color.white.opacity(0.06))
                         .cornerRadius(4)
-                        .focused($urlFocused)
-                        .onSubmit { addManual() }
 
                     Button(action: addManual) {
                         Text("Add")
@@ -138,10 +143,7 @@ struct PipelineAdderPanel: View {
             )
             .shadow(color: .black.opacity(0.5), radius: 30)
         }
-        .onAppear {
-            urlFocused = true
-            loadSuggestions()
-        }
+        .onAppear { loadSuggestions() }
     }
 
     @ViewBuilder
