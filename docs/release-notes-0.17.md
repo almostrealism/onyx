@@ -85,10 +85,18 @@ becomes a bug worth fixing.
 
 ## Pipelines
 
+- **Every open PR shows its own CI.** Under each PR in the monitor: the
+  latest run of each workflow on its branch, the run number, the attempt
+  when it's a re-run, how long ago, and — when it's red — which jobs
+  failed. They're in the menu bar too, failures first. Nothing to add
+  and nothing to remove after the merge; tracking is now for pipelines
+  that aren't on a PR (a nightly, a release).
 - **Attempt numbers.** A GitHub run on its second or later try says so,
   in the monitor and in the menu bar. It's invisible on the run's own page
   until you open it.
 - **Adding a pipeline** is now a panel rather than a popover — see below.
+  And its URL field works for a second pipeline: it used to stop
+  accepting paste after the first.
 
 ## Keyboard
 

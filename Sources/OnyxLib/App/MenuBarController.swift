@@ -277,35 +277,94 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     /// from one on its first, and that is invisible on the run's own page
     /// until you open it.
     private func addPipelines(to menu: NSMenu) {
-        let pipelines = WorkflowMonitor.shared.pipelines + GitLabPipelineMonitor.shared.pipelines
-        guard !pipelines.isEmpty else { return }
+        let entries = Self.pipelineEntries(
+            tracked: WorkflowMonitor.shared.pipelines + GitLabPipelineMonitor.shared.pipelines,
+            prRuns: PRPipelineMonitor.shared.allRuns,
+            prs: PullRequestManager.shared.pullRequests + GitLabMergeRequestManager.shared.mergeRequests)
+        guard !entries.isEmpty else { return }
 
         menu.addItem(.separator())
-        let failing = pipelines.filter { $0.overall == .failure || $0.overall == .mixed }.count
+        let failing = entries.filter { $0.overall == .failure || $0.overall == .mixed }.count
         menu.addItem(header(failing > 0 ? "PIPELINES — \(failing) FAILING" : "PIPELINES"))
 
-        for status in pipelines.sorted(by: Self.mostInterestingFirst) {
-            let item = NSMenuItem(title: Self.pipelineLine(status),
+        for entry in entries {
+            let item = NSMenuItem(title: entry.title,
                                   action: #selector(openPipeline(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = status.runURL ?? status.spec.url
-            item.image = Self.glyph(for: status.overall)
-            item.toolTip = "\(status.spec.fullName) — open in your browser"
+            item.representedObject = entry.url
+            item.image = Self.glyph(for: entry.overall)
+            item.toolTip = entry.tooltip
             menu.addItem(item)
+        }
+    }
+
+    /// One line of the PIPELINES section, whichever way it got there:
+    /// tracked by hand, or found on an open PR.
+    public struct PipelineEntry: Equatable {
+        public let title: String
+        public let url: String?
+        public let overall: PipelineOverallStatus
+        public let tooltip: String
+        /// For ordering among equals.
+        let sortName: String
+    }
+
+    /// Tracked pipelines and the CI on open PRs, as one list — failures
+    /// first — with a run that appears in both shown once. The PR's CI
+    /// is the common case now; tracking is for what isn't on a PR.
+    static func pipelineEntries(tracked: [PipelineStatus], prRuns: [PRPipelineRun],
+                                prs: [PullRequest]) -> [PipelineEntry] {
+        var seenURLs = Set<String>()
+        var entries: [PipelineEntry] = []
+        for status in tracked.sorted(by: mostInterestingFirst) {
+            if let url = status.runURL { seenURLs.insert(url) }
+            entries.append(PipelineEntry(
+                title: pipelineLine(status), url: status.runURL ?? status.spec.url,
+                overall: status.overall,
+                tooltip: "\(status.spec.fullName) — open in your browser",
+                sortName: status.spec.displayName))
+        }
+        let byID = Dictionary(prs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for run in prRuns {
+            if let url = run.url, !seenURLs.insert(url).inserted { continue }
+            let pr = byID[run.prID]
+            entries.append(PipelineEntry(
+                title: prRunLine(run, pr: pr), url: run.url, overall: run.overall,
+                tooltip: (pr.map { "\($0.title) — open the run in your browser" }
+                          ?? "open the run in your browser"),
+                sortName: run.name))
+        }
+        return entries.sorted { a, b in
+            if rank(a.overall) != rank(b.overall) { return rank(a.overall) < rank(b.overall) }
+            return a.sortName.localizedCaseInsensitiveCompare(b.sortName) == .orderedAscending
+        }
+    }
+
+    /// "CI · acme/api#12  ↻ attempt 2" — the workflow, the PR it's on,
+    /// and the attempt when it is a re-run.
+    static func prRunLine(_ run: PRPipelineRun, pr: PullRequest?) -> String {
+        var line = run.name
+        if let pr {
+            line += " · \(pr.repoFullName)\(pr.provider == .gitlab ? "!" : "#")\(pr.number)"
+        }
+        if run.isRetry, let attempt = run.attempt {
+            line += "  ↻ attempt \(attempt)"
+        }
+        return clip(line, 64)
+    }
+
+    private static func rank(_ s: PipelineOverallStatus) -> Int {
+        switch s {
+        case .failure, .mixed: return 0
+        case .running, .queued: return 1
+        default:                return 2
         }
     }
 
     /// Failures first, then anything still running, then the rest. The
     /// order answers "is something wrong" before "what is happening".
     static func mostInterestingFirst(_ a: PipelineStatus, _ b: PipelineStatus) -> Bool {
-        func rank(_ s: PipelineStatus) -> Int {
-            switch s.overall {
-            case .failure, .mixed: return 0
-            case .running, .queued: return 1
-            default:                return 2
-            }
-        }
-        if rank(a) != rank(b) { return rank(a) < rank(b) }
+        if rank(a.overall) != rank(b.overall) { return rank(a.overall) < rank(b.overall) }
         return a.spec.displayName.localizedCaseInsensitiveCompare(b.spec.displayName)
             == .orderedAscending
     }

@@ -184,16 +184,9 @@ public final class GitLabPipelineMonitor: ObservableObject {
     }
 
     /// Map a GitLab pipeline-level status string to our overall enum.
+    /// Shared with the PR pipeline monitor, so both read the same way.
     private static func mapPipelineStatus(_ s: String?) -> PipelineOverallStatus {
-        switch s {
-        case "success":                         return .success
-        case "failed":                          return .failure
-        case "running":                         return .running
-        case "created", "pending", "preparing",
-             "waiting_for_resource", "scheduled": return .queued
-        case "skipped", "manual", "canceled":   return .skipped
-        default:                                return .unknown
-        }
+        PipelineOverallStatus.fromGitLab(s)
     }
 
     enum GitLabError: LocalizedError {

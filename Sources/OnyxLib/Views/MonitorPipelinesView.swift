@@ -10,6 +10,7 @@ struct PullRequestsSection: View {
     @ObservedObject private var glManager = GitLabMergeRequestManager.shared
     @ObservedObject private var ghConfig = GitHubConfigStore.shared
     @ObservedObject private var glConfig = GitLabConfigStore.shared
+    @ObservedObject private var ci = PRPipelineMonitor.shared
 
     /// GitHub PRs then GitLab MRs, each already filtered/sorted by its
     /// own manager. Rows carry a provider badge so the source is clear.
@@ -56,7 +57,8 @@ struct PullRequestsSection: View {
                         .foregroundColor(.gray.opacity(0.4))
                 } else {
                     ForEach(merged) { pr in
-                        PullRequestRow(pr: pr, accentColor: appState.accentColor)
+                        PullRequestRow(pr: pr, runs: ci.runs(for: pr),
+                                       accentColor: appState.accentColor)
                     }
                 }
             }
@@ -80,9 +82,23 @@ struct ProviderBadge: View {
 
 private struct PullRequestRow: View {
     let pr: PullRequest
+    /// The latest CI on the PR's branch, fetched with no tracking needed.
+    let runs: [PRPipelineRun]
     let accentColor: Color
 
     var body: some View {
+        // The run lines are siblings of the PR button, not children of
+        // it: a Button nested inside another's label is a hit-testing
+        // coin toss, and each line opens a different page.
+        VStack(alignment: .leading, spacing: 0) {
+            prButton
+            ForEach(runs) { run in
+                PRPipelineRunLine(run: run, accentColor: accentColor)
+            }
+        }
+    }
+
+    private var prButton: some View {
         Button(action: openPR) {
             HStack(alignment: .top, spacing: 8) {
                 MergeStatusDot(status: pr.mergeStatus)
@@ -126,6 +142,78 @@ private struct PullRequestRow: View {
 
     private func openPR() {
         guard let url = URL(string: pr.url) else { return }
+        NSWorkspace.shared.open(url)
+    }
+}
+
+/// One workflow's latest run on a PR: `● CI #412 ↻2 · 3m ago`, and the
+/// failed jobs by name when it's red — the detail you'd otherwise open
+/// the run to learn. Clicking opens the run.
+struct PRPipelineRunLine: View {
+    let run: PRPipelineRun
+    let accentColor: Color
+
+    var body: some View {
+        Button(action: open) {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
+                    PipelineStatusDot(overall: run.overall)
+                    Text(run.name)
+                        .monitorFont(size: 10)
+                        .foregroundColor(.white.opacity(0.7))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(Self.detail(run))
+                        .monitorFont(size: 10)
+                        .foregroundColor(.gray.opacity(0.5))
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    Spacer(minLength: 0)
+                }
+                if !run.failedJobs.isEmpty {
+                    Text(Self.failedLine(run))
+                        .monitorFont(size: 9)
+                        .foregroundColor(Color.onyxRed.opacity(0.75))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 11)
+                }
+            }
+            .padding(.leading, 22)   // under the PR title, past its dot
+            .padding(.trailing, 8)
+            .padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(run.url ?? run.name)
+    }
+
+    /// `#412 ↻2 · 3m ago` — the attempt only when it's a re-run.
+    static func detail(_ run: PRPipelineRun, now: Date = Date()) -> String {
+        var parts: [String] = []
+        if let n = run.runNumber { parts.append("#\(n)") }
+        if run.isRetry, let attempt = run.attempt { parts.append("↻\(attempt)") }
+        var line = parts.joined(separator: " ")
+        if let at = run.updatedAt {
+            let ago = WatchStatusLine.ago(at, now: now)
+            line += line.isEmpty ? ago : " · \(ago)"
+        }
+        return line
+    }
+
+    /// `failed: lint, test (macos)` — first few names, then a count.
+    static func failedLine(_ run: PRPipelineRun) -> String {
+        let shown = run.failedJobs.prefix(3)
+        var line = "failed: " + shown.joined(separator: ", ")
+        let more = run.failedJobs.count - shown.count
+        if more > 0 { line += " +\(more)" }
+        return line
+    }
+
+    private func open() {
+        guard let url = run.url.flatMap(URL.init(string:)) else { return }
         NSWorkspace.shared.open(url)
     }
 }
@@ -262,7 +350,7 @@ struct PipelinesSection: View {
                         .lineLimit(2)
                 } else if merged.isEmpty {
                     if !anyTracked {
-                        Text("Click + to add a pipeline from your open PRs, or paste a URL")
+                        Text("Your open PRs show their own CI above. Click + to track a pipeline that isn't on a PR — a nightly, a release.")
                             .monitorFont(size: 11)
                             .foregroundColor(.gray.opacity(0.4))
                     } else {

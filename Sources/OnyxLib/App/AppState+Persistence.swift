@@ -19,6 +19,7 @@
 //
 
 import Foundation
+import Combine
 import AppKit
 import SwiftUI
 
@@ -407,6 +408,13 @@ extension AppState {
             // is merged with GitHub's in the monitor overlay.
             GitLabMergeRequestManager.shared.startPolling()
             GitLabPipelineMonitor.shared.startPolling()
+            // The CI on each open PR, with no tracking needed. Wired here
+            // so the monitor follows the PR managers without knowing them.
+            PRPipelineMonitor.shared.start(following:
+                Publishers.CombineLatest(PullRequestManager.shared.$pullRequests,
+                                         GitLabMergeRequestManager.shared.$mergeRequests)
+                    .map { $0 + $1 }
+                    .eraseToAnyPublisher())
             // SSH connection supervisor — maintains the two-connection
             // pair (active + standby) per host so a single connection
             // failure is instantly recoverable via promotion.

@@ -875,8 +875,8 @@ struct WatchStatusLine: View {
 
     /// Relative, because "checked 4m ago" answers the question and
     /// "14:32" makes you do arithmetic to find out whether it's stuck.
-    static func ago(_ date: Date) -> String {
-        let s = Int(Date().timeIntervalSince(date))
+    static func ago(_ date: Date, now: Date = Date()) -> String {
+        let s = Int(now.timeIntervalSince(date))
         if s < 90 { return "just now" }
         if s < 3600 { return "\(s / 60)m ago" }
         if s < 86400 { return "\(s / 3600)h ago" }
