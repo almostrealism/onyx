@@ -157,6 +157,12 @@ struct MonitorView: View {
     /// set-once preferences that belong in Settings, and the keys still
     /// work for anyone with the muscle memory. Listing every key trained
     /// people to read past the line entirely.
+    /// Whether there is anything to show under CLAUDE SESSIONS.
+    private var hasClaudeSessions: Bool {
+        !appState.claudeSessions.activeSessions.isEmpty
+            || !appState.claudeSessions.pendingPermissions.isEmpty
+    }
+
     private var shortcutHint: String {
         "(T \(intervalHint) · M memory · R due-soon · D side panel"
             + " · S \(appState.monitorLayout.label) · F \(appState.fleetMode.label) · X peek)"
@@ -286,9 +292,10 @@ struct MonitorView: View {
                             .foregroundColor(.gray.opacity(0.25))
                     }
 
-                    // Claude Code sessions banner (if any active) — stays
-                    // full-width above the split.
-                    if !appState.claudeSessions.activeSessions.isEmpty || !appState.claudeSessions.pendingPermissions.isEmpty {
+                    // Claude Code sessions, full-width — only in the simple
+                    // layout, which has no column to put them in. The
+                    // detailed layout gives them a slot in its first column.
+                    if appState.monitorLayout == .simple, hasClaudeSessions {
                         ClaudeSessionsSection(appState: appState)
                             .padding(.horizontal, 40)
                     }
@@ -325,10 +332,17 @@ struct MonitorView: View {
                             // Column 1 + Column 2, left of the divider.
                             HStack(alignment: .top, spacing: 16) {
                                 // Column 1: timing bar chart + stats (the tall
-                                // half), then reminders beneath it.
+                                // half), then the Claude sessions, then
+                                // reminders beneath. The sessions list used
+                                // to be a full-width band above the split,
+                                // which pushed every column down by its
+                                // height for the sake of a few short rows.
                                 monitorColumn {
                                     if appState.timing.isConfigured {
                                         TimingBarSection(timing: appState.timing, accentColor: appState.accentColor)
+                                    }
+                                    if hasClaudeSessions {
+                                        ClaudeSessionsSection(appState: appState)
                                     }
                                     RemindersSection(appState: appState)
                                 }
