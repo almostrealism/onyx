@@ -25,17 +25,18 @@ export interface Release {
 export const RELEASES: Release[] = [
   {
     version: '0.17',
-    date: null,
-    upcoming: true,
+    date: '2026-09-22',
     summary:
       'The release where agents got a way to reach you: notify, HTML status pages, alerts on your phone and watch, and a menu bar that says which session is waiting.',
     highlights: [
-      'Agents can interrupt you — notify, with urgent and external, attached to the session it came from',
-      'Alerts on your phone and watch via ntfy, Pushover, a webhook, or iMessage to yourself',
-      'A menu bar item: sessions with notes, their unread alerts, and tracked pipelines',
-      'show_html — agents publish a real page you can click through',
-      'Session notes, favorites and pipelines shared across your Macs via a host you choose',
-      'One-click MCP install per host, which now tells you if it cannot reach Onyx afterwards',
+      'Agents can interrupt you — notify, urgent by default, attached to the session it came from. Where an alert goes is your setting per Mac, not the agent’s.',
+      'Alerts on your phone and watch via ntfy, Pushover, a webhook, or iMessage to yourself.',
+      'A menu bar item: sessions with notes, their unread alerts, and every pipeline that matters — failures first.',
+      'show_html — agents publish a real page you can click through.',
+      'An outbox: an alert sent while Onyx is unreachable is kept and delivered later, carrying the time it was sent.',
+      'Session notes, favorites, tracked pipelines and your PR-workflow choices shared across your Macs via a host you choose.',
+      'Every open PR shows its own CI — the latest run of the workflows you picked, with the failed jobs named.',
+      'One-click MCP install per host, and a bridge that explains itself when Onyx cannot be reached instead of saying “broken”.',
     ],
   },
   {

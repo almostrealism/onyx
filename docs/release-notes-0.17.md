@@ -111,6 +111,10 @@ becomes a bug worth fixing.
 
 ## Fixes worth naming
 
+- **The Claude sessions list moved into the monitor's first column**,
+  under the timing chart and above Reminders. As a full-width band it
+  pushed all three columns down by its height for the sake of a few
+  short rows.
 - **The backtick lowers the monitor even with the ⌘J session list up.**
   The list used to count as a text overlay whether or not anyone was
   typing into it, so the key that raised the monitor couldn't lower it.
@@ -157,6 +161,6 @@ becomes a bug worth fixing.
 - One version number now drives the app, the bridge, the bundle and the
   release tag. The bridge additionally reports a protocol number, because
   matching version strings never proved two binaries agree.
-- The test suite is at 1,233, including the ~1KB remote-script ceiling
+- The test suite is at 1,287, including the ~1KB remote-script ceiling
   measured for every script that can reach a terminal — which found one
   already over.
