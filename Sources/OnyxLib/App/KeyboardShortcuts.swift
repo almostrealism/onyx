@@ -24,6 +24,24 @@ public class ShortcutManager {
     }
 
     /// Get the AppState for the window that owns this event
+    /// What the bare backtick does, given what's on screen.
+    public enum BacktickAction: Equatable {
+        /// Someone is typing; the key is theirs.
+        case passThrough
+        case toggleMonitor
+        /// The ⌘J list is up and nobody is typing into it.
+        case collapseSessionListAndToggleMonitor
+    }
+
+    /// Pure, so the rule can be tested without a window.
+    public static func backtickAction(sessionListOpen: Bool, otherTextOverlay: Bool,
+                                      rightPanelOpen: Bool, typingInTextField: Bool)
+        -> BacktickAction {
+        if otherTextOverlay || rightPanelOpen { return .passThrough }
+        guard sessionListOpen else { return .toggleMonitor }
+        return typingInTextField ? .passThrough : .collapseSessionListAndToggleMonitor
+    }
+
     private static func appState(for event: NSEvent) -> AppState? {
         guard let window = event.window else { return nil }
         lock.lock()
@@ -228,9 +246,12 @@ public class ShortcutManager {
             // monitor-specific shortcuts (P/T/M/C) because the monitor
             // overlay is visually on top of the panel and the user expects
             // those keys to work.
-            let hasRealTextInput = (state?.showSettings ?? false)
+            // The ⌘J session list is kept separate from the others: it
+            // only owns the keyboard while one of its fields is being
+            // typed into, and the backtick below treats it accordingly.
+            let sessionListOpen = state?.showSessionManager ?? false
+            let otherTextOverlay = (state?.showSettings ?? false)
                 || (state?.showCommandPalette ?? false)
-                || (state?.showSessionManager ?? false)
                 || (state?.showWindowRename ?? false)
                 || (state?.showSessionNoteEditor ?? false)
                 // The pipeline panel has a URL field. Without this, typing
@@ -239,11 +260,7 @@ public class ShortcutManager {
                 // characters go into the field.
                 || (state?.showPipelineAdder ?? false)
                 || (state?.showHelp ?? false)
-
-            // For non-monitor shortcuts, also suppress when a right panel
-            // with an editor is open (notes, file browser text fields).
-            let hasAnyTextInput = hasRealTextInput
-                || (state?.activeRightPanel != nil)
+            let hasRealTextInput = otherTextOverlay || sessionListOpen
 
             // Monitor-specific shortcuts: fire when monitor is visible,
             // no real text overlay is active, AND the focus ring is on the
@@ -320,10 +337,27 @@ public class ShortcutManager {
                 return nil
             }
 
-            // Other single-key shortcuts: suppress when any text input is active
-            if !hasAnyTextInput {
-                // Backtick/tilde key (keyCode 50) → toggle monitor overlay
-                if event.keyCode == 50 && flags.isEmpty {
+            // Backtick/tilde key (keyCode 50) → toggle monitor overlay.
+            //
+            // With the monitor up, ⌘J opens the session list OVER it, and
+            // the list used to count as a text overlay whether or not
+            // anyone was typing — so the backtick that had raised the
+            // monitor could no longer lower it. The list is a text
+            // overlay only while a field in it holds the keyboard; the
+            // rest of the time the backtick collapses it and toggles the
+            // monitor as it always did.
+            if event.keyCode == 50 && flags.isEmpty {
+                switch Self.backtickAction(sessionListOpen: sessionListOpen,
+                                           otherTextOverlay: otherTextOverlay,
+                                           rightPanelOpen: state?.activeRightPanel != nil,
+                                           typingInTextField: textFieldHasKeyboard) {
+                case .passThrough:
+                    break
+                case .toggleMonitor:
+                    NotificationCenter.default.post(name: .toggleMonitor, object: nil)
+                    return nil
+                case .collapseSessionListAndToggleMonitor:
+                    state?.showSessionManager = false
                     NotificationCenter.default.post(name: .toggleMonitor, object: nil)
                     return nil
                 }

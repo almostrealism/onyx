@@ -111,6 +111,13 @@ becomes a bug worth fixing.
 
 ## Fixes worth naming
 
+- **The backtick lowers the monitor even with the ⌘J session list up.**
+  The list used to count as a text overlay whether or not anyone was
+  typing into it, so the key that raised the monitor couldn't lower it.
+  Now one keystroke collapses the list and toggles the monitor — unless
+  the keyboard is in one of the list's fields, where a backtick is a
+  character.
+
 - **The "+" on the pipelines section crashed the app.** A SwiftUI popover
   that changes size animates an AppKit window resize, and the animation
   runs a nested runloop in which a stale observer is called — a null
