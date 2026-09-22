@@ -234,18 +234,14 @@ fi
 echo ""
 echo "==> Disk image"
 
+# There is deliberately no "found another .dmg, use it?" here any more.
+# `ls -t dist/*.dmg` finds the PREVIOUS RELEASE, and copying it to
+# Onyx-$VERSION.dmg ships the old app under the new version's name — a
+# mistake nothing downstream can catch, because from that point on every
+# name, URL and checksum looks exactly right. The image for a release is
+# built for that release.
 if [ ! -f "$DMG" ]; then
     echo "  $DMG not found."
-    OTHER="$(ls -t "$DIST_DIR"/*.dmg 2>/dev/null | head -1 || true)"
-    if [ -n "$OTHER" ]; then
-        echo "  Found $OTHER."
-        if confirm "  Use it (it will be uploaded as Onyx-$VERSION.dmg)?" yes; then
-            cp "$OTHER" "$DMG"
-        fi
-    fi
-fi
-
-if [ ! -f "$DMG" ]; then
     if confirm "  Build it now with ./package.sh?" yes; then
         if confirm "  Sign and notarize (needed for other people's Macs)?" yes; then
             ./package.sh --notarize
@@ -269,6 +265,42 @@ done
 
 SIZE="$(du -h "$DMG" | awk '{print $1}')"
 echo "  $DMG ($SIZE)"
+
+# What is actually INSIDE the image. The file name is chosen by whoever
+# built or copied it and proves nothing; the app's own
+# CFBundleShortVersionString is what every user will see in About and
+# what the per-host update check compares against.
+dmg_app_version() {   # dmg_app_version FILE → the app's short version
+    __mnt="$(mktemp -d)"
+    __v=""
+    if hdiutil attach "$1" -mountpoint "$__mnt" -nobrowse -readonly -quiet >/dev/null 2>&1; then
+        for __app in "$__mnt"/*.app; do
+            [ -d "$__app" ] || continue
+            __v="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+                   "$__app/Contents/Info.plist" 2>/dev/null || true)"
+            break
+        done
+        hdiutil detach "$__mnt" -quiet >/dev/null 2>&1 \
+            || hdiutil detach "$__mnt" -force -quiet >/dev/null 2>&1 || true
+    fi
+    rmdir "$__mnt" 2>/dev/null || true
+    printf '%s' "$__v"
+}
+
+INSIDE="$(dmg_app_version "$DMG")"
+if [ -z "$INSIDE" ]; then
+    echo "  WARNING: couldn't read the app version inside the image."
+    confirm "  Publish it without checking?" || exit 1
+elif [ "$INSIDE" != "$VERSION" ]; then
+    echo "  ERROR: that image contains Onyx $INSIDE, not $VERSION."
+    echo "         Publishing it would put the $INSIDE app behind every"
+    echo "         $VERSION download link, with nothing to show for it but"
+    echo "         a file name. Delete $DMG and build it again:"
+    echo "           ./package.sh --notarize"
+    exit 1
+else
+    echo "  Contains Onyx $INSIDE ✓"
+fi
 
 # Gatekeeper's verdict, not ours. An un-notarized DMG downloads fine and
 # then refuses to open on every Mac but this one — worth knowing BEFORE

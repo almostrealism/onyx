@@ -161,6 +161,6 @@ becomes a bug worth fixing.
 - One version number now drives the app, the bridge, the bundle and the
   release tag. The bridge additionally reports a protocol number, because
   matching version strings never proved two binaries agree.
-- The test suite is at 1,291, including the ~1KB remote-script ceiling
+- The test suite is at 1,293, including the ~1KB remote-script ceiling
   measured for every script that can reach a terminal — which found one
   already over.

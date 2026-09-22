@@ -72,4 +72,30 @@ final class PackagingVersionTests: XCTestCase {
     func testTheDMGIsNamedForTheRelease() throws {
         XCTAssertTrue(try script("package.sh").contains("${APP_NAME}-${VERSION}.dmg"))
     }
+
+    // MARK: - Publishing
+
+    /// Releasing 0.17 offered to upload dist/Onyx-0.16.dmg under the new
+    /// name, defaulting to yes: `ls -t dist/*.dmg` finds the PREVIOUS
+    /// release. Nothing downstream could catch it — the name, the URL and
+    /// the checksum would all be consistent with a 0.17 release that
+    /// contained the 0.16 app.
+    func testReleaseNeverOffersAnArbitraryDiskImage() throws {
+        let text = try code("release.sh")
+        XCTAssertFalse(text.contains("ls -t \"$DIST_DIR\"/*.dmg"),
+                       "the newest image in dist/ is the last RELEASE, not this one")
+    }
+
+    /// The file name is chosen by whoever built it and proves nothing, so
+    /// the image is opened and the app's own version read before anything
+    /// is published.
+    func testReleaseChecksTheVersionInsideTheImage() throws {
+        let text = try code("release.sh")
+        XCTAssertTrue(text.contains("hdiutil attach"),
+                      "release.sh must mount the image to check it")
+        XCTAssertTrue(text.contains("Print :CFBundleShortVersionString"),
+                      "…and read the app's own version out of it")
+        XCTAssertTrue(text.contains("$INSIDE\" != \"$VERSION"),
+                      "…and refuse when it disagrees with the release")
+    }
 }
