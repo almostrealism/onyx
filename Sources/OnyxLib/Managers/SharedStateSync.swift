@@ -133,7 +133,8 @@ public final class SharedStateSync: ObservableObject {
             .map { _ in () }
             .merge(with: FavoritesStore.shared.$entries.map { _ in () },
                    GitHubConfigStore.shared.objectWillChange.map { _ in () },
-                   GitLabConfigStore.shared.objectWillChange.map { _ in () })
+                   GitLabConfigStore.shared.objectWillChange.map { _ in () },
+                   WorkflowFilterStore.shared.includedChanged)
             .debounce(for: .seconds(4), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.localChanged() }
             .store(in: &watches)
@@ -418,6 +419,7 @@ public final class SharedStateSync: ObservableObject {
                     favorites: FavoritesStore.shared.entries,
                     githubPipelines: GitHubConfigStore.shared.pipelineURLs,
                     gitlabPipelines: GitLabConfigStore.shared.pipelineURLs,
+                    prWorkflows: WorkflowFilterStore.shared.includedList,
                     updated: Date(),
                     writtenBy: Self.thisMachine)
     }
@@ -458,6 +460,11 @@ public final class SharedStateSync: ObservableObject {
         if GitLabConfigStore.shared.pipelineURLs != state.gitlabPipelines {
             GitLabConfigStore.shared.pipelineURLs = state.gitlabPipelines
             GitLabPipelineMonitor.shared.refresh()
+        }
+        // Which workflows PRs show. The filter is applied on read, so
+        // the overlay follows without a refresh.
+        if WorkflowFilterStore.shared.includedList != state.prWorkflows {
+            WorkflowFilterStore.shared.included = Set(state.prWorkflows)
         }
         applying = false
     }

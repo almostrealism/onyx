@@ -54,7 +54,7 @@ Models       ← Pure data types; no dependencies on anything else
 - `BrowserManager` — WKWebView pool + KVO-based state
 - `FileBrowserManager` — file listing, search, recent files
 - `ArtifactManager` — diagram/model/text artifacts
-- `SharedStateSync` — session notes, favorites and tracked pipeline URLs on a chosen "home host" (`~/.onyx/shared-state.json`), three-way merged against a local shadow. Moving home hosts UNIONS instead of adopting, and the local files stay the working copy — a missing shadow must never delete anything.
+- `SharedStateSync` — session notes, favorites, tracked pipeline URLs and the PR-workflow choice on a chosen "home host" (`~/.onyx/shared-state.json`), three-way merged against a local shadow. Moving home hosts UNIONS instead of adopting, and the local files stay the working copy — a missing shadow must never delete anything.
 - `MenuBarController` — the menu bar item: sessions with notes and their unread agent alerts, plus tracked pipelines (failures first, retry attempt shown)
 - `AlertForwarder` — pushes urgent/external alerts off the Mac (ntfy, Pushover, webhook, iMessage). An Apple Watch mirrors a PHONE, not a Mac, so this is the only path to a wrist. Agent-authored text is never interpolated into AppleScript — `AlertForwardRequest.imessageCommand` passes it via `on run argv`.
 - `NotesManager`, `ClaudeSessionManager`, `TimingManager`

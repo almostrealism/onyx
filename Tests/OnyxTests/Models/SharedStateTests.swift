@@ -675,3 +675,69 @@ final class SharedStateFetchVerdictTests: XCTestCase {
         }
     }
 }
+
+/// The PR-workflow choice travels with the rest: which workflows show
+/// under open PRs is a decision about the work, and making it twice —
+/// once per Mac — is the kind of thing that makes a user stop trusting
+/// that the two machines are the same.
+final class SharedStateWorkflowChoiceTests: XCTestCase {
+
+    private func merge(base: [String]?, local: [String], remote: [String]) -> [String] {
+        SharedStateMerge.mergeNames(base: base, local: local, remote: remote)
+    }
+
+    func testAFileFromBeforeTheFieldExistedStillDecodes() throws {
+        let old = #"{"notes":{},"favorites":[],"githubPipelines":[],"writtenBy":"laptop"}"#
+        let state = try JSONDecoder().decode(SharedState.self, from: Data(old.utf8))
+        XCTAssertEqual(state.prWorkflows, [])
+        XCTAssertEqual(state.writtenBy, "laptop")
+    }
+
+    func testTheChoiceRoundTrips() throws {
+        var state = SharedState()
+        state.prWorkflows = ["CI"]
+        let data = try JSONEncoder().encode(state)
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("prWorkflows"))
+        XCTAssertEqual(try JSONDecoder().decode(SharedState.self, from: data).prWorkflows, ["CI"])
+    }
+
+    /// Order carries no meaning, so it must not make two equal choices
+    /// look different — that would be a push a minute between two Macs.
+    func testOrderDoesNotCountAsAChange() {
+        let a = SharedState(prWorkflows: ["Lint", "CI"])
+        let b = SharedState(prWorkflows: ["CI", "Lint"])
+        XCTAssertTrue(a.sameContent(as: b))
+        XCTAssertFalse(a.sameContent(as: SharedState(prWorkflows: ["CI"])))
+    }
+
+    /// A copy holding only a workflow choice is not "empty" — the wipe
+    /// guard must not read it as an absence.
+    func testAChoiceAloneIsContent() {
+        XCTAssertFalse(SharedState(prWorkflows: ["CI"]).isEmpty)
+        XCTAssertTrue(SharedState().isEmpty)
+    }
+
+    // MARK: - Merge
+
+    func testWithNoShadowBothSidesChoicesAreKept() {
+        XCTAssertEqual(merge(base: nil, local: ["CI"], remote: ["Lint"]), ["CI", "Lint"])
+    }
+
+    /// Switched off on one Mac → off everywhere, once a shadow says it
+    /// was on before.
+    func testSwitchingOffOnOneMacIsHonored() {
+        XCTAssertEqual(merge(base: ["CI", "Lint"], local: ["CI"], remote: ["CI", "Lint"]), ["CI"])
+        XCTAssertEqual(merge(base: ["CI", "Lint"], local: ["CI", "Lint"], remote: ["Lint"]), ["Lint"])
+    }
+
+    func testSwitchingOnOnOneMacIsHonored() {
+        XCTAssertEqual(merge(base: ["CI"], local: ["CI"], remote: ["CI", "Lint"]), ["CI", "Lint"])
+    }
+
+    func testTheFullMergeCarriesTheChoice() {
+        let local = SharedState(prWorkflows: ["CI"])
+        let remote = SharedState(prWorkflows: ["Lint"])
+        XCTAssertEqual(SharedStateMerge.merge(base: nil, local: local, remote: remote).prWorkflows,
+                       ["CI", "Lint"])
+    }
+}

@@ -93,7 +93,8 @@ becomes a bug worth fixing.
   that aren't on a PR (a nightly, a release). Which workflows appear is
   opt-in (Settings → CI ON OPEN PRs): the app offers every workflow name
   it has seen on a PR, and you switch on the one or two that gate a
-  merge — "Running Copilot Code Review" can stay off.
+  merge — "Running Copilot Code Review" can stay off. The choice syncs
+  through shared state, so it's made once, not once per Mac.
 - **Attempt numbers.** A GitHub run on its second or later try says so,
   in the monitor and in the menu bar. It's invisible on the run's own page
   until you open it.

@@ -37,6 +37,11 @@ public struct SharedState: Codable, Equatable {
     /// this feature gets to make on the user's behalf.
     public var githubPipelines: [String]
     public var gitlabPipelines: [String]
+    /// Workflow names the user has switched on under open PRs (see
+    /// WorkflowFilterStore). A choice about the work, not the desk, so
+    /// it follows the user between machines the way tracked pipelines
+    /// do. Sorted, so two copies with the same choice compare equal.
+    public var prWorkflows: [String]
     /// When this copy was written, for the status line.
     public var updated: Date
     /// Which Mac wrote it, so the status line can say "last written by
@@ -47,12 +52,14 @@ public struct SharedState: Codable, Equatable {
                 favorites: [FavoriteEntry] = [],
                 githubPipelines: [String] = [],
                 gitlabPipelines: [String] = [],
+                prWorkflows: [String] = [],
                 updated: Date = Date(),
                 writtenBy: String = "") {
         self.notes = notes
         self.favorites = favorites
         self.githubPipelines = githubPipelines
         self.gitlabPipelines = gitlabPipelines
+        self.prWorkflows = prWorkflows.sorted()
         self.updated = updated
         self.writtenBy = writtenBy
     }
@@ -71,12 +78,13 @@ public struct SharedState: Codable, Equatable {
         favorites = try c.decodeIfPresent([FavoriteEntry].self, forKey: .favorites) ?? []
         githubPipelines = try c.decodeIfPresent([String].self, forKey: .githubPipelines) ?? []
         gitlabPipelines = try c.decodeIfPresent([String].self, forKey: .gitlabPipelines) ?? []
+        prWorkflows = (try c.decodeIfPresent([String].self, forKey: .prWorkflows) ?? []).sorted()
         updated = try c.decodeIfPresent(Date.self, forKey: .updated) ?? .distantPast
         writtenBy = try c.decodeIfPresent(String.self, forKey: .writtenBy) ?? ""
     }
 
     private enum CodingKeys: String, CodingKey {
-        case notes, favorites, githubPipelines, gitlabPipelines, updated, writtenBy
+        case notes, favorites, githubPipelines, gitlabPipelines, prWorkflows, updated, writtenBy
     }
 
     public static let empty = SharedState(updated: .distantPast)
@@ -91,6 +99,7 @@ public struct SharedState: Codable, Equatable {
     public var isEmpty: Bool {
         notes.isEmpty && favorites.isEmpty
             && githubPipelines.isEmpty && gitlabPipelines.isEmpty
+            && prWorkflows.isEmpty
     }
 
     /// Whether two copies carry the same content. Deliberately ignores
@@ -101,6 +110,7 @@ public struct SharedState: Codable, Equatable {
         notes == other.notes && favorites == other.favorites
             && githubPipelines == other.githubPipelines
             && gitlabPipelines == other.gitlabPipelines
+            && prWorkflows == other.prWorkflows
     }
 }
 
@@ -125,6 +135,9 @@ public enum SharedStateMerge {
             gitlabPipelines: mergePipelines(base: base?.gitlabPipelines,
                                             local: local.gitlabPipelines,
                                             remote: remote.gitlabPipelines),
+            prWorkflows: mergeNames(base: base?.prWorkflows,
+                                    local: local.prWorkflows,
+                                    remote: remote.prWorkflows),
             updated: Date(),
             writtenBy: local.writtenBy)
     }
@@ -210,6 +223,21 @@ public enum SharedStateMerge {
             if seen.insert(id(url)).inserted { result.append(url) }
         }
         return result
+    }
+
+    // MARK: - PR workflow choices
+
+    /// Plain set membership with the same rules as favorites: both have
+    /// it → keep; one has it and there's no shadow → keep (an addition);
+    /// one has it and the shadow had it → the other side switched it
+    /// off. Sorted, because order carries no meaning here.
+    static func mergeNames(base: [String]?, local: [String], remote: [String]) -> [String] {
+        let l = Set(local), r = Set(remote), b = base.map(Set.init)
+        return l.union(r).filter { name in
+            if l.contains(name) && r.contains(name) { return true }
+            guard let b else { return true }
+            return !b.contains(name)
+        }.sorted()
     }
 
     // MARK: - Favorites

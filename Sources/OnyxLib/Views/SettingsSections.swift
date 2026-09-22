@@ -713,7 +713,7 @@ struct SharedStateSettingsSection: View {
                 }
             }
 
-            Text("Session notes, favorite sessions and tracked pipelines are kept in ~/.onyx/shared-state.json on the chosen host, so every Mac running Onyx sees the same set. A change reaches your other machines within about a minute, or straight away when you switch to one. API tokens are never shared — they stay on this Mac. Your Mac keeps its own copy and works normally when the host is unreachable. Changing hosts merges the two sets — nothing is replaced or deleted.")
+            Text("Session notes, favorite sessions, tracked pipelines and which workflows show under open PRs are kept in ~/.onyx/shared-state.json on the chosen host, so every Mac running Onyx sees the same set. A change reaches your other machines within about a minute, or straight away when you switch to one. API tokens are never shared — they stay on this Mac. Your Mac keeps its own copy and works normally when the host is unreachable. Changing hosts merges the two sets — nothing is replaced or deleted.")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.4))
                 .fixedSize(horizontal: false, vertical: true)

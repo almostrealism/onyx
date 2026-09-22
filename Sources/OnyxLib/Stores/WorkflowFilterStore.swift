@@ -52,8 +52,18 @@ public final class WorkflowFilterStore: ObservableObject {
         set {
             defaults.set(Array(newValue).sorted(), forKey: Self.includedKey)
             objectWillChange.send()
+            includedChanged.send()
         }
     }
+
+    /// Fires when the CHOICE changes — not when a workflow is merely
+    /// seen, which happens every poll. Shared-state sync listens here;
+    /// listening to objectWillChange would cost a fetch a minute for
+    /// nothing.
+    public let includedChanged = PassthroughSubject<Void, Never>()
+
+    /// The choice as it travels in shared state.
+    public var includedList: [String] { included.sorted() }
 
     public func isIncluded(_ name: String) -> Bool { included.contains(name) }
 
