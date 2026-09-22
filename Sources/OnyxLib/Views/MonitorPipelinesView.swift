@@ -11,6 +11,9 @@ struct PullRequestsSection: View {
     @ObservedObject private var ghConfig = GitHubConfigStore.shared
     @ObservedObject private var glConfig = GitLabConfigStore.shared
     @ObservedObject private var ci = PRPipelineMonitor.shared
+    /// Observed so a workflow switched on in Settings appears at once —
+    /// `ci.runs(for:)` reads the filter, but the filter is what changed.
+    @ObservedObject private var workflowFilter = WorkflowFilterStore.shared
 
     /// GitHub PRs then GitLab MRs, each already filtered/sorted by its
     /// own manager. Rows carry a provider badge so the source is clear.
@@ -350,7 +353,7 @@ struct PipelinesSection: View {
                         .lineLimit(2)
                 } else if merged.isEmpty {
                     if !anyTracked {
-                        Text("Your open PRs show their own CI above. Click + to track a pipeline that isn't on a PR — a nightly, a release.")
+                        Text("Open PRs can show their own CI — pick which workflows in Settings. Click + to track a pipeline that isn't on a PR.")
                             .monitorFont(size: 11)
                             .foregroundColor(.gray.opacity(0.4))
                     } else {

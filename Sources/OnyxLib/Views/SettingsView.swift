@@ -515,6 +515,10 @@ struct SettingsView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
 
+                        // Also across both forges: which workflows a PR
+                        // shows under itself.
+                        PRWorkflowSettingsSection()
+
                         GitHubSettingsSection()
                         GitLabSettingsSection()
                         FlowtreeSettingsSection()

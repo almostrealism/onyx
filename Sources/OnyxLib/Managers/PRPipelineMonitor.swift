@@ -78,11 +78,17 @@ public final class PRPipelineMonitor: ObservableObject {
         "\(pr.id)@\(pr.headBranch ?? "")"
     }
 
-    /// The runs for one PR, in display order.
-    public func runs(for pr: PullRequest) -> [PRPipelineRun] { runs[pr.id] ?? [] }
+    /// The runs for one PR that the user has opted into, in display
+    /// order. Filtered on the way out, not at fetch time, so a change in
+    /// settings shows at once rather than at the next poll.
+    public func runs(for pr: PullRequest) -> [PRPipelineRun] {
+        (runs[pr.id] ?? []).filter(WorkflowFilterStore.shared.keeps)
+    }
 
-    /// Every run, for the menu bar.
-    public var allRuns: [PRPipelineRun] { runs.values.flatMap { $0 } }
+    /// Every opted-in run, for the menu bar.
+    public var allRuns: [PRPipelineRun] {
+        runs.values.flatMap { $0 }.filter(WorkflowFilterStore.shared.keeps)
+    }
 
     // MARK: - Poll cycle
 
@@ -138,6 +144,9 @@ public final class PRPipelineMonitor: ObservableObject {
             var next = self.runs.filter { live.contains($0.key) }
             for (key, value) in collected { next[key] = value }
             self.runs = next
+            // Every workflow found, opted into or not — that is how the
+            // settings list learns what there is to choose from.
+            WorkflowFilterStore.shared.noteSeen(collected.values.flatMap { $0 }.map(\.name))
         }
     }
 
@@ -189,7 +198,10 @@ public final class PRPipelineMonitor: ObservableObject {
                     attempt: run.run_attempt,
                     url: run.html_url,
                     updatedAt: run.updated_at.flatMap(Self.date))
-                guard overall == .failure else {
+                // The failed-jobs request only pays off for a run someone
+                // will see; a workflow that isn't opted in gets the cheap
+                // version, which is still enough to offer it in settings.
+                guard overall == .failure, WorkflowFilterStore.shared.isIncluded(base.name) else {
                     lock.lock(); out.append(base); lock.unlock()
                     continue
                 }
@@ -289,7 +301,9 @@ public final class PRPipelineMonitor: ObservableObject {
                 attempt: nil,
                 url: latest.web_url,
                 updatedAt: latest.updated_at.flatMap(Self.date))
-            guard overall == .failure else { completion(.success([base])); return }
+            guard overall == .failure, WorkflowFilterStore.shared.isIncluded(base.name) else {
+                completion(.success([base])); return
+            }
             guard let jobsURL = URL(string:
                 "https://gitlab.com/api/v4/projects/\(project)/pipelines/\(latest.id)/jobs?scope=failed&per_page=100")
             else { completion(.success([base])); return }

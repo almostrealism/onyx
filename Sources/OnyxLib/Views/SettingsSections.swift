@@ -209,6 +209,63 @@ struct GitHubSettingsSection: View {
     }
 }
 
+/// Which workflows appear under each open PR. Offers the names the app
+/// has seen on PRs rather than asking the user to type any; nothing is
+/// on by default — see WorkflowFilterStore.
+struct PRWorkflowSettingsSection: View {
+    @ObservedObject private var filter = WorkflowFilterStore.shared
+    @ObservedObject private var ci = PRPipelineMonitor.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("CI ON OPEN PRs")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            Text("Each open PR can list the latest run of its workflows. Switch on the ones that gate a merge; the rest stay out of the way.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+
+            let names = filter.offered()
+            if names.isEmpty {
+                Text(ci.isLoading
+                     ? "Looking at your open PRs…"
+                     : "No workflows seen yet — they appear here once an open PR has run one.")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            } else {
+                ForEach(names, id: \.self) { name in
+                    Toggle(isOn: Binding(get: { filter.isIncluded(name) },
+                                         set: { filter.setIncluded(name, $0) })) {
+                        Text(name)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.75))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .tint(Color.onyxBlue)
+                }
+                Text(Self.summary(included: filter.included.count, offered: names.count))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+                    .padding(.top, 2)
+            }
+        }
+    }
+
+    static func summary(included: Int, offered: Int) -> String {
+        included == 0
+            ? "Showing none of \(offered) — nothing appears under your PRs yet"
+            : "Showing \(included) of \(offered)"
+    }
+}
+
 /// Compact "only my PRs/MRs" switch with the auto-detected username shown
 /// once it's resolved. Shared by the GitHub and GitLab settings sections.
 struct MineOnlyToggle: View {

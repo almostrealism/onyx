@@ -90,7 +90,10 @@ becomes a bug worth fixing.
   when it's a re-run, how long ago, and — when it's red — which jobs
   failed. They're in the menu bar too, failures first. Nothing to add
   and nothing to remove after the merge; tracking is now for pipelines
-  that aren't on a PR (a nightly, a release).
+  that aren't on a PR (a nightly, a release). Which workflows appear is
+  opt-in (Settings → CI ON OPEN PRs): the app offers every workflow name
+  it has seen on a PR, and you switch on the one or two that gate a
+  merge — "Running Copilot Code Review" can stay off.
 - **Attempt numbers.** A GitHub run on its second or later try says so,
   in the monitor and in the menu bar. It's invisible on the run's own page
   until you open it.
