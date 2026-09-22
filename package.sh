@@ -81,26 +81,30 @@ for arg in "$@"; do
     esac
 done
 
-# Version comes from the shared Swift constant, so the bundle, the bridge
-# inside it and the per-host update check can't disagree. A dirty or
-# untagged tree is still marked as such in the build identifier rather
-# than silently shipping as the last tag.
 # The version comes from Sources/OnyxVersion/OnyxVersion.swift — the same
 # constant the app and the MCP bridge compile in. Reading it here is what
-# keeps the bundle, the bridge and the tag from drifting apart; `git
-# describe` is kept only for the BUILD identifier, which is about which
-# commit you are running, not which release it claims to be.
+# keeps the bundle, the bridge and the tag from drifting apart.
+#
+# The BUILD identifier beside it is a commit COUNT plus the short sha, and
+# deliberately not `git describe`: describe names the most recent TAG, so
+# on the way to a release — when the new tag doesn't exist yet — every
+# build announced itself as the PREVIOUS version ("0.16-65-g42764a1")
+# while the bundle inside it was 0.17. A number that is wrong until
+# someone remembers to tag is the same class of mistake as a version
+# constant kept in two files.
 onyx_version() {
     sed -n 's/.*public static let current = "\(.*\)".*/\1/p' \
         "Sources/OnyxVersion/OnyxVersion.swift" | head -1
 }
 VERSION="$(onyx_version)"
 [ -n "$VERSION" ] || VERSION="0.0"
-FULL_VERSION=$(git describe --tags --dirty 2>/dev/null || echo "$VERSION")
+BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 0)"
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+git diff --quiet 2>/dev/null || COMMIT="$COMMIT-dirty"
 DMG_PATH="$DIST_DIR/${APP_NAME}-${VERSION}.dmg"
 
 echo ""
-echo "  $APP_NAME $FULL_VERSION"
+echo "  $APP_NAME $VERSION  (build $BUILD_NUMBER, $COMMIT)"
 echo ""
 
 # ---------------------------------------------------------------- build
@@ -175,10 +179,17 @@ done
 echo "  MCP bridges: $(ls "$MCP_DIR" | tr '\n' ' ')"
 
 # Stamp the real version into the bundle's Info.plist.
+#
+# Short version is what a person reads (the About panel's "Version 0.17");
+# CFBundleVersion is the build, and macOS shows it in parentheses beside
+# it and in every crash report — so it has to identify the build without
+# ever contradicting the release.
 cp "Sources/OnyxApp/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 PLIST="$APP_BUNDLE/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :OnyxBuildCommit string $COMMIT" "$PLIST" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Set :OnyxBuildCommit $COMMIT" "$PLIST"
 
 # ----------------------------------------------------------------- sign
 if [ "$DO_SIGN" = "1" ]; then

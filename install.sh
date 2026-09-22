@@ -84,26 +84,36 @@ esac
 # when you need to know. package.sh does the same; a script-installed
 # build has no less right to be identifiable.
 #
-# The release version is the shared constant; the build identifier stays
-# `git describe`, so a tree ahead of the tag still says which commit it is.
 cp "Sources/OnyxApp/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 # The version comes from Sources/OnyxVersion/OnyxVersion.swift — the same
 # constant the app and the MCP bridge compile in. Reading it here is what
-# keeps the bundle, the bridge and the tag from drifting apart; `git
-# describe` is kept only for the BUILD identifier, which is about which
-# commit you are running, not which release it claims to be.
+# keeps the bundle, the bridge and the tag from drifting apart.
+#
+# The BUILD identifier beside it is a commit COUNT plus the short sha, and
+# deliberately not `git describe`: describe names the most recent TAG, so
+# on the way to a release — when the new tag doesn't exist yet — every
+# build announced itself as the PREVIOUS version ("0.16-65-g42764a1")
+# while the bundle inside it was 0.17. A number that is wrong until
+# someone remembers to tag is the same class of mistake as a version
+# constant kept in two files.
 onyx_version() {
     sed -n 's/.*public static let current = "\(.*\)".*/\1/p' \
         "Sources/OnyxVersion/OnyxVersion.swift" | head -1
 }
 VERSION="$(onyx_version)"
 [ -n "$VERSION" ] || VERSION="0.0"
-BUILD_VERSION=$(git describe --tags --dirty --always 2>/dev/null || echo "$VERSION")
+BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 0)"
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+git diff --quiet 2>/dev/null || COMMIT="$COMMIT-dirty"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" \
     "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 || true
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" \
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" \
     "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 || true
-echo "  Version: $BUILD_VERSION"
+/usr/libexec/PlistBuddy -c "Add :OnyxBuildCommit string $COMMIT" \
+    "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Set :OnyxBuildCommit $COMMIT" \
+        "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 || true
+echo "  Version: $VERSION (build $BUILD_NUMBER, $COMMIT)"
 
 # Copy app icon so Finder shows it
 cp "Sources/OnyxApp/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
