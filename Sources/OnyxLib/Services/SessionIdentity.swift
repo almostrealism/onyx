@@ -82,8 +82,18 @@ public enum SessionIdentity {
         case .dockerTop(_, let container):
             return "dockertop:\(machine):\(container):\(session.name)"
         case .browser(let url):
-            // A browser tab isn't on a machine at all.
-            return "browser:\(url):\(session.name)"
+            // A browser tab isn't on a machine at all — and its NAME is
+            // the domain it happens to be showing, which changes the
+            // moment you follow a link. Keying on the name meant a
+            // favorited tab lost its favorite (and its note) as soon as
+            // you navigated: the entry on disk still named the old
+            // domain, and nothing resolved it any more. The URL the tab
+            // was opened with is its identity.
+            //
+            // `storageKeys(for:)` also offers `session.id` — the old
+            // `browser:<url>:<name>` form — so entries written before
+            // this keep resolving.
+            return "browser:\(url)"
         }
     }
 

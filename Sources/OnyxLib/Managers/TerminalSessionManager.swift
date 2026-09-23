@@ -300,9 +300,9 @@ class OnyxTerminalView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        // Only grab focus if no overlay is covering us
-        if !appState.showMonitor && !appState.showSettings && !appState.showCommandPalette
-            && !appState.showSessionManager && !appState.showSetup && !appState.showTerminalText {
+        // Only grab focus if nothing is covering us — a browser tab
+        // included, since it sits in this exact frame.
+        if !appState.terminalIsCovered {
             if let tv = terminalView {
                 tv.window?.makeFirstResponder(tv)
                 appState.focusedComponent = .terminal
@@ -580,6 +580,10 @@ class OnyxTerminalView: NSView {
     private func doRestoreFocus() {
         guard let tv = terminalView else { return }
         guard appState.focusedComponent == .terminal else { return }
+        // `focusedComponent` has no browser case, so it reads `.terminal`
+        // for a browser tab as well — every rescue would take the
+        // keyboard off the page.
+        guard !appState.activeSessionIsBrowser else { return }
         guard let window = tv.window, window.isKeyWindow else { return }
         guard window.firstResponder !== tv else { return }
         window.makeFirstResponder(tv)

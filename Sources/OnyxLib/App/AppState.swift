@@ -118,6 +118,20 @@ extension AppState {
     public var terminalIsCovered: Bool {
         showMonitor || showSettings || showCommandPalette || showSessionManager
             || showSetup || showTerminalText
+            // A browser tab is drawn over the terminal too. The terminal
+            // view STAYS in the tree (hidden, hit-testing off) so session
+            // switching keeps working — but `allowsHitTesting(false)` does
+            // not stop `makeFirstResponder`, and the click monitor decides
+            // "the click landed in the terminal" from the frame alone. So
+            // every click on a web page was a click on the terminal: focus
+            // jumped to an invisible view one runloop hop after the click,
+            // which is why a text field in a page could not be typed into.
+            || activeSessionIsBrowser
+    }
+
+    /// Whether the active session is a browser tab rather than a terminal.
+    public var activeSessionIsBrowser: Bool {
+        activeSession?.source.isLocal == true
     }
 
     /// Something other than the terminal legitimately owns the keyboard,
@@ -130,6 +144,11 @@ extension AppState {
         showSettings || showCommandPalette || showSessionManager || showWindowRename
             || showSessionNoteEditor || showHelp || showWalkthrough || showSetup
             || showTerminalText || showPipelineAdder
+            // The web view owns the keyboard while a browser tab is the
+            // active session — a page's own text fields are the whole
+            // point of it. Nothing may "rescue" the keyboard back to the
+            // terminal underneath.
+            || activeSessionIsBrowser
     }
 
     /// Recalculate and set focusedComponent based on current visibility state.

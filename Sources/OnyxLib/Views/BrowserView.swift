@@ -40,6 +40,13 @@ struct BrowserHostView: NSViewRepresentable {
         // Activate KVO observation — deferred to avoid modifying @Published during update
         DispatchQueue.main.async {
             browserManager.activate(sessionID: session.id)
+            // And give the page the keyboard. Switching to a tab used to
+            // leave first responder wherever it was — usually the hidden
+            // terminal — so the first keystrokes after a switch went into
+            // a view nobody could see.
+            if let window = wv.window, window.firstResponder !== wv {
+                window.makeFirstResponder(wv)
+            }
         }
     }
 

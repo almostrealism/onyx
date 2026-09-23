@@ -80,18 +80,37 @@ extension OnyxTerminalView {
 
             DispatchQueue.main.async {
                 self.isEnumerating = false
+
+                // Browser tabs are OURS, not tmux's.
+                //
+                // This list is rebuilt from enumeration — the topology
+                // store, recreated favorites, live pool entries — and then
+                // ASSIGNED. A browser tab appears in none of those: there
+                // is nothing to enumerate on a host and no terminal in the
+                // pool, so every enumeration pass silently deleted the tab
+                // the user was looking at. That is why a browser session
+                // was missing from the session list, and why favoriting
+                // one never stuck: the favorite resolves through
+                // allSessions, so the entry on disk pointed at a session
+                // that had just been dropped.
+                let browserTabs = self.appState.allSessions.filter { $0.source.isLocal }
+                func withBrowserTabs(_ list: [TmuxSession]) -> [TmuxSession] {
+                    let ids = Set(list.map(\.id))
+                    return list + browserTabs.filter { !ids.contains($0.id) }
+                }
+
                 if finalResults.isEmpty {
                     let defaultHost = self.appState.hosts.first ?? .localhost
                     let fallback = TmuxSession(
                         name: defaultHost.ssh.tmuxSession,
                         source: .host(hostID: defaultHost.id)
                     )
-                    self.appState.allSessions = [fallback]
+                    self.appState.allSessions = withBrowserTabs([fallback])
                     if self.appState.activeSession == nil {
                         self.appState.activeSession = fallback
                     }
                 } else {
-                    self.appState.allSessions = finalResults
+                    self.appState.allSessions = withBrowserTabs(finalResults)
                     // Only reassign active session if there is none at all.
                     // Prefer: restored session from last use > first favorite > default host session > first found
                     if self.appState.activeSession == nil {

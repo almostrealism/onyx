@@ -677,3 +677,87 @@ final class KilledSessionTests: XCTestCase {
         XCTAssertFalse(state.isFavorited(doomed))
     }
 }
+
+/// Browser tabs: a favorited tab must stay favorited when you follow a
+/// link, and must survive the enumeration that rebuilds the session list.
+final class BrowserSessionIdentityTests: XCTestCase {
+
+    private let localhost = HostConfig.localhost
+
+    private func tab(url: String, name: String) -> TmuxSession {
+        TmuxSession(name: name, source: .browser(url: url))
+    }
+
+    /// The tab's NAME is whichever domain it is showing — it is rewritten
+    /// on every navigation. Keying storage on it meant the favorite and
+    /// the note pointed at a session that no longer existed the moment
+    /// you clicked a link.
+    func testTheKeyDoesNotChangeWhenThePageDoes() {
+        let opened = tab(url: "https://github.com", name: "github.com")
+        let navigated = tab(url: "https://github.com", name: "docs.github.com")
+        XCTAssertEqual(SessionIdentity.storageKey(for: opened, host: localhost),
+                       SessionIdentity.storageKey(for: navigated, host: localhost))
+    }
+
+    func testTwoTabsWithDifferentURLsAreDifferentSessions() {
+        XCTAssertNotEqual(
+            SessionIdentity.storageKey(for: tab(url: "https://a.example", name: "a.example"),
+                                       host: localhost),
+            SessionIdentity.storageKey(for: tab(url: "https://b.example", name: "b.example"),
+                                       host: localhost))
+    }
+
+    /// A favorite written by an older build is stored under
+    /// `browser:<url>:<name>`. It has to keep resolving, or updating the
+    /// app looks like it deleted your tabs from the bar.
+    func testAFavoriteStoredUnderTheOldKeyStillResolves() {
+        let state = AppState()
+        let session = tab(url: "https://github.com", name: "github.com")
+        let keys = state.storageKeys(for: session)
+        XCTAssertEqual(keys.first, "browser:https://github.com")
+        XCTAssertTrue(keys.contains(session.id), "the old name-bearing key must still be offered")
+        XCTAssertTrue(session.id.hasSuffix(":github.com"))
+    }
+
+    /// A browser tab is not on any host, so nothing enumerates it and it
+    /// has no terminal in the pool. The list is rebuilt from those two
+    /// things, so the rebuild has to carry tabs over — otherwise the tab
+    /// you are looking at disappears from the session list on the next
+    /// poll, and the favorite pointing at it stops resolving.
+    func testTheEnumerationRebuildCarriesBrowserTabsOver() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/OnyxLib/Managers/TerminalSessionSwitching.swift"),
+            encoding: .utf8)
+        XCTAssertFalse(source.contains("appState.allSessions = finalResults"),
+                       "assigning the enumerated list verbatim drops every browser tab")
+        XCTAssertTrue(source.contains("withBrowserTabs("))
+    }
+}
+
+/// The browser is drawn in the terminal's frame, so the terminal's focus
+/// machinery has to know it is there.
+final class BrowserFocusOwnershipTests: XCTestCase {
+
+    func testABrowserTabCoversTheTerminalAndOwnsTheKeyboard() {
+        let state = AppState()
+        state.activeSession = TmuxSession(name: "github.com",
+                                         source: .browser(url: "https://github.com"))
+        XCTAssertTrue(state.activeSessionIsBrowser)
+        XCTAssertTrue(state.terminalIsCovered,
+                      "a click on the page must not read as a click on the terminal")
+        XCTAssertTrue(state.keyboardOwnedElsewhere,
+                      "nothing may rescue the keyboard back to the hidden terminal")
+    }
+
+    func testATerminalSessionIsUnaffected() {
+        let state = AppState()
+        state.activeSession = TmuxSession(name: "main",
+                                         source: .host(hostID: HostConfig.localhostID))
+        XCTAssertFalse(state.activeSessionIsBrowser)
+        XCTAssertFalse(state.terminalIsCovered)
+        XCTAssertFalse(state.keyboardOwnedElsewhere)
+    }
+}
