@@ -1,0 +1,315 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Footer from '../components/sections/Footer.astro';
+import { LATEST, downloadURL } from '../config/releases';
+import { REPO_URL } from '../config/site';
+
+// The tools, grouped by what an agent is trying to do. Names are the
+// literal tool names an MCP client sees, so they can be searched for.
+const groups = [
+  {
+    heading: 'Getting your attention',
+    tools: [
+      {
+        name: 'notify',
+        body: "Tell the user you need them. The alert attaches to the session it came from, so the indicator lights next to the work that's waiting — not in a general list. Urgent by default, because a quiet alert reaches nobody who isn't already looking.",
+      },
+    ],
+  },
+  {
+    heading: 'Putting something on the screen',
+    tools: [
+      {
+        name: 'show_html',
+        body: 'A real page in one of eight slots beside the terminal: a status summary, a table of results, a report whose every row links to the thing it describes. Links open in your browser. A complete document is shown as written; a fragment gets the app’s own dark styling.',
+      },
+      {
+        name: 'show_diagram',
+        body: 'Mermaid or PlantUML, rendered and zoomable. Explaining a refactor with the graph beats scrolling back through a description of it.',
+      },
+      {
+        name: 'show_text',
+        body: 'Text, code or markdown, syntax-highlighted, with wrapping chosen from the file type — off for code, on for prose.',
+      },
+      {
+        name: 'show_model',
+        body: 'A 3D model — OBJ, USDZ or STL — in a slot, for when the thing under discussion has a shape.',
+      },
+      {
+        name: 'list_slots / clear_slot',
+        body: 'What is on screen, and taking it down again. An agent that can see the slots can reuse one instead of stacking another panel on the pile.',
+      },
+    ],
+  },
+  {
+    heading: 'Reading the codebase',
+    tools: [
+      {
+        name: 'analyze_deps',
+        body: 'The dependency graph between the changed Java files in a repo, including the unchanged files that connect them, drawn as a diagram rather than listed as edges. Runs where the code is.',
+      },
+    ],
+  },
+  {
+    heading: 'Knowing where it stands',
+    tools: [
+      {
+        name: 'onyx_status',
+        body: 'Is Onyx reachable from this host, and if not, why and since when — answered from the host’s own records, without the desktop running. Which desktops have ever answered here, when each was last heard from, what the last attempt saw, and whether anything is queued.',
+      },
+      {
+        name: 'onyx_guide',
+        body: 'How to use Onyx, for agents. Tool descriptions answer "what does this one do"; this answers "what can I build with these together" — that publishing a page and alerting are two calls that pair, or that a remote agent cannot hand Onyx a file path.',
+      },
+    ],
+  },
+];
+---
+
+<Layout
+  title="MCP — Onyx"
+  description="Onyx runs an MCP server, so an agent working on any machine you're connected to can interrupt you, reach your phone, and put a page on your screen. Ten tools, installed on a host in one click."
+>
+  <main>
+    <div class="mx-auto max-w-3xl px-4 py-24 sm:px-6">
+      <a href="/" class="font-mono text-sm text-accent-primary transition hover:text-accent-glow">
+        &larr; Onyx
+      </a>
+
+      <p class="mt-10 font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
+        Model Context Protocol
+      </p>
+      <h1 class="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+        Agents get a way to reach you
+      </h1>
+      <p class="mt-5 text-lg leading-relaxed text-text-secondary">
+        An agent working in a terminal can do everything except get your attention. It
+        finishes and you don't notice; it stops to ask something and you don't notice; it
+        produces a result that would take one picture to explain and gives you four
+        paragraphs instead. Onyx runs an MCP server so the agent can do the other half:
+        interrupt you, reach your phone, and put a page on your screen.
+      </p>
+      <p class="mt-4 leading-relaxed text-text-secondary">
+        It works from any machine you're connected to, not just your Mac. The connection
+        Onyx already holds open for the terminal is the one the tools travel back on.
+      </p>
+    </div>
+
+    <!-- Install -->
+    <section class="border-y border-border-subtle bg-bg-secondary/40">
+      <div class="mx-auto max-w-3xl px-4 py-16 sm:px-6">
+        <h2 class="text-2xl font-bold tracking-tight">One click per host</h2>
+        <p class="mt-4 leading-relaxed text-text-secondary">
+          The bridge ships inside the app — macOS and Linux, x86-64 and arm64 — and installs
+          over the connection you already have, registering itself with Claude Code on that
+          host. The monitor's CONNECTIONS panel shows a light per host: installed, current,
+          or needs updating. A machine with several accounts gets a command you can hand to
+          the others.
+        </p>
+        <p class="mt-4 leading-relaxed text-text-secondary">
+          The install tells you if it can't reach Onyx afterwards, and names the symptom.
+          Registered is not the same as reachable, and the alternative first symptom is an
+          agent hanging for thirty seconds and reporting a timeout that explains nothing.
+        </p>
+        <div class="mt-6 overflow-x-auto rounded-xl border border-border-subtle bg-bg-primary/70 p-4 font-mono text-[12px] leading-relaxed text-text-secondary sm:p-5">
+          <div class="text-text-muted">$ OnyxMCP --probe</div>
+          <div class="mt-1 whitespace-nowrap">
+            <span class="text-text-muted">no</span>&nbsp;&nbsp;&nbsp;&nbsp;ONYX_MCP_PORT=? &mdash; nothing listening
+          </div>
+          <div class="whitespace-nowrap">
+            <span class="text-text-muted">no</span>&nbsp;&nbsp;&nbsp;&nbsp;~/.onyx/mcp.sock &mdash; nothing listening
+          </div>
+          <div class="whitespace-nowrap">
+            <span class="text-ok">YES</span>&nbsp;&nbsp;&nbsp;127.0.0.1:19432 (ssh -R) &mdash; Onyx answered
+          </div>
+          <div class="mt-1 text-ok">reachable</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tools -->
+    <section class="mx-auto max-w-3xl px-4 py-20 sm:px-6">
+      <h2 class="text-2xl font-bold tracking-tight">The tools</h2>
+      <p class="mt-4 leading-relaxed text-text-secondary">
+        Ten of them, and an agent sees the same set whether it's running on your Mac or on a
+        host three networks away.
+      </p>
+
+      <div class="mt-12 space-y-12">
+        {
+          groups.map((group) => (
+            <div>
+              <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
+                {group.heading}
+              </p>
+              <div class="mt-5 space-y-6">
+                {group.tools.map((tool) => (
+                  <div class="border-l-2 border-border-subtle pl-5 transition hover:border-accent-primary/60">
+                    <h3 class="font-mono text-sm text-text-primary">{tool.name}</h3>
+                    <p class="mt-2 text-sm leading-relaxed text-text-secondary">{tool.body}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        }
+      </div>
+    </section>
+
+    <!-- Delivery -->
+    <section class="border-y border-border-subtle bg-bg-secondary/40">
+      <div class="mx-auto max-w-3xl px-4 py-16 sm:px-6">
+        <h2 class="text-2xl font-bold tracking-tight">Where an alert actually goes</h2>
+        <p class="mt-4 leading-relaxed text-text-secondary">
+          The agent says one thing: whether this needs a person. Everything after that is
+          your setting, per machine — an agent can't know which Mac you're sitting at, so it
+          doesn't get to decide how far its message travels.
+        </p>
+
+        <div class="mt-8 grid gap-6 sm:grid-cols-3">
+          <div class="rounded-xl border border-border-subtle bg-bg-primary/70 p-5">
+            <p class="font-mono text-[10px] tracking-wide text-accent-primary uppercase">
+              In the app
+            </p>
+            <p class="mt-3 text-sm leading-relaxed text-text-secondary">
+              An indicator on the session it came from, the alert text in the menu bar, and a
+              dock bounce that keeps going until you come back.
+            </p>
+          </div>
+          <div class="rounded-xl border border-border-subtle bg-bg-primary/70 p-5">
+            <p class="font-mono text-[10px] tracking-wide text-accent-primary uppercase">
+              Notification Center
+            </p>
+            <p class="mt-3 text-sm leading-relaxed text-text-secondary">
+              Every alert, urgent only, or never — your choice per Mac. A normal macOS
+              notification, so it behaves like everything else on your screen.
+            </p>
+          </div>
+          <div class="rounded-xl border border-border-subtle bg-bg-primary/70 p-5">
+            <p class="font-mono text-[10px] tracking-wide text-accent-primary uppercase">
+              Phone, and wrist
+            </p>
+            <p class="mt-3 text-sm leading-relaxed text-text-secondary">
+              An Apple Watch mirrors a phone, never a Mac — so urgent alerts go out through
+              ntfy, Pushover, a JSON webhook, or iMessage to yourself.
+            </p>
+          </div>
+        </div>
+
+        <p class="mt-6 text-sm leading-relaxed text-text-muted">
+          Slack and Discord webhooks work unmodified — the payload carries both of their
+          field names. iMessage needs no signup at all, and being data rather than SMS it
+          survives a carrier that filters gateway traffic. Settings has a Test button that
+          reports the service's own answer rather than a green tick.
+        </p>
+      </div>
+    </section>
+
+    <!-- Offline -->
+    <section class="mx-auto max-w-3xl px-4 py-20 sm:px-6">
+      <h2 class="text-2xl font-bold tracking-tight">When Onyx isn't there</h2>
+      <p class="mt-4 leading-relaxed text-text-secondary">
+        Your laptop sleeps. The network drops. The app is closed because it's Saturday. None
+        of that should turn "the migration needs a decision" into nothing at all.
+      </p>
+
+      <div class="mt-8 space-y-6">
+        <div class="border-l-2 border-border-subtle pl-5">
+          <h3 class="font-medium text-text-primary">The alert is kept, not lost</h3>
+          <p class="mt-2 text-sm leading-relaxed text-text-secondary">
+            An undelivered alert is queued on the host and retried when the agent's session
+            starts, on the next successful call, and on a one-minute heartbeat. It carries
+            the time it was <em>sent</em>, so a 2am alert doesn't claim to have happened when
+            the network came back. It expires after 24 hours, because by then the moment has
+            passed.
+          </p>
+        </div>
+        <div class="border-l-2 border-border-subtle pl-5">
+          <h3 class="font-medium text-text-primary">The bridge explains itself</h3>
+          <p class="mt-2 text-sm leading-relaxed text-text-secondary">
+            Every failure says what this host has seen: whether Onyx has ever answered from
+            here, which desktop, how long ago, over which route, and what the last attempt
+            found. An agent that asks gets a real answer instead of concluding "it's broken"
+            — and a desktop that answered a minute ago is reported as between contacts, not
+            as gone.
+          </p>
+        </div>
+        <div class="border-l-2 border-border-subtle pl-5">
+          <h3 class="font-medium text-text-primary">A session that starts early isn't dead</h3>
+          <p class="mt-2 text-sm leading-relaxed text-text-secondary">
+            An agent started while Onyx was closed used to spend its life with no Onyx tools.
+            The bridge now answers the handshake itself and announces the tools when the app
+            opens.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Transport -->
+    <section class="border-y border-border-subtle bg-bg-secondary/40">
+      <div class="mx-auto max-w-3xl px-4 py-16 sm:px-6">
+        <h2 class="text-2xl font-bold tracking-tight">How it connects</h2>
+        <p class="mt-4 leading-relaxed text-text-secondary">
+          Three routes, tried in order, and the first one that completes a handshake wins. A
+          port that accepts a connection and then says nothing is not trusted — waiting one
+          out costs exactly the thirty seconds an agent's startup has to spend.
+        </p>
+        <dl class="mt-8 space-y-5">
+          <div class="border-l-2 border-border-subtle pl-5">
+            <dt class="font-mono text-sm text-text-primary">ONYX_MCP_PORT</dt>
+            <dd class="mt-2 text-sm leading-relaxed text-text-secondary">
+              Inside a terminal Onyx opened, the app exports the port it's listening on. A
+              local loopback connection, nothing else involved.
+            </dd>
+          </div>
+          <div class="border-l-2 border-border-subtle pl-5">
+            <dt class="font-mono text-sm text-text-primary">~/.onyx/mcp.sock</dt>
+            <dd class="mt-2 text-sm leading-relaxed text-text-secondary">
+              A Unix socket for agents running on the same Mac as Onyx, in a terminal Onyx
+              didn't open.
+            </dd>
+          </div>
+          <div class="border-l-2 border-border-subtle pl-5">
+            <dt class="font-mono text-sm text-text-primary">Reverse-forwarded port</dt>
+            <dd class="mt-2 text-sm leading-relaxed text-text-secondary">
+              Every SSH connection Onyx makes carries a reverse forward, so an agent on a
+              remote host reaches your Mac back down the connection you already opened. No
+              inbound port, no listener facing the network, nothing to expose.
+            </dd>
+          </div>
+        </dl>
+        <p class="mt-6 text-sm leading-relaxed text-text-muted">
+          Alert text and pages travel over your own SSH connection to your own Mac. The
+          exceptions are the ones you set up on purpose: a phone-forwarding service if you
+          configure one, and PlantUML diagrams, whose source is encoded into an image URL —
+          Mermaid renders locally. The
+          <a href="/privacy" class="text-accent-primary transition hover:text-accent-glow">
+            privacy page
+          </a>
+          says exactly where and when.
+        </p>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="mx-auto max-w-3xl px-4 py-20 text-center sm:px-6">
+      <h2 class="text-2xl font-bold tracking-tight">It's in {LATEST.version}</h2>
+      <p class="mx-auto mt-4 max-w-xl leading-relaxed text-text-secondary">
+        Install Onyx, connect a host, and click install in the CONNECTIONS panel. The agent
+        on that machine has the tools the next time it starts.
+      </p>
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-4">
+        <a
+          href={downloadURL(LATEST.version)}
+          class="accent-glow rounded-md bg-accent-primary px-6 py-3 font-medium text-bg-primary transition hover:bg-accent-glow"
+        >
+          Download {LATEST.version}
+        </a>
+        <a href={REPO_URL} class="text-sm text-accent-primary transition hover:text-accent-glow">
+          Source on GitHub &rarr;
+        </a>
+      </div>
+    </section>
+  </main>
+  <Footer />
+</Layout>

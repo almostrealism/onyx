@@ -1,0 +1,66 @@
+---
+// The short version of /mcp. Three things an agent can do for you the
+// moment the bridge is installed, in the order you'd meet them — the
+// page has the rest.
+const items = [
+  {
+    label: 'Notification Center',
+    title: "It tells you when it's blocked",
+    body: "An agent calls notify and you get a normal macOS notification, the dock bouncing until you come back, and an indicator on the session it came from — so you know which piece of work is waiting, not just that something is.",
+  },
+  {
+    label: 'Phone, and wrist',
+    title: 'Even when you left the desk',
+    body: 'An Apple Watch mirrors a phone, never a Mac. Urgent alerts go out through ntfy, Pushover, a JSON webhook, or iMessage to yourself — so the answer to "is it still running" arrives on your wrist instead of waiting for you to look.',
+  },
+  {
+    label: 'On your screen',
+    title: 'Results you can look at',
+    body: 'An agent can put a page in a slot beside the terminal: a summary, a table, a report whose rows link to the things they describe. Better than four paragraphs restating what a picture would have shown.',
+  },
+];
+---
+
+<section class="mx-auto max-w-5xl px-4 py-20 sm:px-6 sm:py-24">
+  <div class="max-w-2xl">
+    <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
+      Alerts &amp; the MCP server
+    </p>
+    <h2 class="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
+      The agent can reach you now
+    </h2>
+    <p class="mt-4 text-text-secondary">
+      Onyx runs an MCP server, and a small bridge installs onto each host you connect to in
+      one click. After that an agent — on your Mac or three networks away — has tools for
+      the half of the job it never had: telling you it needs you, and showing you what it
+      did.
+    </p>
+  </div>
+
+  <div class="mt-12 grid gap-6 sm:grid-cols-3">
+    {
+      items.map((item) => (
+        <div class="rounded-xl border border-border-subtle bg-bg-secondary/40 p-5 transition hover:border-accent-primary/40">
+          <p class="font-mono text-[10px] tracking-wide text-accent-primary uppercase">
+            {item.label}
+          </p>
+          <h3 class="mt-3 font-medium text-text-primary">{item.title}</h3>
+          <p class="mt-2.5 text-sm leading-relaxed text-text-secondary">{item.body}</p>
+        </div>
+      ))
+    }
+  </div>
+
+  <div class="mt-10 flex flex-wrap items-center gap-x-6 gap-y-3">
+    <a
+      href="/mcp"
+      class="rounded-md border border-border-subtle bg-bg-tertiary px-4 py-2 text-sm text-text-primary transition hover:border-accent-primary/60"
+    >
+      All ten tools, and how it connects &rarr;
+    </a>
+    <p class="text-sm text-text-muted">
+      Whether an alert reaches Notification Center or your phone is your setting, per Mac.
+      The agent only says whether it needs a person.
+    </p>
+  </div>
+</section>
