@@ -262,6 +262,27 @@ if [ "$DO_SIGN" = "1" ]; then
 </dict>
 </plist>
 PLIST
+    # Nested code FIRST, inside-out: the bundle's signature seals its
+    # resources, so anything signed after the bundle breaks that seal.
+    #
+    # The macOS MCP bridge in Contents/Resources/mcp is a real Mach-O
+    # executable, and notarization checks every executable in the bundle,
+    # not just the app's. Nothing local complains about it being
+    # unsigned — `codesign --verify --deep --strict` passes, because to
+    # codesign a file in Resources is a resource — so the first sign of
+    # trouble is Apple answering "Invalid" several minutes later with no
+    # reason attached. That is exactly what happened the first time this
+    # bundle carried a bridge.
+    #
+    # The Linux bridges beside it are ELF: not code as far as macOS is
+    # concerned, and codesign refuses them. Hence the macos-* glob.
+    for nested in "$MCP_DIR"/OnyxMCP-macos-*; do
+        [ -f "$nested" ] || continue
+        echo "  Signing $(basename "$nested")..."
+        codesign --force --options runtime --timestamp \
+            --sign "$IDENTITY" "$nested"
+    done
+
     codesign --force --options runtime --timestamp \
         --entitlements "$ENTITLEMENTS" \
         --sign "$IDENTITY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
@@ -269,6 +290,47 @@ PLIST
         --entitlements "$ENTITLEMENTS" \
         --sign "$IDENTITY" "$APP_BUNDLE"
     codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+
+    # Ask the question Apple will ask, here, where it costs a second
+    # instead of a round trip to Cupertino: is every Mach-O in this
+    # bundle signed WITH A DEVELOPER ID and a hardened runtime?
+    #
+    # "Is it signed" is the wrong question and answers yes: on Apple
+    # silicon the linker ad-hoc signs everything it produces, so an
+    # untouched binary reports `Signature=adhoc, linker-signed` and
+    # passes `codesign --verify --strict` cleanly. Notarization wants a
+    # real identity and the runtime flag, and says so only afterwards.
+    BAD=""
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        case "$(/usr/bin/file -b "$f" 2>/dev/null)" in
+            *Mach-O*) ;;
+            *) continue ;;
+        esac
+        info="$(codesign -dvvv "$f" 2>&1 || true)"
+        case "$info" in
+            *"Authority=Developer ID Application"*) ;;
+            *) BAD="$BAD
+  $f
+      not signed with a Developer ID (ad-hoc or unsigned)"
+               continue ;;
+        esac
+        if ! printf '%s' "$info" | grep -q '^CodeDirectory .*flags=[^ ]*runtime'; then
+            BAD="$BAD
+  $f
+      signed without the hardened runtime"
+        fi
+    done <<EOF
+$(find "$APP_BUNDLE" -type f)
+EOF
+    if [ -n "$BAD" ]; then
+        echo "  ERROR: executables Apple will reject:" >&2
+        printf '%s\n' "$BAD" >&2
+        echo "  Notarization would return \"Invalid\" for these, minutes" >&2
+        echo "  from now, and name them only in its log." >&2
+        exit 1
+    fi
+    echo "  Every executable in the bundle is Developer ID signed, hardened."
 else
     # Ad-hoc: required for the binary to run at all on Apple Silicon.
     # Gatekeeper will still warn on another Mac — that's what --sign is for.
@@ -420,21 +482,56 @@ if [ "$DO_NOTARIZE" = "1" ]; then
         fi
 
         echo "  Submitting for notarization (this waits for Apple)..."
+        # `notarytool submit --wait` EXITS 0 FOR A REJECTED SUBMISSION:
+        # it succeeded at submitting and at waiting, and the verdict is
+        # in its output, not its exit status. Trusting the exit status
+        # sent a DMG Apple had called Invalid straight on to `stapler`,
+        # which failed with a CloudKit "Record not found" — the ticket
+        # doesn't exist because there is no ticket — and that is the
+        # error a person was left holding.
+        SUBMIT_LOG="$(mktemp)"
         # shellcheck disable=SC2086
-        if xcrun notarytool submit "$DMG_PATH" $NOTARY_ARGS --wait; then
+        xcrun notarytool submit "$DMG_PATH" $NOTARY_ARGS --wait >"$SUBMIT_LOG" 2>&1 || true
+        cat "$SUBMIT_LOG"
+        SUB_ID="$(sed -n 's/^ *id: *\([0-9a-fA-F-]*\).*/\1/p' "$SUBMIT_LOG" | head -1)"
+        SUB_STATUS="$(sed -n 's/^ *status: *\(.*\)$/\1/p' "$SUBMIT_LOG" \
+            | tail -1 | tr -d '\r')"
+        rm -f "$SUBMIT_LOG"
+
+        if [ "$SUB_STATUS" = "Accepted" ]; then
             NOTARIZED=1
             unset APP_PASSWORD
             break
         fi
-        # Failed. Drop the credentials and go round again.
+
+        if [ -n "$SUB_STATUS" ]; then
+            # Apple answered, so the credentials were fine and retrying
+            # changes nothing. What's wrong is the bundle, and the log
+            # says which file — the one thing the status never does.
+            echo ""
+            echo "  Apple returned: $SUB_STATUS"
+            if [ -n "$SUB_ID" ]; then
+                echo "  Asking Apple why (submission $SUB_ID)..."
+                # shellcheck disable=SC2086
+                xcrun notarytool log "$SUB_ID" $NOTARY_ARGS 2>&1 | head -80
+            fi
+            unset APP_PASSWORD
+            break
+        fi
+
+        # No status at all: the submission never happened — bad
+        # credentials, no network. Drop them and go round again.
         NOTARY_ARGS=""
         unset APP_PASSWORD
     done
 
     if [ "$NOTARIZED" != "1" ]; then
-        echo "  Notarization did not succeed after 3 attempts." >&2
+        echo "" >&2
+        echo "  Notarization did not succeed." >&2
         echo "  The DMG at $DMG_PATH is signed but NOT notarized:" >&2
         echo "  Gatekeeper will refuse it on other Macs." >&2
+        echo "  The log above names the files Apple objected to; fix those" >&2
+        echo "  and run this again. Nothing was stapled." >&2
         exit 1
     fi
 

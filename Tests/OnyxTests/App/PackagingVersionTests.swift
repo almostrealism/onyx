@@ -99,3 +99,54 @@ final class PackagingVersionTests: XCTestCase {
                       "…and refuse when it disagrees with the release")
     }
 }
+
+/// What gets signed, and what counts as notarized.
+///
+/// The first bundle to carry the MCP bridge was rejected by Apple as
+/// "Invalid" with no reason shown, and the visible error was a stapler
+/// failure ("Record not found") several steps later. Two causes, both
+/// locked here.
+final class PackagingSignatureTests: XCTestCase {
+
+    private var packageScript: String {
+        (try? String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("package.sh"), encoding: .utf8)) ?? ""
+    }
+
+    /// The bridge in Contents/Resources is a Mach-O executable, and
+    /// notarization checks every executable in the bundle. Signing the
+    /// app alone leaves it as the linker made it: ad-hoc, no identity,
+    /// no hardened runtime.
+    func testTheNestedMacBridgeIsSigned() {
+        let text = packageScript
+        XCTAssertTrue(text.contains("$MCP_DIR\"/OnyxMCP-macos-*"),
+                      "the macOS bridge inside the bundle must be signed too")
+        guard let nested = text.range(of: "OnyxMCP-macos-*"),
+              let app = text.range(of: "--sign \"$IDENTITY\" \"$APP_BUNDLE\"") else {
+            return XCTFail("couldn't find both signing steps")
+        }
+        XCTAssertTrue(nested.lowerBound < app.lowerBound,
+                      "nested code signs first — the bundle's signature seals it")
+    }
+
+    /// "Is it signed" answers yes for a linker ad-hoc signature, which
+    /// is what was there. The check has to be for a real identity.
+    func testThePreflightLooksForADeveloperIDNotJustASignature() {
+        XCTAssertTrue(packageScript.contains("Authority=Developer ID Application"),
+                      "an ad-hoc signature passes codesign --verify and fails notarization")
+    }
+
+    /// `notarytool submit --wait` exits 0 for a REJECTED submission —
+    /// it succeeded at submitting and waiting. Trusting that sent a
+    /// rejected DMG on to stapler, which is where the user finally saw
+    /// an error, and it named a CloudKit record rather than a cause.
+    func testTheNotarizationVerdictIsReadFromTheOutputNotTheExitStatus() {
+        let text = packageScript
+        XCTAssertTrue(text.contains("\"$SUB_STATUS\" = \"Accepted\""),
+                      "only Accepted may staple")
+        XCTAssertTrue(text.contains("notarytool log"),
+                      "a rejection must fetch the log that names the files")
+    }
+}
