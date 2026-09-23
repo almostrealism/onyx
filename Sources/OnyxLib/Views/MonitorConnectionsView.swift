@@ -126,6 +126,32 @@ struct ConnectionPoolSection: View {
                     .foregroundColor(.white.opacity(conn.connectionStatus.isTransient ? 0.5 : 0.7))
                 }
 
+                // This Mac's own bridge.
+                //
+                // It has no mux — there is no ssh — so it has no place in
+                // the table below, and filtering local hosts out of that
+                // table hid the only button that installs the bridge
+                // here. MCPInstaller has always supported localhost (it
+                // copies the file rather than scp-ing it); nothing in the
+                // UI said so, so the answer to "how do I install it on my
+                // own machine" was the command palette with a local
+                // session focused, which nobody would guess.
+                if let localHost = appState.hosts.first(where: { $0.isLocal }) {
+                    Divider().background(Color.white.opacity(0.06)).padding(.vertical, 4)
+
+                    HStack(spacing: 0) {
+                        Text("")
+                            .frame(width: 8)
+                        Text("THIS MAC")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .lineLimit(1)
+                    .monitorFont(size: 9, weight: .medium)
+                    .foregroundColor(.gray.opacity(0.4))
+
+                    MCPHostRow(host: localHost, appState: appState)
+                }
+
                 // SSH mux status per remote host
                 let remoteHosts = appState.hosts.filter { !$0.isLocal }
                 if !remoteHosts.isEmpty {

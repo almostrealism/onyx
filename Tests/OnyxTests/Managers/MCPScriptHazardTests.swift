@@ -119,3 +119,38 @@ final class MCPScriptHazardTests: XCTestCase {
                                                    base: "/home/me").isEmpty)
     }
 }
+
+/// Installing the bridge on the Mac running Onyx.
+///
+/// The installer has always supported it — it copies the file instead of
+/// scp-ing it — but the CONNECTIONS panel built its host list with
+/// `filter { !$0.isLocal }`, so the install button existed for every
+/// machine except the one in front of you.
+final class LocalMCPInstallTests: XCTestCase {
+
+    private var connectionsView: String {
+        (try? String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/OnyxLib/Views/MonitorConnectionsView.swift"),
+            encoding: .utf8)) ?? ""
+    }
+
+    func testTheConnectionsPanelOffersTheLocalMachine() {
+        let text = connectionsView
+        XCTAssertTrue(text.contains("appState.hosts.first(where: { $0.isLocal })"),
+                      "this Mac needs its own MCP row — it has no mux, so the SSH table skips it")
+        XCTAssertTrue(text.contains("THIS MAC"))
+    }
+
+    /// Claude Code's own installer puts the CLI in places a GUI app's
+    /// PATH never has. A local install that can't find `claude` reports
+    /// NO_CLAUDE and registers nothing.
+    func testThePickerLooksWhereClaudeCodeInstallsItself() {
+        let picker = MCPInstaller.claudePickerScript
+        for path in ["$HOME/.claude/local/claude", "$HOME/.npm-global/bin/claude",
+                     "/opt/homebrew/bin/claude", "$HOME/.local/bin/claude"] {
+            XCTAssertTrue(picker.contains(path), "the picker should try \(path)")
+        }
+    }
+}

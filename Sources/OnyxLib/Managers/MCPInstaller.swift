@@ -163,7 +163,8 @@ public final class MCPInstaller: ObservableObject {
     static let claudePickerScript = """
     ONYX_CLAUDE=""
     for c in "$(command -v claude 2>/dev/null)" /opt/homebrew/bin/claude \
-             /usr/local/bin/claude "$HOME/.local/bin/claude"; do
+             /usr/local/bin/claude "$HOME/.local/bin/claude" \
+             "$HOME/.claude/local/claude" "$HOME/.npm-global/bin/claude"; do
         [ -n "$c" ] && [ -x "$c" ] || continue
         "$c" --version </dev/null >/dev/null 2>&1 || continue
         ONYX_CLAUDE="$c"
