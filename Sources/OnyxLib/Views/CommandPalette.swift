@@ -127,6 +127,11 @@ struct CommandPaletteView: View {
                         .font(.system(.body, design: .monospaced))
                         .foregroundColor(.white)
                         .focused($isSearchFocused)
+                        // Return runs the top match. Typing three letters
+                        // and pressing Return is how a command palette is
+                        // used; without this the only way to run anything
+                        // was to hit the row with the mouse.
+                        .onSubmit { actions.first?.action() }
                 }
                 .padding(12)
                 .background(Color.white.opacity(0.06))
@@ -137,9 +142,6 @@ struct CommandPaletteView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(actions) { action in
                             PaletteRow(action: action)
-                                .onTapGesture {
-                                    action.action()
-                                }
                         }
                     }
                 }
@@ -163,25 +165,39 @@ struct CommandPaletteView: View {
     }
 }
 
+/// One command.
+///
+/// A real Button, not a `Text` with `.onTapGesture` on it. The tap
+/// gesture version gave no hover feedback at all, so a row that didn't
+/// respond was indistinguishable from a row that wasn't meant to be
+/// clicked — and the commands with no keyboard shortcut (Install Onyx
+/// MCP, New Session, Rename Window) are reachable ONLY by clicking.
 struct PaletteRow: View {
     let action: PaletteAction
+    @State private var hovering = false
 
     var body: some View {
-        HStack {
-            Text(action.title)
-                .font(.system(.body, design: .monospaced))
-                .foregroundColor(.white.opacity(0.9))
+        Button(action: action.action) {
+            HStack {
+                Text(action.title)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(.white.opacity(hovering ? 1 : 0.9))
 
-            Spacer()
+                Spacer()
 
-            if !action.shortcut.isEmpty {
-                Text(action.shortcut)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.5))
+                if !action.shortcut.isEmpty {
+                    Text(action.shortcut)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.5))
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(hovering ? Color.white.opacity(0.07) : Color.clear)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
