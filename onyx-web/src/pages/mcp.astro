@@ -95,16 +95,55 @@ const groups = [
       </p>
     </div>
 
-    <!-- Install -->
+    <!-- Install: this Mac -->
     <section class="border-y border-border-subtle bg-bg-secondary/40">
       <div class="mx-auto max-w-3xl px-4 py-16 sm:px-6">
-        <h2 class="text-2xl font-bold tracking-tight">One click per host</h2>
+        <h2 class="text-2xl font-bold tracking-tight">Installing it</h2>
         <p class="mt-4 leading-relaxed text-text-secondary">
-          The bridge ships inside the app — macOS and Linux, x86-64 and arm64 — and installs
-          over the connection you already have, registering itself with Claude Code on that
-          host. The monitor's CONNECTIONS panel shows a light per host: installed, current,
-          or needs updating. A machine with several accounts gets a command you can hand to
-          the others.
+          The bridge ships inside the app — macOS and Linux, x86-64 and arm64 — so there is
+          nothing to download and no runtime to install. Two cases: the agent running on this
+          Mac, and an agent on a machine you connect to.
+        </p>
+
+        <div class="mt-8 rounded-xl border border-accent-primary/30 bg-bg-primary/70 p-5 sm:p-6">
+          <p class="font-mono text-[10px] tracking-wide text-accent-primary uppercase">
+            On the Mac running Onyx
+          </p>
+          <h3 class="mt-3 text-lg font-medium">One command</h3>
+          <p class="mt-3 text-sm leading-relaxed text-text-secondary">
+            Point Claude Code at the bridge inside the app. It takes effect for every new
+            session, in every directory:
+          </p>
+          <div class="mt-4 overflow-x-auto rounded-lg border border-border-subtle bg-bg-secondary/60 p-4 font-mono text-[12px] leading-relaxed text-text-primary">
+            <span class="text-text-muted">$</span> claude mcp add --scope user onyx -- \<br />
+            &nbsp;&nbsp;&nbsp;&nbsp;/Applications/Onyx.app/Contents/Resources/mcp/OnyxMCP-macos-arm64
+          </div>
+          <p class="mt-4 text-sm leading-relaxed text-text-secondary">
+            Then check it, with Onyx running:
+          </p>
+          <div class="mt-3 overflow-x-auto rounded-lg border border-border-subtle bg-bg-secondary/60 p-4 font-mono text-[12px] leading-relaxed text-text-primary">
+            <span class="text-text-muted">$</span>
+            /Applications/Onyx.app/Contents/Resources/mcp/OnyxMCP-macos-arm64 --probe
+          </div>
+          <p class="mt-4 text-sm leading-relaxed text-text-muted">
+            An agent on this Mac reaches Onyx over a Unix socket in your home directory —
+            nothing listens on a network port for this. In {LATEST.version} the command above
+            (or ⌘K &rarr; Install Onyx MCP with a local session focused) is how you do it
+            here; a one-click row for this Mac is in the next release.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Install: remote -->
+    <section class="border-b border-border-subtle">
+      <div class="mx-auto max-w-3xl px-4 py-16 sm:px-6">
+        <h2 class="text-2xl font-bold tracking-tight">On a machine you connect to</h2>
+        <p class="mt-4 leading-relaxed text-text-secondary">
+          One click. The bridge installs over the connection you already have, registering
+          itself with Claude Code on that host, and the monitor's CONNECTIONS panel shows a
+          light per host: installed, current, or needs updating. A machine with several
+          accounts gets a command you can hand to the others.
         </p>
         <p class="mt-4 leading-relaxed text-text-secondary">
           The install tells you if it can't reach Onyx afterwards, and names the symptom.
