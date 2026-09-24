@@ -287,6 +287,32 @@ dmg_app_version() {   # dmg_app_version FILE → the app's short version
     printf '%s' "$__v"
 }
 
+# The Linux bridges, taken out of the image itself.
+#
+# A Linux host is offered these two files and nothing else — there is no
+# app for it — so a release without them leaves anyone not running the
+# one-click install with nowhere to get the bridge. Taking them from the
+# DMG rather than from dist/ or from CI means what the release offers is
+# BYTE-IDENTICAL to what the app installs; there is no version of this
+# where the two disagree.
+BRIDGE_DIR="$(mktemp -d)"
+extract_bridges() {   # extract_bridges DMG DEST → prints what it found
+    __mnt="$(mktemp -d)"
+    if hdiutil attach "$1" -mountpoint "$__mnt" -nobrowse -readonly -quiet >/dev/null 2>&1; then
+        for __app in "$__mnt"/*.app; do
+            [ -d "$__app" ] || continue
+            for __b in "$__app/Contents/Resources/mcp/OnyxMCP-linux-"*; do
+                [ -f "$__b" ] || continue
+                cp "$__b" "$2/" && basename "$__b"
+            done
+            break
+        done
+        hdiutil detach "$__mnt" -quiet >/dev/null 2>&1 \
+            || hdiutil detach "$__mnt" -force -quiet >/dev/null 2>&1 || true
+    fi
+    rmdir "$__mnt" 2>/dev/null || true
+}
+
 INSIDE="$(dmg_app_version "$DMG")"
 if [ -z "$INSIDE" ]; then
     echo "  WARNING: couldn't read the app version inside the image."
@@ -300,6 +326,18 @@ elif [ "$INSIDE" != "$VERSION" ]; then
     exit 1
 else
     echo "  Contains Onyx $INSIDE ✓"
+fi
+
+BRIDGES="$(extract_bridges "$DMG" "$BRIDGE_DIR" | tr '\n' ' ')"
+if [ -n "$BRIDGES" ]; then
+    echo "  Linux bridges: $BRIDGES"
+else
+    echo "  Linux bridges: NONE in this image."
+    echo "  A Linux host will have nothing to download and the app can't"
+    echo "  install onto one. Re-package with dist/mcp populated:"
+    echo "    gh run download --name OnyxMCP-linux-x86_64 --dir dist/mcp"
+    echo "    gh run download --name OnyxMCP-linux-arm64  --dir dist/mcp"
+    confirm "  Publish without them?" || exit 1
 fi
 
 # Gatekeeper's verdict, not ours. An un-notarized DMG downloads fine and
@@ -357,6 +395,7 @@ echo "==> Publishing"
 echo "  repository : $REPO"
 echo "  tag        : $VERSION ($LOCAL_SHA)"
 echo "  asset      : Onyx-$VERSION.dmg ($SIZE)"
+echo "  bridges    : ${BRIDGES:-none}"
 echo "  notes      : $NOTES"
 echo "  visibility : $([ "$DRAFT" = "1" ] && echo draft || echo PUBLIC)"
 echo ""
@@ -385,6 +424,10 @@ if [ "$GH_OK" = "1" ]; then
         [ "$UPDATE_NOTES" = "1" ] && gh release edit "$VERSION" --repo "$REPO" --notes-file "$NOTES" >/dev/null
         gh release upload "$VERSION" "$DMG" --repo "$REPO" --clobber
     fi
+    if [ -n "$BRIDGES" ]; then
+        echo "  Attaching the Linux bridges..."
+        gh release upload "$VERSION" "$BRIDGE_DIR"/OnyxMCP-linux-* --repo "$REPO" --clobber
+    fi
 else
     # No gh: the same two calls against the REST API.
     BODY="$(python3 -c "import json,sys
@@ -400,23 +443,32 @@ print(json.dumps({'tag_name': sys.argv[2], 'name': 'Onyx ' + sys.argv[2],
         api PATCH "repos/$REPO/releases/$EXISTING" "$BODY" >/dev/null
     fi
 
-    # Replace an asset of the same name rather than letting GitHub
-    # rename the new one to Onyx-0.15.dmg.1 — the site links to the
-    # exact name, so a rename is a broken link that looks like a success.
-    OLD_ID="$(api GET "repos/$REPO/releases/$EXISTING/assets" | python3 -c "import json,sys
+    # An asset of the same name is REPLACED rather than left for GitHub
+    # to rename to Onyx-0.15.dmg.1 — the site links to the exact name, so
+    # a rename is a broken link that looks like a success.
+    # One uploader for every asset, so the DMG and the bridges can't
+    # drift apart in how they replace what's already there.
+    upload_asset() {   # upload_asset FILE NAME
+        OLD_ID="$(api GET "repos/$REPO/releases/$EXISTING/assets" | python3 -c "import json,sys
 try: assets = json.load(sys.stdin)
 except Exception: sys.exit(0)
 for a in assets if isinstance(assets, list) else []:
-    if a.get('name') == 'Onyx-$VERSION.dmg': print(a['id'])")"
-    [ -n "$OLD_ID" ] && api DELETE "repos/$REPO/releases/assets/$OLD_ID" >/dev/null
+    if a.get('name') == sys.argv[1]: print(a['id'])" "$2")"
+        [ -n "$OLD_ID" ] && api DELETE "repos/$REPO/releases/assets/$OLD_ID" >/dev/null
+        echo "  Uploading $2 ($(du -h "$1" | awk '{print $1}'))..."
+        curl -sS -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @"$1" \
+            "https://uploads.github.com/repos/$REPO/releases/$EXISTING/assets?name=$2" \
+            >/dev/null
+    }
 
-    echo "  Uploading $(basename "$DMG") ($SIZE)..."
-    curl -sS -X POST \
-        -H "Authorization: Bearer $TOKEN" \
-        -H "Content-Type: application/octet-stream" \
-        --data-binary @"$DMG" \
-        "https://uploads.github.com/repos/$REPO/releases/$EXISTING/assets?name=Onyx-$VERSION.dmg" \
-        >/dev/null
+    upload_asset "$DMG" "Onyx-$VERSION.dmg"
+    for BRIDGE in "$BRIDGE_DIR"/OnyxMCP-linux-*; do
+        [ -f "$BRIDGE" ] || continue
+        upload_asset "$BRIDGE" "$(basename "$BRIDGE")"
+    done
 fi
 
 # ---------------------------------------------------------------------
@@ -439,6 +491,15 @@ fi
 CODE="$(curl -sIL -o /dev/null -w '%{http_code}' "$URL" || echo 000)"
 if [ "$CODE" = "200" ]; then
     echo "  HTTP $CODE ✓  the site's download button works."
+    # And the bridges, which are what a Linux host is pointed at.
+    for BRIDGE in "$BRIDGE_DIR"/OnyxMCP-linux-*; do
+        [ -f "$BRIDGE" ] || continue
+        NAME="$(basename "$BRIDGE")"
+        BCODE="$(curl -sIL -o /dev/null -w '%{http_code}' \
+            "https://github.com/$REPO/releases/download/$VERSION/$NAME" || echo 000)"
+        echo "  HTTP $BCODE  $NAME"
+    done
+    rm -rf "$BRIDGE_DIR"
 else
     echo "  HTTP $CODE ✗  that is what a visitor's browser will get."
     echo "  The release exists but the asset isn't reachable under that name."

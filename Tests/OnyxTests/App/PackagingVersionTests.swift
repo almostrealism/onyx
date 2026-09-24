@@ -150,3 +150,68 @@ final class PackagingSignatureTests: XCTestCase {
                       "a rejection must fetch the log that names the files")
     }
 }
+
+/// Where a Linux host gets the bridge.
+///
+/// A Linux machine is offered two files and no app, so a release without
+/// them leaves anyone not using the one-click install with nowhere to go.
+/// CI used to attach them on a tag push and failed every time: it ran
+/// seconds after the tag, and the release is created minutes later, once
+/// the DMG is built and notarized. Four tagged runs failed that way and
+/// 0.17 shipped with only the DMG on it.
+final class LinuxBridgeReleaseTests: XCTestCase {
+
+    private var root: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+    }
+
+    private func text(_ name: String) throws -> String {
+        try String(contentsOf: root.appendingPathComponent(name), encoding: .utf8)
+    }
+
+    /// The file with its comment lines removed. A comment is allowed to
+    /// SAY "gh release upload" while explaining why it doesn't.
+    private func code(_ name: String) throws -> String {
+        try text(name)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
+            .joined(separator: "\n")
+    }
+
+    /// One writer for the release. CI uploads artifacts; it does not
+    /// touch releases, and cannot be tagged into trying.
+    func testCIDoesNotWriteToReleases() throws {
+        let workflow = try code(".github/workflows/mcp-binaries.yaml")
+        XCTAssertFalse(workflow.contains("gh release upload"),
+                       "CI runs before the release exists — the upload can only fail")
+        XCTAssertFalse(workflow.contains("tags:"),
+                       "a tag points at a commit master already built")
+        XCTAssertTrue(workflow.contains("contents: read"))
+    }
+
+    /// Both architectures, natively. arm64 matters for real hardware —
+    /// an aarch64 host (a DGX, a Pi, a Graviton box) can't run the x86
+    /// build, and emulating the build would be slow enough that someone
+    /// would eventually turn it off.
+    func testBothArchitecturesAreBuiltOnTheirOwnHardware() throws {
+        let workflow = try code(".github/workflows/mcp-binaries.yaml")
+        XCTAssertTrue(workflow.contains("arch: linux-arm64"))
+        XCTAssertTrue(workflow.contains("runner: ubuntu-24.04-arm"),
+                      "arm64 builds on an arm64 runner, not under qemu")
+        XCTAssertTrue(workflow.contains("arch: linux-x86_64"))
+        XCTAssertFalse(workflow.contains("qemu"))
+    }
+
+    /// The bridges come out of the disk image being published, so what a
+    /// Linux host downloads is the same file the app installs.
+    func testReleaseTakesTheBridgesFromTheImageItPublishes() throws {
+        let release = try text("release.sh")
+        XCTAssertTrue(release.contains("Contents/Resources/mcp/OnyxMCP-linux-"),
+                      "extracted from the bundle inside the DMG")
+        XCTAssertTrue(release.contains("OnyxMCP-linux-*"))
+        XCTAssertTrue(release.contains("Publish without them?"),
+                      "an image with no bridges is worth stopping over")
+    }
+}
