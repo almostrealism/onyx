@@ -176,3 +176,177 @@ final class PRPipelineMonitorTests: XCTestCase {
         XCTAssertFalse(MenuBarController.prRunLine(run(attempt: 1), pr: pr()).contains("attempt"))
     }
 }
+
+/// Which job a run is on.
+///
+/// "Still running" describes a five-minute test job and a forty-minute
+/// deploy identically. The job's name is the part worth having, and the
+/// rule for picking one has to hold when several are in flight, when
+/// none has started, and when the forge omits a timestamp.
+final class ActiveJobSelectionTests: XCTestCase {
+
+    // MARK: - GitHub
+
+    private func decodeGitHub(_ json: String) throws -> [PRPipelineMonitor.JobsResponse.Job] {
+        try JSONDecoder().decode(PRPipelineMonitor.JobsResponse.self,
+                                 from: Data(json.utf8)).jobs ?? []
+    }
+
+    /// Trimmed from a real /actions/runs/<id>/jobs response. The keys are
+    /// load-bearing: a typo compiles and yields nil for ever, and the
+    /// symptom would be a row that never names a job.
+    func testTheJobPayloadDecodes() throws {
+        let jobs = try decodeGitHub("""
+        {"jobs":[{"name":"build","status":"completed","conclusion":"success",
+                  "started_at":"2026-09-24T10:00:00Z","created_at":"2026-09-24T09:59:00Z"}]}
+        """)
+        XCTAssertEqual(jobs.first?.status, "completed")
+        XCTAssertEqual(jobs.first?.started_at, "2026-09-24T10:00:00Z")
+        XCTAssertEqual(jobs.first?.created_at, "2026-09-24T09:59:00Z")
+    }
+
+    /// Several jobs in flight: the one that started most recently is what
+    /// the run is doing now.
+    func testTheNewestRunningJobWins() throws {
+        let jobs = try decodeGitHub("""
+        {"jobs":[
+          {"name":"build","status":"completed","conclusion":"success","started_at":"2026-09-24T10:00:00Z"},
+          {"name":"test (linux)","status":"in_progress","conclusion":null,"started_at":"2026-09-24T10:05:00Z"},
+          {"name":"test (macos)","status":"in_progress","conclusion":null,"started_at":"2026-09-24T10:07:30Z"},
+          {"name":"deploy","status":"queued","conclusion":null,"created_at":"2026-09-24T10:06:00Z"}
+        ]}
+        """)
+        let job = try XCTUnwrap(PRPipelineMonitor.activeJob(jobs))
+        XCTAssertEqual(job.name, "test (macos)")
+        XCTAssertEqual(job.state, .running)
+        XCTAssertEqual(job.since, PRPipelineMonitor.date("2026-09-24T10:07:30Z"))
+    }
+
+    /// Nothing running and the run isn't over: it's waiting, and the
+    /// queued job with the newest `created_at` is the honest answer —
+    /// the only ordering something with no start time has.
+    func testWithNothingRunningTheNewestQueuedJobIsNamed() throws {
+        let jobs = try decodeGitHub("""
+        {"jobs":[
+          {"name":"build","status":"completed","conclusion":"success","started_at":"2026-09-24T10:00:00Z"},
+          {"name":"test","status":"queued","conclusion":null,"created_at":"2026-09-24T10:01:00Z"},
+          {"name":"deploy","status":"queued","conclusion":null,"created_at":"2026-09-24T10:02:00Z"}
+        ]}
+        """)
+        let job = try XCTUnwrap(PRPipelineMonitor.activeJob(jobs))
+        XCTAssertEqual(job.name, "deploy")
+        XCTAssertEqual(job.state, .queued)
+    }
+
+    /// A job held for a deployment approval reports `waiting`; one being
+    /// assigned a runner reports `requested` or `pending`. All are "not
+    /// started yet", and a run in that state must still name something.
+    func testTheOtherWordsForNotStartedYetCount() throws {
+        for status in ["waiting", "requested", "pending"] {
+            let jobs = try decodeGitHub("""
+            {"jobs":[{"name":"deploy","status":"\(status)","conclusion":null,
+                      "created_at":"2026-09-24T10:02:00Z"}]}
+            """)
+            XCTAssertEqual(PRPipelineMonitor.activeJob(jobs)?.state, .queued, status)
+        }
+    }
+
+    /// No timestamps at all — an older API response, or a forge that
+    /// omits them. Document order IS creation order, so the last listed
+    /// is the newest; naming it beats naming nothing.
+    func testWithNoTimestampsTheLastListedJobIsUsed() throws {
+        let jobs = try decodeGitHub("""
+        {"jobs":[{"name":"first","status":"queued","conclusion":null},
+                 {"name":"last","status":"queued","conclusion":null}]}
+        """)
+        let job = try XCTUnwrap(PRPipelineMonitor.activeJob(jobs))
+        XCTAssertEqual(job.name, "last")
+        XCTAssertNil(job.since)
+    }
+
+    /// A finished run is not doing anything, and saying it is would be
+    /// worse than saying nothing.
+    func testAFinishedRunNamesNoJob() throws {
+        let jobs = try decodeGitHub("""
+        {"jobs":[{"name":"build","status":"completed","conclusion":"success"},
+                 {"name":"test","status":"completed","conclusion":"failure"}]}
+        """)
+        XCTAssertNil(PRPipelineMonitor.activeJob(jobs))
+        XCTAssertEqual(PRPipelineMonitor.failedJobNames(jobs), ["test"])
+    }
+
+    /// One request per unfinished run, none for a settled green one.
+    func testOnlyUnfinishedOrRedRunsCostAJobsRequest() {
+        XCTAssertTrue(PRPipelineMonitor.wantsJobs(.running))
+        XCTAssertTrue(PRPipelineMonitor.wantsJobs(.queued))
+        XCTAssertTrue(PRPipelineMonitor.wantsJobs(.failure))
+        XCTAssertTrue(PRPipelineMonitor.wantsJobs(.mixed))
+        XCTAssertFalse(PRPipelineMonitor.wantsJobs(.success))
+        XCTAssertFalse(PRPipelineMonitor.wantsJobs(.skipped))
+        XCTAssertFalse(PRPipelineMonitor.wantsJobs(.unknown))
+    }
+
+    // MARK: - GitLab
+
+    private func decodeGitLab(_ json: String) throws -> [PRPipelineMonitor.GitLabJob] {
+        try JSONDecoder().decode([PRPipelineMonitor.GitLabJob].self, from: Data(json.utf8))
+    }
+
+    func testTheGitLabJobPayloadDecodesAndPicksTheNewestRunning() throws {
+        let jobs = try decodeGitLab("""
+        [{"name":"lint","status":"success","started_at":"2026-09-24T10:00:00.123Z",
+          "created_at":"2026-09-24T09:59:00.000Z"},
+         {"name":"rspec 1/3","status":"running","started_at":"2026-09-24T10:04:00.000Z",
+          "created_at":"2026-09-24T10:03:00.000Z"},
+         {"name":"rspec 2/3","status":"running","started_at":"2026-09-24T10:06:00.000Z",
+          "created_at":"2026-09-24T10:03:00.000Z"}]
+        """)
+        let job = try XCTUnwrap(PRPipelineMonitor.activeGitLabJob(jobs))
+        XCTAssertEqual(job.name, "rspec 2/3")
+        XCTAssertEqual(job.state, .running)
+    }
+
+    func testGitLabWordsForWaiting() throws {
+        for status in ["created", "pending", "preparing", "waiting_for_resource", "scheduled"] {
+            let jobs = try decodeGitLab("""
+            [{"name":"deploy","status":"\(status)","created_at":"2026-09-24T10:02:00.000Z"}]
+            """)
+            XCTAssertEqual(PRPipelineMonitor.activeGitLabJob(jobs)?.state, .queued, status)
+        }
+    }
+
+    /// A `manual` job is waiting for a PERSON. Reporting it as queued
+    /// would make a pipeline that has stopped and is waiting on you look
+    /// like one that is getting on with it.
+    func testAManualGitLabJobIsNotCalledQueued() throws {
+        let jobs = try decodeGitLab("""
+        [{"name":"deploy to prod","status":"manual","created_at":"2026-09-24T10:02:00.000Z"}]
+        """)
+        XCTAssertNil(PRPipelineMonitor.activeGitLabJob(jobs))
+    }
+
+    func testGitLabFailedJobsAreNamed() throws {
+        let jobs = try decodeGitLab("""
+        [{"name":"lint","status":"failed","created_at":"2026-09-24T10:00:00.000Z"},
+         {"name":"rspec","status":"success","created_at":"2026-09-24T10:00:00.000Z"}]
+        """)
+        XCTAssertEqual(PRPipelineMonitor.failedGitLabJobNames(jobs), ["lint"])
+    }
+
+    // MARK: - The row
+
+    func testTheTooltipSaysWhichStateAndSinceWhen() {
+        let started = Date(timeIntervalSince1970: 1_000_000)
+        let now = Date(timeIntervalSince1970: 1_000_000 + 300)
+        let running = PRPipelineRun.ActiveJob(name: "test (macos)", state: .running, since: started)
+        XCTAssertEqual(PRPipelineRunLine.jobHelp(running, now: now),
+                       "running: test (macos) — started 5m ago")
+
+        let queued = PRPipelineRun.ActiveJob(name: "deploy", state: .queued, since: started)
+        XCTAssertEqual(PRPipelineRunLine.jobHelp(queued, now: now),
+                       "queued: deploy — queued 5m ago")
+
+        let unstamped = PRPipelineRun.ActiveJob(name: "deploy", state: .queued, since: nil)
+        XCTAssertEqual(PRPipelineRunLine.jobHelp(unstamped, now: now), "queued: deploy")
+    }
+}

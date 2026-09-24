@@ -172,6 +172,25 @@ struct PRPipelineRunLine: View {
                         .lineLimit(1)
                         .layoutPriority(1)
                     Spacer(minLength: 0)
+                    // What it's actually on. "Running" says nothing —
+                    // a unit-test job and a deploy look identical from
+                    // out here; the job's name is the difference.
+                    if let job = run.activeJob {
+                        HStack(spacing: 3) {
+                            Image(systemName: job.state == .running
+                                  ? "play.fill" : "hourglass")
+                                .font(.system(size: 7))
+                            Text(job.name)
+                                .monitorFont(size: 10)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .foregroundColor(job.state == .running
+                                         ? Color.onyxBlue.opacity(0.85)
+                                         : Color.onyxAmber.opacity(0.8))
+                        .layoutPriority(2)
+                        .help(Self.jobHelp(job))
+                    }
                 }
                 if !run.failedJobs.isEmpty {
                     Text(Self.failedLine(run))
@@ -204,6 +223,15 @@ struct PRPipelineRunLine: View {
             line += line.isEmpty ? ago : " · \(ago)"
         }
         return line
+    }
+
+    /// "running: test (macos) — started 2m ago", for the tooltip. The row
+    /// itself has no room to say which of the two it is in words.
+    static func jobHelp(_ job: PRPipelineRun.ActiveJob, now: Date = Date()) -> String {
+        let verb = job.state == .running ? "running" : "queued"
+        guard let since = job.since else { return "\(verb): \(job.name)" }
+        let stamp = job.state == .running ? "started" : "queued"
+        return "\(verb): \(job.name) — \(stamp) \(WatchStatusLine.ago(since, now: now))"
     }
 
     /// `failed: lint, test (macos)` — first few names, then a count.

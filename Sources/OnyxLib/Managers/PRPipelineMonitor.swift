@@ -153,8 +153,9 @@ public final class PRPipelineMonitor: ObservableObject {
     // MARK: - GitHub
 
     /// The runs on the head branch, newest first; the first of each
-    /// workflow is its latest. Red ones get a second request for the
-    /// names of the failed jobs.
+    /// workflow is its latest. A run that is red, running or queued gets
+    /// a second request for its jobs — the failed ones by name, and
+    /// whichever one the run is actually on right now.
     private func fetchGitHub(pr: PullRequest, token: String,
                              completion: @escaping (Result<[PRPipelineRun], Error>) -> Void) {
         let parts = pr.repoFullName.split(separator: "/").map(String.init)
@@ -198,21 +199,25 @@ public final class PRPipelineMonitor: ObservableObject {
                     attempt: run.run_attempt,
                     url: run.html_url,
                     updatedAt: run.updated_at.flatMap(Self.date))
-                // The failed-jobs request only pays off for a run someone
-                // will see; a workflow that isn't opted in gets the cheap
-                // version, which is still enough to offer it in settings.
-                guard overall == .failure, WorkflowFilterStore.shared.isIncluded(base.name) else {
+                // The jobs request only pays off for a run someone will
+                // see, and only when there is something in it to say: what
+                // failed, or what it is working on. A finished green run
+                // needs neither, and a workflow that isn't opted in gets
+                // the cheap version — still enough to offer it in settings.
+                guard Self.wantsJobs(overall),
+                      WorkflowFilterStore.shared.isIncluded(base.name) else {
                     lock.lock(); out.append(base); lock.unlock()
                     continue
                 }
                 group.enter()
-                self.fetchFailedJobs(owner: parts[0], repo: parts[1], runID: run.id,
-                                     token: token) { names in
+                self.fetchJobs(owner: parts[0], repo: parts[1], runID: run.id,
+                               token: token) { summary in
                     lock.lock()
                     out.append(PRPipelineRun(
                         id: base.id, prID: base.prID, name: base.name, overall: base.overall,
                         runNumber: base.runNumber, attempt: base.attempt, url: base.url,
-                        updatedAt: base.updatedAt, failedJobs: names))
+                        updatedAt: base.updatedAt, failedJobs: summary.failed,
+                        activeJob: summary.active))
                     lock.unlock()
                     group.leave()
                 }
@@ -233,24 +238,92 @@ public final class PRPipelineMonitor: ObservableObject {
         }
     }
 
-    private func fetchFailedJobs(owner: String, repo: String, runID: Int, token: String,
-                                 completion: @escaping ([String]) -> Void) {
+    /// Whether a run's jobs are worth a request: something failed, or it
+    /// hasn't finished. Internal for the test.
+    static func wantsJobs(_ overall: PipelineOverallStatus) -> Bool {
+        switch overall {
+        case .failure, .mixed, .running, .queued: return true
+        case .success, .skipped, .unknown:        return false
+        }
+    }
+
+    /// What one run's job list is worth saying.
+    struct JobSummary {
+        let failed: [String]
+        let active: PRPipelineRun.ActiveJob?
+    }
+
+    private func fetchJobs(owner: String, repo: String, runID: Int, token: String,
+                           completion: @escaping (JobSummary) -> Void) {
         var comps = URLComponents()
         comps.scheme = "https"
         comps.host = "api.github.com"
         comps.path = "/repos/\(owner)/\(repo)/actions/runs/\(runID)/jobs"
         comps.queryItems = [URLQueryItem(name: "per_page", value: "100")]
-        guard let url = comps.url else { completion([]); return }
+        guard let url = comps.url else {
+            completion(JobSummary(failed: [], active: nil)); return
+        }
         var req = URLRequest(url: url)
         applyGitHubAuth(&req, token: token)
         session.dataTask(with: req) { data, _, _ in
             guard let data,
                   let decoded = try? JSONDecoder().decode(JobsResponse.self, from: data) else {
-                completion([]); return
+                completion(JobSummary(failed: [], active: nil)); return
             }
-            completion(Self.failedJobNames(decoded.jobs ?? []))
+            let jobs = decoded.jobs ?? []
+            completion(JobSummary(failed: Self.failedJobNames(jobs),
+                                  active: Self.activeJob(jobs)))
         }.resume()
     }
+
+    /// The job the run is on right now.
+    ///
+    /// Running jobs win, newest start first: a run with four jobs in
+    /// flight is most usefully described by the one it just picked up.
+    /// With nothing running, a run that isn't over is waiting, so the
+    /// most recently CREATED queued job is the answer — GitHub stamps a
+    /// job's `created_at` even before it starts, which is the only
+    /// ordering available for something that has no start time. Where
+    /// even that is missing, document order is creation order, so the
+    /// last one listed is the newest.
+    ///
+    /// Internal for the test.
+    static func activeJob(_ jobs: [JobsResponse.Job]) -> PRPipelineRun.ActiveJob? {
+        func newest(_ candidates: [(name: String, at: Date?)]) -> (name: String, at: Date?)? {
+            guard !candidates.isEmpty else { return nil }
+            let stamped = candidates.filter { $0.at != nil }
+            // Fall back to the LAST listed rather than the first: the API
+            // lists jobs in the order they were created.
+            guard !stamped.isEmpty else { return candidates.last }
+            return stamped.max { ($0.at ?? .distantPast) < ($1.at ?? .distantPast) }
+        }
+
+        let running = jobs
+            .filter { $0.status == "in_progress" }
+            .compactMap { job -> (name: String, at: Date?)? in
+                guard let name = job.name else { return nil }
+                return (name, (job.started_at ?? job.created_at).flatMap(date))
+            }
+        if let job = newest(running) {
+            return PRPipelineRun.ActiveJob(name: job.name, state: .running, since: job.at)
+        }
+
+        let waiting = jobs
+            .filter { Self.queuedStatuses.contains($0.status ?? "") }
+            .compactMap { job -> (name: String, at: Date?)? in
+                guard let name = job.name else { return nil }
+                return (name, job.created_at.flatMap(date))
+            }
+        if let job = newest(waiting) {
+            return PRPipelineRun.ActiveJob(name: job.name, state: .queued, since: job.at)
+        }
+        return nil
+    }
+
+    /// GitHub's words for "accepted, not started". `waiting` is a job
+    /// held for a deployment approval; `requested`/`pending` appear while
+    /// a runner is being allocated.
+    static let queuedStatuses: Set<String> = ["queued", "waiting", "requested", "pending"]
 
     /// Internal for the test.
     static func failedJobNames(_ jobs: [JobsResponse.Job]) -> [String] {
@@ -266,8 +339,9 @@ public final class PRPipelineMonitor: ObservableObject {
 
     // MARK: - GitLab
 
-    /// The MR's own pipelines endpoint, newest first. Red ones get a
-    /// second request, scoped to the failed jobs.
+    /// The MR's own pipelines endpoint, newest first. A pipeline that is
+    /// red, running or waiting gets a second request for its jobs — the
+    /// failed ones by name, and whichever one it is on right now.
     private func fetchGitLab(pr: PullRequest, token: String,
                              completion: @escaping (Result<[PRPipelineRun], Error>) -> Void) {
         let project = pr.repoFullName.addingPercentEncoding(withAllowedCharacters: GitLabPath.allowed)
@@ -301,24 +375,76 @@ public final class PRPipelineMonitor: ObservableObject {
                 attempt: nil,
                 url: latest.web_url,
                 updatedAt: latest.updated_at.flatMap(Self.date))
-            guard overall == .failure, WorkflowFilterStore.shared.isIncluded(base.name) else {
+            guard Self.wantsJobs(overall),
+                  WorkflowFilterStore.shared.isIncluded(base.name) else {
                 completion(.success([base])); return
             }
+            // The whole job list, not `scope=failed`: the same request has
+            // to answer "what failed" and "what is it on", and a second
+            // scoped call per pipeline per minute buys nothing.
             guard let jobsURL = URL(string:
-                "https://gitlab.com/api/v4/projects/\(project)/pipelines/\(latest.id)/jobs?scope=failed&per_page=100")
+                "https://gitlab.com/api/v4/projects/\(project)/pipelines/\(latest.id)/jobs?per_page=100")
             else { completion(.success([base])); return }
             var jobsReq = URLRequest(url: jobsURL)
             jobsReq.setValue(token, forHTTPHeaderField: "PRIVATE-TOKEN")
             self.session.dataTask(with: jobsReq) { data, _, _ in
-                let names = data.flatMap { try? JSONDecoder().decode([GitLabJob].self, from: $0) }?
-                    .compactMap(\.name) ?? []
+                let jobs = data.flatMap { try? JSONDecoder().decode([GitLabJob].self, from: $0) } ?? []
                 completion(.success([PRPipelineRun(
                     id: base.id, prID: base.prID, name: base.name, overall: base.overall,
                     runNumber: base.runNumber, attempt: nil, url: base.url,
-                    updatedAt: base.updatedAt, failedJobs: names)]))
+                    updatedAt: base.updatedAt,
+                    failedJobs: Self.failedGitLabJobNames(jobs),
+                    activeJob: Self.activeGitLabJob(jobs))]))
             }.resume()
         }.resume()
     }
+
+    /// GitLab says `failed` on the job itself. `allow_failure` jobs also
+    /// say `failed` and are deliberately included: a red job is worth
+    /// naming whether or not the pipeline chose to survive it.
+    static func failedGitLabJobNames(_ jobs: [GitLabJob]) -> [String] {
+        jobs.filter { $0.status == "failed" }.compactMap(\.name)
+    }
+
+    /// The GitLab counterpart of `activeJob`, with GitLab's vocabulary:
+    /// `running`, then the several words it uses for "not started yet".
+    /// A queued job has `created_at` but no `started_at`, same as
+    /// GitHub — so the ordering rule is identical.
+    static func activeGitLabJob(_ jobs: [GitLabJob]) -> PRPipelineRun.ActiveJob? {
+        func newest(_ candidates: [(name: String, at: Date?)]) -> (name: String, at: Date?)? {
+            guard !candidates.isEmpty else { return nil }
+            let stamped = candidates.filter { $0.at != nil }
+            guard !stamped.isEmpty else { return candidates.last }
+            return stamped.max { ($0.at ?? .distantPast) < ($1.at ?? .distantPast) }
+        }
+
+        let running = jobs.filter { $0.status == "running" }
+            .compactMap { job -> (name: String, at: Date?)? in
+                guard let name = job.name else { return nil }
+                return (name, (job.started_at ?? job.created_at).flatMap(date))
+            }
+        if let job = newest(running) {
+            return PRPipelineRun.ActiveJob(name: job.name, state: .running, since: job.at)
+        }
+
+        let waiting = jobs.filter { gitlabQueuedStatuses.contains($0.status ?? "") }
+            .compactMap { job -> (name: String, at: Date?)? in
+                guard let name = job.name else { return nil }
+                return (name, job.created_at.flatMap(date))
+            }
+        if let job = newest(waiting) {
+            return PRPipelineRun.ActiveJob(name: job.name, state: .queued, since: job.at)
+        }
+        return nil
+    }
+
+    /// GitLab's words for "not started yet". `manual` is excluded on
+    /// purpose: a manual job is waiting for a PERSON, not a runner, and
+    /// reporting it as queued would make a pipeline that has stopped and
+    /// is waiting on you look like one that is getting on with it.
+    static let gitlabQueuedStatuses: Set<String> = [
+        "created", "pending", "preparing", "waiting_for_resource", "scheduled",
+    ]
 
     // MARK: - Helpers
 
@@ -359,7 +485,13 @@ public final class PRPipelineMonitor: ObservableObject {
         let jobs: [Job]?
         struct Job: Decodable {
             let name: String?
+            /// queued / in_progress / completed / waiting / requested / pending
+            let status: String?
             let conclusion: String?
+            /// When it began executing. Null while queued.
+            let started_at: String?
+            /// When it was created — the only stamp a queued job has.
+            let created_at: String?
         }
     }
 
@@ -370,7 +502,13 @@ public final class PRPipelineMonitor: ObservableObject {
         let updated_at: String?
     }
 
-    private struct GitLabJob: Decodable {
+    /// Internal so the decoding can be tested against a real payload.
+    struct GitLabJob: Decodable {
         let name: String?
+        /// created / pending / running / failed / success / canceled /
+        /// manual / waiting_for_resource / preparing / scheduled
+        let status: String?
+        let started_at: String?
+        let created_at: String?
     }
 }

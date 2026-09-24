@@ -36,13 +36,43 @@ public struct PRPipelineRun: Identifiable, Equatable {
     /// would otherwise open the run to find out. Empty while green or
     /// still running.
     public let failedJobs: [String]
+    /// What the run is doing RIGHT NOW: the job that started most
+    /// recently, or — when nothing is running and the run isn't over —
+    /// the job most recently queued. Nil for a finished run.
+    ///
+    /// "Still running" on its own says nothing: a five-minute unit-test
+    /// job and a forty-minute deploy look identical from outside. The
+    /// job's name is what tells you which.
+    public let activeJob: ActiveJob?
 
     public init(id: String, prID: String, name: String, overall: PipelineOverallStatus,
                 runNumber: Int?, attempt: Int?, url: String?, updatedAt: Date?,
-                failedJobs: [String] = []) {
+                failedJobs: [String] = [], activeJob: ActiveJob? = nil) {
         self.id = id; self.prID = prID; self.name = name; self.overall = overall
         self.runNumber = runNumber; self.attempt = attempt; self.url = url
         self.updatedAt = updatedAt; self.failedJobs = failedJobs
+        self.activeJob = activeJob
+    }
+
+    /// One job inside a run, and whether it has started.
+    public struct ActiveJob: Equatable {
+        public enum State: String, Equatable {
+            /// Executing now.
+            case running
+            /// Accepted and waiting for a runner, or waiting on a
+            /// dependency or an approval.
+            case queued
+        }
+
+        public let name: String
+        public let state: State
+        /// When it started (running) or was created (queued). Nil where
+        /// the forge didn't say — the name is still worth showing.
+        public let since: Date?
+
+        public init(name: String, state: State, since: Date?) {
+            self.name = name; self.state = state; self.since = since
+        }
     }
 
     /// True when this is a re-run — the only case worth showing.
