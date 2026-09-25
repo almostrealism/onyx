@@ -350,3 +350,118 @@ final class ActiveJobSelectionTests: XCTestCase {
         XCTAssertEqual(PRPipelineRunLine.jobHelp(unstamped, now: now), "queued: deploy")
     }
 }
+
+/// The compact PR line in simple mode: one line per PR, showing the one
+/// pipeline the PR is most recently busy with.
+///
+/// The detailed overlay gives a PR four lines and a row per workflow. At
+/// across-the-room size there is one line, so which pipeline it names has
+/// to be the right one.
+final class CompactPRLineTests: XCTestCase {
+
+    private func run(_ name: String, job: PRPipelineRun.ActiveJob?,
+                     overall: PipelineOverallStatus = .running) -> PRPipelineRun {
+        PRPipelineRun(id: "github:acme/api#7/\(name)", prID: "github:acme/api#7",
+                      name: name, overall: overall, runNumber: 1, attempt: 1,
+                      url: nil, updatedAt: nil, activeJob: job)
+    }
+
+    private func job(_ name: String, _ state: PRPipelineRun.ActiveJob.State,
+                     at seconds: TimeInterval?) -> PRPipelineRun.ActiveJob {
+        PRPipelineRun.ActiveJob(name: name, state: state,
+                                since: seconds.map { Date(timeIntervalSince1970: $0) })
+    }
+
+    private func pr(_ number: Int, branch: String?) -> PullRequest {
+        PullRequest(provider: .github, repoFullName: "acme/api", number: number,
+                    title: "Fix \(number)", url: "https://github.com/acme/api/pull/\(number)",
+                    openCommentThreads: 0, mergeStatus: .ready, headBranch: branch,
+                    author: "me", apiSaysDraft: false)
+    }
+
+    // MARK: - Which pipeline
+
+    /// Two pipelines busy at once: the one whose job started most
+    /// recently is what the PR is actually on.
+    func testTheLatestStartedJobDecidesWhichPipelineIsShown() {
+        let runs = [run("Pipeline 1", job: job("test A", .running, at: 100)),
+                    run("Pipeline 2", job: job("test B", .running, at: 200))]
+        let chosen = PRPipelineRun.mostRecentlyActive(runs)
+        XCTAssertEqual(chosen?.name, "Pipeline 2")
+        XCTAssertEqual(chosen?.activeJob?.name, "test B")
+    }
+
+    /// A queued job's stamp is a creation time and a running job's is a
+    /// start time; the question asked is "what happened most recently", so
+    /// they are compared directly.
+    func testAQueuedJobCanOutrankAnOlderRunningOne() {
+        let runs = [run("Pipeline 1", job: job("test A", .running, at: 100)),
+                    run("Pipeline 2", job: job("deploy", .queued, at: 300))]
+        XCTAssertEqual(PRPipelineRun.mostRecentlyActive(runs)?.activeJob?.name, "deploy")
+    }
+
+    /// Same instant, so nothing separates them by time: the running job
+    /// is the one consuming it.
+    func testAtTheSameInstantRunningBeatsQueued() {
+        let runs = [run("Pipeline 1", job: job("waiting", .queued, at: 500)),
+                    run("Pipeline 2", job: job("building", .running, at: 500))]
+        XCTAssertEqual(PRPipelineRun.mostRecentlyActive(runs)?.activeJob?.name, "building")
+    }
+
+    /// No timestamps anywhere — naming a job still beats naming none, and
+    /// a running one is the better guess.
+    func testWithNoTimestampsARunningJobIsPreferred() {
+        let runs = [run("Pipeline 1", job: job("queued thing", .queued, at: nil)),
+                    run("Pipeline 2", job: job("running thing", .running, at: nil))]
+        XCTAssertEqual(PRPipelineRun.mostRecentlyActive(runs)?.activeJob?.name, "running thing")
+    }
+
+    func testARunWithNoActiveJobIsNeverChosen() {
+        let runs = [run("Idle", job: nil, overall: .success),
+                    run("Busy", job: job("test", .running, at: 10))]
+        XCTAssertEqual(PRPipelineRun.mostRecentlyActive(runs)?.name, "Busy")
+        XCTAssertNil(PRPipelineRun.mostRecentlyActive([run("Idle", job: nil, overall: .success)]))
+    }
+
+    // MARK: - When nothing is running
+
+    /// A branch name on its own answers nothing, so a quiet PR reports a
+    /// verdict instead. Red outranks green: it's the one to act on.
+    func testAQuietPRReportsAVerdict() {
+        let green = [run("CI", job: nil, overall: .success)]
+        XCTAssertEqual(PRPipelineRun.settledSummary(green)?.text, "passed")
+        XCTAssertEqual(PRPipelineRun.settledSummary(green)?.failing, false)
+
+        let red = [run("CI", job: nil, overall: .success),
+                   run("Lint", job: nil, overall: .failure)]
+        XCTAssertEqual(PRPipelineRun.settledSummary(red)?.text, "failed")
+        XCTAssertEqual(PRPipelineRun.settledSummary(red)?.failing, true)
+
+        XCTAssertNil(PRPipelineRun.settledSummary([]), "no runs means nothing to say")
+        XCTAssertNil(PRPipelineRun.settledSummary([run("CI", job: nil, overall: .unknown)]))
+    }
+
+    // MARK: - Order and labels
+
+    /// Busy PRs first, most recent at the top: an overflowing list drops
+    /// the quiet ones, which are the ones with nothing to report.
+    func testBusyPRsSortAboveQuietOnes() {
+        let quiet = pr(1, branch: "chore/deps")
+        let older = pr(2, branch: "fix/a")
+        let newer = pr(3, branch: "fix/b")
+        let byPR: [String: [PRPipelineRun]] = [
+            quiet.id: [run("CI", job: nil, overall: .success)],
+            older.id: [run("CI", job: job("test", .running, at: 100))],
+            newer.id: [run("CI", job: job("test", .running, at: 900))],
+        ]
+        let ordered = SimplePullRequests.ordered([quiet, older, newer]) { byPR[$0.id] ?? [] }
+        XCTAssertEqual(ordered.map(\.number), [3, 2, 1])
+    }
+
+    func testTheLineIsLabeledWithTheBranch() {
+        XCTAssertEqual(SimplePRLine.branchLabel(pr(7, branch: "feature/thing")), "feature/thing")
+        // GitHub omits the head branch on a PR from a deleted fork.
+        XCTAssertEqual(SimplePRLine.branchLabel(pr(7, branch: nil)), "#7")
+        XCTAssertEqual(SimplePRLine.branchLabel(pr(7, branch: "")), "#7")
+    }
+}

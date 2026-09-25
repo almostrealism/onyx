@@ -194,6 +194,7 @@ struct SimpleSidePanel: View {
             SimpleSessionNotes(appState: appState, accentColor: accentColor)
             SimpleTodayReminders(reminders: reminders, accentColor: accentColor,
                                  listOrder: appState.appearance.remindersLists)
+            SimplePullRequests(appState: appState, accentColor: accentColor)
             Spacer(minLength: 0)
         }
     }
@@ -222,6 +223,7 @@ struct SimpleSidePanel: View {
     static func hasContent(appState: AppState, reminders: RemindersManager,
                            store: SessionNotesStore = .shared) -> Bool {
         if !orderedSessionNotes(appState: appState, store: store).isEmpty { return true }
+        if !SimplePullRequests.visiblePRs(appState: appState).isEmpty { return true }
         return reminders.accessGranted
             && reminders.reminders.contains(where: { RemindersManager.isDueToday($0) })
     }
@@ -256,23 +258,40 @@ struct SimpleSessionNotes: View {
                         .tracking(2)
 
                     ForEach(Array(entries.prefix(maxShown)), id: \.session.id) { entry in
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Circle()
-                                .fill(dotColor(for: entry.session, now: context.date))
-                                .frame(width: 7, height: 7)
-                            if let n = entry.shortcut {
-                                Text("⌘\(n)")
-                                    .monitorFont(size: 9)
-                                    .foregroundColor(.gray.opacity(0.45))
+                        // Clickable here too. The detailed overlay's notes
+                        // take you to the session; a compact view of the
+                        // same list that only looks at you is a worse
+                        // version of the same thing, and there is no
+                        // reason for the two to disagree.
+                        //
+                        // `jumpToSession` rather than `switchToSession`:
+                        // it routes through the terminal pool so the
+                        // session's view actually activates, and drops the
+                        // overlay covering it.
+                        Button(action: {
+                            appState.jumpToSession(entry.session,
+                                                   dismissIfAlreadyActive: false)
+                        }) {
+                            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                                Circle()
+                                    .fill(dotColor(for: entry.session, now: context.date))
+                                    .frame(width: 7, height: 7)
+                                if let n = entry.shortcut {
+                                    Text("⌘\(n)")
+                                        .monitorFont(size: 9)
+                                        .foregroundColor(.gray.opacity(0.45))
+                                }
+                                Text(entry.note.text)
+                                    .monitorFont(size: 13)
+                                    .foregroundColor(appState.activeSession?.id == entry.session.id
+                                                     ? .white.opacity(0.95) : .white.opacity(0.8))
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                Spacer(minLength: 0)
                             }
-                            Text(entry.note.text)
-                                .monitorFont(size: 13)
-                                .foregroundColor(appState.activeSession?.id == entry.session.id
-                                                 ? .white.opacity(0.95) : .white.opacity(0.8))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            Spacer(minLength: 0)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
 
                     if entries.count > maxShown {
@@ -292,6 +311,142 @@ struct SimpleSessionNotes: View {
             return .gray.opacity(0.45)
         }
         return monitorSessionActivityColor(now.timeIntervalSince(last))
+    }
+}
+
+/// Open PRs in one line each: the branch, and what its CI is doing.
+///
+/// The detailed overlay gives a PR four lines — title, repo, then a line
+/// per workflow. That is the right shape when you are reading; this is
+/// the across-the-room view, so each PR gets one line and the only
+/// pipeline shown is the one the PR is most recently busy with. A PR with
+/// nothing running says "passed" or "failed" instead, because a branch
+/// name on its own answers nothing.
+struct SimplePullRequests: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject private var ghManager = PullRequestManager.shared
+    @ObservedObject private var glManager = GitLabMergeRequestManager.shared
+    @ObservedObject private var ci = PRPipelineMonitor.shared
+    /// Observed so switching a workflow on in Settings lands here too —
+    /// `ci.runs(for:)` reads the filter, and the filter is what changed.
+    @ObservedObject private var workflowFilter = WorkflowFilterStore.shared
+    let accentColor: Color
+
+    /// The charts are the point of this layout; a long PR list must not
+    /// push them around. Busy ones sort first, so an overflowing list
+    /// drops the quiet ones.
+    private let maxShown = 5
+
+    /// The same merged, draft-filtered list the detailed overlay shows,
+    /// so the two can't disagree about which PRs are yours.
+    static func visiblePRs(appState: AppState,
+                           gh: PullRequestManager = .shared,
+                           gl: GitLabMergeRequestManager = .shared) -> [PullRequest] {
+        (gh.pullRequests + gl.mergeRequests)
+            .filter { appState.appearance.prDraftFilter.keeps($0) }
+    }
+
+    /// Busy PRs first, most recently busy at the top; then the rest in
+    /// the order their forge gave them.
+    static func ordered(_ prs: [PullRequest],
+                        runs: (PullRequest) -> [PRPipelineRun]) -> [PullRequest] {
+        prs.enumerated().sorted { a, b in
+            let jobA = PRPipelineRun.mostRecentlyActive(runs(a.element))?.activeJob
+            let jobB = PRPipelineRun.mostRecentlyActive(runs(b.element))?.activeJob
+            switch (jobA, jobB) {
+            case (.some(let x), .some(let y)):
+                let (sx, sy) = (x.since ?? .distantPast, y.since ?? .distantPast)
+                return sx == sy ? a.offset < b.offset : sx > sy
+            case (.some, .none): return true
+            case (.none, .some): return false
+            case (.none, .none): return a.offset < b.offset
+            }
+        }.map(\.element)
+    }
+
+    var body: some View {
+        let prs = Self.ordered(Self.visiblePRs(appState: appState)) { ci.runs(for: $0) }
+        if !prs.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("OPEN PRs")
+                    .monitorFont(size: 10, weight: .medium)
+                    .foregroundColor(accentColor)
+                    .tracking(2)
+
+                ForEach(Array(prs.prefix(maxShown))) { pr in
+                    SimplePRLine(pr: pr, runs: ci.runs(for: pr), accentColor: accentColor)
+                }
+
+                if prs.count > maxShown {
+                    Text("+\(prs.count - maxShown) more")
+                        .monitorFont(size: 10)
+                        .foregroundColor(.gray.opacity(0.35))
+                }
+            }
+        }
+    }
+}
+
+/// One PR: branch on the left, what it's doing on the right.
+struct SimplePRLine: View {
+    let pr: PullRequest
+    let runs: [PRPipelineRun]
+    let accentColor: Color
+
+    var body: some View {
+        Button(action: open) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(Self.branchLabel(pr))
+                    .monitorFont(size: 12)
+                    .foregroundColor(.white.opacity(0.85))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 6)
+
+                if let run = PRPipelineRun.mostRecentlyActive(runs), let job = run.activeJob {
+                    // The workflow, then the step. Two shades rather than
+                    // a separator: at a glance you want the step, and it
+                    // is the half that changes.
+                    Text(run.name)
+                        .monitorFont(size: 11)
+                        .foregroundColor(.gray.opacity(0.55))
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    Text(job.name)
+                        .monitorFont(size: 12)
+                        .foregroundColor(job.state == .running
+                                         ? Color.onyxBlue.opacity(0.9)
+                                         : Color.onyxAmber.opacity(0.85))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .layoutPriority(2)
+                } else if let settled = PRPipelineRun.settledSummary(runs) {
+                    Text(settled.text)
+                        .monitorFont(size: 11)
+                        .foregroundColor(settled.failing
+                                         ? Color.onyxRed.opacity(0.85)
+                                         : Color.onyxGreen.opacity(0.7))
+                        .layoutPriority(1)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(pr.title)
+    }
+
+    /// The branch, because that is what a person matches against the work
+    /// in front of them. A PR with no head branch — GitHub omits it on a
+    /// PR from a deleted fork — falls back to the number.
+    static func branchLabel(_ pr: PullRequest) -> String {
+        if let branch = pr.headBranch, !branch.isEmpty { return branch }
+        return "\(pr.provider == .gitlab ? "!" : "#")\(pr.number)"
+    }
+
+    private func open() {
+        guard let url = URL(string: pr.url) else { return }
+        NSWorkspace.shared.open(url)
     }
 }
 

@@ -85,6 +85,45 @@ public struct PRPipelineRun: Identifiable, Equatable {
     }
 }
 
+extension PRPipelineRun {
+
+    /// Of a PR's runs, the one it is most recently busy with: the active
+    /// job — running or queued — with the latest timestamp.
+    ///
+    /// Running and queued stamps are compared directly, which is the
+    /// question being asked ("what started or was queued most recently"),
+    /// even though one is a start time and the other a creation time. A
+    /// job with no timestamp at all loses to any that has one, and among
+    /// those a running job beats a queued one, since it is the one
+    /// actually consuming time.
+    public static func mostRecentlyActive(_ runs: [PRPipelineRun]) -> PRPipelineRun? {
+        let busy = runs.filter { $0.activeJob != nil }
+        guard !busy.isEmpty else { return nil }
+        let stamped = busy.filter { $0.activeJob?.since != nil }
+        guard !stamped.isEmpty else {
+            return busy.first { $0.activeJob?.state == .running } ?? busy.last
+        }
+        return stamped.max { a, b in
+            let (x, y) = (a.activeJob?.since ?? .distantPast, b.activeJob?.since ?? .distantPast)
+            if x != y { return x < y }
+            // Same instant: running outranks queued.
+            return a.activeJob?.state == .queued && b.activeJob?.state == .running
+        }
+    }
+
+    /// One word for a PR whose CI isn't doing anything right now, or nil
+    /// when there is nothing to say at all.
+    ///
+    /// Deliberately not a per-run list: a compact line has room for a
+    /// verdict, and the verdict people act on is "is anything red".
+    public static func settledSummary(_ runs: [PRPipelineRun]) -> (text: String, failing: Bool)? {
+        guard !runs.isEmpty else { return nil }
+        if runs.contains(where: \.needsAttention) { return ("failed", true) }
+        if runs.contains(where: { $0.overall == .success }) { return ("passed", false) }
+        return nil
+    }
+}
+
 extension PipelineOverallStatus {
 
     /// GitHub's two-field vocabulary — `status` while a run is alive,
