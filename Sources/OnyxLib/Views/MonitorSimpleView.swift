@@ -200,7 +200,18 @@ struct SimpleSidePanel: View {
     }
 
     /// The column's width at a given UI font scale.
-    static func columnWidth(fontScale: CGFloat) -> CGFloat { 260 * fontScale }
+    ///
+    /// Widened by a fifth when the PR lines arrived: a branch name and a
+    /// pipeline step on one line is the widest thing the column carries,
+    /// and at 260 both ends were truncating at once.
+    static func columnWidth(fontScale: CGFloat) -> CGFloat { 312 * fontScale }
+
+    /// The most of the window the column may take. The charts are what
+    /// this layout is for, so they keep the clear majority — and pinning
+    /// the SHARE rather than a multiple of the column means widening the
+    /// column doesn't quietly raise the window size the panel needs
+    /// (it stays ~780pt at 1×, as it was when the column was 260).
+    static let maxColumnShare: CGFloat = 0.4
 
     /// The full "should the column be up" decision, shared by every
     /// layout that offers it: the user's toggle, something to say, and
@@ -214,7 +225,7 @@ struct SimpleSidePanel: View {
                            fontScale: CGFloat) -> Bool {
         appState.appearance.simpleShowSidePanel
             && hasContent(appState: appState, reminders: reminders, store: store)
-            && width > columnWidth(fontScale: fontScale) * 3
+            && columnWidth(fontScale: fontScale) <= width * maxColumnShare
     }
 
     /// Whether the column has anything to say. Checked by the parent
@@ -335,7 +346,7 @@ struct SimplePullRequests: View {
     /// The charts are the point of this layout; a long PR list must not
     /// push them around. Busy ones sort first, so an overflowing list
     /// drops the quiet ones.
-    private let maxShown = 5
+    private let maxShown = 6
 
     /// The same merged, draft-filtered list the detailed overlay shows,
     /// so the two can't disagree about which PRs are yours.
@@ -346,21 +357,45 @@ struct SimplePullRequests: View {
             .filter { appState.appearance.prDraftFilter.keeps($0) }
     }
 
-    /// Busy PRs first, most recently busy at the top; then the rest in
-    /// the order their forge gave them.
+    /// How interesting a PR is at a glance, lowest first.
+    ///
+    /// This layout answers one question — what is happening — so a PR
+    /// with something in flight outranks one that is merely broken, and a
+    /// broken one outranks one that is finished and green. A green PR
+    /// needs nothing from you, which is exactly why it goes last and is
+    /// the first to be dropped when the list overflows.
+    enum Interest: Int, Comparable {
+        case busy = 0        // something running or queued
+        case failing = 1     // nothing in flight, but something is red
+        case settled = 2     // finished, nothing failing
+
+        static func < (a: Interest, b: Interest) -> Bool { a.rawValue < b.rawValue }
+
+        static func of(_ runs: [PRPipelineRun]) -> Interest {
+            if PRPipelineRun.mostRecentlyActive(runs) != nil { return .busy }
+            if runs.contains(where: \.needsAttention) { return .failing }
+            return .settled
+        }
+    }
+
+    /// Busy PRs first — most recently busy at the top — then failing
+    /// ones, then the settled ones. Within a tier the forge's own order
+    /// is kept, so the list doesn't reshuffle on every poll.
     static func ordered(_ prs: [PullRequest],
                         runs: (PullRequest) -> [PRPipelineRun]) -> [PullRequest] {
         prs.enumerated().sorted { a, b in
-            let jobA = PRPipelineRun.mostRecentlyActive(runs(a.element))?.activeJob
-            let jobB = PRPipelineRun.mostRecentlyActive(runs(b.element))?.activeJob
-            switch (jobA, jobB) {
-            case (.some(let x), .some(let y)):
-                let (sx, sy) = (x.since ?? .distantPast, y.since ?? .distantPast)
-                return sx == sy ? a.offset < b.offset : sx > sy
-            case (.some, .none): return true
-            case (.none, .some): return false
-            case (.none, .none): return a.offset < b.offset
+            let (ra, rb) = (runs(a.element), runs(b.element))
+            let (ia, ib) = (Interest.of(ra), Interest.of(rb))
+            if ia != ib { return ia < ib }
+            // Inside the busy tier, the newest thing to have started or
+            // been queued is the one worth reading first.
+            if ia == .busy,
+               let sa = PRPipelineRun.mostRecentlyActive(ra)?.activeJob?.since,
+               let sb = PRPipelineRun.mostRecentlyActive(rb)?.activeJob?.since,
+               sa != sb {
+                return sa > sb
             }
+            return a.offset < b.offset
         }.map(\.element)
     }
 

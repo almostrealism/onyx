@@ -458,6 +458,64 @@ final class CompactPRLineTests: XCTestCase {
         XCTAssertEqual(ordered.map(\.number), [3, 2, 1])
     }
 
+    /// Three tiers, in the order this layout is for: something happening,
+    /// then something broken, then something finished and green. A green
+    /// PR asks nothing of you, which is why it is also the first dropped
+    /// when the list overflows.
+    func testRunningOutranksFailingWhichOutranksSettled() {
+        let settled = pr(1, branch: "chore/deps")
+        let failing = pr(2, branch: "fix/broken")
+        let busy = pr(3, branch: "fix/live")
+        let byPR: [String: [PRPipelineRun]] = [
+            settled.id: [run("CI", job: nil, overall: .success)],
+            failing.id: [run("CI", job: nil, overall: .failure)],
+            busy.id: [run("CI", job: job("test", .running, at: 5))],
+        ]
+        XCTAssertEqual(
+            SimplePullRequests.ordered([settled, failing, busy]) { byPR[$0.id] ?? [] }
+                .map(\.number),
+            [3, 2, 1])
+    }
+
+    /// A pipeline that is BOTH red and still running counts as busy: the
+    /// run isn't over, and what it is doing now is the live fact.
+    func testARedRunThatIsStillGoingIsBusyNotFailing() {
+        let runs = [run("CI", job: job("retry", .running, at: 50), overall: .mixed)]
+        XCTAssertEqual(SimplePullRequests.Interest.of(runs), .busy)
+    }
+
+    func testTheInterestTiersAreOrdered() {
+        XCTAssertTrue(SimplePullRequests.Interest.busy < SimplePullRequests.Interest.failing)
+        XCTAssertTrue(SimplePullRequests.Interest.failing < SimplePullRequests.Interest.settled)
+        XCTAssertEqual(SimplePullRequests.Interest.of([]), .settled,
+                       "a PR with no pipelines at all asks nothing of you")
+    }
+
+    /// Inside a tier the forge's order is kept, so the column doesn't
+    /// reshuffle under the pointer on every poll.
+    func testWithinATierTheOrderIsStable() {
+        let a = pr(1, branch: "a")
+        let b = pr(2, branch: "b")
+        let byPR: [String: [PRPipelineRun]] = [
+            a.id: [run("CI", job: nil, overall: .failure)],
+            b.id: [run("CI", job: nil, overall: .failure)],
+        ]
+        XCTAssertEqual(SimplePullRequests.ordered([a, b]) { byPR[$0.id] ?? [] }.map(\.number),
+                       [1, 2])
+        XCTAssertEqual(SimplePullRequests.ordered([b, a]) { byPR[$0.id] ?? [] }.map(\.number),
+                       [2, 1])
+    }
+
+    /// The column is wider now, and widening it must not have quietly
+    /// raised the window size the panel needs — the share is what's
+    /// pinned, so the threshold stays where it was.
+    func testTheColumnStaysAtMostFortyPercentOfTheWindow() {
+        let width = SimpleSidePanel.columnWidth(fontScale: 1)
+        XCTAssertEqual(width, 312)
+        XCTAssertEqual(width / SimpleSidePanel.maxColumnShare, 780, accuracy: 0.5,
+                       "the same minimum window width the 260pt column had")
+    }
+
     func testTheLineIsLabeledWithTheBranch() {
         XCTAssertEqual(SimplePRLine.branchLabel(pr(7, branch: "feature/thing")), "feature/thing")
         // GitHub omits the head branch on a PR from a deleted fork.
