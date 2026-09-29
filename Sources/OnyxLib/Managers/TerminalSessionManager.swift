@@ -293,8 +293,7 @@ class OnyxTerminalView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         // Don't claim hits when an overlay is covering the terminal
-        if appState.showMonitor || appState.showSettings || appState.showCommandPalette
-            || appState.showSessionManager || appState.showSetup || appState.showTerminalText {
+        if appState.terminalIsCovered {
             return nil
         }
         return terminalView?.hitTest(point) ?? super.hitTest(point)
@@ -475,6 +474,10 @@ class OnyxTerminalView: NSView {
                 // moved, and your typing still went to the search box.
                 // Deferred so it runs after the click is delivered.
                 DispatchQueue.main.async {
+                    // Re-check: this can run inside another view's
+                    // mouse-tracking loop, and a card opened since the
+                    // click must keep the keyboard.
+                    guard !self.appState.terminalIsCovered else { return }
                     if let tv = self.terminalView, window.firstResponder !== tv {
                         window.makeFirstResponder(tv)
                     }

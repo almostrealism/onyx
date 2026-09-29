@@ -970,10 +970,16 @@ final class KeyboardOwnershipTests: XCTestCase {
             ("walkthrough", { s in s.showWalkthrough = true }),
             ("setup", { s in s.showSetup = true }),
             ("text mode", { s in s.showTerminalText = true }),
+            ("pipeline adder", { s in s.showPipelineAdder = true }),
         ] {
             let s = AppState()
             set(s)
             XCTAssertTrue(s.keyboardOwnedElsewhere, "\(name) should own the keyboard")
+            // The ⌘; hang: the note editor owned the keyboard but didn't
+            // cover the terminal, so a click in its field was routed as a
+            // terminal click and focus was yanked mid-selection-drag.
+            XCTAssertTrue(s.terminalIsCovered,
+                          "\(name) is drawn over the terminal; a click in it is not a terminal click")
         }
     }
 

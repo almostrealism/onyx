@@ -115,18 +115,19 @@ extension AppState {
     /// drifted: the one used for click routing omitted `showTerminalText`,
     /// which was harmless until clicking started taking first responder —
     /// and then it stole the selection out of ⇧⌘C's selectable view.
+    ///
+    /// Defined as "the monitor, or anything that owns the keyboard" so the
+    /// two can't drift again: every card that takes typing is drawn over
+    /// the terminal. They had drifted — the ⌘; note editor, window rename,
+    /// help, walkthrough and pipeline adder owned the keyboard but did not
+    /// cover the terminal, so a click in the note field was routed as a
+    /// click on the terminal. That queued a makeFirstResponder(terminal)
+    /// which ran INSIDE the field's own selection-drag loop: the field
+    /// lost the keyboard for good, or AppKit's tracking loop spun on a
+    /// field editor pulled out from under it and the app hung.
+    /// (A browser tab is in `keyboardOwnedElsewhere`, so it covers too.)
     public var terminalIsCovered: Bool {
-        showMonitor || showSettings || showCommandPalette || showSessionManager
-            || showSetup || showTerminalText
-            // A browser tab is drawn over the terminal too. The terminal
-            // view STAYS in the tree (hidden, hit-testing off) so session
-            // switching keeps working — but `allowsHitTesting(false)` does
-            // not stop `makeFirstResponder`, and the click monitor decides
-            // "the click landed in the terminal" from the frame alone. So
-            // every click on a web page was a click on the terminal: focus
-            // jumped to an invisible view one runloop hop after the click,
-            // which is why a text field in a page could not be typed into.
-            || activeSessionIsBrowser
+        showMonitor || keyboardOwnedElsewhere
     }
 
     /// Whether the active session is a browser tab rather than a terminal.

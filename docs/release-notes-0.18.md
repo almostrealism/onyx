@@ -81,6 +81,13 @@ The column that `d` opens in the across-the-room layout:
   - *Favorites:* a tab's favorite and note were keyed by the site it was
     showing, so following a link lost both. They're keyed by the address
     the tab was opened with now, and existing ones still resolve.
+- **Selecting text with the mouse in the ⌘; note field could hang the
+  app**, or leave the field unable to take typing. A click in the note
+  field was treated as a click on the terminal behind it, and handing the
+  terminal the keyboard ran in the middle of the field's own selection
+  drag. The note editor, window rename, help, the walkthrough and the
+  pipeline adder all had this problem. They're now all on the one list of
+  things that cover the terminal.
 - **⌘K commands couldn't be clicked.** The rows looked like buttons and
   weren't. They are now, with hover highlighting, and Return runs the top
   match. Before, a command with no shortcut, such as Install Onyx MCP,
