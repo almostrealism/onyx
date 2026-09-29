@@ -25,6 +25,7 @@
 import SwiftUI
 import AppKit
 import SwiftTerm
+import OnyxAppKitShims
 import Foundation
 import Combine
 
@@ -1103,15 +1104,24 @@ class OnyxTerminalView: NSView {
         tv.terminal.options.scrollback = scrollback
         tv.autoresizingMask = [.width, .height]
 
-        tv.nativeBackgroundColor = NSColor(white: 0.04, alpha: 0.0)
+        Self.applyColors(to: tv)
+
+        let size = CGFloat(currentFontSize)
+        tv.font = resolveFont(name: currentFontName, size: size)
+
+        tv.processDelegate = self
+        return tv
+    }
+
+    /// Onyx's terminal colors: a transparent default background (the window's
+    /// vibrancy is the background) and the 16-color palette.
+    static func applyColors(to tv: TerminalView) {
+        tv.nativeBackgroundColor = OnyxTerminalBackgroundColor(white: 0.04)
         tv.nativeForegroundColor = NSColor(white: 0.9, alpha: 1.0)
 
         tv.wantsLayer = true
         tv.layer?.isOpaque = false
         tv.layer?.backgroundColor = CGColor.clear
-
-        let size = CGFloat(currentFontSize)
-        tv.font = resolveFont(name: currentFontName, size: size)
 
         func c(_ r: Double, _ g: Double, _ b: Double) -> SwiftTerm.Color {
             SwiftTerm.Color(red: UInt16(r * 65535), green: UInt16(g * 65535), blue: UInt16(b * 65535))
@@ -1124,9 +1134,6 @@ class OnyxTerminalView: NSView {
             c(0.5, 0.7, 1.0), c(0.8, 0.5, 1.0), c(0.5, 0.9, 1.0), c(1.0, 1.0, 1.0),
         ]
         tv.installColors(palette)
-
-        tv.processDelegate = self
-        return tv
     }
 
     /// Hide SwiftTerm's built-in scroller on a terminal view

@@ -28,11 +28,19 @@ let package = Package(
             name: "OnyxVersion",
             path: "Sources/OnyxVersion"
         ),
+        // The one piece of AppKit Swift can't express: an NSColor subclass
+        // (see OnyxTerminalBackgroundColor.h). macOS only, and only OnyxLib
+        // uses it, so the Linux bridge build never touches it.
+        .target(
+            name: "OnyxAppKitShims",
+            path: "Sources/OnyxAppKitShims"
+        ),
         .target(
             name: "OnyxLib",
             dependencies: [
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 "OnyxVersion",
+                "OnyxAppKitShims",
             ],
             path: "Sources/OnyxLib"
         ),
