@@ -24,7 +24,7 @@ public enum OnyxVersion {
     /// The version this source tree builds. Matches the git tag at a
     /// release, and is the version a build from an untagged tree claims to
     /// be working toward.
-    public static let current = "0.17"
+    public static let current = "0.18"
 
     /// What the bridge and the app have agreed between themselves, bumped
     /// whenever that agreement changes.

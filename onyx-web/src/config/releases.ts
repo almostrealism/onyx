@@ -24,6 +24,22 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.18',
+    date: null,
+    upcoming: true,
+    summary:
+      'Small repairs, mostly to things 0.17 introduced and people then used: this Mac can install the bridge from the UI, pasted text is readable, the embedded browser keeps its keystrokes, and Linux hosts have a bridge to download.',
+    highlights: [
+      'The Mac running Onyx gets its own Install row in the monitor’s CONNECTIONS panel. It was the one machine without a button.',
+      'Each PR’s CI names the job it’s on: the running job that started most recently or, while it waits, the newest queued one.',
+      'The simple monitor’s side panel: clickable sessions, and up to six open PRs on one line each, with the busy ones first.',
+      'Pasted text is readable. It used to come out dark gray on nothing: zsh and bash highlight pastes with reverse video, which a transparent background couldn’t show.',
+      'The embedded browser keeps keyboard focus in page text fields, its tabs stay in the session list, and a favorited tab keeps its favorite after you follow a link.',
+      '⌘K commands are clickable, and Return runs the top match.',
+      'Linux bridges for x86-64 and arm64 are attached to the GitHub release, byte-identical to the ones inside the app.',
+    ],
+  },
+  {
     version: '0.17',
     date: '2026-09-22',
     summary:

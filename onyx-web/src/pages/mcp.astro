@@ -2,6 +2,10 @@
 import Layout from '../layouts/Layout.astro';
 import Footer from '../components/sections/Footer.astro';
 import { LATEST, downloadURL } from '../config/releases';
+
+// The THIS MAC install row shipped in 0.18. Until that's the release people
+// download, the command is the only way here; after, the row is the easy one.
+const hasLocalInstallRow = Number(LATEST.version.split('.')[1]) >= 18;
 import { REPO_URL } from '../config/site';
 
 // The tools, grouped by what an agent is trying to do. Names are the
@@ -127,9 +131,21 @@ const groups = [
           </div>
           <p class="mt-4 text-sm leading-relaxed text-text-muted">
             An agent on this Mac reaches Onyx over a Unix socket in your home directory —
-            nothing listens on a network port for this. In {LATEST.version} the command above
-            (or ⌘K &rarr; Install Onyx MCP with a local session focused) is how you do it
-            here; a one-click row for this Mac is in the next release.
+            nothing listens on a network port for this.{' '}
+            {
+              hasLocalInstallRow ? (
+                <>
+                  Or skip the terminal: the monitor's CONNECTIONS panel has a THIS MAC row with
+                  the same Install button every remote host gets.
+                </>
+              ) : (
+                <>
+                  In {LATEST.version} the command above (or ⌘K &rarr; Install Onyx MCP with a
+                  local session focused) is how you do it here; a one-click row for this Mac
+                  arrives in 0.18.
+                </>
+              )
+            }
           </p>
         </div>
       </div>
