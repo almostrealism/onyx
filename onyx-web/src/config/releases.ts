@@ -25,8 +25,7 @@ export interface Release {
 export const RELEASES: Release[] = [
   {
     version: '0.18',
-    date: null,
-    upcoming: true,
+    date: '2026-09-30',
     summary:
       'Small repairs, mostly to things 0.17 introduced and people then used: this Mac can install the bridge from the UI, pasted text is readable, the embedded browser keeps its keystrokes, and Linux hosts have a bridge to download.',
     highlights: [
