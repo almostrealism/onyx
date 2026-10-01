@@ -240,6 +240,63 @@ echo "==> Disk image"
 # mistake nothing downstream can catch, because from that point on every
 # name, URL and checksum looks exactly right. The image for a release is
 # built for that release.
+# What is actually INSIDE the image. The file name is chosen by whoever
+# built or copied it and proves nothing; the app's own Info.plist is what
+# every user will see in About and what the per-host update check
+# compares against.
+dmg_plist() {   # dmg_plist FILE KEY → that key from the app's Info.plist
+    __mnt="$(mktemp -d)"
+    __v=""
+    if hdiutil attach "$1" -mountpoint "$__mnt" -nobrowse -readonly -quiet >/dev/null 2>&1; then
+        for __app in "$__mnt"/*.app; do
+            [ -d "$__app" ] || continue
+            __v="$(/usr/libexec/PlistBuddy -c "Print :$2" \
+                   "$__app/Contents/Info.plist" 2>/dev/null || true)"
+            break
+        done
+        hdiutil detach "$__mnt" -quiet >/dev/null 2>&1 \
+            || hdiutil detach "$__mnt" -force -quiet >/dev/null 2>&1 || true
+    fi
+    rmdir "$__mnt" 2>/dev/null || true
+    printf '%s' "$__v"
+}
+dmg_app_version() { dmg_plist "$1" CFBundleShortVersionString; }
+
+# An image built from some other commit is the same mistake as an image
+# of some other version, one level down: a test build made before the last
+# fix says the right version number and is missing the fix. package.sh
+# stamps the commit it built (with -dirty for uncommitted changes), so
+# compare that against the tag rather than trusting the file's name.
+TAG_COMMIT="$(git rev-parse "refs/tags/$VERSION^{commit}")"
+if [ -f "$DMG" ]; then
+    BUILT="$(dmg_plist "$DMG" OnyxBuildCommit)"
+    BUILT_FULL="$(git rev-parse -q --verify "${BUILT%-dirty}^{commit}" 2>/dev/null || true)"
+    if [ -n "$BUILT" ] && [ "$BUILT_FULL" = "$TAG_COMMIT" ] && [ "${BUILT%-dirty}" = "$BUILT" ]; then
+        echo "  $DMG was built from the tag ($BUILT) ✓"
+    else
+        if [ -z "$BUILT" ]; then
+            echo "  $DMG doesn't say which commit it was built from."
+        else
+            echo "  $DMG was built from $BUILT, but $VERSION is $(git rev-parse --short "$TAG_COMMIT")."
+        fi
+        echo "  Publishing it would ship that build under the $VERSION name."
+        if confirm "  Delete it and build $VERSION fresh?" yes; then
+            rm -f "$DMG"
+        else
+            confirm "  Publish the existing image anyway?" || exit 1
+        fi
+    fi
+fi
+
+# package.sh builds the working tree, so a fresh image is only the tag's
+# if the working tree IS the tag.
+if [ ! -f "$DMG" ] && [ "$(git rev-parse HEAD)" != "$TAG_COMMIT" ]; then
+    echo "  HEAD is $(git rev-parse --short HEAD), not the $VERSION tag."
+    echo "  Building now would package HEAD. Check out the tag first:"
+    echo "    git checkout $VERSION && ./release.sh $VERSION"
+    exit 1
+fi
+
 if [ ! -f "$DMG" ]; then
     echo "  $DMG not found."
     if confirm "  Build it now with ./package.sh?" yes; then
@@ -265,27 +322,6 @@ done
 
 SIZE="$(du -h "$DMG" | awk '{print $1}')"
 echo "  $DMG ($SIZE)"
-
-# What is actually INSIDE the image. The file name is chosen by whoever
-# built or copied it and proves nothing; the app's own
-# CFBundleShortVersionString is what every user will see in About and
-# what the per-host update check compares against.
-dmg_app_version() {   # dmg_app_version FILE → the app's short version
-    __mnt="$(mktemp -d)"
-    __v=""
-    if hdiutil attach "$1" -mountpoint "$__mnt" -nobrowse -readonly -quiet >/dev/null 2>&1; then
-        for __app in "$__mnt"/*.app; do
-            [ -d "$__app" ] || continue
-            __v="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
-                   "$__app/Contents/Info.plist" 2>/dev/null || true)"
-            break
-        done
-        hdiutil detach "$__mnt" -quiet >/dev/null 2>&1 \
-            || hdiutil detach "$__mnt" -force -quiet >/dev/null 2>&1 || true
-    fi
-    rmdir "$__mnt" 2>/dev/null || true
-    printf '%s' "$__v"
-}
 
 # The Linux bridges, taken out of the image itself.
 #

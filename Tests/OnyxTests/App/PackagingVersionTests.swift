@@ -93,10 +93,27 @@ final class PackagingVersionTests: XCTestCase {
         let text = try code("release.sh")
         XCTAssertTrue(text.contains("hdiutil attach"),
                       "release.sh must mount the image to check it")
-        XCTAssertTrue(text.contains("Print :CFBundleShortVersionString"),
+        XCTAssertTrue(text.contains("dmg_plist \"$1\" CFBundleShortVersionString"),
                       "…and read the app's own version out of it")
         XCTAssertTrue(text.contains("$INSIDE\" != \"$VERSION"),
                       "…and refuse when it disagrees with the release")
+    }
+
+    /// A test build made before the last fix carries the right version
+    /// number and is missing the fix — the 0.18 test DMG predated the ⌘;
+    /// hang fix and would have shipped. The commit package.sh stamps is
+    /// compared with the tag's, and a dirty build never counts as the tag.
+    func testReleaseChecksTheImageWasBuiltFromTheTag() throws {
+        let text = try code("release.sh")
+        XCTAssertTrue(text.contains("dmg_plist \"$DMG\" OnyxBuildCommit"),
+                      "release.sh must read which commit the image was built from")
+        XCTAssertTrue(text.contains("\"$BUILT_FULL\" = \"$TAG_COMMIT\""),
+                      "…and compare it with the tag's commit")
+        XCTAssertTrue(text.contains("${BUILT%-dirty}\" = \"$BUILT\""),
+                      "…and refuse a build of uncommitted changes")
+        XCTAssertTrue(text.contains("OnyxBuildCommit"),
+                      "package.sh stamps the commit release.sh relies on")
+        XCTAssertTrue(try code("package.sh").contains("OnyxBuildCommit string $COMMIT"))
     }
 }
 
