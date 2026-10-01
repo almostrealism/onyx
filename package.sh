@@ -145,36 +145,70 @@ cp "$BUILD_DIR/OnyxMCP" "$MCP_DIR/OnyxMCP-macos-arm64"
 chmod +x "$MCP_DIR/OnyxMCP-macos-arm64"
 
 # Linux binaries, in order of preference:
-#   1. dist/mcp/            — fetched by hand, or by the step below
+#   1. dist/mcp/            — fetched or built by hand
 #   2. this version's release
-#   3. the CI RUN on master — the case that matters when packaging a
-#      version that hasn't been tagged yet, which is every build before a
-#      release. The workflow only attaches binaries to a release on a tag,
-#      so during packaging the artifacts exist only on the run.
+#   3. the latest successful 'MCP binaries' run on master — the case that
+#      matters when packaging a version that hasn't been released yet,
+#      which is every build before a release. That workflow runs whenever
+#      the bridge or OnyxVersion changes, so a version bump rebuilds them.
 #   4. an older release      — closer to right than shipping none
+#
+# Sources 1–3 are only accepted if the binary was built for THIS version.
+# dist/mcp/ outlives the release it was fetched for: 0.18 was about to be
+# packaged with the 0.17 bridges still sitting there, preferred over CI's
+# fresh ones. The bridge compiles OnyxVersion.current in as a plain
+# string, so `strings` can read it without running a Linux binary here.
+bridge_is_this_version() {   # bridge_is_this_version FILE
+    strings "$1" 2>/dev/null | grep -Fqx "$VERSION"
+}
+
+CI_RUN=""
+if command -v gh >/dev/null 2>&1; then
+    CI_RUN="$(gh run list --workflow mcp-binaries.yaml --branch master --status success \
+              --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)"
+fi
+
 for arch in linux-x86_64 linux-arm64; do
-    if [ -f "$DIST_DIR/mcp/OnyxMCP-$arch" ]; then
-        cp "$DIST_DIR/mcp/OnyxMCP-$arch" "$MCP_DIR/"
-    elif command -v gh >/dev/null 2>&1 \
-        && gh release download "$VERSION" --pattern "OnyxMCP-$arch" \
-             --dir "$MCP_DIR" --clobber >/dev/null 2>&1; then
-        :
-    elif command -v gh >/dev/null 2>&1 \
-        && gh run download --name "OnyxMCP-$arch" --dir "$MCP_DIR" >/dev/null 2>&1; then
-        echo "  OnyxMCP-$arch came from the latest 'MCP binaries' run (not yet released)."
-    elif command -v gh >/dev/null 2>&1 \
-        && gh release download --pattern "OnyxMCP-$arch" \
-             --dir "$MCP_DIR" --clobber >/dev/null 2>&1; then
-        # This version's release has no bridge yet — the newest one that
-        # does is closer to right than shipping none.
-        echo "  NOTE: OnyxMCP-$arch came from an older release, not $VERSION."
-    else
-        echo "  WARNING: no OnyxMCP-$arch — hosts on that architecture"
+    BIN="OnyxMCP-$arch"
+    FOUND=""
+    __tmp="$(mktemp -d)"
+
+    if [ -f "$DIST_DIR/mcp/$BIN" ]; then
+        if bridge_is_this_version "$DIST_DIR/mcp/$BIN"; then
+            cp "$DIST_DIR/mcp/$BIN" "$MCP_DIR/"; FOUND="dist/mcp"
+        else
+            echo "  Skipping dist/mcp/$BIN: it wasn't built for $VERSION."
+        fi
+    fi
+    if [ -z "$FOUND" ] && command -v gh >/dev/null 2>&1 \
+        && gh release download "$VERSION" --pattern "$BIN" --dir "$__tmp" --clobber >/dev/null 2>&1 \
+        && bridge_is_this_version "$__tmp/$BIN"; then
+        cp "$__tmp/$BIN" "$MCP_DIR/"; FOUND="the $VERSION release"
+    fi
+    if [ -z "$FOUND" ] && [ -n "$CI_RUN" ]; then
+        rm -f "$__tmp/$BIN"
+        if gh run download "$CI_RUN" --name "$BIN" --dir "$__tmp" >/dev/null 2>&1 \
+            && bridge_is_this_version "$__tmp/$BIN"; then
+            cp "$__tmp/$BIN" "$MCP_DIR/"; FOUND="'MCP binaries' run $CI_RUN"
+        fi
+    fi
+    if [ -z "$FOUND" ] && command -v gh >/dev/null 2>&1 \
+        && gh release download --pattern "$BIN" --dir "$MCP_DIR" --clobber >/dev/null 2>&1; then
+        # Nothing built for this version — the newest release that has a
+        # bridge is closer to right than shipping none.
+        FOUND="an older release"
+        echo "  NOTE: $BIN came from an older release, not $VERSION."
+    fi
+    rm -rf "$__tmp"
+
+    if [ -z "$FOUND" ]; then
+        echo "  WARNING: no $BIN — hosts on that architecture"
         echo "           won't be able to install the bridge from this build."
         echo "           Run the 'MCP binaries' workflow, then re-package."
         continue
     fi
-    chmod +x "$MCP_DIR/OnyxMCP-$arch"
+    echo "  $BIN from $FOUND"
+    chmod +x "$MCP_DIR/$BIN"
 done
 echo "  MCP bridges: $(ls "$MCP_DIR" | tr '\n' ' ')"
 

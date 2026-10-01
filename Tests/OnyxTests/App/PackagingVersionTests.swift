@@ -103,6 +103,20 @@ final class PackagingVersionTests: XCTestCase {
     /// number and is missing the fix — the 0.18 test DMG predated the ⌘;
     /// hang fix and would have shipped. The commit package.sh stamps is
     /// compared with the tag's, and a dirty build never counts as the tag.
+    /// dist/mcp/ outlived 0.17 and was preferred over CI's fresh bridges,
+    /// so 0.18 would have shipped Linux bridges announcing 0.17. Every
+    /// source is checked for the version string first — as a FIXED string:
+    /// as a regex, "0.18" matched an unrelated "0818" in the 0.17 binary.
+    func testPackageOnlyTakesBridgesBuiltForThisVersion() throws {
+        let text = try code("package.sh")
+        XCTAssertTrue(text.contains("grep -Fqx \"$VERSION\""),
+                      "the version must be matched as a fixed string, not a regex")
+        XCTAssertTrue(text.contains("bridge_is_this_version \"$DIST_DIR/mcp/$BIN\""),
+                      "a leftover dist/mcp/ bridge must prove its version before it is used")
+        XCTAssertTrue(text.contains("gh run download \"$CI_RUN\""),
+                      "CI artifacts come from a named run, never an interactive pick")
+    }
+
     func testReleaseChecksTheImageWasBuiltFromTheTag() throws {
         let text = try code("release.sh")
         XCTAssertTrue(text.contains("dmg_plist \"$DMG\" OnyxBuildCommit"),
