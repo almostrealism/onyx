@@ -880,3 +880,36 @@ struct AlertForwardingSettingsSection: View {
         }
     }
 }
+
+/// Claude Code's permission prompts, answered in Onyx instead of the terminal.
+struct ClaudeHooksSettingsSection: View {
+    @ObservedObject var appState: AppState
+
+    var body: some View {
+        // Claude Code permission gating
+        VStack(alignment: .leading, spacing: 4) {
+            Text("CLAUDE CODE HOOKS")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            Toggle(isOn: Binding(
+                get: { appState.appearance.claudeHooksGatePermissions },
+                set: {
+                    appState.appearance.claudeHooksGatePermissions = $0
+                    appState.syncClaudeGatePermissions()
+                }
+            )) {
+                Text("Approve tool calls in Onyx UI")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            .toggleStyle(.switch)
+
+            Text("When on, Claude shows a banner in Onyx instead of the terminal prompt when it needs permission for a tool call. Only tools that your Claude settings require approval for are affected — auto-allowed tools pass through untouched. Requires the bridge installed via ⌘K → 'Install Onyx MCP'.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}

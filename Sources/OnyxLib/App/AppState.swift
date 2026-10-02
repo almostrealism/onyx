@@ -214,6 +214,9 @@ public class AppState: ObservableObject {
     @Published public var showSetup = false
     @Published public var activeRightPanel: RightPanel?
     @Published public var showSettings = false
+    /// The Settings category last looked at, so reopening Settings goes back
+    /// to it. Per window and per launch — not worth persisting.
+    @Published public var settingsPane: SettingsPane = .general
     @Published public var showCommandPalette = false
     /// Full-screen help / keyboard-shortcut reference overlay (Cmd+/).
     @Published public var showHelp = false

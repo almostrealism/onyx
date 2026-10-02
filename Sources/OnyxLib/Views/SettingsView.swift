@@ -28,506 +28,39 @@ struct SettingsView: View {
                     appState.showSettings = false
                 }
 
-            VStack(spacing: 24) {
-                Text("SETTINGS")
-                    .font(.system(size: 24, weight: .ultraLight, design: .monospaced))
-                    .foregroundColor(Color.onyxBlue)
-                    .tracking(8)
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    SettingsSidebar(selection: $appState.settingsPane, accent: appState.accentColor)
 
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // Hosts section
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                SectionHeader(title: "HOSTS")
-                                Spacer()
-                                Button(action: addHost) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "plus")
-                                            .font(.system(size: 9))
-                                        Text("Add Host")
-                                            .font(.system(size: 10, design: .monospaced))
-                                    }
-                                    .foregroundColor(appState.accentColor)
-                                }
-                                .buttonStyle(.plain)
-                            }
+                    Rectangle()
+                        .fill(Color.white.opacity(0.06))
+                        .frame(width: 1)
 
-                            ForEach(appState.hosts) { host in
-                                HostRow(
-                                    host: host,
-                                    appState: appState,
-                                    isEditing: editingHostID == host.id,
-                                    onToggleEdit: {
-                                        editingHostID = editingHostID == host.id ? nil : host.id
-                                    },
-                                    onDelete: {
-                                        appState.removeHost(host.id)
-                                        if editingHostID == host.id { editingHostID = nil }
-                                    }
-                                )
+                    VStack(alignment: .leading, spacing: 0) {
+                        // No pane title: every pane opens with its own
+                        // section header, and the sidebar shows which
+                        // pane this is. A title would say HOSTS twice.
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 20) {
+                                pane(appState.settingsPane)
                             }
+                            .padding(.horizontal, 28)
+                            .padding(.vertical, 24)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-
-                        // Appearance section
-                        VStack(alignment: .leading, spacing: 4) {
-                            SectionHeader(title: "APPEARANCE")
-
-                            VStack(spacing: 10) {
-                                OnyxTextField(label: "Window title", text: $appState.appearance.windowTitle, placeholder: "Onyx")
-                                    .focused($focusedField, equals: .windowTitle)
-
-                                // Terminal font
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("TERMINAL FONT")
-                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                        .tracking(2)
-
-                                    ScrollView(.horizontal, showsIndicators: false) {
-                                        HStack(spacing: 6) {
-                                            ForEach(availableMonoFonts, id: \.self) { fontName in
-                                                let selected = appState.appearance.terminalFontName == fontName
-                                                Button(action: { appState.appearance.terminalFontName = fontName }) {
-                                                    Text(fontName)
-                                                        .font(.system(size: 11, design: .monospaced))
-                                                        .foregroundColor(selected ? .white : .gray.opacity(0.5))
-                                                        .padding(.horizontal, 10)
-                                                        .padding(.vertical, 4)
-                                                        .background(selected ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
-                                                        .cornerRadius(4)
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-                                        }
-                                    }
-                                }
-
-                                HStack(spacing: 12) {
-                                    OnyxTextField(label: "Terminal font size", text: $terminalFontSizeText, placeholder: "13")
-                                        .focused($focusedField, equals: .fontSize)
-                                        .frame(width: 130)
-
-                                    OnyxTextField(label: "UI font size", text: $uiFontSizeText, placeholder: "12")
-                                        .frame(width: 130)
-                                }
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("WINDOW OPACITY")
-                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                        .tracking(2)
-
-                                    HStack(spacing: 12) {
-                                        Slider(value: $appState.appearance.windowOpacity, in: 0.3...1.0, step: 0.05)
-                                            .tint(Color.onyxBlue)
-
-                                        Text("\(Int(appState.appearance.windowOpacity * 100))%")
-                                            .font(.system(size: 12, design: .monospaced))
-                                            .foregroundColor(.gray)
-                                            .frame(width: 40)
-                                    }
-                                }
-
-                                // Accent color picker
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("DEFAULT ACCENT")
-                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                        .tracking(2)
-
-                                    HStack(spacing: 8) {
-                                        ForEach(AppearanceConfig.accentOptions, id: \.self) { hex in
-                                            Circle()
-                                                .fill(Color(hex: hex))
-                                                .frame(width: 24, height: 24)
-                                                .overlay(
-                                                    Circle()
-                                                        .stroke(Color.white, lineWidth: appState.appearance.accentHex == hex ? 2 : 0)
-                                                )
-                                                .onTapGesture {
-                                                    appState.appearance.accentHex = hex
-                                                }
-                                        }
-                                    }
-                                }
-
-                                // Per-window accent color
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("WINDOW \(appState.windowIndex + 1) ACCENT")
-                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                        .tracking(2)
-
-                                    HStack(spacing: 8) {
-                                        // "Default" option — removes per-window override
-                                        Circle()
-                                            .fill(Color(hex: appState.appearance.accentHex))
-                                            .frame(width: 24, height: 24)
-                                            .overlay(
-                                                Circle()
-                                                    .stroke(Color.white, lineWidth: appState.appearance.windowAccents[appState.windowIndex] == nil ? 2 : 0)
-                                            )
-                                            .overlay(
-                                                Text("D")
-                                                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(.white.opacity(0.7))
-                                            )
-                                            .onTapGesture {
-                                                appState.appearance.windowAccents.removeValue(forKey: appState.windowIndex)
-                                            }
-
-                                        ForEach(AppearanceConfig.accentOptions, id: \.self) { hex in
-                                            Circle()
-                                                .fill(Color(hex: hex))
-                                                .frame(width: 24, height: 24)
-                                                .overlay(
-                                                    Circle()
-                                                        .stroke(Color.white, lineWidth: appState.appearance.windowAccents[appState.windowIndex] == hex ? 2 : 0)
-                                                )
-                                                .onTapGesture {
-                                                    appState.appearance.windowAccents[appState.windowIndex] = hex
-                                                }
-                                        }
-                                    }
-                                }
-
-                                // Extra timezone clocks
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("EXTRA CLOCKS")
-                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                        .tracking(2)
-
-                                    ForEach(0..<3, id: \.self) { i in
-                                        TimezoneField(
-                                            index: i,
-                                            appState: appState,
-                                            accentColor: Color(hex: appState.appearance.accentHex)
-                                        )
-                                    }
-
-                                    Toggle(isOn: Binding(
-                                        get: { appState.appearance.use12HourClock },
-                                        set: {
-                                            appState.appearance.use12HourClock = $0
-                                            appState.saveAppearance()
-                                        }
-                                    )) {
-                                        Text("12-hour clock (AM/PM)")
-                                            .font(.system(size: 11, design: .monospaced))
-                                            .foregroundColor(.white.opacity(0.8))
-                                    }
-                                    .toggleStyle(.switch)
-
-                                    Text("UTC always stays 24-hour. Also on P in the monitor overlay.")
-                                        .font(.system(size: 9, design: .monospaced))
-                                        .foregroundColor(.gray.opacity(0.4))
-                                }
-
-                                // Monitor: container visibility
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("MONITOR")
-                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                        .tracking(2)
-
-                                    Toggle(isOn: Binding(
-                                        get: { appState.appearance.showAllContainers },
-                                        set: {
-                                            appState.appearance.showAllContainers = $0
-                                            appState.saveAppearance()
-                                        }
-                                    )) {
-                                        Text("Show every docker container")
-                                            .font(.system(size: 11, design: .monospaced))
-                                            .foregroundColor(.white.opacity(0.8))
-                                    }
-                                    .toggleStyle(.switch)
-
-                                    Text("Off, the monitor lists only containers that have used CPU in the last five minutes, so a host running thirty idle containers stays readable. Also on C in the monitor overlay.")
-                                        .font(.system(size: 9, design: .monospaced))
-                                        .foregroundColor(.gray.opacity(0.4))
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-
-                                // Keyboard: keys Onyx takes from the terminal
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("KEYBOARD")
-                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                        .tracking(2)
-
-                                    Toggle(isOn: Binding(
-                                        get: { appState.appearance.shiftTabCyclesSessions },
-                                        set: {
-                                            appState.appearance.shiftTabCyclesSessions = $0
-                                            appState.saveAppearance()
-                                        }
-                                    )) {
-                                        Text("⇧⇥ cycles tmux sessions")
-                                            .font(.system(size: 11, design: .monospaced))
-                                            .foregroundColor(.white.opacity(0.8))
-                                    }
-                                    .toggleStyle(.switch)
-
-                                    Text("Off, Shift-Tab goes to the terminal untouched — which is what you want if you use Claude Code, where it switches permission modes. ⌘1–9 and ⌘J switch sessions either way.")
-                                        .font(.system(size: 9, design: .monospaced))
-                                        .foregroundColor(.gray.opacity(0.4))
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-
-                                // Menu bar item
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("MENU BAR")
-                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                        .tracking(2)
-
-                                    Toggle(isOn: Binding(
-                                        get: { appState.appearance.showMenuBarItem },
-                                        set: {
-                                            appState.appearance.showMenuBarItem = $0
-                                            appState.saveAppearance()
-                                            MenuBarController.shared.setEnabled($0)
-                                        }
-                                    )) {
-                                        Text("Show sessions in the menu bar")
-                                            .font(.system(size: 11, design: .monospaced))
-                                            .foregroundColor(.white.opacity(0.8))
-                                    }
-                                    .toggleStyle(.switch)
-
-                                    Text("Lists the sessions that have notes and shows which of them an agent has alerted you about, with the alert text right in the menu. This is how you find out which session is bouncing the dock without switching to Onyx.")
-                                        .font(.system(size: 9, design: .monospaced))
-                                        .foregroundColor(.gray.opacity(0.4))
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-
-                                // Claude Code permission gating
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("CLAUDE CODE HOOKS")
-                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                        .tracking(2)
-
-                                    Toggle(isOn: Binding(
-                                        get: { appState.appearance.claudeHooksGatePermissions },
-                                        set: {
-                                            appState.appearance.claudeHooksGatePermissions = $0
-                                            appState.syncClaudeGatePermissions()
-                                        }
-                                    )) {
-                                        Text("Approve tool calls in Onyx UI")
-                                            .font(.system(size: 11, design: .monospaced))
-                                            .foregroundColor(.white.opacity(0.8))
-                                    }
-                                    .toggleStyle(.switch)
-
-                                    Text("When on, Claude shows a banner in Onyx instead of the terminal prompt when it needs permission for a tool call. Only tools that your Claude settings require approval for are affected — auto-allowed tools pass through untouched. Requires the bridge installed via ⌘K → 'Install Onyx MCP'.")
-                                        .font(.system(size: 9, design: .monospaced))
-                                        .foregroundColor(.gray.opacity(0.4))
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-
-                                // Debug: focus outline visualization
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("DEBUG")
-                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                        .tracking(2)
-
-                                    Toggle(isOn: Binding(
-                                        get: { appState.appearance.showFocusOutline },
-                                        set: { appState.appearance.showFocusOutline = $0 }
-                                    )) {
-                                        Text("Show keyboard focus outline")
-                                            .font(.system(size: 11, design: .monospaced))
-                                            .foregroundColor(.white.opacity(0.8))
-                                    }
-                                    .toggleStyle(.switch)
-
-                                    Text("Draws an orange outline around whichever component currently holds keyboard focus (terminal, right panel, overlay). Useful when investigating focus-routing issues; leave off otherwise.")
-                                        .font(.system(size: 9, design: .monospaced))
-                                        .foregroundColor(.gray.opacity(0.4))
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-
-                                // Reminders list picker
-                                if remindersManager.accessGranted {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("REMINDERS LISTS")
-                                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                            .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                            .tracking(2)
-
-                                        ScrollView(.horizontal, showsIndicators: false) {
-                                            HStack(spacing: 6) {
-                                                let isToday = appState.appearance.remindersLists.isEmpty
-                                                Button(action: { appState.appearance.remindersLists = [] }) {
-                                                    Text("Today")
-                                                        .font(.system(size: 11, design: .monospaced))
-                                                        .foregroundColor(isToday ? .white : .gray.opacity(0.5))
-                                                        .padding(.horizontal, 10)
-                                                        .padding(.vertical, 4)
-                                                        .background(isToday ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
-                                                        .cornerRadius(4)
-                                                }
-                                                .buttonStyle(.plain)
-
-                                                ForEach(remindersManager.availableLists, id: \.self) { list in
-                                                    let selected = appState.appearance.remindersLists.contains(list)
-                                                    Button(action: {
-                                                        if selected {
-                                                            appState.appearance.remindersLists.removeAll { $0 == list }
-                                                        } else {
-                                                            appState.appearance.remindersLists.append(list)
-                                                        }
-                                                    }) {
-                                                        Text(list)
-                                                            .font(.system(size: 11, design: .monospaced))
-                                                            .foregroundColor(selected ? .white : .gray.opacity(0.5))
-                                                            .padding(.horizontal, 10)
-                                                            .padding(.vertical, 4)
-                                                            .background(selected ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
-                                                            .cornerRadius(4)
-                                                    }
-                                                    .buttonStyle(.plain)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                                // Timing.app API token
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("TIMING.APP")
-                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                        .tracking(2)
-
-                                    HStack(spacing: 8) {
-                                        SecureField("API token from web.timingapp.com", text: Binding(
-                                            get: { appState.timing.apiToken },
-                                            set: { appState.timing.apiToken = $0 }
-                                        ))
-                                        .textFieldStyle(.plain)
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundColor(.white.opacity(0.8))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 3)
-                                        .background(Color.white.opacity(0.06))
-                                        .cornerRadius(3)
-
-                                        if appState.timing.isConfigured {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .font(.system(size: 12))
-                                                .foregroundColor(Color.onyxGreen)
-                                        }
-                                    }
-
-                                    Text("Get token at web.timingapp.com/integrations/tokens")
-                                        .font(.system(size: 9, design: .monospaced))
-                                        .foregroundColor(.gray.opacity(0.3))
-
-                                    // Project filter
-                                    if appState.timing.isConfigured && !appState.timing.availableProjects.isEmpty {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("FILTER PROJECT")
-                                                .font(.system(size: 9, weight: .medium, design: .monospaced))
-                                                .foregroundColor(.gray.opacity(0.5))
-                                                .tracking(1)
-
-                                            ScrollView(.horizontal, showsIndicators: false) {
-                                                HStack(spacing: 6) {
-                                                    // "All" option
-                                                    let isAll = appState.timing.filterProjectID.isEmpty
-                                                    Button(action: { appState.timing.filterProjectID = "" }) {
-                                                        Text("All")
-                                                            .font(.system(size: 10, design: .monospaced))
-                                                            .foregroundColor(isAll ? .white : .gray.opacity(0.5))
-                                                            .padding(.horizontal, 8)
-                                                            .padding(.vertical, 3)
-                                                            .background(isAll ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
-                                                            .cornerRadius(3)
-                                                    }
-                                                    .buttonStyle(.plain)
-
-                                                    // Top-level projects only
-                                                    ForEach(appState.timing.availableProjects.filter { $0.depth == 0 }) { proj in
-                                                        let selected = appState.timing.filterProjectID == proj.id
-                                                        Button(action: { appState.timing.filterProjectID = proj.id }) {
-                                                            HStack(spacing: 3) {
-                                                                Circle()
-                                                                    .fill(Color(hex: proj.color))
-                                                                    .frame(width: 6, height: 6)
-                                                                Text(proj.title)
-                                                                    .font(.system(size: 10, design: .monospaced))
-                                                            }
-                                                            .foregroundColor(selected ? .white : .gray.opacity(0.5))
-                                                            .padding(.horizontal, 8)
-                                                            .padding(.vertical, 3)
-                                                            .background(selected ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
-                                                            .cornerRadius(3)
-                                                        }
-                                                        .buttonStyle(.plain)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        .padding(.top, 4)
-                                    }
-                                }
-                        }
-
-                        SharedStateSettingsSection(appState: appState)
-
-                        AlertForwardingSettingsSection(appState: appState)
-
-                        SearchFilterSettingsSection(appState: appState)
-
-                        // Applies to the merged GitHub + GitLab list, so
-                        // it sits above both rather than inside either.
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("PULL REQUESTS")
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                .foregroundColor(Color.onyxBlue.opacity(0.7))
-                                .tracking(2)
-
-                            Picker("", selection: Binding(
-                                get: { appState.appearance.prDraftFilter },
-                                set: {
-                                    appState.appearance.prDraftFilter = $0
-                                    appState.saveAppearance()
-                                }
-                            )) {
-                                ForEach(PRDraftFilter.allCases, id: \.self) { f in
-                                    Text(f.label).tag(f)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-
-                            Text("A PR counts as a draft if the forge says so, or if its title starts with \"Draft:\", \"WIP:\" or \"[draft]\" — some teams mark drafts by convention on a PR the API considers ready.")
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(.gray.opacity(0.4))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        // Also across both forges: which workflows a PR
-                        // shows under itself.
-                        PRWorkflowSettingsSection()
-
-                        GitHubSettingsSection()
-                        GitLabSettingsSection()
-                        FlowtreeSettingsSection()
-                        PageWatchSettingsSection()
+                        // A fresh scroll position per pane; otherwise a
+                        // long pane's offset carries into a short one.
+                        .id(appState.settingsPane)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
-                .frame(maxHeight: 500)
+
+                Rectangle()
+                    .fill(Color.white.opacity(0.06))
+                    .frame(height: 1)
 
                 HStack(spacing: 12) {
+                    Spacer()
                     Button(action: { appState.showSettings = false }) {
                         Text("Cancel")
                             .font(.system(.body, design: .monospaced))
@@ -552,9 +85,10 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                     .keyboardShortcut(.return, modifiers: [])
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
             }
-            .padding(40)
-            .frame(maxWidth: 500)
+            .frame(maxWidth: 860, maxHeight: 620)
             .background(Color(nsColor: NSColor(white: 0.06, alpha: 0.98)))
             .cornerRadius(10)
             .overlay(
@@ -562,8 +96,443 @@ struct SettingsView: View {
                     .stroke(Color.white.opacity(0.08), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.5), radius: 30)
+            .padding(32)
         }
         .onAppear { loadFontSizeText() }
+    }
+
+    // MARK: - Panes
+
+    @ViewBuilder
+    private func pane(_ pane: SettingsPane) -> some View {
+        switch pane {
+        case .general: generalPane
+        case .appearance: appearancePane
+        case .hosts: hostsPane
+        case .monitor: monitorPane
+        case .reminders: RemindersSettingsPane(appState: appState, reminders: remindersManager)
+        case .pullRequests: pullRequestsPane
+        case .pageWatches: PageWatchSettingsSection()
+        case .alerts: AlertForwardingSettingsSection(appState: appState)
+        case .claudeCode: ClaudeHooksSettingsSection(appState: appState)
+        case .sharedState: SharedStateSettingsSection(appState: appState)
+        case .files: SearchFilterSettingsSection(appState: appState)
+        case .flowtree: FlowtreeSettingsSection()
+        }
+    }
+
+    @ViewBuilder
+    private var generalPane: some View {
+        OnyxTextField(label: "Window title", text: $appState.appearance.windowTitle, placeholder: "Onyx")
+            .focused($focusedField, equals: .windowTitle)
+
+        // Keyboard: keys Onyx takes from the terminal
+        VStack(alignment: .leading, spacing: 4) {
+            Text("KEYBOARD")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            Toggle(isOn: Binding(
+                get: { appState.appearance.shiftTabCyclesSessions },
+                set: {
+                    appState.appearance.shiftTabCyclesSessions = $0
+                    appState.saveAppearance()
+                }
+            )) {
+                Text("⇧⇥ cycles tmux sessions")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            .toggleStyle(.switch)
+
+            Text("Off, Shift-Tab goes to the terminal untouched — which is what you want if you use Claude Code, where it switches permission modes. ⌘1–9 and ⌘J switch sessions either way.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        // Menu bar item
+        VStack(alignment: .leading, spacing: 4) {
+            Text("MENU BAR")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            Toggle(isOn: Binding(
+                get: { appState.appearance.showMenuBarItem },
+                set: {
+                    appState.appearance.showMenuBarItem = $0
+                    appState.saveAppearance()
+                    MenuBarController.shared.setEnabled($0)
+                }
+            )) {
+                Text("Show sessions in the menu bar")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            .toggleStyle(.switch)
+
+            Text("Lists the sessions that have notes and shows which of them an agent has alerted you about, with the alert text right in the menu. This is how you find out which session is bouncing the dock without switching to Onyx.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        // Debug: focus outline visualization
+        VStack(alignment: .leading, spacing: 4) {
+            Text("DEBUG")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            Toggle(isOn: Binding(
+                get: { appState.appearance.showFocusOutline },
+                set: { appState.appearance.showFocusOutline = $0 }
+            )) {
+                Text("Show keyboard focus outline")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            .toggleStyle(.switch)
+
+            Text("Draws an orange outline around whichever component currently holds keyboard focus (terminal, right panel, overlay). Useful when investigating focus-routing issues; leave off otherwise.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var appearancePane: some View {
+        // Terminal font
+        VStack(alignment: .leading, spacing: 4) {
+            Text("TERMINAL FONT")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(availableMonoFonts, id: \.self) { fontName in
+                        let selected = appState.appearance.terminalFontName == fontName
+                        Button(action: { appState.appearance.terminalFontName = fontName }) {
+                            Text(fontName)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(selected ? .white : .gray.opacity(0.5))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(selected ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
+                                .cornerRadius(4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+
+        HStack(spacing: 12) {
+            OnyxTextField(label: "Terminal font size", text: $terminalFontSizeText, placeholder: "13")
+                .focused($focusedField, equals: .fontSize)
+                .frame(width: 130)
+
+            OnyxTextField(label: "UI font size", text: $uiFontSizeText, placeholder: "12")
+                .frame(width: 130)
+        }
+
+        VStack(alignment: .leading, spacing: 4) {
+            Text("WINDOW OPACITY")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            HStack(spacing: 12) {
+                Slider(value: $appState.appearance.windowOpacity, in: 0.3...1.0, step: 0.05)
+                    .tint(Color.onyxBlue)
+
+                Text("\(Int(appState.appearance.windowOpacity * 100))%")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(.gray)
+                    .frame(width: 40)
+            }
+        }
+
+        // Accent color picker
+        VStack(alignment: .leading, spacing: 4) {
+            Text("DEFAULT ACCENT")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            HStack(spacing: 8) {
+                ForEach(AppearanceConfig.accentOptions, id: \.self) { hex in
+                    Circle()
+                        .fill(Color(hex: hex))
+                        .frame(width: 24, height: 24)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white, lineWidth: appState.appearance.accentHex == hex ? 2 : 0)
+                        )
+                        .onTapGesture {
+                            appState.appearance.accentHex = hex
+                        }
+                }
+            }
+        }
+
+        // Per-window accent color
+        VStack(alignment: .leading, spacing: 4) {
+            Text("WINDOW \(appState.windowIndex + 1) ACCENT")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            HStack(spacing: 8) {
+                // "Default" option — removes per-window override
+                Circle()
+                    .fill(Color(hex: appState.appearance.accentHex))
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white, lineWidth: appState.appearance.windowAccents[appState.windowIndex] == nil ? 2 : 0)
+                    )
+                    .overlay(
+                        Text("D")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.7))
+                    )
+                    .onTapGesture {
+                        appState.appearance.windowAccents.removeValue(forKey: appState.windowIndex)
+                    }
+
+                ForEach(AppearanceConfig.accentOptions, id: \.self) { hex in
+                    Circle()
+                        .fill(Color(hex: hex))
+                        .frame(width: 24, height: 24)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white, lineWidth: appState.appearance.windowAccents[appState.windowIndex] == hex ? 2 : 0)
+                        )
+                        .onTapGesture {
+                            appState.appearance.windowAccents[appState.windowIndex] = hex
+                        }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var hostsPane: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                SectionHeader(title: "HOSTS")
+                Spacer()
+                Button(action: addHost) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 9))
+                        Text("Add Host")
+                            .font(.system(size: 10, design: .monospaced))
+                    }
+                    .foregroundColor(appState.accentColor)
+                }
+                .buttonStyle(.plain)
+            }
+
+            ForEach(appState.hosts) { host in
+                HostRow(
+                    host: host,
+                    appState: appState,
+                    isEditing: editingHostID == host.id,
+                    onToggleEdit: {
+                        editingHostID = editingHostID == host.id ? nil : host.id
+                    },
+                    onDelete: {
+                        appState.removeHost(host.id)
+                        if editingHostID == host.id { editingHostID = nil }
+                    }
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var monitorPane: some View {
+        // Monitor: container visibility
+        VStack(alignment: .leading, spacing: 4) {
+            Text("MONITOR")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            Toggle(isOn: Binding(
+                get: { appState.appearance.showAllContainers },
+                set: {
+                    appState.appearance.showAllContainers = $0
+                    appState.saveAppearance()
+                }
+            )) {
+                Text("Show every docker container")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            .toggleStyle(.switch)
+
+            Text("Off, the monitor lists only containers that have used CPU in the last five minutes, so a host running thirty idle containers stays readable. Also on C in the monitor overlay.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        // Extra timezone clocks
+        VStack(alignment: .leading, spacing: 4) {
+            Text("EXTRA CLOCKS")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            ForEach(0..<3, id: \.self) { i in
+                TimezoneField(
+                    index: i,
+                    appState: appState,
+                    accentColor: Color(hex: appState.appearance.accentHex)
+                )
+            }
+
+            Toggle(isOn: Binding(
+                get: { appState.appearance.use12HourClock },
+                set: {
+                    appState.appearance.use12HourClock = $0
+                    appState.saveAppearance()
+                }
+            )) {
+                Text("12-hour clock (AM/PM)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            .toggleStyle(.switch)
+
+            Text("UTC always stays 24-hour. Also on P in the monitor overlay.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+        }
+
+        // Timing.app API token
+        VStack(alignment: .leading, spacing: 4) {
+            Text("TIMING.APP")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            HStack(spacing: 8) {
+                SecureField("API token from web.timingapp.com", text: Binding(
+                    get: { appState.timing.apiToken },
+                    set: { appState.timing.apiToken = $0 }
+                ))
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(3)
+
+                if appState.timing.isConfigured {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color.onyxGreen)
+                }
+            }
+
+            Text("Get token at web.timingapp.com/integrations/tokens")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.3))
+
+            // Project filter
+            if appState.timing.isConfigured && !appState.timing.availableProjects.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("FILTER PROJECT")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.5))
+                        .tracking(1)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            // "All" option
+                            let isAll = appState.timing.filterProjectID.isEmpty
+                            Button(action: { appState.timing.filterProjectID = "" }) {
+                                Text("All")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(isAll ? .white : .gray.opacity(0.5))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(isAll ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
+                                    .cornerRadius(3)
+                            }
+                            .buttonStyle(.plain)
+
+                            // Top-level projects only
+                            ForEach(appState.timing.availableProjects.filter { $0.depth == 0 }) { proj in
+                                let selected = appState.timing.filterProjectID == proj.id
+                                Button(action: { appState.timing.filterProjectID = proj.id }) {
+                                    HStack(spacing: 3) {
+                                        Circle()
+                                            .fill(Color(hex: proj.color))
+                                            .frame(width: 6, height: 6)
+                                        Text(proj.title)
+                                            .font(.system(size: 10, design: .monospaced))
+                                    }
+                                    .foregroundColor(selected ? .white : .gray.opacity(0.5))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(selected ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
+                                    .cornerRadius(3)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var pullRequestsPane: some View {
+        // Applies to the merged GitHub + GitLab list, so
+        // it sits above both rather than inside either.
+        VStack(alignment: .leading, spacing: 4) {
+            Text("PULL REQUESTS")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            Picker("", selection: Binding(
+                get: { appState.appearance.prDraftFilter },
+                set: {
+                    appState.appearance.prDraftFilter = $0
+                    appState.saveAppearance()
+                }
+            )) {
+                ForEach(PRDraftFilter.allCases, id: \.self) { f in
+                    Text(f.label).tag(f)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            Text("A PR counts as a draft if the forge says so, or if its title starts with \"Draft:\", \"WIP:\" or \"[draft]\" — some teams mark drafts by convention on a PR the API considers ready.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        // Also across both forges: which workflows a PR shows under itself.
+        PRWorkflowSettingsSection()
+
+        GitHubSettingsSection()
+        GitLabSettingsSection()
     }
 
     /// Seed local font-size text from the model. Called on view appear so
