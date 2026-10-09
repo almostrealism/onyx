@@ -46,5 +46,10 @@ public enum OnyxVersion {
     ///     proto); the bridge answers the handshake, the tool list and
     ///     `onyx_status` on its own when the desktop is away, and keeps a
     ///     per-host ledger of what it has seen.
-    public static let bridgeProtocol = 3
+    /// 4 — the bridge writes and checks Claude Code's hooks itself
+    ///     (`--install-hooks`, `--hooks-status`); hook events carry where
+    ///     they came from (`onyx_origin`) and every hook run is recorded
+    ///     in the ledger. Hosts on 3 show "update available", and the
+    ///     reinstall is what writes hooks where they were never written.
+    public static let bridgeProtocol = 4
 }

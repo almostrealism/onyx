@@ -419,8 +419,11 @@ public class AppState: ObservableObject {
 
     private var claudeSessionCancellable: AnyCancellable?
     /// Claude sessions.
+    ///
+    /// App-wide (`ClaudeSessionManager.shared`): a Claude session is a fact
+    /// about a host, not about a window, and hook events reach one server.
     public lazy var claudeSessions: ClaudeSessionManager = {
-        let c = ClaudeSessionManager()
+        let c = ClaudeSessionManager.shared
         c.gatePermissions = AppearanceStore.shared.config.claudeHooksGatePermissions
         claudeSessionCancellable = c.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()

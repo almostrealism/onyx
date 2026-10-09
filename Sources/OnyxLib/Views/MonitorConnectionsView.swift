@@ -236,6 +236,8 @@ struct ConnectionPoolSection: View {
                     }
                 }
 
+                HookSourcesList(manager: appState.claudeSessions)
+
                 // Recent connection events. Every bug this month was
                 // diagnosed by finding out what the host actually said,
                 // and that always meant "go run `log show`" — a round trip
@@ -608,6 +610,7 @@ private struct MCPHostRow: View {
         let status = installer.status(for: host)
         let busy = installer.progress[host.id]
 
+        VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 6) {
             Circle()
                 .fill(color(for: status))
@@ -640,6 +643,22 @@ private struct MCPHostRow: View {
                 .padding(.trailing, 6)
             }
         }
+        // The bridge can be fine while the hooks aren't — alerts work and
+        // the session list stays empty, which is how this went unnoticed.
+        // Only the account Onyx connects as is checked; an agent run under
+        // another account needs the bridge's adopt script.
+        if busy == nil, status.isWorking, let problem = status.hooksProblem {
+            Text("hooks: \(problem)")
+                .monitorFont(size: 9)
+                .foregroundColor(Color.onyxAmber.opacity(0.85))
+                .lineLimit(2)
+                .padding(.leading, 18)
+                .help("Claude Code's hooks are what list this host's sessions in Onyx. "
+                      + "Reinstall to write them, or run `OnyxMCP --install-hooks` as the "
+                      + "account that runs Claude. `OnyxMCP --status` there shows every hook "
+                      + "run and why the last one failed.")
+        }
+        }
         .padding(.leading, 8)
         .onAppear {
             // Only ask once per host per appearance — this view is inside
@@ -668,6 +687,64 @@ private struct MCPHostRow: View {
         case .unsupported(let p):   return "no bridge for \(p) in this build"
         case .notInstalled:         return "not installed"
         case .unknown:              return host.paused ? "host paused" : "checking…"
+        }
+    }
+}
+
+/// Every machine and account Claude Code hooks have been heard from since
+/// launch. The Claude sessions list is fed by hooks, not by the MCP
+/// connection alerts use, so a host can deliver alerts and never appear
+/// here — and when one is missing, this is the first thing to look at:
+/// a host absent from this list isn't reaching Onyx with its hooks at all.
+struct HookSourcesList: View {
+    @ObservedObject var manager: ClaudeSessionManager
+    @Environment(\.monitorFontScale) private var fontScale
+
+    var body: some View {
+        Divider().background(Color.white.opacity(0.06)).padding(.vertical, 4)
+
+        HStack(spacing: 0) {
+            Text("").frame(width: 8)
+            Text("HOOKS HEARD FROM")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("LAST")
+                .frame(width: 100 * fontScale, alignment: .trailing)
+        }
+        .lineLimit(1)
+        .monitorFont(size: 9, weight: .medium)
+        .foregroundColor(.gray.opacity(0.4))
+        .help("Machines and accounts whose Claude Code hooks have reached Onyx since it "
+              + "started. A host missing here isn't reporting its sessions: check its MCP row "
+              + "above, then run `OnyxMCP --status` on it.")
+
+        let sources = manager.hookSources.values.sorted { $0.lastAt > $1.lastAt }
+        if sources.isEmpty && manager.anonymousHookEvents == 0 {
+            Text("none since Onyx started")
+                .monitorFont(size: 10)
+                .foregroundColor(.gray.opacity(0.4))
+                .padding(.leading, 8)
+        }
+        ForEach(sources) { source in
+            HStack(spacing: 0) {
+                Text("").frame(width: 8)
+                Text(source.account)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundColor(.white.opacity(0.7))
+                Text("\(source.lastEvent) · \(WatchStatusLine.ago(source.lastAt, now: Date()))")
+                    .frame(width: 100 * fontScale, alignment: .trailing)
+                    .foregroundColor(.gray.opacity(0.55))
+            }
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .monitorFont(size: 10)
+            .help("\(source.events) event\(source.events == 1 ? "" : "s") from "
+                  + "\(source.sessions.count) Claude session\(source.sessions.count == 1 ? "" : "s")")
+        }
+        if manager.anonymousHookEvents > 0 {
+            Text("+ \(manager.anonymousHookEvents) event(s) from bridges too old to say where — reinstall them")
+                .monitorFont(size: 9)
+                .foregroundColor(Color.onyxAmber.opacity(0.7))
+                .padding(.leading, 8)
         }
     }
 }

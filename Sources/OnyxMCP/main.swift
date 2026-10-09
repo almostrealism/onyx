@@ -253,11 +253,27 @@ final class OnyxConnection {
     /// on one suspect route spends the entire budget and reports nothing;
     /// five seconds is far longer than a loopback needs and leaves room to
     /// try the others.
-    private let handshakeTimeout = 5
+    private let handshakeTimeout: Int
+    /// The route to try first: the one that last worked on this host. A
+    /// hook is a fresh process every time, so without this it would
+    /// rediscover the route — paying a dead route's full handshake wait —
+    /// on every single tool call, inside a 5-second budget.
+    private let preferredRoute: String?
+    /// Whether a newly proven route is asked who it is. Worth one round
+    /// trip for the long-lived bridge; not for a hook, which would pay it
+    /// on every run.
+    private let identifies: Bool
 
-    init(receiveTimeout: Int) {
+    init(receiveTimeout: Int, handshakeTimeout: Int = 5,
+         preferredRoute: String? = nil, identifies: Bool = true) {
         self.receiveTimeout = receiveTimeout
+        self.handshakeTimeout = handshakeTimeout
+        self.preferredRoute = preferredRoute
+        self.identifies = identifies
     }
+
+    /// The route the last successful request went over.
+    var currentRoute: String? { route?.describe }
 
     deinit {
         closeFd()
@@ -278,7 +294,9 @@ final class OnyxConnection {
     @discardableResult
     private func ensureConnected() -> Bool {
         if fd >= 0 { return true }
-        for candidate in Route.allCases where !rejected.contains(key(candidate)) {
+        let ordered = Route.allCases.filter { $0.describe == preferredRoute }
+            + Route.allCases.filter { $0.describe != preferredRoute }
+        for candidate in ordered where !rejected.contains(key(candidate)) {
             let newFd = candidate.connect()
             guard newFd >= 0 else { continue }
             setReceiveTimeout(fd: newFd,
@@ -387,7 +405,7 @@ final class OnyxConnection {
             if let current, !isProven(current) {
                 proven.insert(key(current))
                 setReceiveTimeout(fd: fd, seconds: receiveTimeout)
-                identify(via: current)
+                if identifies { identify(via: current) }
                 let who = desktop.map { " — \($0.machine), Onyx \($0.version)" } ?? ""
                 let note = "OnyxMCP: connected to Onyx via \(current.describe)\(who)\n"
                 FileHandle.standardError.write(Data(note.utf8))
@@ -520,7 +538,9 @@ final class Bridge: @unchecked Sendable {
                       host: ProcessInfo.processInfo.hostName,
                       version: "\(onyxMCPVersion) (proto \(OnyxVersion.bridgeProtocol))",
                       routes: probeRoutes(),
-                      outboxWaiting: outbox.count)
+                      outboxWaiting: outbox.count,
+                      hooks: (ClaudeHooks.health(atPath: ClaudeHooks.settingsPath()),
+                              ClaudeHooks.settingsPath()))
     }
 
     /// The paragraph that replaces "unreachable" in every error.
@@ -749,8 +769,37 @@ if CommandLine.arguments.contains("--status") {
                         host: ProcessInfo.processInfo.hostName,
                         version: "\(onyxMCPVersion) (proto \(OnyxVersion.bridgeProtocol))",
                         routes: routes,
-                        outboxWaiting: Outbox().count))
+                        outboxWaiting: Outbox().count,
+                        hooks: (ClaudeHooks.health(atPath: ClaudeHooks.settingsPath()),
+                                ClaudeHooks.settingsPath())))
     exit(routes.contains { $0.ok } ? 0 : 1)
+}
+
+// `--install-hooks [binary]` writes Onyx's hooks into this account's
+// Claude settings. The installer runs it as the account it connects as,
+// and the script left for a machine's other accounts runs it as them —
+// hooks are per account, and an agent started under `su` reads the other
+// account's settings. Defaults to this binary's own path.
+if let flag = CommandLine.arguments.firstIndex(of: "--install-hooks") {
+    let next = flag + 1 < CommandLine.arguments.count ? CommandLine.arguments[flag + 1] : nil
+    let binary = next.flatMap { $0.hasPrefix("-") ? nil : $0 } ?? ownPath()
+    let path = ClaudeHooks.settingsPath()
+    do {
+        try ClaudeHooks.install(binaryPath: binary, settingsPath: path)
+        let health = ClaudeHooks.health(atPath: path)
+        print(health.line)
+        exit(health.ok ? 0 : 1)
+    } catch {
+        print("HOOKS_FAILED \(error)")
+        exit(1)
+    }
+}
+
+// `--hooks-status` is the one-line verdict the app's status check reads.
+if CommandLine.arguments.contains("--hooks-status") {
+    let health = ClaudeHooks.health(atPath: ClaudeHooks.settingsPath())
+    print(health.line)
+    exit(health.ok ? 0 : 1)
 }
 
 // `--probe` answers "can this host actually reach Onyx", route by route,
@@ -808,7 +857,15 @@ if isHookMode {
     // PermissionRequest may block up to 120s waiting for user interaction.
     // Other events should be fast.
     let hookTimeout = eventName == "PermissionRequest" ? 120 : 10
-    let conn = OnyxConnection(receiveTimeout: hookTimeout)
+    let started = Date()
+    // Claude gives most hooks 5 seconds and kills them after. Two seconds
+    // is ages for a loopback that works and leaves room for the next
+    // route when this one is a dead forward; the route that worked last
+    // time is tried first so a healthy host never pays it at all.
+    let hookLedger = Ledger()
+    let conn = OnyxConnection(receiveTimeout: hookTimeout, handshakeTimeout: 2,
+                              preferredRoute: hookLedger.snapshot().lastSuccessRoute,
+                              identifies: false)
 
     var inputData = Data()
     while let chunk = Optional(FileHandle.standardInput.availableData), !chunk.isEmpty {
@@ -828,6 +885,10 @@ if isHookMode {
     if let data = inputData as Data?,
        var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
         dict["hook_event_name"] = eventName
+        // Which machine, account and tmux session this came from, so the
+        // desktop can say where a Claude session is running — and list
+        // which hosts it has heard hooks from at all.
+        dict["onyx_origin"] = ClaudeHooks.origin()
         if let enriched = try? JSONSerialization.data(withJSONObject: dict),
            let str = String(data: enriched, encoding: .utf8) {
             enrichedParams = str
@@ -842,7 +903,9 @@ if isHookMode {
     {"jsonrpc":"2.0","id":"\(requestId)","method":"claude/hook","params":\(enrichedParams)}
     """
 
-    if let response = conn.sendRequest(jsonRPC, attempts: 2),
+    let response = conn.sendRequest(jsonRPC, attempts: 2)
+    let millis = Int(Date().timeIntervalSince(started) * 1000)
+    if let response,
        let data = response.data(using: .utf8),
        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
        let result = json["result"],
@@ -851,7 +914,17 @@ if isHookMode {
         print(resultString)
         fflush(stdout)
     }
-    // Silent fall-through on any failure — Claude Code continues normally.
+    // Claude Code carries on either way — a hook must never break the
+    // session — but the outcome is written down, because a hook that
+    // fails silently is a host whose sessions silently never appear.
+    // `OnyxMCP --status` reads it back.
+    hookLedger.sawHook(
+        Ledger.HookRun(event: eventName, at: started, millis: millis,
+                       route: response == nil ? nil : conn.currentRoute,
+                       detail: response == nil
+                           ? "no route reached Onyx (see the failures above)"
+                           : nil),
+        delivered: response != nil)
 } else {
     // BRIDGE MODE — long-lived stdio JSON-RPC bridge.
     //

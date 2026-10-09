@@ -213,9 +213,14 @@ extension AppState {
         TimingDataStore.shared.startPolling()
         _ = timing // trigger lazy init so it subscribes to store changes
 
-        // Start MCP socket server for agent integration
-        mcpServer = MCPSocketServer(artifactManager: artifactManager, claudeSessions: claudeSessions)
-        mcpServer?.start()
+        // The MCP server for agent integration — ONE per app, not one per
+        // window. Each window used to start its own: every one unlinked
+        // and re-bound the Unix socket, so local agents reached the window
+        // opened last, while hosts' -R forwards pointed at the first
+        // window's port. With two windows open, Claude sessions split
+        // between them by route.
+        mcpServer = MCPSocketServer.shared(artifactManager: artifactManager,
+                                           claudeSessions: claudeSessions)
 
         // Start dashboard HTTP server for browser new-tab monitoring
         dashboardServer = DashboardServer(appState: self)

@@ -62,6 +62,18 @@ final class Ledger {
         private enum CodingKeys: String, CodingKey { case at, route, reason, count }
     }
 
+    /// One run of `OnyxMCP --hook`. Hooks are separate processes Claude
+    /// starts and kills on a few seconds' budget, and they used to fail
+    /// without a trace — which is how a host could deliver alerts and
+    /// still never have its sessions listed.
+    struct HookRun: Codable, Equatable {
+        var event: String
+        var at: Date
+        var millis: Int
+        var route: String?
+        var detail: String?
+    }
+
     struct Record: Codable, Equatable {
         /// Keyed by machine name.
         var desktops: [String: Desktop] = [:]
@@ -69,6 +81,11 @@ final class Ledger {
         var failures: [Failure] = []
         var lastSuccess: Date?
         var lastSuccessRoute: String?
+        // Optional so ledgers written before hooks were recorded decode.
+        var hookDelivered: HookRun?
+        var hookFailed: HookRun?
+        var hooksDelivered: Int?
+        var hooksFailed: Int?
     }
 
     static let maxFailures = 20
@@ -175,6 +192,25 @@ final class Ledger {
             }
             if record.failures.count > Self.maxFailures {
                 record.failures.removeFirst(record.failures.count - Self.maxFailures)
+            }
+            save(record)
+        }
+    }
+
+    /// A hook run finished, one way or the other.
+    func sawHook(_ run: HookRun, delivered: Bool) {
+        withFileLock {
+            var record = load()
+            if delivered {
+                record.hookDelivered = run
+                record.hooksDelivered = (record.hooksDelivered ?? 0) + 1
+                if let route = run.route {
+                    record.lastSuccess = run.at
+                    record.lastSuccessRoute = route
+                }
+            } else {
+                record.hookFailed = run
+                record.hooksFailed = (record.hooksFailed ?? 0) + 1
             }
             save(record)
         }
@@ -288,7 +324,9 @@ final class Ledger {
     /// The full picture, for `--status` and the `onyx_status` tool.
     static func report(_ record: Record, host: String, version: String,
                        routes: [(route: String, verdict: String, ok: Bool)],
-                       outboxWaiting: Int, now: Date = Date()) -> String {
+                       outboxWaiting: Int,
+                       hooks: (health: ClaudeHooks.Health, settingsPath: String)? = nil,
+                       now: Date = Date()) -> String {
         var lines: [String] = []
         lines.append("OnyxMCP \(version) on \(host)")
         lines.append("")
@@ -324,7 +362,43 @@ final class Ledger {
         lines.append(outboxWaiting > 0
                      ? "Outbox: \(outboxWaiting) alert(s) waiting for a route to open."
                      : "Outbox: empty.")
+        lines.append("")
+        lines.append(contentsOf: hookLines(record, hooks: hooks, now: now))
         return lines.joined(separator: "\n")
+    }
+
+    /// The hooks half of the report. Hooks are what list this host's
+    /// Claude sessions in Onyx, and they can be broken while everything
+    /// above says "reachable" — they're configured per account, and each
+    /// one is a separate process with seconds to work in.
+    static func hookLines(_ record: Record,
+                          hooks: (health: ClaudeHooks.Health, settingsPath: String)?,
+                          now: Date = Date()) -> [String] {
+        var lines = ["Claude Code hooks (these list this host's sessions in Onyx):"]
+        if let hooks {
+            let h = hooks.health
+            let user = ProcessInfo.processInfo.environment["USER"] ?? "this account"
+            if h.ok {
+                lines.append("  configured for \(user) in \(hooks.settingsPath)")
+            } else {
+                lines.append("  NOT WORKING for \(user): \(h.line) (\(hooks.settingsPath))")
+                lines.append("  Fix: `OnyxMCP --install-hooks` as \(user), or reinstall from Onyx.")
+            }
+        }
+        if let run = record.hookDelivered {
+            lines.append("  last delivered: \(run.event) \(ago(run.at, now: now)), \(run.millis) ms"
+                         + (run.route.map { " via \($0)" } ?? ""))
+        } else {
+            lines.append("  last delivered: never")
+        }
+        if let run = record.hookFailed {
+            lines.append("  last failed: \(run.event) \(ago(run.at, now: now)) after \(run.millis) ms"
+                         + (run.detail.map { " — \($0)" } ?? ""))
+        }
+        if let ok = record.hooksDelivered, let bad = record.hooksFailed, bad > 0 {
+            lines.append("  totals: \(ok) delivered, \(bad) failed")
+        }
+        return lines
     }
 
     static func ago(_ date: Date, now: Date = Date()) -> String {

@@ -2,6 +2,11 @@ import SwiftUI
 
 struct ClaudeSessionsSection: View {
     @ObservedObject var appState: AppState
+    /// Most sessions listed before "+N more". The list lives in a column
+    /// shared with other sections, and an uncapped list of a busy fleet's
+    /// agents pushed everything below it off the screen. Permission
+    /// requests are never capped: each one is an agent blocked on you.
+    var maxShown = 8
 
     private var manager: ClaudeSessionManager { appState.claudeSessions }
 
@@ -70,16 +75,24 @@ struct ClaudeSessionsSection: View {
             }
 
             // Active sessions
-            ForEach(manager.activeSessions) { session in
+            let active = manager.activeSessions
+            ForEach(Array(active.prefix(maxShown))) { session in
                 HStack(spacing: 8) {
                     Circle()
                         .fill(sessionStatusColor(session.status))
                         .frame(width: 6, height: 6)
 
-                    Text(shortSessionId(session.id))
+                    // Where it's running — the tmux session, else the
+                    // machine. The session id is only a fallback, for a
+                    // bridge too old to say.
+                    Text(Self.place(session))
                         .monitorFont(size: 10)
                         .foregroundColor(Color.onyxPurple.opacity(0.7))
-                        .frame(width: 50, alignment: .leading)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 110, alignment: .leading)
+                        .help(session.origin.map { "\($0.label)\nClaude session \(session.id)" }
+                              ?? "Claude session \(session.id)")
 
                     switch session.status {
                     case .running(let tool):
@@ -114,7 +127,20 @@ struct ClaudeSessionsSection: View {
                         .foregroundColor(.gray.opacity(0.3))
                 }
             }
+            if active.count > maxShown {
+                Text("+\(active.count - maxShown) more")
+                    .monitorFont(size: 9)
+                    .foregroundColor(.gray.opacity(0.4))
+            }
         }
+    }
+
+    /// What to call a session's location in one short label.
+    static func place(_ session: ClaudeActivity) -> String {
+        if let origin = session.origin {
+            return origin.session ?? origin.machine
+        }
+        return String(session.id.prefix(8))
     }
 
     private func sessionStatusColor(_ status: ClaudeActivity.ClaudeStatus) -> Color {
@@ -124,10 +150,6 @@ struct ClaudeSessionsSection: View {
         case .idle: return Color.onyxBlue.opacity(0.5)
         case .stopped: return .gray.opacity(0.3)
         }
-    }
-
-    private func shortSessionId(_ id: String) -> String {
-        String(id.prefix(8))
     }
 
     private func relativeTime(_ date: Date) -> String {

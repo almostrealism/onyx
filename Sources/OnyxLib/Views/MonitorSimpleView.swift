@@ -192,11 +192,19 @@ struct SimpleSidePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             SimpleSessionNotes(appState: appState, accentColor: accentColor)
+            if Self.hasClaudeSessions(appState) {
+                ClaudeSessionsSection(appState: appState, maxShown: 5)
+            }
             SimpleTodayReminders(reminders: reminders, accentColor: accentColor,
                                  listOrder: appState.appearance.remindersLists)
             SimplePullRequests(appState: appState, accentColor: accentColor)
             Spacer(minLength: 0)
         }
+    }
+
+    static func hasClaudeSessions(_ appState: AppState) -> Bool {
+        !appState.claudeSessions.activeSessions.isEmpty
+            || !appState.claudeSessions.pendingPermissions.isEmpty
     }
 
     /// The column's width at a given UI font scale.
@@ -234,6 +242,7 @@ struct SimpleSidePanel: View {
     static func hasContent(appState: AppState, reminders: RemindersManager,
                            store: SessionNotesStore = .shared) -> Bool {
         if !orderedSessionNotes(appState: appState, store: store).isEmpty { return true }
+        if hasClaudeSessions(appState) { return true }
         if !SimplePullRequests.visiblePRs(appState: appState).isEmpty { return true }
         return reminders.accessGranted
             && reminders.reminders.contains(where: { RemindersManager.isDueToday($0) })

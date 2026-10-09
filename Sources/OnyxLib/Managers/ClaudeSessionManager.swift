@@ -33,6 +33,9 @@ public struct ClaudeActivity: Identifiable {
     public var lastSeen: Date
     /// Status.
     public var status: ClaudeStatus
+    /// Where it's running, as its hooks report it. Nil from a bridge
+    /// older than protocol 4, which didn't say.
+    public var origin: HookOrigin? = nil
 
     /// ClaudeStatus.
     public enum ClaudeStatus: Equatable {
@@ -41,6 +44,45 @@ public struct ClaudeActivity: Identifiable {
         case waitingPermission
         case stopped
     }
+}
+
+/// Where a hook event came from: the machine, the account, and the tmux
+/// session — as the bridge on that machine saw them.
+public struct HookOrigin: Equatable, Hashable {
+    public let machine: String
+    public let user: String?
+    public let session: String?
+
+    public init(machine: String, user: String? = nil, session: String? = nil) {
+        self.machine = machine
+        self.user = user
+        self.session = session
+    }
+
+    /// From the event's `onyx_origin`.
+    public init?(_ raw: Any?) {
+        guard let dict = raw as? [String: Any],
+              let machine = dict["machine"] as? String, !machine.isEmpty else { return nil }
+        self.init(machine: machine, user: dict["user"] as? String, session: dict["session"] as? String)
+    }
+
+    /// "user@machine", the identity hooks are configured for.
+    public var account: String { user.map { "\($0)@\(machine)" } ?? machine }
+
+    /// "user@machine · session" — what a person would recognize.
+    public var label: String { session.map { "\(account) · \($0)" } ?? account }
+}
+
+/// Every machine/account that has sent hook events, and when. The first
+/// question when a host's Claude sessions are missing is "has Onyx heard
+/// from its hooks at all?" — this is the answer.
+public struct HookSource: Identifiable, Equatable {
+    public var id: String { account }
+    public let account: String
+    public var lastEvent: String
+    public var lastAt: Date
+    public var events: Int
+    public var sessions: Set<String>
 }
 
 /// A pending permission request from Claude Code
@@ -100,8 +142,40 @@ public class ClaudeSessionManager: ObservableObject {
     /// naturally respects the user's existing permission configuration.
     public var gatePermissions: Bool = false
 
+    /// Hook sources heard from since launch, keyed by account.
+    @Published public private(set) var hookSources: [String: HookSource] = [:]
+    /// Hook events that arrived without an origin — from bridges older
+    /// than protocol 4. Counted so "nothing heard" and "heard, but can't
+    /// say from where" aren't confused.
+    @Published public private(set) var anonymousHookEvents = 0
+
+    /// The app's one session list. Claude sessions are facts about hosts,
+    /// not windows, and every hook event reaches one server.
+    public static let shared = ClaudeSessionManager()
+
     /// Create a new instance.
     public init() {}
+
+    /// Note where an event came from. Public for tests.
+    public func recordOrigin(_ origin: HookOrigin?, event: String, sessionId: String, at: Date = Date()) {
+        DispatchQueue.main.async {
+            guard let origin else {
+                self.anonymousHookEvents += 1
+                return
+            }
+            var source = self.hookSources[origin.account]
+                ?? HookSource(account: origin.account, lastEvent: event, lastAt: at, events: 0, sessions: [])
+            source.lastEvent = event
+            source.lastAt = at
+            source.events += 1
+            source.sessions.insert(sessionId)
+            self.hookSources[origin.account] = source
+            // The handler's own update is queued after this one, so the
+            // session may not exist yet.
+            self.sessions[sessionId, default: ClaudeActivity(id: sessionId, lastSeen: at, status: .idle)]
+                .origin = origin
+        }
+    }
 
     // MARK: - Hook Event Processing
 
@@ -110,6 +184,10 @@ public class ClaudeSessionManager: ObservableObject {
     public func processHookEvent(_ event: [String: Any]) -> [String: Any] {
         let eventName = event["hook_event_name"] as? String ?? ""
         let sessionId = event["session_id"] as? String ?? "unknown"
+        // Recorded BEFORE the handler: a PermissionRequest blocks for up
+        // to two minutes, and that is exactly when you want to see which
+        // machine is asking.
+        recordOrigin(HookOrigin(event["onyx_origin"]), event: eventName, sessionId: sessionId)
 
         switch eventName {
         case "PreToolUse":
@@ -134,12 +212,11 @@ public class ClaudeSessionManager: ObservableObject {
     // MARK: - Event Handlers
 
     private func handleSessionStart(_ event: [String: Any], sessionId: String) -> [String: Any] {
-        let activity = ClaudeActivity(
-            id: sessionId,
-            lastSeen: Date(),
-            status: .idle
-        )
         DispatchQueue.main.async {
+            // A fresh start, but keep where it's running: the origin was
+            // recorded just before this.
+            var activity = ClaudeActivity(id: sessionId, lastSeen: Date(), status: .idle)
+            activity.origin = self.sessions[sessionId]?.origin
             self.sessions[sessionId] = activity
         }
         return ["continue": true]

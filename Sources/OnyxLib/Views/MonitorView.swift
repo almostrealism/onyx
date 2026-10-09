@@ -292,13 +292,11 @@ struct MonitorView: View {
                             .foregroundColor(.gray.opacity(0.25))
                     }
 
-                    // Claude Code sessions, full-width — only in the simple
-                    // layout, which has no column to put them in. The
-                    // detailed layout gives them a slot in its first column.
-                    if appState.monitorLayout == .simple, hasClaudeSessions {
-                        ClaudeSessionsSection(appState: appState)
-                            .padding(.horizontal, 40)
-                    }
+                    // No full-width Claude sessions band. Both layouts put
+                    // them in their left column (simple mode's is the one
+                    // `d` opens): as a band across the whole overlay, a
+                    // fleet's worth of agents pushed every chart down and
+                    // could leave the screen unusable.
 
                     // A fired page watch outranks everything else on this
                     // screen: it's the one thing here you were actively

@@ -18,7 +18,8 @@ final class MCPScriptHazardTests: XCTestCase {
     private var scripts: [(String, String)] {
         [
             ("claude picker", MCPInstaller.claudePickerScript),
-            ("hooks merge", MCPInstaller.settingsMergeScript(binaryPath: binary)),
+            ("hooks install", MCPInstaller.hooksInstallScript(binaryPath: binary)),
+            ("hooks status", MCPInstaller.hooksStatusScript),
             ("adopt script", MCPInstaller.multiUserScript(binaryPath: binary,
                                                           base: "/Users/Shared")),
         ]
@@ -80,24 +81,37 @@ final class MCPScriptHazardTests: XCTestCase {
 
     // MARK: - Behavior the scripts must keep
 
-    /// Hooks are merged into whatever is already there. A setup step that
-    /// silently dropped someone's other hooks — or their other MCP
-    /// servers — would be the worst thing in this file.
-    func testHooksAreMergedRatherThanOverwritten() {
-        let script = MCPInstaller.settingsMergeScript(binaryPath: binary)
-        XCTAssertTrue(script.contains("settings.get(\"hooks\")"),
-                      "existing settings must be read before being written")
-        XCTAssertTrue(script.contains("OnyxMCP") && script.contains("not in str"),
-                      "only OUR hook entries should be replaced")
+    /// Hooks are written by the bridge (`--install-hooks`), which merges
+    /// rather than overwrites — see BridgeHooksTests for that behavior.
+    /// The script's job is to call it safely: quoted path, and an empty
+    /// stdin so it can't read the rest of the install as input.
+    func testHooksAreWrittenByTheBridgeNotPython() {
+        let script = MCPInstaller.hooksInstallScript(binaryPath: "/Users/Some One/.onyx/bin/OnyxMCP")
+        XCTAssertTrue(script.contains("'/Users/Some One/.onyx/bin/OnyxMCP' --install-hooks '/Users/Some One/.onyx/bin/OnyxMCP' </dev/null"),
+                      "the path must be quoted and stdin closed")
+        XCTAssertFalse(script.contains("python"),
+                       "the python3 merge failed silently on hosts without it — and on Macs "
+                       + "whose python3 is only the Command Line Tools stub")
+        XCTAssertTrue(script.contains("---HOOKS---"), "the installer reads the verdict after this marker")
     }
 
-    /// Without python3 the script must NOT write a settings file over one
-    /// that exists. A half-understood rewrite of someone's config is not
-    /// worth the convenience.
-    func testWithoutPython3ItDoesNotRewriteSettings() {
-        let script = MCPInstaller.settingsMergeScript(binaryPath: binary)
-        XCTAssertTrue(script.contains("hooks skipped"),
-                      "the no-python3 branch should decline, not guess")
+    /// An older bridge doesn't know `--hooks-status` and would treat it as
+    /// "start the bridge" — reading the rest of the status script from
+    /// stdin. It is only asked when its protocol says it understands.
+    func testTheHooksStatusQuestionIsOnlyPutToABridgeThatKnowsIt() {
+        let script = MCPInstaller.hooksStatusScript
+        XCTAssertTrue(script.contains("--version"), "the protocol is checked first")
+        XCTAssertTrue(script.contains("\"(proto \"[4-9]\")\""), "protocol 4 and up only")
+        XCTAssertTrue(script.contains("--hooks-status </dev/null"), "stdin closed regardless")
+        XCTAssertTrue(script.contains("HOOKS_UNKNOWN"), "older bridges are reported as unknown, not broken")
+    }
+
+    /// Hooks are per account. The script left for a machine's other
+    /// accounts used to register the bridge and stop, so their alerts
+    /// worked and their Claude sessions never appeared in Onyx.
+    func testTheAdoptScriptInstallsHooksToo() {
+        let script = MCPInstaller.multiUserScript(binaryPath: binary, base: "/Users/Shared")
+        XCTAssertTrue(script.contains("\"$BIN\" --install-hooks \"$BIN\" </dev/null"))
     }
 
     /// The adopt script is handed to another human to run. It has to fail

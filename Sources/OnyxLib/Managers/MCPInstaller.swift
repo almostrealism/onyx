@@ -46,11 +46,19 @@ public struct MCPHostStatus: Equatable {
     public var checkedAt: Date?
     /// Where the binary is, once we know.
     public var path: String?
+    /// What's wrong with Claude Code's hooks for the account Onyx connects
+    /// as, or nil when they're fine or couldn't be checked. Separate from
+    /// `state` because the bridge can be perfectly healthy without them:
+    /// alerts still work, and only the session list goes quiet — which is
+    /// exactly why it went unnoticed.
+    public var hooksProblem: String?
 
-    public init(state: State = .unknown, checkedAt: Date? = nil, path: String? = nil) {
+    public init(state: State = .unknown, checkedAt: Date? = nil, path: String? = nil,
+                hooksProblem: String? = nil) {
         self.state = state
         self.checkedAt = checkedAt
         self.path = path
+        self.hooksProblem = hooksProblem
     }
 
     public var isWorking: Bool {
@@ -137,6 +145,7 @@ public final class MCPInstaller: ObservableObject {
             else
                 echo "NO_CLAUDE"
             fi
+            \(Self.hooksStatusScript)
             """
             let (cmd, args, stdin) = appState.remoteScriptNoTTY(script, host: host)
             let result = RemoteExec.shared.run(cmd, args: args, stdin: stdin,
@@ -248,6 +257,7 @@ public final class MCPInstaller: ObservableObject {
         if first.hasPrefix("OnyxMCP ") {
             let reported = Self.parseVersionLine(first)
             let version = reported.version
+            let hooks = Self.hooksProblem(in: section("---HOOKS---").first)
             // The binary running is not the question. Claude Code has to
             // KNOW about it, and it reads MCP servers from ~/.claude.json
             // — which is why the previous version of this reported
@@ -264,7 +274,7 @@ public final class MCPInstaller: ObservableObject {
                     state: reported.proto >= OnyxVersion.bridgeProtocol
                         ? .installed(version: version)
                         : .outdated(version: version),
-                    checkedAt: Date(), path: path)
+                    checkedAt: Date(), path: path, hooksProblem: hooks)
             case "NO_CLAUDE":
                 return MCPHostStatus(state: .broken("installed, but Claude Code isn't on this host"),
                                      checkedAt: Date(), path: path)
@@ -275,7 +285,7 @@ public final class MCPInstaller: ObservableObject {
                 // No answer at all — say installed rather than inventing a
                 // failure we didn't observe.
                 return MCPHostStatus(state: .installed(version: version),
-                                     checkedAt: Date(), path: path)
+                                     checkedAt: Date(), path: path, hooksProblem: hooks)
             }
         }
         // It's there and it didn't answer — report what it said instead of
@@ -456,7 +466,7 @@ public final class MCPInstaller: ObservableObject {
         else
             echo "NO_CLAUDE"
         fi
-        \(Self.settingsMergeScript(binaryPath: remotePath))
+        \(Self.hooksInstallScript(binaryPath: remotePath))
         \(Self.multiUserScript(binaryPath: remotePath, base: base))
         echo "---DONE---"
         """
@@ -479,7 +489,8 @@ public final class MCPInstaller: ObservableObject {
         let reg: [String] = {
             guard let r = out.range(of: "---REG---", options: .backwards) else { return [] }
             let rest = out[r.upperBound...]
-            let stop = rest.range(of: "---DONE---")?.lowerBound ?? rest.endIndex
+            let stop = rest.range(of: "---HOOKS---")?.lowerBound
+                ?? rest.range(of: "---DONE---")?.lowerBound ?? rest.endIndex
             return rest[..<stop]
                 .components(separatedBy: "\n")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -512,6 +523,26 @@ public final class MCPInstaller: ObservableObject {
         }
 
         DiagnosticLog.shared.record("mcp", "installed and registered on \(host.label) at \(remotePath)")
+
+        // Registered gets alerts working; hooks are what list the host's
+        // Claude sessions. They used to be written by a python3 merge
+        // whose failure ("hooks skipped") nothing read, so a host could
+        // show green with no hooks at all.
+        let hooksLine: String? = {
+            guard let r = out.range(of: "---HOOKS---", options: .backwards) else { return nil }
+            let rest = out[r.upperBound...]
+            let stop = rest.range(of: "---")?.lowerBound ?? rest.endIndex
+            return rest[..<stop].components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first { !$0.isEmpty }
+        }()
+        if let problem = Self.hooksProblem(in: hooksLine ?? "HOOKS_FAILED the bridge didn't answer") {
+            DiagnosticLog.shared.record("mcp", "\(host.label): hooks — \(problem)", failure: true)
+            fail("Bridge installed and registered on \(host.label), so alerts work — but Claude Code's "
+                 + "hooks couldn't be written, so its sessions won't be listed: \(problem)",
+                 for: host.id)
+            return false
+        }
 
         // Registered is not the same as reachable. If Claude on that host
         // can't get to Onyx, the next thing the user sees is a 30-second
@@ -588,62 +619,75 @@ public final class MCPInstaller: ObservableObject {
         "$ONYX_CLAUDE" mcp get onyx </dev/null >/dev/null 2>&1 \\
             && echo "Onyx MCP registered for $(whoami)." \\
             || { echo "claude mcp add ran but the server isn't listed." >&2; exit 1; }
+        # Hooks are per account too, and they are what list this account's
+        # Claude sessions in Onyx. This script used to register the bridge
+        # and stop, so alerts worked and the sessions never appeared.
+        "$BIN" --install-hooks "$BIN" </dev/null
         ONYXEOF
         chmod 0755 \(Self.shellQuote(path)) 2>/dev/null || true
         """
     }
 
-    /// Merge our hooks into ~/.claude/settings.json.
+    /// Write our hooks into Claude Code's settings, using the bridge.
     ///
-    /// Merge, never replace: people have their own hooks and their own MCP
-    /// servers, and a setup step that quietly deletes them would be the
-    /// worst thing in this file. python3 does it properly; without python3
-    /// we only write a settings file when there ISN'T one, because a
-    /// half-understood rewrite of somebody's config is not worth the
-    /// convenience.
-    static func settingsMergeScript(binaryPath: String) -> String {
-        let hookCmd = MCPInstall.hookCommand(binaryPath: binaryPath)
+    /// This was a python3 merge, and without python3 — or on a Mac whose
+    /// python3 is only the stub that offers to install the Command Line
+    /// Tools — it printed "hooks skipped" and the install reported success
+    /// anyway. The bridge is the one thing guaranteed to be on the host by
+    /// this point, so it does the merge itself (`OnyxMCP --install-hooks`)
+    /// and answers with a verdict line the installer checks.
+    static func hooksInstallScript(binaryPath: String) -> String {
+        let bin = Self.shellQuote(binaryPath)
         return """
-        mkdir -p "$HOME/.claude"
-        ONYX_BIN=\(Self.shellQuote(binaryPath))
-        ONYX_HOOK=\(Self.shellQuote(hookCmd))
-        if command -v python3 >/dev/null 2>&1; then
-        python3 - "$HOME/.claude/settings.json" "$ONYX_BIN" "$ONYX_HOOK" <<'PYEOF'
-        import json, sys, os
-        path, binary, hook = sys.argv[1], sys.argv[2], sys.argv[3]
-        try:
-            with open(path) as f:
-                settings = json.load(f)
-        except Exception:
-            settings = {}
-        events = ["PreToolUse", "PostToolUse", "SessionStart", "Stop", "PermissionRequest"]
-        hooks = settings.get("hooks") or {}
-        for event in events:
-            entry = {"type": "command", "command": hook + " " + event}
-            if event == "PermissionRequest":
-                entry["timeout"] = 120
-            matchers = hooks.get(event) or [{"matcher": "", "hooks": []}]
-            # Replace only OUR hook, leaving anyone else's in place.
-            for m in matchers:
-                m["hooks"] = [h for h in (m.get("hooks") or [])
-                              if "OnyxMCP" not in str(h.get("command", ""))]
-                m["hooks"].append(entry)
-            hooks[event] = matchers
-        settings["hooks"] = hooks
-        tmp = path + ".onyx-tmp"
-        with open(tmp, "w") as f:
-            json.dump(settings, f, indent=2)
-            f.write("\\n")
-        os.replace(tmp, path)
-        print("settings merged")
-        PYEOF
-        else
-            # Hooks are a nested merge; without python3 we leave the file
-            # alone rather than guess. The MCP registration above is the
-            # part that matters and it went through the CLI.
-            echo "hooks skipped (no python3 to merge with)"
-        fi
+        echo "---HOOKS---"
+        \(bin) --install-hooks \(bin) </dev/null 2>&1 || true
         """
+    }
+
+    /// Ask the installed bridge whether this account's hooks are in place.
+    ///
+    /// Only a bridge that knows the question is asked: an older one would
+    /// take the unknown flag as "start the bridge" and read the rest of
+    /// this script from stdin. The protocol number says which is which,
+    /// and stdin is closed regardless.
+    static let hooksStatusScript = """
+    echo "---HOOKS---"
+    if [ -x "$B" ]; then
+        case "$("$B" --version 2>&1)" in
+            *"(proto "[4-9]")"*|*"(proto "[1-9][0-9]")"*) "$B" --hooks-status </dev/null 2>&1 ;;
+            *) echo "HOOKS_UNKNOWN bridge too old to say" ;;
+        esac
+    fi
+    """
+
+    /// The bridge's verdict line, as a sentence for the UI — or nil when
+    /// the hooks are fine, or when there's nothing to go on.
+    static func hooksProblem(in line: String?) -> String? {
+        guard let line = line?.trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty else {
+            return nil
+        }
+        let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
+        let verdict = parts[0]
+        let detail = parts.count > 1 ? parts[1] : ""
+        switch verdict {
+        case "HOOKS_OK", "HOOKS_UNKNOWN":
+            return nil
+        case "HOOKS_MISSING":
+            return "Claude Code hooks aren't configured, so this host's sessions won't be listed"
+        case "HOOKS_PARTIAL":
+            return "some Claude Code hooks are missing (\(detail))"
+        case "HOOKS_BROKEN":
+            return "Claude Code's hooks point at a bridge that isn't there (\(detail))"
+        case "HOOKS_DISABLED":
+            return "hooks are switched off in Claude's settings (disableAllHooks)"
+        case "HOOKS_UNREADABLE":
+            return "Claude's settings.json isn't valid JSON, so the hooks can't be checked or written"
+        case "HOOKS_FAILED":
+            return detail.isEmpty ? "writing the hooks failed" : detail
+        default:
+            // Not a verdict at all — an error from the shell or the binary.
+            return line
+        }
     }
 
     // MARK: - Plumbing

@@ -942,6 +942,22 @@ public class MCPSocketServer {
     public static let defaultRemotePort: UInt16 = 19432
 
     /// Create a new instance.
+    private static var sharedInstance: MCPSocketServer?
+    private static let sharedLock = NSLock()
+
+    /// The app's one server, started by whichever window asks first.
+    /// Artifact slots belong to that window; Claude sessions and alerts
+    /// are app-wide anyway.
+    public static func shared(artifactManager: ArtifactManager,
+                              claudeSessions: ClaudeSessionManager) -> MCPSocketServer {
+        sharedLock.lock(); defer { sharedLock.unlock() }
+        if let existing = sharedInstance { return existing }
+        let server = MCPSocketServer(artifactManager: artifactManager, claudeSessions: claudeSessions)
+        server.start()
+        sharedInstance = server
+        return server
+    }
+
     public init(artifactManager: ArtifactManager, claudeSessions: ClaudeSessionManager) {
         self.handler = MCPMessageHandler(artifactManager: artifactManager, claudeSessions: claudeSessions)
         // Use ~/.onyx/ for the socket (cross-platform, matches OnyxMCP client)

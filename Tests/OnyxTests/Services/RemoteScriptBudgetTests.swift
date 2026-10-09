@@ -195,12 +195,12 @@ final class RemoteScriptBudgetTests: XCTestCase {
     /// a known number rather than a surprise — a pipe has no 1KB limit, but
     /// it is still worth knowing when one of these doubles.
     func testTheExemptInstallScriptsAreMeasuredNotIgnored() {
-        let merge = MCPInstaller.settingsMergeScript(binaryPath: "/Users/Shared/.onyx/bin/OnyxMCP")
+        let merge = MCPInstaller.hooksInstallScript(binaryPath: "/Users/Shared/.onyx/bin/OnyxMCP")
         let multi = MCPInstaller.multiUserScript(binaryPath: "/Users/Shared/.onyx/bin/OnyxMCP",
                                                  base: "/Users/Shared")
         let picker = MCPInstaller.claudePickerScript
-        for (what, script) in [("settings merge", merge), ("multi-user", multi),
-                               ("claude picker", picker)] {
+        for (what, script) in [("hooks install", merge), ("multi-user", multi),
+                               ("claude picker", picker), ("hooks status", MCPInstaller.hooksStatusScript)] {
             XCTAssertLessThan(script.utf8.count, 4096,
                               "\(what) is \(script.utf8.count)B; past 4KB even a Linux "
                               + "terminal's buffer is gone, and this would have to move "
