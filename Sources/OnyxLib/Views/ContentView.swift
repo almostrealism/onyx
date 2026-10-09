@@ -1461,9 +1461,13 @@ private struct FavoriteBarChip: View {
             // the monitor. One without has no row there, so the chip is
             // the only place the light can live.
             if !hasNote {
+                // Unread only: the bar is too tight for "you've read
+                // everything here". The history is still a click away in
+                // the menu bar item.
                 SessionAlertIndicator(sessionKey: appState.storageKey(for: session),
                                       accentColor: appState.accentColor,
-                                      size: sz(9))
+                                      size: sz(9),
+                                      showsWhenAllRead: false)
                     .padding(.trailing, 2)
             }
 

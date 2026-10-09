@@ -14,6 +14,11 @@ struct SessionAlertIndicator: View {
     let sessionKey: String?
     let accentColor: Color
     var size: CGFloat = 11
+    /// Show the empty bell — "there were messages here, all read". Fine
+    /// beside a note in the monitor; on the session chips along the bottom,
+    /// where space is tight, an indicator that says nothing new is just
+    /// clutter, so there it appears only while something is unread.
+    var showsWhenAllRead = true
 
     @ObservedObject private var alerts = AlertStore.shared
     @State private var showing = false
@@ -23,8 +28,12 @@ struct SessionAlertIndicator: View {
         let history = alerts.alerts(for: sessionKey)
 
         // No light and no history means nothing to offer — take up no
-        // space rather than leaving a dead target in the row.
-        if !history.isEmpty {
+        // space rather than leaving a dead target in the row. Where the
+        // empty bell isn't wanted, it stays only while its popover is
+        // open: opening it marks everything seen, and the bell vanishing
+        // would take the popover anchored to it along.
+        if Self.isVisible(hasHistory: !history.isEmpty, unseen: unseen,
+                          showsWhenAllRead: showsWhenAllRead, popoverOpen: showing) {
             Button(action: { showing = true }) {
                 HStack(spacing: 3) {
                     Image(systemName: unseen > 0 ? "bell.badge.fill" : "bell")
@@ -50,6 +59,13 @@ struct SessionAlertIndicator: View {
                     }
             }
         }
+    }
+}
+
+extension SessionAlertIndicator {
+    static func isVisible(hasHistory: Bool, unseen: Int,
+                          showsWhenAllRead: Bool, popoverOpen: Bool) -> Bool {
+        hasHistory && (unseen > 0 || showsWhenAllRead || popoverOpen)
     }
 }
 

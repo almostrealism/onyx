@@ -56,6 +56,13 @@ Draft — still being assembled.
 
 ## Fixes worth naming
 
+- **The session chips along the bottom no longer show an empty bell**
+  once a session's alerts have all been read. That strip is the tightest
+  space on the screen, and "you had messages here once" isn't worth a
+  slot in it. The bell appears there only while something is unread. The
+  monitor still shows the empty bell beside a session's note, and the menu
+  bar item still lists the history.
+
 - **With more than one window open, Claude sessions split between them.**
   Each window started its own MCP server: agents on this Mac reached the
   window opened last, and remote hosts reached the first. There is now one
