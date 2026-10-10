@@ -268,11 +268,40 @@ dmg_app_version() { dmg_plist "$1" CFBundleShortVersionString; }
 # stamps the commit it built (with -dirty for uncommitted changes), so
 # compare that against the tag rather than trusting the file's name.
 TAG_COMMIT="$(git rev-parse "refs/tags/$VERSION^{commit}")"
+
+# Paths that never reach the app bundle. The website's release entry and
+# the release notes are routinely committed AFTER the candidate is built
+# and tested — that's the order things happen in — and rebuilding,
+# re-notarizing and re-testing an identical app for a website edit would
+# make the image you tested NOT the one you ship.
+outside_app() {   # outside_app PATH → true if the path can't affect the bundle
+    case "$1" in
+        onyx-web/*|docs/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# True when the image's commit is an ancestor of the tag and everything
+# changed between them is outside the app. Prints what changed.
+same_app_as_tag() {   # same_app_as_tag BUILT_COMMIT
+    git merge-base --is-ancestor "$1" "$TAG_COMMIT" 2>/dev/null || return 1
+    __changed="$(git diff --name-only "$1" "$TAG_COMMIT")"
+    [ -n "$__changed" ] || return 0
+    for __f in $__changed; do
+        outside_app "$__f" || return 1
+    done
+    echo "  Changed since it was built, none of it in the app:"
+    printf '%s\n' "$__changed" | sed 's/^/    /'
+    return 0
+}
+
 if [ -f "$DMG" ]; then
     BUILT="$(dmg_plist "$DMG" OnyxBuildCommit)"
     BUILT_FULL="$(git rev-parse -q --verify "${BUILT%-dirty}^{commit}" 2>/dev/null || true)"
     if [ -n "$BUILT" ] && [ "$BUILT_FULL" = "$TAG_COMMIT" ] && [ "${BUILT%-dirty}" = "$BUILT" ]; then
         echo "  $DMG was built from the tag ($BUILT) ✓"
+    elif [ -n "$BUILT_FULL" ] && [ "${BUILT%-dirty}" = "$BUILT" ] && same_app_as_tag "$BUILT_FULL"; then
+        echo "  $DMG was built from $BUILT; the app is identical at the tag ✓"
     else
         if [ -z "$BUILT" ]; then
             echo "  $DMG doesn't say which commit it was built from."

@@ -1,6 +1,15 @@
 # Onyx 0.19
 
-Draft — still being assembled.
+Settings you can find your way around, and an answer to "why aren't this
+machine's Claude sessions listed?"
+
+The question came up because the sessions list and alerts look like one
+feature and aren't. Alerts ride the MCP connection; the sessions list is
+fed by Claude Code hooks, which are configured separately, per account, and
+run as short-lived processes with a few seconds to work. A host could
+deliver every alert and never list a session, with nothing anywhere to say
+why. Now the hooks are installed reliably and there are tools to see each
+link in that chain.
 
 ## Settings
 
@@ -67,3 +76,11 @@ Draft — still being assembled.
   Each window started its own MCP server: agents on this Mac reached the
   window opened last, and remote hosts reached the first. There is now one
   server and one session list for the whole app.
+
+## Under the hood
+
+- The bridge protocol is 4. Reinstall the bridge on each host when Onyx
+  offers to; that is what writes the hooks.
+- The test suite is at 1,365, including integration tests that run the
+  real bridge to install hooks, check them, and deliver a hook event to a
+  stand-in desktop.

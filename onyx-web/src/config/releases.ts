@@ -24,6 +24,22 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.19',
+    date: null,
+    upcoming: true,
+    summary:
+      'Settings laid out like System Settings, reorderable Reminders lists, and an answer to why some machines’ Claude sessions never appeared.',
+    highlights: [
+      'Settings has a list of categories on the left and the chosen category on the right, instead of one long scrolling column.',
+      'Reminders gets its own pane: the monitor’s lists in order, which you can drag to reorder.',
+      'Claude sessions missing from some hosts: hooks are now installed reliably — without python3, and for every account that runs Claude — and each host says when they aren’t.',
+      'New diagnostics: a list of every machine Onyx has heard hooks from, and OnyxMCP --status reports the last hook delivered and the last one that failed.',
+      'Claude sessions say where they’re running, and sit in the monitor’s left column in both layouts, capped so a busy fleet can’t push everything else off the screen.',
+      'The session chips along the bottom show a bell only while something is unread.',
+      'With more than one window open, Claude sessions no longer split between them.',
+    ],
+  },
+  {
     version: '0.18',
     date: '2026-09-30',
     summary:

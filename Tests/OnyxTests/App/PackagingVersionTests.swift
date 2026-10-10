@@ -117,6 +117,18 @@ final class PackagingVersionTests: XCTestCase {
                       "CI artifacts come from a named run, never an interactive pick")
     }
 
+    /// The site's release entry is committed after the candidate is
+    /// tested. That must not force a rebuild — the image you tested is the
+    /// one to ship — but only paths that can't reach the bundle qualify,
+    /// and only when the build commit is an ANCESTOR of the tag.
+    func testOnlySiteAndDocsChangesMayFollowTheBuild() throws {
+        let text = try code("release.sh")
+        XCTAssertTrue(text.contains("onyx-web/*|docs/*) return 0"),
+                      "only the website and docs are outside the app")
+        XCTAssertTrue(text.contains("git merge-base --is-ancestor \"$1\" \"$TAG_COMMIT\""),
+                      "a build from a commit AFTER the tag is never accepted")
+    }
+
     func testReleaseChecksTheImageWasBuiltFromTheTag() throws {
         let text = try code("release.sh")
         XCTAssertTrue(text.contains("dmg_plist \"$DMG\" OnyxBuildCommit"),
