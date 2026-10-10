@@ -473,11 +473,37 @@ if [ "$DO_NOTARIZE" = "1" ]; then
 
     NOTARY_ARGS=""
     # A profile is used only if it actually WORKS — not if it merely
-    # exists. Locked, unreadable and absent all mean the same thing here:
-    # ask the human.
-    if xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
+    # exists. Locked, unreadable and absent all end in asking the human,
+    # but they are NOT the same problem, and this used to swallow the
+    # answer: "no working profile" was all anyone saw, for a profile that
+    # was fine and an Apple agreement that needed accepting, or a
+    # password that had been revoked. Apple's own words are shown now.
+    PROFILE_CHECK="$(xcrun notarytool history --keychain-profile "$PROFILE" 2>&1)" \
+        && PROFILE_OK=1 || PROFILE_OK=0
+    if [ "$PROFILE_OK" = "1" ]; then
         echo "  Using notary profile: $PROFILE"
         NOTARY_ARGS="--keychain-profile $PROFILE"
+    else
+        echo ""
+        echo "  The '$PROFILE' notary profile didn't work. notarytool said:"
+        printf '%s\n' "$PROFILE_CHECK" | tail -5 | sed 's/^/    /'
+        case "$PROFILE_CHECK" in
+            *"No Keychain password item found"*|*"could not find"*|*"not found"*)
+                echo "  → There's no profile by that name in this keychain." ;;
+            *"agreement"*|*"contract"*|*"403"*)
+                echo "  → Apple wants an updated agreement accepted. Sign in at"
+                echo "    https://developer.apple.com/account and accept it; the"
+                echo "    profile itself is fine and will work again after that." ;;
+            *"401"*|*"nauthorized"*|*"credentials"*|*"password"*)
+                echo "  → Apple rejected the stored password: the app-specific"
+                echo "    password was probably revoked or rotated. Enter a new"
+                echo "    one below; it will be saved to the profile." ;;
+            *"locked"*|*"interaction is not allowed"*)
+                echo "  → The keychain is locked. Unlock it with"
+                echo "    security unlock-keychain ~/Library/Keychains/login.keychain-db" ;;
+            *"network"*|*"offline"*|*"timed out"*|*"resolve"*)
+                echo "  → Apple couldn't be reached. Check the network and re-run." ;;
+        esac
     fi
 
     NOTARIZED=0
@@ -486,7 +512,6 @@ if [ "$DO_NOTARIZE" = "1" ]; then
             echo ""
             if [ "$attempt" = "1" ]; then
                 echo "  Notarization credentials needed."
-                echo "  (No working '$PROFILE' profile on this machine.)"
             else
                 echo "  That didn't authenticate. Try again (attempt $attempt of 3)."
                 echo "  The password is an APP-SPECIFIC password from"

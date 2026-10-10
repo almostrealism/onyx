@@ -185,6 +185,20 @@ final class PackagingSignatureTests: XCTestCase {
     /// it succeeded at submitting and waiting. Trusting that sent a
     /// rejected DMG on to stapler, which is where the user finally saw
     /// an error, and it named a CloudKit record rather than a cause.
+    /// "No working profile" was all anyone saw, whatever the cause — an
+    /// Apple agreement waiting to be accepted, a revoked password, a locked
+    /// keychain. The profile check keeps what notarytool said and shows it.
+    func testTheProfileCheckShowsWhatNotarytoolSaid() {
+        let text = (try? String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("package.sh"), encoding: .utf8)) ?? ""
+        XCTAssertFalse(text.contains("notarytool history --keychain-profile \"$PROFILE\" >/dev/null"),
+                       "the check must not throw away Apple's answer")
+        XCTAssertTrue(text.contains("PROFILE_CHECK=\"$(xcrun notarytool history"))
+        XCTAssertTrue(text.contains("agreement"), "the commonest cause gets named")
+    }
+
     func testTheNotarizationVerdictIsReadFromTheOutputNotTheExitStatus() {
         let text = packageScript
         XCTAssertTrue(text.contains("\"$SUB_STATUS\" = \"Accepted\""),
