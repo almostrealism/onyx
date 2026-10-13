@@ -192,7 +192,10 @@ final class PackagingSignatureTests: XCTestCase {
     /// a bridge built before a fix from one built after. The CI run is
     /// only used when the bridge's sources are unchanged since its commit.
     func testCIBridgesMustBeBuiltFromTheCurrentBridgeSources() throws {
-        let text = try code("package.sh")
+        let text = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("package.sh"), encoding: .utf8)
         XCTAssertTrue(text.contains("databaseId,headSha"), "the run's commit has to be known")
         XCTAssertTrue(text.contains("git diff --quiet \"$CI_SHA\" HEAD -- Sources/OnyxMCP Sources/OnyxVersion Package.swift"),
                       "and compared against the bridge's sources at HEAD")
