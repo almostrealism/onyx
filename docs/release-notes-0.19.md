@@ -54,6 +54,15 @@ link in that chain.
 - The bridge protocol is now 4, so hosts show "update available". The
   reinstall is what writes hooks where they were missing.
 
+- **A hook can no longer stall Claude.** Hooks run on every tool call and
+  Claude waits for them, up to 60 seconds when no timeout is set. On a
+  host where Onyx was unreachable, one agent measured 31 seconds per hook,
+  so a minute per tool call. Now every hook gives up at 3 seconds and
+  records which step it was stuck in (`OnyxMCP --status` shows it). After
+  a hook hangs, the hooks that follow don't try for 30 seconds. Connection
+  attempts have a 2-second limit, and the hooks Onyx installs carry an
+  explicit `"timeout": 5`.
+
 ## Monitor
 
 - **Claude sessions are in the left column in the simple layout too** (the

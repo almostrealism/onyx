@@ -164,8 +164,22 @@ bridge_is_this_version() {   # bridge_is_this_version FILE
 
 CI_RUN=""
 if command -v gh >/dev/null 2>&1; then
-    CI_RUN="$(gh run list --workflow mcp-binaries.yaml --branch master --status success \
-              --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)"
+    CI_LINE="$(gh run list --workflow mcp-binaries.yaml --branch master --status success \
+              --limit 1 --json databaseId,headSha -q '.[0] | "\(.databaseId) \(.headSha)"' 2>/dev/null || true)"
+    CI_RUN="${CI_LINE%% *}"
+    CI_SHA="${CI_LINE#* }"
+    # The version string can't tell two builds of the same version apart:
+    # a bridge fix committed after the last CI run still says 0.19. So the
+    # run is only used if the bridge's sources haven't changed since the
+    # commit it built — otherwise this would package the bridge from
+    # BEFORE the fix, silently, while CI was still building the new one.
+    if [ -n "$CI_RUN" ] && [ -n "$CI_SHA" ] && \
+       ! git diff --quiet "$CI_SHA" HEAD -- Sources/OnyxMCP Sources/OnyxVersion Package.swift 2>/dev/null; then
+        echo "  The latest 'MCP binaries' run ($CI_RUN) built $(git rev-parse --short "$CI_SHA" 2>/dev/null || echo "$CI_SHA"),"
+        echo "  and the bridge has changed since. Not using it: wait for the run on"
+        echo "  $(git rev-parse --short HEAD) to finish, then package again."
+        CI_RUN=""
+    fi
 fi
 
 for arch in linux-x86_64 linux-arm64; do

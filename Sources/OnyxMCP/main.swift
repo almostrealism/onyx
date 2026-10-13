@@ -56,6 +56,32 @@ let socketPath: String = {
 
 // MARK: - Low-level socket helpers
 
+/// How long a connect may take before it counts as failed.
+///
+/// A blocking connect() has no deadline of its own, and on a host with a
+/// wedged listener — a stuck sshd behind an `-R` forward, a full accept
+/// queue — it can sit for many seconds. Every hook paid that on every tool
+/// call: one agent measured 31 seconds per hook, a minute per tool call.
+/// These are loopback connections; two seconds is generous.
+let connectTimeoutMillis: Int32 = 2000
+
+/// connect(), bounded by `connectTimeoutMillis`. True when connected.
+func connectBounded(_ fd: Int32, _ addr: UnsafePointer<sockaddr>, _ length: socklen_t) -> Bool {
+    let flags = fcntl(fd, F_GETFL, 0)
+    _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+    defer { _ = fcntl(fd, F_SETFL, flags) }
+    if connect(fd, addr, length) == 0 { return true }
+    // Only EINPROGRESS means "still trying". A Unix socket answers EAGAIN
+    // when its backlog is full, which is a failure, not a wait.
+    guard errno == EINPROGRESS else { return false }
+    var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+    guard poll(&pfd, 1, connectTimeoutMillis) == 1 else { return false }
+    var err: Int32 = 0
+    var len = socklen_t(MemoryLayout<Int32>.size)
+    guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == 0 else { return false }
+    return err == 0
+}
+
 func connectToUnixSocket() -> Int32 {
     let fd = socket(AF_UNIX, streamSocket, 0)
     guard fd >= 0 else { return -1 }
@@ -72,13 +98,13 @@ func connectToUnixSocket() -> Int32 {
         }
     }
 
-    let result = withUnsafePointer(to: &addr) { ptr in
+    let connected = withUnsafePointer(to: &addr) { ptr in
         ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-            connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            connectBounded(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
         }
     }
 
-    if result < 0 {
+    if !connected {
         close(fd)
         return -1
     }
@@ -94,13 +120,13 @@ func connectToTCP(port: UInt16) -> Int32 {
     addr.sin_port = port.bigEndian
     addr.sin_addr.s_addr = inet_addr("127.0.0.1")
 
-    let result = withUnsafePointer(to: &addr) { ptr in
+    let connected = withUnsafePointer(to: &addr) { ptr in
         ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-            connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
+            connectBounded(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
         }
     }
 
-    if result < 0 {
+    if !connected {
         close(fd)
         return -1
     }
@@ -257,7 +283,7 @@ final class OnyxConnection {
     /// The route to try first: the one that last worked on this host. A
     /// hook is a fresh process every time, so without this it would
     /// rediscover the route — paying a dead route's full handshake wait —
-    /// on every single tool call, inside a 5-second budget.
+    /// on every single tool call, inside a 3-second deadline.
     private let preferredRoute: String?
     /// Whether a newly proven route is asked who it is. Worth one round
     /// trip for the long-lived bridge; not for a hook, which would pay it
@@ -274,6 +300,10 @@ final class OnyxConnection {
 
     /// The route the last successful request went over.
     var currentRoute: String? { route?.describe }
+
+    /// Told what the connection is doing, step by step — for the hook
+    /// watchdog, which reports the step a stalled hook was stuck in.
+    var onStage: ((String) -> Void)?
 
     deinit {
         closeFd()
@@ -297,6 +327,7 @@ final class OnyxConnection {
         let ordered = Route.allCases.filter { $0.describe == preferredRoute }
             + Route.allCases.filter { $0.describe != preferredRoute }
         for candidate in ordered where !rejected.contains(key(candidate)) {
+            onStage?("connecting to \(candidate.describe)")
             let newFd = candidate.connect()
             guard newFd >= 0 else { continue }
             setReceiveTimeout(fd: newFd,
@@ -373,6 +404,7 @@ final class OnyxConnection {
                 continue
             }
 
+            onStage?("waiting for \(current?.describe ?? "Onyx") to answer")
             guard let response = readLine(fd: fd) else {
                 // Silence from a route that has never answered is the
                 // signature of something else holding the port: a stale
@@ -858,14 +890,30 @@ if isHookMode {
     // Other events should be fast.
     let hookTimeout = eventName == "PermissionRequest" ? 120 : 10
     let started = Date()
-    // Claude gives most hooks 5 seconds and kills them after. Two seconds
+    HookWatchdog.enter("reading the ledger")
+    // The watchdog ends any run at 3 seconds (HookWatchdog). Two seconds
     // is ages for a loopback that works and leaves room for the next
     // route when this one is a dead forward; the route that worked last
     // time is tried first so a healthy host never pays it at all.
     let hookLedger = Ledger()
+    let snapshot = hookLedger.snapshot()
+    // Back off after a SLOW failure. A refused connection costs well under
+    // a second, but a route that hangs costs the whole watchdog deadline,
+    // and there's a Pre and a Post hook on every tool call. So while the
+    // last attempt hung less than 30s ago, don't try: one hook every 30s
+    // finds out whether Onyx is back. Nothing is written for a skip, which
+    // is what lets the next attempt happen.
+    if ClaudeHooks.shouldBackOff(lastFailed: snapshot.hookFailed,
+                                 lastDelivered: snapshot.hookDelivered) {
+        exit(0)
+    }
     let conn = OnyxConnection(receiveTimeout: hookTimeout, handshakeTimeout: 2,
-                              preferredRoute: hookLedger.snapshot().lastSuccessRoute,
+                              preferredRoute: snapshot.lastSuccessRoute,
                               identifies: false)
+    // Armed before anything that could block — stdin included.
+    HookWatchdog.start(event: eventName, started: started, ledger: hookLedger)
+    conn.onStage = { HookWatchdog.enter($0) }
+    HookWatchdog.enter("reading the event from stdin")
 
     var inputData = Data()
     while let chunk = Optional(FileHandle.standardInput.availableData), !chunk.isEmpty {
@@ -888,6 +936,7 @@ if isHookMode {
         // Which machine, account and tmux session this came from, so the
         // desktop can say where a Claude session is running — and list
         // which hosts it has heard hooks from at all.
+        HookWatchdog.enter("asking tmux which session this is")
         dict["onyx_origin"] = ClaudeHooks.origin()
         if let enriched = try? JSONSerialization.data(withJSONObject: dict),
            let str = String(data: enriched, encoding: .utf8) {
@@ -905,6 +954,7 @@ if isHookMode {
 
     let response = conn.sendRequest(jsonRPC, attempts: 2)
     let millis = Int(Date().timeIntervalSince(started) * 1000)
+    HookWatchdog.enter("recording the result")
     if let response,
        let data = response.data(using: .utf8),
        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

@@ -188,6 +188,16 @@ final class PackagingSignatureTests: XCTestCase {
     /// "No working profile" was all anyone saw, whatever the cause — an
     /// Apple agreement waiting to be accepted, a revoked password, a locked
     /// keychain. The profile check keeps what notarytool said and shows it.
+    /// Two builds of 0.19 both say 0.19, so the version check can't tell
+    /// a bridge built before a fix from one built after. The CI run is
+    /// only used when the bridge's sources are unchanged since its commit.
+    func testCIBridgesMustBeBuiltFromTheCurrentBridgeSources() throws {
+        let text = try code("package.sh")
+        XCTAssertTrue(text.contains("databaseId,headSha"), "the run's commit has to be known")
+        XCTAssertTrue(text.contains("git diff --quiet \"$CI_SHA\" HEAD -- Sources/OnyxMCP Sources/OnyxVersion Package.swift"),
+                      "and compared against the bridge's sources at HEAD")
+    }
+
     func testTheProfileCheckShowsWhatNotarytoolSaid() {
         let text = (try? String(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()

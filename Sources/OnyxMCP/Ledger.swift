@@ -197,6 +197,30 @@ final class Ledger {
         }
     }
 
+    /// As `sawHook`, but gives up rather than wait for the lock. For the
+    /// hook watchdog: the hook it is rescuing might be stuck holding, or
+    /// waiting on, this very lock.
+    func sawHookIfUnlocked(_ run: HookRun, delivered: Bool) -> Bool {
+        if !FileManager.default.fileExists(atPath: lockPath) {
+            FileManager.default.createFile(atPath: lockPath, contents: nil)
+        }
+        let fd = open(lockPath, O_RDWR)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        for _ in 0..<10 {
+            if flock(fd, LOCK_EX | LOCK_NB) == 0 {
+                defer { flock(fd, LOCK_UN) }
+                var record = load()
+                record.hookFailed = run
+                record.hooksFailed = (record.hooksFailed ?? 0) + 1
+                save(record)
+                return true
+            }
+            usleep(30_000)
+        }
+        return false
+    }
+
     /// A hook run finished, one way or the other.
     func sawHook(_ run: HookRun, delivered: Bool) {
         withFileLock {

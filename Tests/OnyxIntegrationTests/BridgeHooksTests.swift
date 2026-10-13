@@ -60,6 +60,15 @@ final class BridgeHooksTests: XCTestCase {
 
         let s = try settings(home)
         XCTAssertEqual(s["model"] as? String, "opus", "other settings survive")
+        // Every entry of ours carries a timeout: without one Claude waits
+        // up to 60 seconds for a hook, on every tool call.
+        let ours = ((s["hooks"] as? [String: Any])?["PostToolUse"] as? [[String: Any]] ?? [])
+            .flatMap { $0["hooks"] as? [[String: Any]] ?? [] }
+            .filter { ($0["command"] as? String ?? "").contains("OnyxMCP") }
+        XCTAssertEqual(ours.first?["timeout"] as? Int, 5)
+        let permission = ((s["hooks"] as? [String: Any])?["PermissionRequest"] as? [[String: Any]] ?? [])
+            .flatMap { $0["hooks"] as? [[String: Any]] ?? [] }
+        XCTAssertEqual(permission.first?["timeout"] as? Int, 120, "a permission request waits on a person")
         XCTAssertEqual(commands(s, "PreToolUse"), ["my-hook", "/opt/onyx/OnyxMCP --hook PreToolUse"],
                        "the user's own hook survives, and ours appears once after two installs")
         for event in ["PostToolUse", "SessionStart", "Stop", "PermissionRequest"] {
@@ -146,6 +155,38 @@ final class BridgeHooksTests: XCTestCase {
         XCTAssertTrue(status.contains("last failed: PostToolUse"), status)
     }
 
+    /// One agent measured 31 seconds per hook — a minute per tool call —
+    /// on a host where Onyx was unreachable. Against a route that accepts
+    /// and never answers, a hook now gives up at its 3-second deadline,
+    /// says which step it was stuck in, and the hooks after it don't try
+    /// again for 30 seconds.
+    func testAHookThatWouldHangGivesUpAndTheNextOnesDontTry() throws {
+        var (env, _) = try sandbox()
+        let silent = try SilentListener()
+        defer { silent.stop() }
+        env["ONYX_MCP_PORT"] = String(silent.port)
+        env["ONYX_MCP_FORWARD_PORT"] = String(silent.port)
+        let payload = #"{"session_id":"s1","tool_name":"Bash"}"#
+
+        let start = Date()
+        _ = try run(["--hook", "PostToolUse"], env: env, stdin: payload)
+        let first = Date().timeIntervalSince(start)
+        XCTAssertLessThan(first, 5, "the watchdog must end it — took \(first)s")
+
+        // Read back without the silent routes: --status probes each route
+        // for a person, at 5s apiece, and that isn't what's under test.
+        var quiet = env
+        quiet["ONYX_MCP_FORWARD_PORT"] = "0"
+        quiet.removeValue(forKey: "ONYX_MCP_PORT")
+        let status = try run(["--status"], env: quiet).out
+        XCTAssertTrue(status.contains("gave up after 3s while waiting for"), status)
+
+        let again = Date()
+        _ = try run(["--hook", "PreToolUse"], env: env, stdin: payload)
+        XCTAssertLessThan(Date().timeIntervalSince(again), 1,
+                          "right after a hang, the next hook doesn't try at all")
+    }
+
     /// A delivered hook carries where it came from, and the delivery is
     /// recorded with its route.
     func testADeliveredHookCarriesItsOriginAndIsRecorded() throws {
@@ -218,6 +259,33 @@ private final class RecordingDesktop {
                 }
             }
             receive()
+        }
+        listener.start(queue: .global())
+        guard ready.wait(timeout: .now() + 5) == .success, let bound = listener.port?.rawValue else {
+            throw XCTSkip("couldn't bind a local listener")
+        }
+        port = bound
+    }
+
+    func stop() { listener.cancel(); connections.forEach { $0.cancel() } }
+}
+
+/// Accepts connections and never says a word — a stale `-R` forward, or a
+/// wedged listener, from the bridge's point of view.
+private final class SilentListener {
+    private let listener: NWListener
+    private var connections: [NWConnection] = []
+    private(set) var port: UInt16 = 0
+
+    init() throws {
+        let params = NWParameters.tcp
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+        listener = try NWListener(using: params)
+        let ready = DispatchSemaphore(value: 0)
+        listener.stateUpdateHandler = { if case .ready = $0 { ready.signal() } }
+        listener.newConnectionHandler = { [weak self] connection in
+            self?.connections.append(connection)
+            connection.start(queue: .global())
         }
         listener.start(queue: .global())
         guard ready.wait(timeout: .now() + 5) == .success, let bound = listener.port?.rawValue else {

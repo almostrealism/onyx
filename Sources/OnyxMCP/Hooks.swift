@@ -9,7 +9,8 @@
 // Hooks are how Onyx lists Claude sessions. They are a separate path from
 // the MCP tools: `notify` travels over the long-lived bridge Claude starts
 // once per session, while every hook is a fresh `OnyxMCP --hook` process
-// that Claude runs, and kills, on a 5–10 second budget. A host can have a
+// that Claude runs on every tool call and WAITS FOR — up to the entry's
+// timeout, or 60 seconds when it has none. A host can have a
 // working bridge and no working hooks, and that looked like "Onyx MCP is
 // connected, but this machine's sessions never show up". Three ways it
 // happened, all silent:
@@ -59,8 +60,12 @@ enum ClaudeHooks {
         var out = settings
         var hooks = settings["hooks"] as? [String: Any] ?? [:]
         for event in events {
-            var entry: [String: Any] = ["type": "command", "command": "\(binaryPath) --hook \(event)"]
-            if event == "PermissionRequest" { entry["timeout"] = 120 }
+            // An explicit timeout on every entry. Without one Claude waits
+            // up to its 60-second default, and a hook that blocked cost
+            // that on every tool call. The bridge enforces its own 3s
+            // deadline (HookWatchdog); this is the backstop.
+            var entry: [String: Any] = ["type": "command", "command": "\(binaryPath) --hook \(event)",
+                                        "timeout": event == "PermissionRequest" ? 120 : 5]
 
             var matchers = hooks[event] as? [[String: Any]] ?? []
             if matchers.isEmpty { matchers = [["matcher": "", "hooks": []]] }
@@ -221,6 +226,21 @@ enum ClaudeHooks {
         return path
     }
 
+    // MARK: - Backing off
+
+    static let backOffWindow: TimeInterval = 30
+    static let slowFailureMillis = 1000
+
+    /// Whether to skip trying: the last hook failed SLOWLY (it hung rather
+    /// than being refused), less than `backOffWindow` ago, and nothing has
+    /// been delivered since.
+    static func shouldBackOff(lastFailed: Ledger.HookRun?, lastDelivered: Ledger.HookRun?,
+                              now: Date = Date()) -> Bool {
+        guard let failed = lastFailed, failed.millis >= slowFailureMillis else { return false }
+        if let delivered = lastDelivered, delivered.at >= failed.at { return false }
+        return now.timeIntervalSince(failed.at) < backOffWindow
+    }
+
     // MARK: - Where an event came from
 
     /// Who is running this hook: the machine, the account, and the tmux
@@ -240,7 +260,7 @@ enum ClaudeHooks {
     }
 
     /// `gethostname`, not ProcessInfo.hostName: on macOS the latter can do
-    /// a reverse DNS lookup, and this runs inside a 5-second budget.
+    /// a reverse DNS lookup, and this runs inside a 3-second deadline.
     static func machineName() -> String {
         var buffer = [CChar](repeating: 0, count: 256)
         guard gethostname(&buffer, buffer.count) == 0 else { return "unknown" }
@@ -280,4 +300,52 @@ func ownPath() -> String {
     #endif
     if let path = Bundle.main.executablePath { return path }
     return CommandLine.arguments[0]
+}
+
+/// A hard deadline for one hook run.
+///
+/// A hook runs on every tool call, and Claude waits for it: up to the
+/// entry's timeout, or 60 seconds when there is none. One host measured
+/// 31 seconds per hook, so every tool call stalled for a minute while Onyx
+/// was unreachable. Nothing in the hook may take that long, whatever it is
+/// stuck on. So a watchdog ends the run at the deadline, after writing
+/// down the step it was stuck in. That makes the next stall a diagnosis
+/// (`OnyxMCP --status`, "last failed") instead of a mystery.
+enum HookWatchdog {
+    private static let lock = NSLock()
+    private static var current = "starting"
+
+    /// What the hook is doing right now, in words for the ledger.
+    static var stage: String {
+        lock.lock(); defer { lock.unlock() }
+        return current
+    }
+
+    static func enter(_ stage: String) {
+        lock.lock(); current = stage; lock.unlock()
+    }
+
+    /// The deadline for an event. A permission request waits on a person,
+    /// so it gets the two minutes Claude gives it; everything else must
+    /// never be felt.
+    static func deadline(for event: String) -> TimeInterval {
+        event == "PermissionRequest" ? 125 : 3
+    }
+
+    static func start(event: String, started: Date, ledger: Ledger) {
+        let seconds = deadline(for: event)
+        let thread = Thread {
+            Thread.sleep(forTimeInterval: seconds)
+            let stuck = stage
+            let run = Ledger.HookRun(event: event, at: started,
+                                     millis: Int(Date().timeIntervalSince(started) * 1000),
+                                     route: nil,
+                                     detail: "gave up after \(Int(seconds))s while \(stuck)")
+            _ = ledger.sawHookIfUnlocked(run, delivered: false)
+            FileHandle.standardError.write(Data(
+                "OnyxMCP: hook \(event) gave up after \(Int(seconds))s while \(stuck)\n".utf8))
+            exit(0)
+        }
+        thread.start()
+    }
 }
