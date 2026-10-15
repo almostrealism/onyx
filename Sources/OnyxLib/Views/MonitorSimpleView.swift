@@ -170,7 +170,11 @@ struct MonitorBottomStrip<Containers: View>: View {
                 }
                 SimplePipelinesStrip()
                 if timing.isConfigured {
-                    WeeklyTimingTile(timing: timing, accentColor: accentColor)
+                    // One tile per selected project, in the order chosen.
+                    ForEach(timing.groups) { group in
+                        WeeklyTimingTile(group: group, showsTitle: timing.groups.count > 1,
+                                         accentColor: accentColor)
+                    }
                 }
             }
             .frame(height: height)

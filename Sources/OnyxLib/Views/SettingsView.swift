@@ -451,16 +451,16 @@ struct SettingsView: View {
             // Project filter
             if appState.timing.isConfigured && !appState.timing.availableProjects.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("FILTER PROJECT")
+            Text("FILTER PROJECTS")
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.5))
                         .tracking(1)
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
-                            // "All" option
-                            let isAll = appState.timing.filterProjectID.isEmpty
-                            Button(action: { appState.timing.filterProjectID = "" }) {
+                            let selected = appState.timing.filterProjectIDs
+                            let isAll = selected.isEmpty
+                            Button(action: { appState.timing.filterProjectIDs = [] }) {
                                 Text("All")
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundColor(isAll ? .white : .gray.opacity(0.5))
@@ -471,29 +471,47 @@ struct SettingsView: View {
                             }
                             .buttonStyle(.plain)
 
-                            // Top-level projects only
+                            // Top-level projects only. Up to three, each with its own bars
+                            // and numbers, in the order chosen — the number on a chip is its
+                            // place.
+                            let full = selected.count >= TimingManager.maxFilterProjects
                             ForEach(appState.timing.availableProjects.filter { $0.depth == 0 }) { proj in
-                                let selected = appState.timing.filterProjectID == proj.id
-                                Button(action: { appState.timing.filterProjectID = proj.id }) {
+                                let position = selected.firstIndex(of: proj.id)
+                                let isOn = position != nil
+                                Button(action: { appState.timing.toggleFilterProject(proj.id) }) {
                                     HStack(spacing: 3) {
                                         Circle()
                                             .fill(Color(hex: proj.color))
                                             .frame(width: 6, height: 6)
                                         Text(proj.title)
                                             .font(.system(size: 10, design: .monospaced))
+                                        if let position, selected.count > 1 {
+                                            Text("\(position + 1)")
+                                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.black)
+                                                .padding(.horizontal, 3)
+                                                .background(Color(hex: appState.appearance.accentHex))
+                                                .cornerRadius(2)
+                                        }
                                     }
-                                    .foregroundColor(selected ? .white : .gray.opacity(0.5))
+                                    .foregroundColor(isOn ? .white : .gray.opacity(full ? 0.25 : 0.5))
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 3)
-                                    .background(selected ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
+                                    .background(isOn ? Color(hex: appState.appearance.accentHex).opacity(0.3) : Color.white.opacity(0.06))
                                     .cornerRadius(3)
                                 }
                                 .buttonStyle(.plain)
+                                .disabled(full && !isOn)
+                                .help(full && !isOn ? "Three projects is the most — deselect one first" : "")
                             }
                         }
                     }
+
+                    Text("Up to three. Each gets its own bars and numbers, in the order chosen.")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.4))
                 }
-                .padding(.top, 4)
+        .padding(.top, 4)
             }
         }
     }

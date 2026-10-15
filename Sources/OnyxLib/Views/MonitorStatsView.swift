@@ -13,29 +13,38 @@ func monitorCPUBarColor(_ pct: CGFloat, maxPct: CGFloat) -> Color {
     return Color.onyxBlue
 }
 
-/// Weekly hours + per-day average for the currently-filtered Timing
-/// project. Renders only when timing is configured AND the current
-/// week has any data.
+/// Weekly hours + per-day average for one selected Timing project (or All).
+/// Simple mode shows one per selected project, side by side. Renders only
+/// when that project has time this week.
 struct WeeklyTimingTile: View {
-    @ObservedObject var timing: TimingManager
+    let group: TimingManager.TimingGroup
+    /// The project's name above the bar — only when there's more than one
+    /// tile to tell apart.
+    var showsTitle = false
     let accentColor: Color
 
     var body: some View {
-        let total = timing.totalWeekHours
-        let daysWithData = timing.dailyHours.filter { $0.hours > 0 }.count
-        let perDay = daysWithData > 0 ? total / Double(daysWithData) : 0
+        let total = group.totalWeekHours
+        let perDay = group.perDayThisWeek
 
         if total > 0 {
             VStack(alignment: .trailing, spacing: 5) {
+                if showsTitle {
+                    Text(group.title)
+                        .monitorFont(size: 9, weight: .medium)
+                        .foregroundColor(.white.opacity(0.55))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 // Horizontal project-ratio bar across the top of the tile,
                 // same visual as the vertical one beside the daily bars.
-                if timing.projectTotals.count > 1 {
+                if group.projectTotals.count > 1 {
                     // Deliberately chunky. This is the only place the
                     // week's split across projects is shown in simple
                     // mode, and at 5pt the color bands were too fine to
                     // read at a glance — which is the whole job of a
                     // simple-mode tile.
-                    WeeklyTimeRatioBar(totals: timing.projectTotals,
+                    WeeklyTimeRatioBar(totals: group.projectTotals,
                                        axis: .horizontal,
                                        thickness: 10,
                                        length: Self.contentWidth)
@@ -325,15 +334,14 @@ struct TimingBarSection: View {
     @ObservedObject var timing: TimingManager
     let accentColor: Color
 
-    private var avgPerDay: Double {
-        let daysWithData = timing.dailyHours.filter { $0.hours > 0 }.count
-        guard daysWithData > 0 else { return 0 }
-        return timing.totalWeekHours / Double(daysWithData)
+    /// Every bar in every group shares one scale, so a short day for one
+    /// project reads as short beside a long day for another.
+    private var maxHours: Double {
+        max(timing.groups.flatMap { $0.dailyHours.map(\.hours) }.max() ?? 1, 1)
     }
 
-    private var maxHours: Double {
-        max(timing.dailyHours.map(\.hours).max() ?? 1, 1)
-    }
+    /// More than one project selected: label things by project.
+    private var isMulti: Bool { timing.groups.count > 1 }
 
     /// Bar-chart plot height. Matched to the heatmap grid's height
     /// (7 rows × 12pt cells + 6 × 2pt gaps = 96pt) so the bottom of
@@ -342,25 +350,35 @@ struct TimingBarSection: View {
     /// the bars look less stubby/over-wide at common window sizes.
     private static let barAreaHeight: CGFloat = 96
 
-    /// Consistent color palette for projects
-    private static let projectColors = ["66CCFF", "6BFF8E", "FFD06B", "C06BFF", "FF6B6B", "FF6BCD", "6BFFD0"]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 5) {
                 Text("TIME THIS WEEK")
                     .monitorFont(size: 10, weight: .medium)
                     .foregroundColor(accentColor)
                     .tracking(2)
 
-                if !timing.filterProjectID.isEmpty {
-                    Text(timing.filterProjectName)
-                        .monitorFont(size: 9, weight: .medium)
-                        .foregroundColor(accentColor.opacity(0.6))
+                // The selected projects, in the order their bars stand in
+                // each day. The dot is the color of the strip under each
+                // of that project's bars.
+                if !timing.filterProjectIDs.isEmpty {
+                    ForEach(timing.groups) { group in
+                        HStack(spacing: 3) {
+                            if isMulti {
+                                Circle()
+                                    .fill(Color(hex: group.color))
+                                    .frame(width: 5, height: 5)
+                            }
+                            Text(group.title)
+                                .monitorFont(size: 9, weight: .medium)
+                                .foregroundColor(accentColor.opacity(0.6))
+                                .lineLimit(1)
+                        }
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(accentColor.opacity(0.1))
                         .cornerRadius(3)
+                    }
                 }
 
                 Spacer()
@@ -372,44 +390,35 @@ struct TimingBarSection: View {
                 }
             }
 
-            // Week bar chart: the weekly project-ratio bar, then the daily
-            // bars. The ratio bar is exactly barAreaHeight tall and
-            // top-aligned, so its bottom lines up with the bars' bottom.
-            // (The 26-week heatmap moved to its own middle-column section.)
+            // Week bar chart: the weekly project-ratio bar (all selected
+            // projects together), then the days. Each day holds one bar per
+            // selected project, side by side, in the order chosen.
             HStack(alignment: .top, spacing: 8) {
-                    if timing.projectTotals.count > 1 {
-                        WeeklyTimeRatioBar(totals: timing.projectTotals,
-                                           axis: .vertical,
-                                           thickness: 6,
-                                           length: Self.barAreaHeight)
-                    }
-                // Stacked bar chart: one bar per day, segments per project
+                if timing.projectTotals.count > 1 {
+                    WeeklyTimeRatioBar(totals: timing.projectTotals,
+                                       axis: .vertical,
+                                       thickness: 6,
+                                       length: Self.barAreaHeight)
+                }
                 VStack(spacing: 2) {
-                    HStack(alignment: .bottom, spacing: 3) {
-                        ForEach(timing.dailyHours) { day in
-                            VStack(spacing: 0) {
-                                Spacer(minLength: 0)
-                                if day.hours > 0 && day.projects.count > 1 {
-                                    VStack(spacing: 0) {
-                                        ForEach(day.projects) { slice in
-                                            Rectangle()
-                                                .fill(Color(hex: slice.color).opacity(0.75))
-                                                .frame(height: max(1, CGFloat(slice.hours / maxHours) * Self.barAreaHeight))
-                                        }
+                    HStack(alignment: .bottom, spacing: isMulti ? 6 : 3) {
+                        ForEach(0..<7, id: \.self) { dayIndex in
+                            HStack(alignment: .bottom, spacing: 1) {
+                                ForEach(timing.groups) { group in
+                                    if dayIndex < group.dailyHours.count {
+                                        DayBar(day: group.dailyHours[dayIndex],
+                                               maxHours: maxHours,
+                                               height: Self.barAreaHeight,
+                                               marker: isMulti ? Color(hex: group.color) : nil)
                                     }
-                                    .cornerRadius(2)
-                                } else {
-                                    RoundedRectangle(cornerRadius: 2)
-                                        .fill(day.hours > 0 ? Color(hex: day.projects.first?.color ?? "66CCFF").opacity(0.7) : Color.white.opacity(0.04))
-                                        .frame(height: max(2, CGFloat(day.hours / maxHours) * Self.barAreaHeight))
                                 }
                             }
                             .frame(maxWidth: .infinity)
                         }
                     }
-                    .frame(height: Self.barAreaHeight)
-                    HStack(spacing: 3) {
-                        ForEach(timing.dailyHours) { day in
+                    .frame(height: Self.barAreaHeight + (isMulti ? 3 : 0))
+                    HStack(spacing: isMulti ? 6 : 3) {
+                        ForEach(timing.groups.first?.dailyHours ?? []) { day in
                             Text(day.dayLabel)
                                 .monitorFont(size: 8)
                                 .foregroundColor(.gray.opacity(0.4))
@@ -418,12 +427,14 @@ struct TimingBarSection: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-            }  // end bar row (ratio bar + daily bars)
+            }
 
-            // Project totals legend
+            // Legend: every subproject across the selected projects (and
+            // the projects themselves, when time is logged to them
+            // directly), most time first, whichever project it's under.
             if timing.projectTotals.count > 1 {
-                HStack(spacing: 8) {
-                    ForEach(timing.projectTotals.prefix(5)) { proj in
+                FlowLayout(spacing: 8, lineSpacing: 3) {
+                    ForEach(timing.projectTotals.prefix(isMulti ? 10 : 5)) { proj in
                         HStack(spacing: 3) {
                             Circle()
                                 .fill(Color(hex: proj.color))
@@ -437,51 +448,15 @@ struct TimingBarSection: View {
                                 .foregroundColor(.white.opacity(0.4))
                         }
                     }
-                    Spacer()
                 }
             }
 
-            // Stats: two columns, big current number + small longer-range avg
-            HStack(alignment: .top, spacing: 24) {
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text(String(format: "%.1f", timing.totalWeekHours))
-                            .monitorFont(size: 18, weight: .medium)
-                            .foregroundColor(.white.opacity(0.9))
-                        Text("hrs")
-                            .monitorFont(size: 10)
-                            .foregroundColor(.gray.opacity(0.5))
-                    }
-                    HStack(spacing: 3) {
-                        Text(String(format: "%.1f hrs/wk", timing.avgHoursPerWeekLast4))
-                            .monitorFont(size: 9)
-                            .foregroundColor(.gray.opacity(0.5))
-                        Text("(4w avg)")
-                            .monitorFont(size: 8)
-                            .foregroundColor(.gray.opacity(0.35))
-                    }
+            // Stats: per selected project, the week's hours and hours/day,
+            // each with its longer-range average beneath.
+            VStack(alignment: .leading, spacing: isMulti ? 6 : 0) {
+                ForEach(timing.groups) { group in
+                    TimingStatsRow(group: group, label: isMulti ? group.title : nil)
                 }
-
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text(String(format: "%.1f", avgPerDay))
-                            .monitorFont(size: 18, weight: .medium)
-                            .foregroundColor(.white.opacity(0.9))
-                        Text("hrs/day")
-                            .monitorFont(size: 10)
-                            .foregroundColor(.gray.opacity(0.5))
-                    }
-                    HStack(spacing: 3) {
-                        Text(String(format: "%.1f hrs/day", timing.avgHoursPerDayLast30))
-                            .monitorFont(size: 9)
-                            .foregroundColor(.gray.opacity(0.5))
-                        Text("(30d avg)")
-                            .monitorFont(size: 8)
-                            .foregroundColor(.gray.opacity(0.35))
-                    }
-                }
-
-                Spacer()
             }
 
             if let error = timing.lastError {
@@ -491,6 +466,147 @@ struct TimingBarSection: View {
                     .lineLimit(1)
             }
         }
+    }
+}
+
+/// One stacked bar: a day for one project, split by subproject. With more
+/// than one project selected it stands on a thin strip of the project's
+/// color, which is how the bars side by side are told apart.
+private struct DayBar: View {
+    let day: TimingManager.DailyTime
+    let maxHours: Double
+    let height: CGFloat
+    let marker: Color?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            if day.hours > 0 && day.projects.count > 1 {
+                VStack(spacing: 0) {
+                    ForEach(day.projects) { slice in
+                        Rectangle()
+                            .fill(Color(hex: slice.color).opacity(0.75))
+                            .frame(height: max(1, CGFloat(slice.hours / maxHours) * height))
+                    }
+                }
+                .cornerRadius(2)
+            } else {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(day.hours > 0
+                          ? Color(hex: day.projects.first?.color ?? "66CCFF").opacity(0.7)
+                          : Color.white.opacity(0.04))
+                    .frame(height: max(2, CGFloat(day.hours / maxHours) * height))
+            }
+            if let marker {
+                Rectangle()
+                    .fill(marker.opacity(0.9))
+                    .frame(height: 2)
+                    .padding(.top, 1)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// The two numbers for one project: hours this week (with the 4-week
+/// average) and hours per day (with the 30-day average). Labeled with the
+/// project when more than one is shown.
+private struct TimingStatsRow: View {
+    let group: TimingManager.TimingGroup
+    let label: String?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 24) {
+            if let label {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(Color(hex: group.color))
+                        .frame(width: 6, height: 6)
+                    Text(label)
+                        .monitorFont(size: 10, weight: .medium)
+                        .foregroundColor(.white.opacity(0.7))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .frame(width: 90, alignment: .leading)
+                .padding(.top, 5)
+            }
+            stat(value: group.totalWeekHours, unit: "hrs",
+                 average: String(format: "%.1f hrs/wk", group.avgHoursPerWeekLast4), span: "(4w avg)")
+            stat(value: group.perDayThisWeek, unit: "hrs/day",
+                 average: String(format: "%.1f hrs/day", group.avgHoursPerDayLast30), span: "(30d avg)")
+            Spacer()
+        }
+    }
+
+    private func stat(value: Double, unit: String, average: String, span: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+                Text(String(format: "%.1f", value))
+                    .monitorFont(size: 18, weight: .medium)
+                    .foregroundColor(.white.opacity(0.9))
+                Text(unit)
+                    .monitorFont(size: 10)
+                    .foregroundColor(.gray.opacity(0.5))
+            }
+            HStack(spacing: 3) {
+                Text(average)
+                    .monitorFont(size: 9)
+                    .foregroundColor(.gray.opacity(0.5))
+                Text(span)
+                    .monitorFont(size: 8)
+                    .foregroundColor(.gray.opacity(0.35))
+            }
+        }
+    }
+}
+
+/// Lays children out left to right, wrapping onto a new line when the row
+/// is full. For the timing legend, which with several projects selected
+/// has more entries than fit on one line.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        let height = rows.reduce(0) { $0 + $1.height } + lineSpacing * CGFloat(max(0, rows.count - 1))
+        let width = rows.map(\.width).max() ?? 0
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2),
+                                      proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + lineSpacing
+        }
+    }
+
+    private struct Row { var indices: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var current = Row()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let needed = current.indices.isEmpty ? size.width : current.width + spacing + size.width
+            if needed > width, !current.indices.isEmpty {
+                rows.append(current)
+                current = Row()
+            }
+            current.width = current.indices.isEmpty ? size.width : current.width + spacing + size.width
+            current.height = max(current.height, size.height)
+            current.indices.append(index)
+        }
+        if !current.indices.isEmpty { rows.append(current) }
+        return rows
     }
 }
 
