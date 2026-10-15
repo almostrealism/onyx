@@ -38,7 +38,11 @@ struct WeeklyTimingTile: View {
                 }
                 // Horizontal project-ratio bar across the top of the tile,
                 // same visual as the vertical one beside the daily bars.
-                if group.projectTotals.count > 1 {
+                // Drawn even for a single part — a solid bar in that
+                // part's color. Beside other tiles, one without a bar
+                // looked broken, and the color is what ties the tile to
+                // the chart.
+                if !group.projectTotals.isEmpty {
                     // Deliberately chunky. This is the only place the
                     // week's split across projects is shown in simple
                     // mode, and at 5pt the color bands were too fine to

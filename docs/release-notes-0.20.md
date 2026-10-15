@@ -19,7 +19,10 @@ Draft — still being assembled.
   - "Hours this week" and "hours per day" become one labeled row per
     project.
   - In the simple layout, the corner widget repeats once per project,
-    with the project's name above it.
+    with the project's name above it. Every tile has its colored bar,
+    including a project whose time is all in one subproject, where the
+    bar is solid. It used to appear only when there was more than one
+    part.
 
   "All" still clears the selection, and a single project looks exactly as
   it did before. An existing single-project filter carries over.
