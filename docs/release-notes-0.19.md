@@ -90,6 +90,6 @@ link in that chain.
 
 - The bridge protocol is 4. Reinstall the bridge on each host when Onyx
   offers to; that is what writes the hooks.
-- The test suite is at 1,365, including integration tests that run the
+- The test suite is at 1,368, including integration tests that run the
   real bridge to install hooks, check them, and deliver a hook event to a
   stand-in desktop.

@@ -25,8 +25,7 @@ export interface Release {
 export const RELEASES: Release[] = [
   {
     version: '0.19',
-    date: null,
-    upcoming: true,
+    date: '2026-10-15',
     summary:
       'Settings laid out like System Settings, reorderable Reminders lists, and an answer to why some machines’ Claude sessions never appeared.',
     highlights: [
