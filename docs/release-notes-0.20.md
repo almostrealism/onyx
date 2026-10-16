@@ -16,8 +16,12 @@ Draft — still being assembled.
     the projects themselves, when time is logged to them directly), most
     time first, whichever project it's under. It wraps onto more lines
     when it needs to.
-  - "Hours this week" and "hours per day" become one labeled row per
-    project.
+  - The numbers are columns: one per project plus a total, each with
+    the week's hours above its hours per day (with the 4-week and 30-day
+    averages in small type), and the column's label underneath, so it
+    can't be confused with the legend's subproject names. Fewer projects
+    means fewer, wider columns. One project gets a single column, since
+    its total would repeat it.
   - In the simple layout, the corner widget repeats once per project,
     with the project's name above it. Every tile has its colored bar,
     including a project whose time is all in one subproject, where the

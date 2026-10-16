@@ -104,4 +104,26 @@ final class TimingMultiProjectTests: XCTestCase {
         XCTAssertEqual(TimingManager.color("ABCDEF", for: "Bridge"), "ABCDEF")
         XCTAssertEqual(TimingManager.color("", for: "Bridge").count, 6)
     }
+
+    // MARK: - The stats columns
+
+    func testAColumnPerProjectThenTheTotal() {
+        let r = compute(["w", "h"])
+        let columns = TimingStatsGrid.columns(groups: r.groups, combined: r.combined)
+        XCTAssertEqual(columns.map(\.label), ["Work", "Home", "total"])
+        XCTAssertEqual(columns.last?.group.totalWeekHours ?? 0, 8, accuracy: 0.001,
+                       "the total is every selected project together")
+        XCTAssertNil(columns.last?.color, "the total has no project color")
+    }
+
+    /// One project's total would just repeat it, so there's one column.
+    func testOneProjectIsOneColumn() {
+        let r = compute(["w"])
+        XCTAssertEqual(TimingStatsGrid.columns(groups: r.groups, combined: r.combined).map(\.label), ["Work"])
+    }
+
+    func testAllIsOneColumnCalledTotal() {
+        let r = compute([])
+        XCTAssertEqual(TimingStatsGrid.columns(groups: r.groups, combined: r.combined).map(\.label), ["total"])
+    }
 }

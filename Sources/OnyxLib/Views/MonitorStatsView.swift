@@ -455,13 +455,10 @@ struct TimingBarSection: View {
                 }
             }
 
-            // Stats: per selected project, the week's hours and hours/day,
-            // each with its longer-range average beneath.
-            VStack(alignment: .leading, spacing: isMulti ? 6 : 0) {
-                ForEach(timing.groups) { group in
-                    TimingStatsRow(group: group, label: isMulti ? group.title : nil)
-                }
-            }
+            // Stats: a column per selected project, plus a total when there
+            // is more than one; two rows — the week's hours, then hours/day.
+            TimingStatsGrid(columns: TimingStatsGrid.columns(groups: timing.groups,
+                                                             combined: timing.combined))
 
             if let error = timing.lastError {
                 Text(error)
@@ -512,55 +509,91 @@ private struct DayBar: View {
     }
 }
 
-/// The two numbers for one project: hours this week (with the 4-week
-/// average) and hours per day (with the 30-day average). Labeled with the
-/// project when more than one is shown.
-private struct TimingStatsRow: View {
-    let group: TimingManager.TimingGroup
-    let label: String?
+/// The week's numbers as columns: one per selected project and, with more
+/// than one, a total. Each column has two rows — hours this week (with the
+/// 4-week average under it) and hours per day (with the 30-day average) —
+/// and its label at the BOTTOM, so it can't be mistaken for one of the
+/// subproject names in the legend just above.
+///
+/// Columns rather than a row per project because a label over a column
+/// costs a line, where a label in front of a row cost a third of the width.
+struct TimingStatsGrid: View {
+    struct Column: Identifiable {
+        let id: String
+        let label: String
+        /// The project's color for its dot; nil for the total.
+        let color: String?
+        let group: TimingManager.TimingGroup
+    }
+
+    let columns: [Column]
+
+    /// The columns for a selection: each project, then the total — or a
+    /// single column when there's only one group, since its total would
+    /// just repeat it.
+    static func columns(groups: [TimingManager.TimingGroup],
+                        combined: TimingManager.TimingGroup?) -> [Column] {
+        if groups.count <= 1 {
+            return groups.map {
+                Column(id: $0.id, label: $0.id.isEmpty ? "total" : $0.title,
+                       color: $0.id.isEmpty ? nil : $0.color, group: $0)
+            }
+        }
+        var out = groups.map { Column(id: $0.id, label: $0.title, color: $0.color, group: $0) }
+        if let combined {
+            out.append(Column(id: "total", label: "total", color: nil, group: combined))
+        }
+        return out
+    }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 24) {
-            if let label {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(Color(hex: group.color))
-                        .frame(width: 6, height: 6)
-                    Text(label)
-                        .monitorFont(size: 10, weight: .medium)
-                        .foregroundColor(.white.opacity(0.7))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+        HStack(alignment: .top, spacing: 12) {
+            ForEach(columns) { column in
+                VStack(alignment: .leading, spacing: 6) {
+                    stat(column.group.totalWeekHours, unit: "hrs",
+                         average: String(format: "%.1f/wk", column.group.avgHoursPerWeekLast4),
+                         span: "4w")
+                    stat(column.group.perDayThisWeek, unit: "hrs/day",
+                         average: String(format: "%.1f/day", column.group.avgHoursPerDayLast30),
+                         span: "30d")
+                    HStack(spacing: 4) {
+                        if let color = column.color {
+                            Circle()
+                                .fill(Color(hex: color))
+                                .frame(width: 5, height: 5)
+                        }
+                        Text(column.label)
+                            .monitorFont(size: 9, weight: .medium)
+                            .foregroundColor(column.color == nil ? .white.opacity(0.75) : .white.opacity(0.55))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .padding(.top, 1)
                 }
-                .frame(width: 90, alignment: .leading)
-                .padding(.top, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            stat(value: group.totalWeekHours, unit: "hrs",
-                 average: String(format: "%.1f hrs/wk", group.avgHoursPerWeekLast4), span: "(4w avg)")
-            stat(value: group.perDayThisWeek, unit: "hrs/day",
-                 average: String(format: "%.1f hrs/day", group.avgHoursPerDayLast30), span: "(30d avg)")
-            Spacer()
         }
     }
 
-    private func stat(value: Double, unit: String, average: String, span: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: 4) {
+    private func stat(_ value: Double, unit: String, average: String, span: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(String(format: "%.1f", value))
-                    .monitorFont(size: 18, weight: .medium)
+                    .monitorFont(size: 14, weight: .medium)
                     .foregroundColor(.white.opacity(0.9))
                 Text(unit)
-                    .monitorFont(size: 10)
+                    .monitorFont(size: 8)
                     .foregroundColor(.gray.opacity(0.5))
             }
             HStack(spacing: 3) {
                 Text(average)
-                    .monitorFont(size: 9)
+                    .monitorFont(size: 8)
                     .foregroundColor(.gray.opacity(0.5))
                 Text(span)
-                    .monitorFont(size: 8)
+                    .monitorFont(size: 7)
                     .foregroundColor(.gray.opacity(0.35))
             }
+            .lineLimit(1)
         }
     }
 }

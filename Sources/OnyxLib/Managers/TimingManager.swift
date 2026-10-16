@@ -51,6 +51,9 @@ public class TimingManager: ObservableObject {
     /// order they were chosen — or a single "All" group when none is.
     @Published public var groups: [TimingGroup] = []
 
+    /// Every selected project together — the "total" column beside them.
+    @Published public var combined: TimingGroup?
+
     /// The most top-level projects that can be selected at once. Each gets
     /// its own bar per day, so three means 21 bars in the week chart —
     /// past that they stop being readable.
@@ -224,6 +227,7 @@ public class TimingManager: ObservableObject {
                                   filterIDs: filterProjectIDs, monday: store.weekMonday,
                                   today: Date())
         groups = result.groups
+        combined = result.combined
         dailyHours = result.combined.dailyHours
         projectTotals = result.combined.projectTotals
         totalWeekHours = result.combined.totalWeekHours
