@@ -34,3 +34,12 @@ Draft — still being assembled.
   launch to launch, and between a bar and its legend dot. The fallback
   used to come from a hash that changes every launch, and the chart and
   legend each chose their own.
+- **The simple monitor's charts stay above the bottom strip.** They were
+  sized without counting their own titles and spacing, so they ran down
+  behind the strip's text. With the memory chart on, the Timing tiles'
+  labels were half covered. Each chart's full height is now counted, and
+  nothing in the chart area can draw past it.
+- **Fleet charts per machine go side by side past three machines.** In the
+  simple layout, four or more machines used to be stacked in one column
+  that never fit the screen. Now a column holds at most three machines:
+  four are split 2 + 2, five are split 3 + 2.

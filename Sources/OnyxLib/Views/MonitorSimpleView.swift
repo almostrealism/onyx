@@ -43,10 +43,20 @@ struct SimpleMonitorBody: View {
             // Scaled: the tile's contents are monitorFont-sized, so at a
             // larger UI font they grow while a fixed reserve would not —
             // and the row would start clipping.
-            let bottomStripHeight: CGFloat = 84 * fontScale
+            //
+            // With more than one Timing project each tile carries its
+            // project's name too, a line taller.
+            let bottomStripHeight = Self.bottomStripHeight(
+                titledTimingTiles: timing.isConfigured && timing.groups.count > 1,
+                fontScale: fontScale)
             let chartArea = max(0, geo.size.height - bottomStripHeight - 16)
-            let cpuHeight = chartArea * 0.55
-            let subHeight = max(40, chartArea * 0.42)
+            let showsSubRow = (monitor.showMemoryChart && !monitor.bucketedMemory().isEmpty)
+                || !monitor.bucketedGPU().isEmpty
+            let single = MonitorChartLayout.singleHost(available: chartArea,
+                                                       hasSubRow: showsSubRow,
+                                                       fontScale: fontScale)
+            let cpuHeight = single.cpu
+            let subHeight = single.sub
 
             // The side panel — sessions above today's reminders — takes a
             // fixed column down the LEFT, sharing an edge with the
@@ -77,7 +87,8 @@ struct SimpleMonitorBody: View {
                 case .topHosts:
                     FleetStackedCharts(appState: appState, monitor: monitor,
                                        accentColor: accentColor,
-                                       availableHeight: chartArea)
+                                       availableHeight: chartArea,
+                                       maxRows: Self.maxFleetRows)
                 case .fleetMax:
                     FleetMergedCharts(appState: appState, monitor: monitor,
                                       accentColor: accentColor,
@@ -129,6 +140,12 @@ struct SimpleMonitorBody: View {
                 }
                 }
             }
+            // The charts and the side panel get exactly the area above the
+            // strip, and nothing in them may run past it: anything that
+            // did was drawn behind the strip's text and made both
+            // unreadable. The arithmetic aims to fit; this guarantees it.
+            .frame(height: chartArea, alignment: .top)
+            .clipped()
 
             MonitorBottomStrip(appState: appState, reminders: reminders,
                                timing: timing, accentColor: accentColor,
@@ -137,6 +154,22 @@ struct SimpleMonitorBody: View {
                 SimpleContainersStrip(dockerStats: dockerStats)
             }
         }
+    }
+}
+
+extension SimpleMonitorBody {
+    /// Simple mode's per-host fleet charts stop at this many rows and go
+    /// side by side: past three, one column never fit the screen.
+    static let maxFleetRows = 3
+
+    /// The bottom strip's height: room for its tallest member, the weekly
+    /// Timing tile, plus a margin — the row is centered, so a member
+    /// taller than the strip would spill up into the charts and off the
+    /// bottom edge alike.
+    static func bottomStripHeight(titledTimingTiles: Bool, fontScale: CGFloat) -> CGFloat {
+        let base: CGFloat = 84 * fontScale
+        guard titledTimingTiles else { return base }
+        return base + MonitorChartLayout.lineHeight(9, fontScale: fontScale) + 5
     }
 }
 

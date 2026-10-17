@@ -34,6 +34,11 @@ struct FleetStackedCharts: View {
     /// Below this, a chart is a smear — used to decide whether memory
     /// rows are worth drawing at all in a cramped column.
     var minChartHeight: CGFloat = 22
+    /// The most host stacks in one column; nil keeps them all in one.
+    /// Simple mode caps it so a fleet goes side by side rather than off
+    /// the bottom. The detailed overlay's column is too narrow to split
+    /// and scrolls instead.
+    var maxRows: Int? = nil
     @Environment(\.monitorFontScale) private var fontScale
 
     var body: some View {
@@ -52,32 +57,49 @@ struct FleetStackedCharts: View {
             let showMem = monitor.showMemoryChart && series.contains { $0.mem != nil }
             let perHost = 1 + (showGPU ? 1 : 0) + (showMem ? 1 : 0)
 
-            let headerHeight: CGFloat = 16 * fontScale
+            // Past `maxRows` hosts, the stacks go side by side instead of
+            // ever shorter: four or more hosts in one column left each
+            // chart a sliver and still ran off the bottom. Within a
+            // column the rows still share the time axis.
+            let grid = MonitorChartLayout.fleetGrid(hosts: series.count,
+                                                    maxRows: maxRows ?? series.count)
             let rowSpacing: CGFloat = 10
-            let available = availableHeight
-                - CGFloat(series.count) * headerHeight
-                - CGFloat(max(0, series.count - 1)) * rowSpacing
-            let chartHeight = max(minChartHeight,
-                                  available / CGFloat(series.count * perHost) - 4)
+            let innerSpacing: CGFloat = 3
+            let chartHeight = MonitorChartLayout.fleetChartHeight(
+                available: availableHeight, rows: grid.rows, chartsPerHost: perHost,
+                rowSpacing: rowSpacing, innerSpacing: innerSpacing,
+                fontScale: fontScale, minChartHeight: minChartHeight)
 
-            VStack(alignment: .leading, spacing: rowSpacing) {
-                ForEach(series) { host in
-                    VStack(alignment: .leading, spacing: 3) {
-                        FleetHostHeader(host: host, accentColor: accentColor)
-                        GridChart(title: "CPU", values: host.cpu,
-                                  accentColor: Color.onyxBlue, height: chartHeight)
-                        if showGPU {
-                            GridChart(title: "GPU", values: host.gpu ?? [],
-                                      accentColor: Color.onyxPurple, height: chartHeight)
+            HStack(alignment: .top, spacing: 20) {
+                ForEach(Array(MonitorChartLayout.columnsOf(series, columns: grid.columns).enumerated()),
+                        id: \.offset) { _, column in
+                    VStack(alignment: .leading, spacing: rowSpacing) {
+                        ForEach(column) { host in
+                            VStack(alignment: .leading, spacing: innerSpacing) {
+                                FleetHostHeader(host: host, accentColor: accentColor)
+                                GridChart(title: "CPU", values: host.cpu,
+                                          accentColor: Color.onyxBlue, height: chartHeight)
+                                if showGPU {
+                                    GridChart(title: "GPU", values: host.gpu ?? [],
+                                              accentColor: Color.onyxPurple, height: chartHeight)
+                                }
+                                if showMem {
+                                    GridChart(title: "MEM", values: host.mem ?? [],
+                                              accentColor: Color.onyxAmber, height: chartHeight)
+                                }
+                            }
                         }
-                        if showMem {
-                            GridChart(title: "MEM", values: host.mem ?? [],
-                                      accentColor: Color.onyxAmber, height: chartHeight)
-                        }
+                        Spacer(minLength: 0)
                     }
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                Spacer(minLength: 0)
             }
+            // The floor on chart height can still overrun a tiny window;
+            // cut it off here rather than drawing over what's below. Only
+            // where the budget is the screen — the detailed column
+            // scrolls, so there an overrun just scrolls.
+            .frame(height: maxRows == nil ? nil : availableHeight, alignment: .top)
+            .clipped()
         }
     }
 }
@@ -105,11 +127,12 @@ struct FleetMergedCharts: View {
 
             // Memory takes a fixed slice off the bottom; the merged charts
             // split what's left. They're the headline, so they keep the
-            // majority of the height at every size.
-            let memHeight: CGFloat = memHosts.isEmpty ? 0 : min(110 * fontScale,
-                                                                availableHeight * 0.3)
-            let chartArea = max(0, availableHeight - memHeight - 20)
-            let chartHeight = gpu.isEmpty ? chartArea - 20 : (chartArea / 2) - 20
+            // majority of the height at every size. Titles and spacing
+            // are paid for first, so the whole stack fits its budget.
+            let sizes = MonitorChartLayout.fleetMerged(
+                available: availableHeight, hasGPU: !gpu.isEmpty,
+                hasMemory: !memHosts.isEmpty, fontScale: fontScale)
+            let chartHeight = sizes.chart
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("FLEET MAX — \(series.count) HOST\(series.count == 1 ? "" : "S")")
@@ -118,10 +141,10 @@ struct FleetMergedCharts: View {
                     .tracking(2)
 
                 GridChart(title: "CPU · MAX ACROSS HOSTS", values: cpu,
-                          accentColor: Color.onyxBlue, height: max(30, chartHeight))
+                          accentColor: Color.onyxBlue, height: chartHeight)
                 if !gpu.isEmpty {
                     GridChart(title: "GPU · MAX ACROSS HOSTS", values: gpu,
-                              accentColor: Color.onyxPurple, height: max(30, chartHeight))
+                              accentColor: Color.onyxPurple, height: chartHeight)
                 } else {
                     // Say so rather than just leaving a gap. A missing chart
                     // is indistinguishable from a broken one, and this exact
@@ -150,7 +173,7 @@ struct FleetMergedCharts: View {
                                     .lineLimit(1)
                                 GridChart(title: "MEM", values: host.mem ?? [],
                                           accentColor: Color.onyxAmber,
-                                          height: max(24, memHeight - 34))
+                                          height: sizes.memory)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
