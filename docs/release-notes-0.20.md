@@ -51,4 +51,7 @@ Draft — still being assembled.
   real work (about a third of a core or more) comes before a PR's job,
   and a PR's job comes before an idle container. A PR the side panel is
   already listing doesn't take a slot. Slots don't flip back and forth
-  when two things are about equally busy.
+  when two things are about equally busy. A long branch name is shortened
+  from the prefixes first: `experiment/quant-welfare/phase-1` shows as
+  `expe/quan/phase-1`. If it still doesn't fit, it is cut inside the last
+  part: `feature/delta-consolidation` shows as `feat/delta-…dation`.

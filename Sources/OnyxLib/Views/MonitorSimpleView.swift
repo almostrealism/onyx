@@ -749,7 +749,7 @@ struct PRJobPill: View {
             HStack(spacing: 6) {
                 // Capped by characters, not a frame: a width cap pads a
                 // short branch out to the full width.
-                Text(Self.shortened(activity.branch))
+                Text(BranchLabel.compact(activity.branch))
                     .monitorFont(size: 9)
                     .foregroundColor(.white.opacity(0.4))
                     .lineLimit(1)
@@ -769,16 +769,8 @@ struct PRJobPill: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("\(activity.prTitle)\n\(activity.workflow) · \(activity.job) — "
+        .help("\(activity.prTitle)\n\(activity.branch)\n\(activity.workflow) · \(activity.job) — "
               + (activity.state == .running ? "running" : "queued"))
-    }
-
-    /// The branch with its middle cut past 18 characters — the start and
-    /// the end are the parts that tell branches apart.
-    static func shortened(_ branch: String, max: Int = 18) -> String {
-        guard branch.count > max else { return branch }
-        let keep = max - 1
-        return "\(branch.prefix((keep + 1) / 2))…\(branch.suffix(keep / 2))"
     }
 
     private func open() {
