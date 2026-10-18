@@ -43,3 +43,12 @@ Draft — still being assembled.
   simple layout, four or more machines used to be stacked in one column
   that never fit the screen. Now a column holds at most three machines:
   four are split 2 + 2, five are split 3 + 2.
+- **The simple monitor's bottom strip shows PR jobs in flight, as well as
+  containers.** A PR with a job running or queued gets a pill with its
+  branch and the job's name, colored as in the side panel: blue for
+  running, amber for queued. Click a pill to open the PR. The strip's
+  three slots go to whatever matters most right now. A container doing
+  real work (about a third of a core or more) comes before a PR's job,
+  and a PR's job comes before an idle container. A PR the side panel is
+  already listing doesn't take a slot. Slots don't flip back and forth
+  when two things are about equally busy.

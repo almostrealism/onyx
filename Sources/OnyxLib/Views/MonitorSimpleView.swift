@@ -4,7 +4,7 @@ import EventKit
 // MARK: - Simple Monitor view
 //
 // "S" toggles a stripped-down layout: same headline at top, then giant
-// CPU + MEM + GPU charts, a compact strip of the top-CPU containers,
+// CPU + MEM + GPU charts, a compact strip of busy containers and PR jobs,
 // and a small weekly Timing tile in the bottom-right. Designed for
 // at-a-glance ambient monitoring rather than the full diagnostic
 // dashboard.
@@ -151,7 +151,8 @@ struct SimpleMonitorBody: View {
                                timing: timing, accentColor: accentColor,
                                showSessions: !showPanel,
                                height: bottomStripHeight) {
-                SimpleContainersStrip(dockerStats: dockerStats)
+                MonitorWorkloadStrip(appState: appState, dockerStats: dockerStats,
+                                     sidePanelOpen: showPanel)
             }
         }
     }
@@ -177,10 +178,9 @@ extension SimpleMonitorBody {
 /// what's running, what's building, and the week's hours.
 ///
 /// Shared by simple mode and both fleet layouts so they can't drift into
-/// three slightly different answers to "what else is going on". Only the
-/// containers slot differs — one host's containers in simple mode, the
-/// whole fleet's in the fleet layouts — so it's passed in.
-struct MonitorBottomStrip<Containers: View>: View {
+/// three slightly different answers to "what else is going on". The
+/// workload slots are passed in, so a layout can choose its own sources.
+struct MonitorBottomStrip<Workloads: View>: View {
     @ObservedObject var appState: AppState
     @ObservedObject var reminders: RemindersManager
     @ObservedObject var timing: TimingManager
@@ -189,14 +189,15 @@ struct MonitorBottomStrip<Containers: View>: View {
     /// pills aren't saying it twice.
     let showSessions: Bool
     let height: CGFloat
-    @ViewBuilder let containers: () -> Containers
+    /// The workload slots — the one part that differs between layouts.
+    @ViewBuilder let workloads: () -> Workloads
 
     var body: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
             HStack(alignment: .center, spacing: 12) {
                 SimpleRemindersScope(reminders: reminders)
-                containers()
+                workloads()
                 Spacer(minLength: 12)
                 if showSessions {
                     SimpleSessionActivityStrip(appState: appState)
@@ -392,7 +393,14 @@ struct SimplePullRequests: View {
     /// The charts are the point of this layout; a long PR list must not
     /// push them around. Busy ones sort first, so an overflowing list
     /// drops the quiet ones.
-    private let maxShown = 6
+    static let maxShown = 6
+    private var maxShown: Int { Self.maxShown }
+
+    /// The PRs this section lists, in its order — what the bottom strip
+    /// checks so it doesn't show a job the panel already shows.
+    static func shown(appState: AppState, ci: PRPipelineMonitor = .shared) -> [PullRequest] {
+        Array(ordered(visiblePRs(appState: appState)) { ci.runs(for: $0) }.prefix(maxShown))
+    }
 
     /// The same merged, draft-filtered list the detailed overlay shows,
     /// so the two can't disagree about which PRs are yours.
@@ -517,12 +525,8 @@ struct SimplePRLine: View {
         .help(pr.title)
     }
 
-    /// The branch, because that is what a person matches against the work
-    /// in front of them. A PR with no head branch — GitHub omits it on a
-    /// PR from a deleted fork — falls back to the number.
     static func branchLabel(_ pr: PullRequest) -> String {
-        if let branch = pr.headBranch, !branch.isEmpty { return branch }
-        return "\(pr.provider == .gitlab ? "!" : "#")\(pr.number)"
+        PRJobStripSource.branchLabel(pr)
     }
 
     private func open() {
@@ -669,40 +673,124 @@ struct SimpleRemindersScope: View {
     }
 }
 
-/// Up to 3 containers with the highest current CPU%, rendered as a
-/// compact horizontal strip. Empty (zero-height) when docker isn't
-/// available so the timing tile sits flush against the leading edge.
-struct SimpleContainersStrip: View {
+/// The workload slots in the bottom strip: busy containers and PR jobs in
+/// flight, as many as fit, ranked by the priority each reports.
+///
+/// Used to be the three busiest containers, always — even when every
+/// container was idle and the thing worth watching was a PR's CI. Now
+/// each kind of workload is a MonitorStripSource and MonitorStripRanker
+/// picks; this view only gathers the data and draws the pills.
+/// Zero-width when there's nothing to show.
+struct MonitorWorkloadStrip: View {
+    @ObservedObject var appState: AppState
     @ObservedObject var dockerStats: DockerStatsManager
+    /// Whether the side panel is up, listing PRs with their jobs.
+    let sidePanelOpen: Bool
+    @ObservedObject private var ghManager = PullRequestManager.shared
+    @ObservedObject private var glManager = GitLabMergeRequestManager.shared
+    @ObservedObject private var ci = PRPipelineMonitor.shared
+    @ObservedObject private var workflowFilter = WorkflowFilterStore.shared
+    /// Last time's choice, so a near-tie doesn't flicker (see stickiness).
+    @State private var shownBefore: Set<String> = []
 
     var body: some View {
-        if dockerStats.isAvailable {
-            let top = dockerStats.visibleContainers
-                .sorted { DockerStatsManager.parseCPUPct($0.cpu) > DockerStatsManager.parseCPUPct($1.cpu) }
-                .prefix(3)
-            // Match the full list: bar saturates at total-cores × 100% so
-            // a single hot container on a many-core box is correctly dim.
-            let maxPct = CGFloat(max(1, dockerStats.cpuCores)) * 100.0
-            HStack(spacing: 10) {
-                ForEach(Array(top), id: \.id) { c in
-                    SimpleContainerPill(
-                        name: c.name,
-                        cpuText: c.cpu,
-                        cpuPct: CGFloat(DockerStatsManager.parseCPUPct(c.cpu)),
-                        maxPct: maxPct
-                    )
+        let items = MonitorStripRanker.select(from: sources, in: context,
+                                              shownBefore: shownBefore)
+        HStack(spacing: 10) {
+            ForEach(items) { item in
+                switch item.content {
+                case .container(let load):
+                    SimpleContainerPill(name: load.name, cpuText: load.cpuText,
+                                        cpuPct: CGFloat(load.cpuPercent),
+                                        maxPct: CGFloat(load.maxPercent))
+                case .prJob(let activity):
+                    PRJobPill(activity: activity)
                 }
             }
-        } else {
-            EmptyView()
         }
+        .animation(.easeInOut(duration: 0.25), value: items.map(\.id))
+        .onChange(of: items.map(\.id)) { ids in shownBefore = Set(ids) }
+    }
+
+    private var sources: [MonitorStripSource] {
+        var sources: [MonitorStripSource] = []
+        if dockerStats.isAvailable {
+            // Match the full list: the bar saturates at total-cores × 100%
+            // so a single hot container on a many-core box is correctly dim.
+            let maxPct = Double(max(1, dockerStats.cpuCores)) * 100
+            sources.append(ContainerStripSource(loads: dockerStats.visibleContainers.map {
+                ContainerLoad(name: $0.name, cpuText: $0.cpu,
+                              cpuPercent: DockerStatsManager.parseCPUPct($0.cpu),
+                              maxPercent: maxPct)
+            }))
+        }
+        sources.append(PRJobStripSource(
+            prs: SimplePullRequests.ordered(SimplePullRequests.visiblePRs(appState: appState)) {
+                ci.runs(for: $0)
+            },
+            runs: { ci.runs(for: $0) }))
+        return sources
+    }
+
+    private var context: MonitorStripContext {
+        MonitorStripContext(prsInSidePanel: sidePanelOpen
+            ? Set(SimplePullRequests.shown(appState: appState, ci: ci).map(\.id))
+            : [])
+    }
+}
+
+/// A PR's job in flight: the branch, small, then the job in the side
+/// panel's colors — blue running, amber queued. Click opens the PR.
+struct PRJobPill: View {
+    let activity: PRJobActivity
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 6) {
+                // Capped by characters, not a frame: a width cap pads a
+                // short branch out to the full width.
+                Text(Self.shortened(activity.branch))
+                    .monitorFont(size: 9)
+                    .foregroundColor(.white.opacity(0.4))
+                    .lineLimit(1)
+                Text(activity.job)
+                    .monitorFont(size: 11)
+                    .foregroundColor(activity.state == .running
+                                     ? Color.onyxBlue.opacity(0.9)
+                                     : Color.onyxAmber.opacity(0.85))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .layoutPriority(1)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.white.opacity(0.04))
+            .cornerRadius(4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("\(activity.prTitle)\n\(activity.workflow) · \(activity.job) — "
+              + (activity.state == .running ? "running" : "queued"))
+    }
+
+    /// The branch with its middle cut past 18 characters — the start and
+    /// the end are the parts that tell branches apart.
+    static func shortened(_ branch: String, max: Int = 18) -> String {
+        guard branch.count > max else { return branch }
+        let keep = max - 1
+        return "\(branch.prefix((keep + 1) / 2))…\(branch.suffix(keep / 2))"
+    }
+
+    private func open() {
+        guard let url = URL(string: activity.prURL) else { return }
+        NSWorkspace.shared.open(url)
     }
 }
 
 /// One pill in the simple-mode containers strip. Renders the same
 /// proportional CPU bar + color ramp as the full DockerStatsSection row,
 /// just compacted into a chip-sized container.
-private struct SimpleContainerPill: View {
+struct SimpleContainerPill: View {
     let name: String
     let cpuText: String
     let cpuPct: CGFloat
