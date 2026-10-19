@@ -1158,6 +1158,18 @@ public class FileBrowserManager: ObservableObject {
     @Published public var uploadStatus: String?
     @Published public var isUploading = false
 
+    /// The files on a pasteboard — what Finder puts there on ⌘C. Empty
+    /// when it holds anything else, text included.
+    public static func fileURLs(on pasteboard: NSPasteboard) -> [URL] {
+        fileURLs(in: pasteboard.readObjects(forClasses: [NSURL.self],
+                                            options: [.urlReadingFileURLsOnly: true]))
+    }
+
+    /// The file URLs among what a pasteboard read returned.
+    static func fileURLs(in objects: [Any]?) -> [URL] {
+        (objects ?? []).compactMap { $0 as? URL }.filter(\.isFileURL)
+    }
+
     /// Upload files.
     public func uploadFiles(_ urls: [URL]) {
         guard let dest = currentPath else { return }

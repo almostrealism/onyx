@@ -354,6 +354,22 @@ public class ShortcutManager {
                 return nil
             }
 
+            // Cmd+V in the file browser with files on the clipboard → upload
+            // them into the folder being shown, as a drop would. Copied in
+            // Finder with ⌘C, pasted here. Same gate as Space: only when
+            // the browser holds the keyboard and nobody is typing, and only
+            // when the clipboard has FILES — pasting text anywhere is
+            // untouched.
+            if flags == .command && chars.lowercased() == "v" && fileBrowserActive
+                && !terminalHasKeyboard && !textFieldHasKeyboard && !hasRealTextInput,
+               let browser = state?.fileBrowserManager, browser.currentPath != nil {
+                let urls = FileBrowserManager.fileURLs(on: .general)
+                if !urls.isEmpty {
+                    browser.uploadFiles(urls)
+                    return nil
+                }
+            }
+
             // Backtick/tilde key (keyCode 50) → toggle monitor overlay.
             //
             // With the monitor up, ⌘J opens the session list OVER it, and

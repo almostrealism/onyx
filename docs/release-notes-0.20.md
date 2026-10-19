@@ -75,3 +75,7 @@ Draft — still being assembled.
 - **⌃⇥ cycles tmux sessions**, whatever ⇧⇥ is set to. With ⇧⇥ given back
   to the terminal (Settings → General → Keyboard), Claude Code's
   permission-mode switch works and you still have a cycling key.
+- **Paste files into the file browser.** Copy files or folders in Finder
+  with ⌘C, click into the file browser, and press ⌘V. They upload to the
+  folder being shown, the same as dropping them there. ⌘V with text on
+  the clipboard works as it always has.
