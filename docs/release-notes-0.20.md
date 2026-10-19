@@ -97,3 +97,11 @@ Draft — still being assembled.
   host's disk before the file is touched. Line endings and every other
   byte you didn't edit are kept exactly. Files over 2 MB, or that aren't
   UTF-8 text, open read-only with an explanation.
+- **The file browser can show a folder as a tree.** Click the tree button
+  in its toolbar. Folders open in place when clicked, and each folder's
+  contents are fetched the first time you open it. Files open as usual.
+  "Open as folder" in a folder's right-click menu makes it the folder
+  shown. The choice is remembered.
+- **Download from the file viewer gets the right file** when the file was
+  opened from search. It used to look for a file of that name in the
+  folder being shown.

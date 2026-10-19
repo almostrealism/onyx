@@ -78,9 +78,10 @@ struct FileBrowserView: View {
                             accentColor: appState.accentColor,
                             onClose: { browser.closeFile() },
                             onDownload: {
-                                if let path = browser.currentPath, let name = browser.viewingFileName {
-                                    let fullPath = path.hasSuffix("/") ? "\(path)\(name)" : "\(path)/\(name)"
-                                    browser.downloadPath(fullPath, isDirectory: false)
+                                // Where the file actually is — not the folder
+                                // shown, for a file opened from search or the tree.
+                                if let path = browser.viewingFilePath {
+                                    browser.downloadPath(path, isDirectory: false)
                                 }
                             },
                             onEdit: browser.viewingFilePath.map { path in
@@ -775,6 +776,19 @@ struct NavigationBar: View {
                           : "Add \(path) to favorites")
                 }
 
+                // List / tree
+                if browser.currentPath != nil && browser.viewingFileName == nil {
+                    Button(action: { browser.treeMode.toggle() }) {
+                        Image(systemName: "list.bullet.indent")
+                            .font(.system(size: 12))
+                            .foregroundColor(browser.treeMode ? appState.accentColor : .gray.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                    .help(browser.treeMode
+                          ? "Showing a tree — click for a flat list"
+                          : "Show as a tree, opening folders in place")
+                }
+
                 // Collapse paths toggle
                 if browser.currentPath != nil && browser.viewingFileName == nil {
                     Button(action: {
@@ -930,6 +944,15 @@ struct DirectoryListView: View {
     }
 
     var body: some View {
+        if browser.treeMode, let root = browser.currentPath {
+            FileTreeView(appState: appState, browser: browser,
+                         roots: displayEntries, rootPath: root)
+        } else {
+            flatList
+        }
+    }
+
+    private var flatList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(displayEntries) { entry in
@@ -955,6 +978,107 @@ struct DirectoryListView: View {
                 }
             }
         }
+    }
+}
+
+/// The folder as an expandable tree: click a folder to open it in place,
+/// a file to view it. "Open as folder" in a folder's menu makes it the
+/// one shown, as clicking it does in the list.
+struct FileTreeView: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var browser: FileBrowserManager
+    let roots: [RemoteEntry]
+    let rootPath: String
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(browser.tree.rows(roots: roots, in: rootPath)) { row in
+                    VStack(alignment: .leading, spacing: 0) {
+                        FileTreeRow(row: row, accentColor: appState.accentColor)
+                            .opacity(browser.matchesSearchFilter(row.entry) ? 1 : 0.3)
+                            .onTapGesture {
+                                if row.entry.isDirectory {
+                                    browser.toggleTreeFolder(row.path)
+                                } else {
+                                    browser.openFile(atPath: row.path)
+                                }
+                            }
+                            .contextMenu {
+                                if row.entry.isDirectory {
+                                    Button(action: { browser.navigateTo(row.path) }) {
+                                        Label("Open as folder", systemImage: "folder")
+                                    }
+                                }
+                                Button(action: {
+                                    browser.downloadPath(row.path, isDirectory: row.entry.isDirectory)
+                                }) {
+                                    Label("Download", systemImage: "arrow.down.circle")
+                                }
+                            }
+                        if let failure = browser.tree.failures[row.path] {
+                            Text(failure)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(Color.onyxRed.opacity(0.8))
+                                .lineLimit(2)
+                                .padding(.leading, FileTreeRow.indent(row.depth + 1) + 12)
+                                .padding(.bottom, 4)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct FileTreeRow: View {
+    let row: FileTree.Row
+    let accentColor: Color
+
+    static func indent(_ depth: Int) -> CGFloat { CGFloat(depth) * 14 }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Group {
+                if row.isLoading {
+                    ProgressView().scaleEffect(0.4).colorScheme(.dark)
+                } else if row.entry.isDirectory {
+                    Image(systemName: row.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.gray.opacity(0.5))
+                } else {
+                    // Holds the column, so a file lines up with its
+                    // sibling folders rather than under their chevrons.
+                    Color.clear
+                }
+            }
+            .frame(width: 12, height: 12)
+
+            Image(systemName: row.entry.isDirectory
+                  ? (row.isExpanded ? "folder" : "folder.fill")
+                  : iconForFile(row.entry.name))
+                .font(.system(size: 12))
+                .foregroundColor(row.entry.isDirectory ? accentColor.opacity(0.7) : .gray.opacity(0.5))
+                .frame(width: 16)
+
+            Text(row.entry.name)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundColor(row.entry.isDirectory ? .white.opacity(0.9) : .white.opacity(0.7))
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer()
+
+            if !row.entry.isDirectory {
+                Text(row.entry.size)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.3))
+            }
+        }
+        .padding(.leading, 8 + Self.indent(row.depth))
+        .padding(.trailing, 12)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 }
 
@@ -1698,9 +1822,8 @@ struct FullFileBrowserView: View {
     }
 
     private func downloadCurrentFile() {
-        if let path = browser.currentPath, let name = browser.viewingFileName {
-            let fullPath = path.hasSuffix("/") ? "\(path)\(name)" : "\(path)/\(name)"
-            browser.downloadPath(fullPath, isDirectory: false)
+        if let path = browser.viewingFilePath {
+            browser.downloadPath(path, isDirectory: false)
         }
     }
 }

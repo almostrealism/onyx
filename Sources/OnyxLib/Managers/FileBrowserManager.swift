@@ -82,6 +82,14 @@ public class FileBrowserManager: ObservableObject {
 
     /// When true, single-child directory chains are collapsed into combined paths
     @Published public var collapsePaths = true
+
+    /// Show the folder as an expandable tree rather than a flat list.
+    /// Remembered across launches: it's how you like to browse.
+    @Published public var treeMode: Bool = UserDefaults.standard.bool(forKey: "fileBrowserTreeMode") {
+        didSet { UserDefaults.standard.set(treeMode, forKey: "fileBrowserTreeMode") }
+    }
+    /// The tree's open folders and what's been loaded into them.
+    @Published public var tree = FileTree()
     /// Collapsed directory entries: maps display name → resolved full path
     @Published public var collapsedEntries: [RemoteEntry] = []
     @Published public var isCollapsingPaths = false
@@ -268,6 +276,7 @@ public class FileBrowserManager: ObservableObject {
         viewingFilePath = nil
         isUnsupportedFile = false
         collapsedEntries = []
+        tree = FileTree()
         if let current = currentPath {
             pathHistory.append(current)
         }
@@ -355,6 +364,7 @@ public class FileBrowserManager: ObservableObject {
         guard let path = currentPath else { return }
         collapsedEntries = []
         listDirectory(path)
+        if treeMode { refreshTree() }
     }
 
     /// Open entry.
@@ -366,6 +376,52 @@ public class FileBrowserManager: ObservableObject {
         } else {
             targetLine = nil   // manual open — don't jump to a stale nav line
             readFile(fullPath, name: entry.name)
+        }
+    }
+
+    // MARK: - Tree
+
+    /// Open or close a folder in the tree, fetching its entries the first
+    /// time it opens.
+    public func toggleTreeFolder(_ path: String) {
+        guard tree.toggle(path) else { return }
+        fetchTreeFolder(path)
+    }
+
+    /// Open a file anywhere in the tree (not just the folder shown).
+    public func openFile(atPath path: String) {
+        targetLine = nil
+        readFile(path, name: (path as NSString).lastPathComponent)
+    }
+
+    /// Re-fetch every open folder, keeping them open — the refresh button.
+    public func refreshTree() {
+        let open = tree.expanded
+        tree = FileTree()
+        // Parents first, so a child's rows have somewhere to go.
+        for path in open.sorted(by: { $0.count < $1.count }) {
+            tree.expanded.insert(path)
+            tree.loading.insert(path)
+            fetchTreeFolder(path)
+        }
+    }
+
+    private func fetchTreeFolder(_ path: String) {
+        let (cmd, args) = appState.remoteCommand("ls -lAp \(escapeForShell(path)) 2>&1")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Self.runProcessWithStatus(cmd: cmd, args: args)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let trimmed = result.output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if result.exitCode == 255 || trimmed.contains("Permission denied (publickey") {
+                    self.tree.failed(path, self.formatProcessError(result, action: "List \(path)"))
+                    self.handleSSHFailure()
+                } else if trimmed.hasPrefix("ls:") || trimmed.contains("No such file or directory") {
+                    self.tree.failed(path, trimmed)
+                } else {
+                    self.tree.loaded(path, self.parseLsOutput(result.output ?? ""))
+                }
+            }
         }
     }
 
