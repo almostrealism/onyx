@@ -112,6 +112,14 @@ public class ShortcutManager {
                 return nil
             }
 
+            // Ctrl+Tab → cycle tmux sessions, always. The macOS "next tab"
+            // key, and one no terminal program depends on — so giving
+            // Shift+Tab back to the terminal costs nothing.
+            if flags == .control && event.keyCode == 48 {
+                NotificationCenter.default.post(name: .cycleTmuxSession, object: nil)
+                return nil
+            }
+
             // Shift+Tab → cycle tmux sessions, unless the user has given
             // the key back to the terminal. Claude Code uses ⇧⇥ to switch
             // permission modes, and a swallowed key looks exactly like a
@@ -229,6 +237,15 @@ public class ShortcutManager {
             // into, always; searching for "release notes" must not fire a
             // preview halfway through.
             let textFieldHasKeyboard = event.window?.firstResponder is NSTextView
+
+            // Keys the terminal gets differently from SwiftTerm's default —
+            // Shift-Return as a newline Claude Code can tell from Return.
+            if let terminal = event.window?.firstResponder as? TerminalView,
+               let bytes = TerminalKeyTranslation.bytes(keyCode: event.keyCode,
+                                                        modifiers: event.modifierFlags) {
+                terminal.send(data: bytes[...])
+                return nil
+            }
 
             // Keep the model honest. The focus outline reads from
             // `focusedComponent`, so without this it goes on describing a

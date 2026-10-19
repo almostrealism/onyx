@@ -146,7 +146,7 @@ struct SettingsView: View {
             }
             .toggleStyle(.switch)
 
-            Text("Off, Shift-Tab goes to the terminal untouched — which is what you want if you use Claude Code, where it switches permission modes. ⌘1–9 and ⌘J switch sessions either way.")
+            Text("Off, Shift-Tab goes to the terminal untouched — which is what you want if you use Claude Code, where it switches permission modes. ⌃⇥, ⌘1–9 and ⌘J switch sessions either way.")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.4))
                 .fixedSize(horizontal: false, vertical: true)

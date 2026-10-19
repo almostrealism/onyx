@@ -41,6 +41,8 @@ struct HelpOverlay: View {
               label: appState.appearance.shiftTabCyclesSessions
                   ? "Cycle tmux sessions  ·  turn off in Settings → KEYBOARD to give it to the terminal"
                   : "Passed through to the terminal (Claude Code uses it) — Settings → KEYBOARD"),
+        .init(keys: "⌃⇥", label: "Cycle tmux sessions"),
+        .init(keys: "⇧↩", label: "New line without submitting (Claude Code)"),
         .init(keys: "⌘1–9", label: "Switch to a favorite session"),
         .init(keys: "⌘⌃ ←↑↓→", label: "Resize the tmux pane"),
         .init(keys: "Space", label: "Preview the selected file (file browser)"),

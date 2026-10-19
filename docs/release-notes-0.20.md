@@ -68,3 +68,10 @@ Draft — still being assembled.
 - **Renaming a session no longer leaves a copy under its old name.** The
   terminal stays attached through the rename and keeps its activity clock.
   Before, the old name stayed in the session list beside the new one.
+- **Shift-Return makes a new line in Claude Code** instead of submitting.
+  Onyx now sends Shift-Return as ESC CR (Meta-Return), the sequence
+  Claude Code reads as a line break. It passes through tmux unchanged. In
+  a zsh prompt it adds a line to the command being edited.
+- **⌃⇥ cycles tmux sessions**, whatever ⇧⇥ is set to. With ⇧⇥ given back
+  to the terminal (Settings → General → Keyboard), Claude Code's
+  permission-mode switch works and you still have a cycling key.
