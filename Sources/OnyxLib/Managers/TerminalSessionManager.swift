@@ -170,6 +170,17 @@ class OnyxTerminalView: NSView {
             guard let id = note.object as? String else { return }
             self?.destroyPoolEntry(id)
         }
+        // A renamed session's terminal is still attached — tmux renames in
+        // place — so it moves to the new id. Left under the old one, the
+        // still-running terminal made enumeration keep the old name in
+        // the list beside the new.
+        NotificationCenter.default.addObserver(
+            forName: .sessionRenamed, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let from = note.userInfo?["from"] as? String,
+                  let to = note.userInfo?["to"] as? String else { return }
+            self?.movePoolEntry(from: from, to: to)
+        }
         NotificationCenter.default.addObserver(forName: .refreshPoolStatus, object: nil, queue: .main) { [weak self] _ in
             self?.publishPoolStatus()
         }
@@ -694,6 +705,17 @@ class OnyxTerminalView: NSView {
             }
         }
         return tv
+    }
+
+    /// Re-key a pool entry after its session was renamed.
+    func movePoolEntry(from oldID: String, to newID: String) {
+        guard oldID != newID, let entry = pool.removeValue(forKey: oldID) else { return }
+        // A terminal already opened under the new name is a second attach
+        // to the same session; the moved one wins.
+        if pool[newID] != nil { destroyPoolEntry(newID) }
+        pool[newID] = entry
+        if activeSessionID == oldID { activeSessionID = newID }
+        TerminalActivityStore.shared.rename(from: oldID, to: newID)
     }
 
     func destroyPoolEntry(_ sessionID: String) {

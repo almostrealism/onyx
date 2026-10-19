@@ -18,6 +18,9 @@ public extension Notification.Name {
     /// pool tears down its entry so enumeration's "keep what is provably
     /// connected" rule can't put it back.
     static let sessionKilled = Notification.Name("sessionKilled")
+    /// A tmux session was renamed. userInfo: "from" and "to", the old and
+    /// new session ids.
+    static let sessionRenamed = Notification.Name("sessionRenamed")
     static let createTmuxSession = Notification.Name("createTmuxSession")
     static let toggleSessionManager = Notification.Name("toggleSessionManager")
     static let switchToFavorite = Notification.Name("switchToFavorite")
@@ -1067,10 +1070,49 @@ public class AppState: ObservableObject {
                     return
                 }
                 self.migrateSessionIdentity(from: session, to: renamed)
-                if wasActive { self.activeSession = renamed }
-                self.refreshSessionList = true
+                self.replaceRenamedSession(oldID: oldID, with: renamed)
+                // The terminal attached under the old name is attached to
+                // the renamed session — tmux renames in place — so it
+                // moves to the new id rather than reconnecting.
+                NotificationCenter.default.post(name: .sessionRenamed, object: nil,
+                                                userInfo: ["from": oldID, "to": renamed.id])
+                // After the pool has moved, so this reuses that terminal.
+                DispatchQueue.main.async {
+                    if wasActive { self.activeSession = renamed }
+                    self.refreshSessionList = true
+                }
             }
         }
+    }
+
+    /// Put `renamed` where the session called `oldID` was, and make sure
+    /// nothing brings the old name back.
+    ///
+    /// A rename used to leave the old name in the list beside the new one.
+    /// The topology store kept the old session as alive for its grace
+    /// period, and enumeration kept any session whose terminal is still
+    /// running — the old id's terminal was, attached to the renamed
+    /// session. The same things that resurrected a killed session.
+    func replaceRenamedSession(oldID: String, with renamed: TmuxSession) {
+        _ = NetworkTopologyStore.shared.forget(sessionID: oldID)
+        if let state = sessionConnectionStates.removeValue(forKey: oldID) {
+            sessionConnectionStates[renamed.id] = state
+        }
+        var list = allSessions
+        if let i = list.firstIndex(where: { $0.id == oldID }) {
+            // In place, so the list doesn't reorder under the user.
+            list[i] = renamed
+        } else {
+            list.append(renamed)
+        }
+        // If an enumeration already found it by its new name, keep one.
+        var seen = false
+        list.removeAll { session in
+            guard session.id == renamed.id else { return false }
+            defer { seen = true }
+            return seen
+        }
+        allSessions = list
     }
 
     /// Kill a tmux session and forget what was attached to it.

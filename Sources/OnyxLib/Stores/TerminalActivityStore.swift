@@ -111,6 +111,18 @@ public final class TerminalActivityStore: ObservableObject {
         lock.unlock()
     }
 
+    /// A session was renamed: its idle clock goes with it. Under the new
+    /// id alone it would start from nothing, and a busy session would read
+    /// as never having produced output.
+    public func rename(from oldID: String, to newID: String) {
+        lock.lock()
+        if let v = lastChange.removeValue(forKey: oldID) { lastChange[newID] = v }
+        if let v = lastHash.removeValue(forKey: oldID) { lastHash[newID] = v }
+        if let v = suppressUntil.removeValue(forKey: oldID) { suppressUntil[newID] = v }
+        lock.unlock()
+        schedulePublish()
+    }
+
     /// Coalesce UI updates to ~1 Hz on the main thread.
     private func schedulePublish() {
         DispatchQueue.main.async { [weak self] in

@@ -65,3 +65,6 @@ Draft — still being assembled.
 - **The side panel's PR lines no longer name the workflow**, only the
   running or queued job, leaving more room for the branch. Hover a PR line
   to see the workflow.
+- **Renaming a session no longer leaves a copy under its old name.** The
+  terminal stays attached through the rename and keeps its activity clock.
+  Before, the old name stayed in the session list beside the new one.
