@@ -164,7 +164,11 @@ struct MonitorView: View {
     }
 
     private var shortcutHint: String {
-        "(T \(intervalHint) · M memory · R due-soon · D side panel"
+        // Only the keys that do something visible in this layout.
+        let layoutKeys = appState.monitorLayout == .simple
+            ? "D side panel"
+            : "R due-soon · D simple + side panel"
+        return "(T \(intervalHint) · M memory · \(layoutKeys)"
             + " · S \(appState.monitorLayout.label) · F \(appState.fleetMode.label) · X peek)"
     }
 

@@ -249,6 +249,38 @@ public class AppState: ObservableObject {
     /// Back-compat shim for the many places that only care whether the
     /// stripped-down single-host layout is up.
     public var showSimpleMonitor: Bool { monitorLayout == .simple }
+
+    // MARK: Monitor keys that only one layout can show
+    //
+    // A key must never change something the user can't see: the change
+    // is invisible when made and a mystery when it surfaces later. `D`
+    // used to flip simple mode's side panel from the detailed layout —
+    // where there is no side panel — so the panel was "off" the next
+    // time simple mode came up, for no visible reason.
+
+    /// `D`: in simple mode, show or hide the side panel. Anywhere else it
+    /// means "simple mode, with the side panel", so it goes there and
+    /// opens the panel rather than toggling it blind.
+    public func handleSidePanelKey() {
+        if monitorLayout == .simple {
+            appearance.simpleShowSidePanel.toggle()
+        } else {
+            monitorLayout = .simple
+            appearance.simpleShowSidePanel = true
+        }
+        saveAppearance()
+    }
+
+    /// `R`: the due-soon filter on the detailed layout's reminders list.
+    /// Simple mode doesn't show that list, so there it does nothing.
+    /// Returns whether it acted.
+    @discardableResult
+    public func handleRemindersDueSoonKey() -> Bool {
+        guard monitorLayout == .detailed else { return false }
+        appearance.remindersDueSoonOnly.toggle()
+        saveAppearance()
+        return true
+    }
     /// Temporary "peek" while the monitor overlay is up: drops the
     /// overlay's opacity to the slider floor (0.3) so the user can glance
     /// at the desktop behind it, then restore their chosen opacity.

@@ -493,15 +493,11 @@ struct SimplePRLine: View {
 
                 Spacer(minLength: 6)
 
-                if let run = PRPipelineRun.mostRecentlyActive(runs), let job = run.activeJob {
-                    // The workflow, then the step. Two shades rather than
-                    // a separator: at a glance you want the step, and it
-                    // is the half that changes.
-                    Text(run.name)
-                        .monitorFont(size: 11)
-                        .foregroundColor(.gray.opacity(0.55))
-                        .lineLimit(1)
-                        .layoutPriority(1)
+                if let job = PRPipelineRun.mostRecentlyActive(runs)?.activeJob {
+                    // The job alone. The workflow's name cost the branch
+                    // its characters and told you little: job names are
+                    // rarely shared between workflows, and the settled
+                    // verdict below never named one either. Hover for it.
                     Text(job.name)
                         .monitorFont(size: 12)
                         .foregroundColor(job.state == .running
@@ -522,7 +518,14 @@ struct SimplePRLine: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(pr.title)
+        .help(tooltip)
+    }
+
+    /// The title, and the workflow the shown job belongs to.
+    private var tooltip: String {
+        guard let run = PRPipelineRun.mostRecentlyActive(runs),
+              let job = run.activeJob else { return pr.title }
+        return "\(pr.title)\n\(run.name) · \(job.name)"
     }
 
     static func branchLabel(_ pr: PullRequest) -> String {

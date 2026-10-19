@@ -55,3 +55,13 @@ Draft — still being assembled.
   from the prefixes first: `experiment/quant-welfare/phase-1` shows as
   `expe/quan/phase-1`. If it still doesn't fit, it is cut inside the last
   part: `feature/delta-consolidation` shows as `feat/delta-…dation`.
+- **`D` in the detailed monitor switches to simple mode and opens the side
+  panel.** It used to toggle the side panel without leaving the detailed
+  layout, where there is no side panel. The change couldn't be seen, and
+  the panel was off the next time simple mode came up. `R` (reminders due
+  soon) likewise does nothing in simple mode, which has no list for it to
+  filter. The hint line under the clock lists only the keys that do
+  something in the current layout.
+- **The side panel's PR lines no longer name the workflow**, only the
+  running or queued job, leaving more room for the branch. Hover a PR line
+  to see the workflow.

@@ -559,13 +559,11 @@ private struct ContentViewMonitorNotifications: ViewModifier {
         content
             .onReceive(NotificationCenter.default.publisher(for: .toggleRemindersDueSoon)) { _ in
                 guard isKeyWindow, appState.showMonitor else { return }
-                appState.appearance.remindersDueSoonOnly.toggle()
-                appState.saveAppearance()
+                appState.handleRemindersDueSoonKey()
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleSimpleSidePanel)) { _ in
                 guard isKeyWindow, appState.showMonitor else { return }
-                appState.appearance.simpleShowSidePanel.toggle()
-                appState.saveAppearance()
+                appState.handleSidePanelKey()
             }
     }
 }
