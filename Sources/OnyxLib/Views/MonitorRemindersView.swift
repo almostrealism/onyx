@@ -349,10 +349,7 @@ struct RemindersSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text(reminders.displayName)
-                    .monitorFont(size: 10, weight: .medium)
-                    .foregroundColor(appState.accentColor)
-                    .tracking(2)
+                AgendaPaneTabs(appState: appState, remindersTitle: reminders.displayName)
 
                 // Say WHY the list is short — a silently filtered list
                 // reads as missing reminders.

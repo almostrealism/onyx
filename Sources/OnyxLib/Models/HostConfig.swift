@@ -194,6 +194,9 @@ public struct AppearanceConfig: Codable {
     /// the overlay is up; persisted because it's a standing preference for
     /// how you want to read the list, not a transient peek.
     public var remindersDueSoonOnly: Bool = false
+    /// Whether the monitor's agenda pane shows Reminders or today's
+    /// calendar. `A` while the overlay is up, or click the pane's header.
+    public var agendaPane: AgendaPane = .reminders
     /// How far an agent's alert travels on this Mac, beyond the indicator
     /// in the app. The person's choice per device — an agent can't know
     /// which of the user's machines they are sitting at, so it has no say.
@@ -301,6 +304,7 @@ public struct AppearanceConfig: Codable {
         case searchFileTypeIDs, remindersDueSoonOnly, simpleShowSidePanel
         case showAllContainers, prDraftFilter, hasSeenWalkthrough
         case showMenuBarItem, shiftTabCyclesSessions, externalDelivery
+        case agendaPane
     }
 
     public init(from decoder: Decoder) throws {
@@ -329,5 +333,6 @@ public struct AppearanceConfig: Codable {
         self.showMenuBarItem            = try c.decodeIfPresent(Bool.self,           forKey: .showMenuBarItem)            ?? true
         self.shiftTabCyclesSessions     = try c.decodeIfPresent(Bool.self,           forKey: .shiftTabCyclesSessions)     ?? true
         self.externalDelivery           = try c.decodeIfPresent(ExternalDelivery.self, forKey: .externalDelivery)         ?? .urgentOnly
+        self.agendaPane                 = try c.decodeIfPresent(AgendaPane.self,     forKey: .agendaPane)                 ?? .reminders
     }
 }

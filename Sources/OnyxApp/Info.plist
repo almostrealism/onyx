@@ -27,6 +27,8 @@
     </dict>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Onyx shows today's calendar on the monitor screen, when you switch its agenda pane to Calendar.</string>
     <key>NSRemindersUsageDescription</key>
     <string>Onyx shows your reminders due today on the monitor screen.</string>
     <!-- Required before macOS will even PROMPT to allow driving Messages.

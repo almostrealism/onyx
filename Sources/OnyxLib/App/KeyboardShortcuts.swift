@@ -311,6 +311,9 @@ public class ShortcutManager {
                 case 2: // D → simple mode: sessions + today's reminders down the left
                     NotificationCenter.default.post(name: .toggleSimpleSidePanel, object: nil)
                     return nil
+                case 0: // A → agenda pane: Reminders ↔ today's calendar
+                    NotificationCenter.default.post(name: .toggleAgendaPane, object: nil)
+                    return nil
                 case 15: // R → reminders: only what's due today/tomorrow
                     NotificationCenter.default.post(name: .toggleRemindersDueSoon, object: nil)
                     return nil

@@ -48,3 +48,25 @@ final class MonitorLayoutKeyTests: XCTestCase {
         XCTAssertNotEqual(app.appearance.remindersDueSoonOnly, before)
     }
 }
+
+extension MonitorLayoutKeyTests {
+
+    func testASwitchesTheAgendaPane() {
+        let app = AppState()
+        app.monitorLayout = .detailed
+        app.appearance.agendaPane = .reminders
+        app.handleAgendaKey()
+        XCTAssertEqual(app.appearance.agendaPane, .calendar)
+        app.handleAgendaKey()
+        XCTAssertEqual(app.appearance.agendaPane, .reminders)
+    }
+
+    func testAInSimpleModeOpensTheSidePanelSoTheSwitchIsSeen() {
+        let app = AppState()
+        app.monitorLayout = .simple
+        app.appearance.simpleShowSidePanel = false
+        app.handleAgendaKey()
+        XCTAssertTrue(app.appearance.simpleShowSidePanel)
+        XCTAssertEqual(app.appearance.agendaPane, .calendar)
+    }
+}

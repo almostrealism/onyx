@@ -79,3 +79,11 @@ Draft — still being assembled.
   with ⌘C, click into the file browser, and press ⌘V. They upload to the
   folder being shown, the same as dropping them there. ⌘V with text on
   the clipboard works as it always has.
+- **The monitor's agenda pane can show today's calendar instead of
+  Reminders.** Press `A` with the monitor up, or click CALENDAR in the
+  pane's header. That's the reminders column in the detailed layout, and
+  the list in simple mode's side panel. In simple mode, `A` also opens the
+  side panel. The detailed layout shows the whole day, with past events
+  dimmed and the current event highlighted. Simple mode shows only what's
+  left of the day. Onyx asks for calendar access the first time you switch
+  to the calendar, not at launch.

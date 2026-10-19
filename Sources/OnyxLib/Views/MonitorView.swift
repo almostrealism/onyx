@@ -166,8 +166,8 @@ struct MonitorView: View {
     private var shortcutHint: String {
         // Only the keys that do something visible in this layout.
         let layoutKeys = appState.monitorLayout == .simple
-            ? "D side panel"
-            : "R due-soon · D simple + side panel"
+            ? "D side panel · A agenda"
+            : "R due-soon · A agenda · D simple + side panel"
         return "(T \(intervalHint) · M memory · \(layoutKeys)"
             + " · S \(appState.monitorLayout.label) · F \(appState.fleetMode.label) · X peek)"
     }
@@ -346,7 +346,11 @@ struct MonitorView: View {
                                     if hasClaudeSessions {
                                         ClaudeSessionsSection(appState: appState)
                                     }
-                                    RemindersSection(appState: appState)
+                                    if appState.appearance.agendaPane == .calendar {
+                                        TodayCalendarSection(appState: appState)
+                                    } else {
+                                        RemindersSection(appState: appState)
+                                    }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
 

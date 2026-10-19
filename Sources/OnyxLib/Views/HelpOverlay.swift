@@ -62,6 +62,7 @@ struct HelpOverlay: View {
         .init(keys: "C", label: "Toggle all-containers view"),
         .init(keys: "P", label: "Toggle 12 / 24-hour clock"),
         .init(keys: "R", label: "Reminders: only what's due today / tomorrow (detailed layout)"),
+        .init(keys: "A", label: "Agenda: Reminders ↔ today's calendar"),
         .init(keys: "D", label: "Side panel: sessions, reminders, PRs on the left (switches to simple mode)"),
     ]
 

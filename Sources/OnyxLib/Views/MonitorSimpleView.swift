@@ -233,8 +233,13 @@ struct SimpleSidePanel: View {
             if Self.hasClaudeSessions(appState) {
                 ClaudeSessionsSection(appState: appState, maxShown: 5)
             }
-            SimpleTodayReminders(reminders: reminders, accentColor: accentColor,
-                                 listOrder: appState.appearance.remindersLists)
+            if appState.appearance.agendaPane == .calendar {
+                SimpleTodayCalendar(appState: appState)
+            } else {
+                SimpleTodayReminders(appState: appState, reminders: reminders,
+                                     accentColor: accentColor,
+                                     listOrder: appState.appearance.remindersLists)
+            }
             SimplePullRequests(appState: appState, accentColor: accentColor)
             Spacer(minLength: 0)
         }
@@ -282,6 +287,9 @@ struct SimpleSidePanel: View {
         if !orderedSessionNotes(appState: appState, store: store).isEmpty { return true }
         if hasClaudeSessions(appState) { return true }
         if !SimplePullRequests.visiblePRs(appState: appState).isEmpty { return true }
+        // The calendar always has something to say, if only that the day
+        // is clear or access is needed — and it's how you'd switch back.
+        if appState.appearance.agendaPane == .calendar { return true }
         return reminders.accessGranted
             && reminders.reminders.contains(where: { RemindersManager.isDueToday($0) })
     }
@@ -549,6 +557,7 @@ struct SimplePRLine: View {
 /// lists), so `reminders.reminders` is already exactly what's due by end
 /// of today, overdue included, across every list.
 struct SimpleTodayReminders: View {
+    @ObservedObject var appState: AppState
     @ObservedObject var reminders: RemindersManager
     let accentColor: Color
     /// The user's configured list order, so the groups read in the same
@@ -577,10 +586,7 @@ struct SimpleTodayReminders: View {
         }
 
         return VStack(alignment: .leading, spacing: 9) {
-            Text("TODAY")
-                .monitorFont(size: 10, weight: .medium)
-                .foregroundColor(accentColor)
-                .tracking(2)
+            AgendaPaneTabs(appState: appState, remindersTitle: "TODAY")
 
             ForEach(shown, id: \.id) { group in
                 VStack(alignment: .leading, spacing: 5) {

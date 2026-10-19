@@ -307,6 +307,10 @@ if [ "$DO_SIGN" = "1" ]; then
          Messages.app to text the user. -->
     <key>com.apple.security.automation.apple-events</key>
     <true/>
+    <!-- Today's calendar on the monitor. The hardened runtime blocks the
+         Calendar database without it, prompt or no prompt. -->
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
 </dict>
 </plist>
 PLIST

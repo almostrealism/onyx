@@ -561,6 +561,10 @@ private struct ContentViewMonitorNotifications: ViewModifier {
                 guard isKeyWindow, appState.showMonitor else { return }
                 appState.handleRemindersDueSoonKey()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleAgendaPane)) { _ in
+                guard isKeyWindow, appState.showMonitor else { return }
+                appState.handleAgendaKey()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .toggleSimpleSidePanel)) { _ in
                 guard isKeyWindow, appState.showMonitor else { return }
                 appState.handleSidePanelKey()
