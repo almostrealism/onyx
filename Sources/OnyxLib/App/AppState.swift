@@ -148,7 +148,7 @@ extension AppState {
     public var keyboardOwnedElsewhere: Bool {
         showSettings || showCommandPalette || showSessionManager || showWindowRename
             || showSessionNoteEditor || showHelp || showWalkthrough || showSetup
-            || showTerminalText || showPipelineAdder
+            || showTerminalText || showPipelineAdder || showFileEditor
             // The web view owns the keyboard while a browser tab is the
             // active session — a page's own text fields are the whole
             // point of it. Nothing may "rescue" the keyboard back to the
@@ -307,6 +307,8 @@ public class AppState: ObservableObject {
     /// on open, inside AppKit's animated window resize. See
     /// PipelineAdderPanel.swift.
     @Published public var showPipelineAdder = false
+    /// The full-window file editor is up (see `fileEditor`).
+    @Published public var showFileEditor = false
     @Published public var showSessionNoteEditor = false
     @Published public var reconnectRequested = false
     @Published public var refreshSessionList = false
@@ -421,6 +423,11 @@ public class AppState: ObservableObject {
     /// File browser manager.
     public lazy var fileBrowserManager: FileBrowserManager = {
         FileBrowserManager(appState: self)
+    }()
+
+    /// The full-window editor for a file from the file browser.
+    public lazy var fileEditor: FileEditorManager = {
+        FileEditorManager(appState: self)
     }()
 
     /// This window's index (0-3). Windows > 3 show all favorites.
@@ -1125,6 +1132,33 @@ public class AppState: ObservableObject {
         allSessions = list
     }
 
+    // MARK: - File editor
+
+    /// Open a file from the file browser in the full-window editor, on
+    /// the host the browser is showing.
+    public func openFileEditor(path: String) {
+        fileEditor.open(path: path, host: activeHost)
+        showFileEditor = true
+    }
+
+    /// Close the editor — unless there are unsaved edits, in which case it
+    /// asks first (`force` skips that, for "Discard").
+    public func closeFileEditor(force: Bool = false) {
+        if !force && fileEditor.isDirty {
+            fileEditor.confirmingDiscard = true
+            return
+        }
+        let saved = fileEditor.lastSaved != nil
+        let path = fileEditor.path
+        fileEditor.close()
+        showFileEditor = false
+        // The viewer behind still shows the file as it was opened.
+        if saved, let path, fileBrowserManager.viewingFilePath == path {
+            fileBrowserManager.reloadViewedFile()
+        }
+        recalculateFocus()
+    }
+
     /// Kill a tmux session and forget what was attached to it.
     public func killSession(_ session: TmuxSession) {
         guard let (cmd, args) = tmuxAdminCommand(
@@ -1249,6 +1283,8 @@ public class AppState: ObservableObject {
             }
         } else if showHelp {
             showHelp = false
+        } else if showFileEditor {
+            closeFileEditor()
         } else if showPipelineAdder {
             showPipelineAdder = false
         } else if showSessionNoteEditor {

@@ -53,6 +53,18 @@ final class RemoteScriptBudgetTests: XCTestCase {
                           file: file, line: line)
     }
 
+    // MARK: - The file editor
+
+    /// Scales with the path: a deep directory and a long file name.
+    func testFileEditorCommitFitsWithADeepPath() {
+        let (state, host) = makeState()
+        let dir = "/" + Array(repeating: "a-rather-long-directory-name", count: 10).joined(separator: "/")
+        let target = dir + "/" + String(repeating: "long-file-name-", count: 5) + ".py"
+        let script = RemoteFileEdit.commitScript(
+            temporary: RemoteFileEdit.temporaryPath(for: target, token: "abcd1234"), target: target)
+        assertFits(payload(script, state: state, host: host), "the file editor's save")
+    }
+
     // MARK: - The monitor
 
     /// The one that broke every Mac. Stats are polled per host per tick, so

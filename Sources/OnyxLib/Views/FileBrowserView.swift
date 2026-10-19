@@ -83,6 +83,9 @@ struct FileBrowserView: View {
                                     browser.downloadPath(fullPath, isDirectory: false)
                                 }
                             },
+                            onEdit: browser.viewingFilePath.map { path in
+                                { appState.openFileEditor(path: path) }
+                            },
                             onViewDiff: browser.gitChangedFileForViewing().map { file in
                                 { browser.gitManager.fetchFileDiff(file) }
                             },
@@ -1284,6 +1287,8 @@ struct FileContentView: View {
     let accentColor: Color
     let onClose: () -> Void
     var onDownload: (() -> Void)?
+    /// Open the file in the full-window editor.
+    var onEdit: (() -> Void)?
     var onViewDiff: (() -> Void)?
     /// Reports the user's live text selection up to the manager.
     var onSelectionChange: ((String) -> Void)?
@@ -1346,6 +1351,20 @@ struct FileContentView: View {
                 }
 
                 Spacer()
+
+                if let edit = onEdit {
+                    Button(action: edit) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 10))
+                            Text("Edit")
+                                .font(.system(size: 10, design: .monospaced))
+                        }
+                        .foregroundColor(accentColor.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Edit this file full-window (⌘S saves)")
+                }
 
                 if let download = onDownload {
                     Button(action: download) {
@@ -1659,7 +1678,10 @@ struct FullFileBrowserView: View {
                                     accentColor: appState.accentColor,
                                     onClose: { browser.closeFile() },
                                     onDownload: { downloadCurrentFile() },
-                                    onViewDiff: browser.gitChangedFileForViewing().map { file in
+                                    onEdit: browser.viewingFilePath.map { path in
+                                { appState.openFileEditor(path: path) }
+                            },
+                            onViewDiff: browser.gitChangedFileForViewing().map { file in
                                         { browser.gitManager.fetchFileDiff(file) }
                                     },
                                     onSelectionChange: { browser.currentSelection = $0 }

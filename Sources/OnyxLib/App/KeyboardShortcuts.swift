@@ -56,6 +56,14 @@ public class ShortcutManager {
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let chars = event.charactersIgnoringModifiers ?? ""
 
+            // Cmd+S → save, while the file editor is up. Nothing else uses
+            // it, and with the editor closed it passes through.
+            if flags == .command && chars.lowercased() == "s",
+               let state = appState(for: event), state.showFileEditor {
+                state.fileEditor.save()
+                return nil
+            }
+
             // Cmd+Shift+C → toggle terminal text mode (selectable text view)
             if flags.contains([.command, .shift]) && chars.lowercased() == "c" {
                 NotificationCenter.default.post(name: .toggleTerminalTextMode, object: nil)
@@ -277,6 +285,7 @@ public class ShortcutManager {
                 // characters go into the field.
                 || (state?.showPipelineAdder ?? false)
                 || (state?.showHelp ?? false)
+                || (state?.showFileEditor ?? false)
             let hasRealTextInput = otherTextOverlay || sessionListOpen
 
             // Monitor-specific shortcuts: fire when monitor is visible,

@@ -229,6 +229,13 @@ public struct ContentView: View {
                     .zIndex(60)
                 }
 
+                // Full-window file editor (Edit, from a file in the browser)
+                if appState.showFileEditor {
+                    FileEditorOverlay(appState: appState, editor: appState.fileEditor)
+                        .transition(.opacity)
+                        .zIndex(61)
+                }
+
                 // Full-window file browser (Cmd+Shift+O)
                 if appState.showFullFileBrowser {
                     FullFileBrowserView(appState: appState)

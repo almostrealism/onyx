@@ -29,6 +29,9 @@ public class FileBrowserManager: ObservableObject {
     @Published public var fileContent: String?
     @Published public var imageData: Data?
     @Published public var viewingFileName: String?
+    /// The full path of the file being viewed — where it actually is,
+    /// which isn't always the folder shown (a file opened from search).
+    @Published public private(set) var viewingFilePath: String?
     /// True when the file can't be previewed (binary, unknown format)
     @Published public var isUnsupportedFile = false
     /// When set, the file viewer scrolls to (and highlights) this 1-based line
@@ -262,6 +265,7 @@ public class FileBrowserManager: ObservableObject {
         fileContent = nil
         imageData = nil
         viewingFileName = nil
+        viewingFilePath = nil
         isUnsupportedFile = false
         collapsedEntries = []
         if let current = currentPath {
@@ -363,6 +367,12 @@ public class FileBrowserManager: ObservableObject {
             targetLine = nil   // manual open — don't jump to a stale nav line
             readFile(fullPath, name: entry.name)
         }
+    }
+
+    /// Read the viewed file again — after it was edited and saved.
+    public func reloadViewedFile() {
+        guard let path = viewingFilePath, let name = viewingFileName else { return }
+        readFile(path, name: name)
     }
 
     /// Close the currently viewed file. If the file was opened from search
@@ -601,6 +611,7 @@ public class FileBrowserManager: ObservableObject {
 
         currentSelection = ""   // new file → drop any prior selection
         trackRecentFile(path: path, name: name)
+        viewingFilePath = path
 
         isLoading = true
         error = nil

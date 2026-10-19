@@ -87,3 +87,13 @@ Draft — still being assembled.
   dimmed and the current event highlighted. Simple mode shows only what's
   left of the day. Onyx asks for calendar access the first time you switch
   to the calendar, not at launch.
+- **Edit files from the file browser.** Open a text file and click Edit.
+  It opens in a full-window editor; ⌘S saves it back to the host. Esc
+  closes, and asks first if there are unsaved changes. Before saving, Onyx
+  checks whether the file changed on the host since you opened it. If it
+  did, you choose: overwrite it, or reload and lose your edits. A save
+  writes into the existing file, so it keeps its permissions and
+  ownership, and a symlink stays a symlink. The new bytes are on the
+  host's disk before the file is touched. Line endings and every other
+  byte you didn't edit are kept exactly. Files over 2 MB, or that aren't
+  UTF-8 text, open read-only with an explanation.
