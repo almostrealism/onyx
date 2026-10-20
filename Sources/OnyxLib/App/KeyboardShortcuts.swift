@@ -125,6 +125,7 @@ public class ShortcutManager {
             // Shift+Tab back to the terminal costs nothing.
             if flags == .control && event.keyCode == 48 {
                 NotificationCenter.default.post(name: .cycleTmuxSession, object: nil)
+                FeatureTipStore.shared.used("terminal.ctrl-tab")
                 return nil
             }
 
@@ -252,6 +253,7 @@ public class ShortcutManager {
                let bytes = TerminalKeyTranslation.bytes(keyCode: event.keyCode,
                                                         modifiers: event.modifierFlags) {
                 terminal.send(data: bytes[...])
+                FeatureTipStore.shared.used("terminal.shift-return")
                 return nil
             }
 
@@ -378,6 +380,7 @@ public class ShortcutManager {
                 let urls = FileBrowserManager.fileURLs(on: .general)
                 if !urls.isEmpty {
                     browser.uploadFiles(urls)
+                    FeatureTipStore.shared.used("files.paste")
                     return nil
                 }
             }

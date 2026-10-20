@@ -2,6 +2,31 @@
 
 Draft — still being assembled.
 
+## Finding what Onyx can do
+
+- **What's New.** After an update, Onyx shows a card once listing what
+  arrived since you last looked, with "Show me" for the features it can put
+  on screen. It's in the Help menu and the command palette afterwards. New
+  installs get the tour instead.
+- **Tips where features live.** A one-line NEW tip appears where a new
+  feature is used: in the file browser ("⌘V pastes files copied in
+  Finder"), on an open file, in the monitor's agenda pane, and in the
+  status bar under the terminal. Each place shows one tip at a time. A tip
+  goes away for good once you use the feature or close it, in every
+  window.
+- **More of the command palette finds features by what they do:** today's
+  calendar in the monitor, the file browser as a tree, cycling the side
+  panel's width, What's New and the walkthrough.
+
+## Side panel
+
+- **The divider shows it can be dragged.** It has a grip, lights up under
+  the pointer, and says what it does when hovered. Double-click resets
+  the panel to its default width.
+- **Each window remembers its panel width** across launches, on this Mac.
+  ⌘\ still steps through preset widths, and the window remembers those
+  too.
+
 ## Timing
 
 - **Up to three Timing.app projects at once.** Settings → Monitor → Filter

@@ -587,6 +587,7 @@ struct SimpleTodayReminders: View {
 
         return VStack(alignment: .leading, spacing: 9) {
             AgendaPaneTabs(appState: appState, remindersTitle: "TODAY")
+            FeatureTipLine(place: .monitorAgenda, accent: accentColor)
 
             ForEach(shown, id: \.id) { group in
                 VStack(alignment: .leading, spacing: 5) {

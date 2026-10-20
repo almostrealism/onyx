@@ -38,7 +38,7 @@ public struct ContentView: View {
     private var hasOverlay: Bool {
         appState.showSetup || appState.showSettings
             || appState.showCommandPalette || appState.showSessionManager
-            || appState.showHelp || appState.showWalkthrough
+            || appState.showHelp || appState.showWalkthrough || appState.showWhatsNew
     }
 
     /// Show the tour once, after the first session is actually up.
@@ -47,9 +47,21 @@ public struct ContentView: View {
     /// terminal exists, is describing something the user can't see yet.
     /// It also only runs in the key window — four windows opening four
     /// tours would be its own bad first impression.
+    ///
+    /// Someone who has had the tour gets What's New instead, once, when an
+    /// update brought something they haven't been told about. A new user
+    /// gets only the tour: a list of what changed in a release they never
+    /// had is noise, so everything that exists counts as announced.
     private func offerWalkthroughOnFirstLaunch() {
-        guard hostWindow?.isKeyWindow == true, !appState.appearance.hasSeenWalkthrough,
-              !appState.showSetup, !appState.showWalkthrough else { return }
+        guard hostWindow?.isKeyWindow == true, !appState.showSetup,
+              !appState.showWalkthrough, !appState.showWhatsNew else { return }
+        if appState.appearance.hasSeenWalkthrough {
+            withAnimation(.easeOut(duration: 0.3)) {
+                appState.openWhatsNew(evenIfNothingNew: false)
+            }
+            return
+        }
+        FeatureTipStore.shared.markAllAnnounced()
         withAnimation(.easeOut(duration: 0.3)) {
             appState.showWalkthrough = true
         }
@@ -74,6 +86,7 @@ public struct ContentView: View {
 
     private func saveRightPanelFraction() {
         PanelSplit.save(Double(rightPanelFraction), window: appState.windowIndex)
+        FeatureTipStore.shared.used("panel.divider")
     }
 
     public var body: some View {
@@ -273,6 +286,10 @@ public struct ContentView: View {
                 // user is looking at before they know help exists.
                 if appState.showWalkthrough {
                     WalkthroughOverlay(appState: appState)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                }
+                if appState.showWhatsNew {
+                    WhatsNewOverlay(appState: appState)
                         .transition(.opacity.combined(with: .scale(scale: 0.97)))
                 }
             }
@@ -684,6 +701,10 @@ private struct ContentViewPanelNotifications: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .showWalkthrough)) { _ in
                 guard isKeyWindow else { return }
                 appState.showWalkthrough = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .showWhatsNew)) { _ in
+                guard isKeyWindow else { return }
+                appState.openWhatsNew(evenIfNothingNew: true)
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleHelp)) { _ in
                 guard isKeyWindow else { return }
@@ -1199,6 +1220,10 @@ struct FavoritesBar: View {
             }
 
             Spacer()
+
+            FeatureTipLine(place: .terminal, accent: appState.accentColor, fontSize: sz(9),
+                           insets: EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
+                .layoutPriority(1)
 
             // Hint
             Text("⌘R refresh")

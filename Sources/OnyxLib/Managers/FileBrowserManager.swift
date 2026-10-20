@@ -86,7 +86,10 @@ public class FileBrowserManager: ObservableObject {
     /// Show the folder as an expandable tree rather than a flat list.
     /// Remembered across launches: it's how you like to browse.
     @Published public var treeMode: Bool = UserDefaults.standard.bool(forKey: "fileBrowserTreeMode") {
-        didSet { UserDefaults.standard.set(treeMode, forKey: "fileBrowserTreeMode") }
+        didSet {
+            UserDefaults.standard.set(treeMode, forKey: "fileBrowserTreeMode")
+            if treeMode { FeatureTipStore.shared.used("files.tree") }
+        }
     }
     /// The tree's open folders and what's been loaded into them.
     @Published public var tree = FileTree()

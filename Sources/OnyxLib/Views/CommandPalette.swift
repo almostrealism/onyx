@@ -82,6 +82,29 @@ struct CommandPaletteView: View {
                 appState.showCommandPalette = false
                 appState.showHelp = true
             },
+            PaletteAction(title: "What's New in Onyx", shortcut: "") {
+                appState.showCommandPalette = false
+                appState.openWhatsNew(evenIfNothingNew: true)
+            },
+            PaletteAction(title: "Onyx Walkthrough", shortcut: "") {
+                appState.showCommandPalette = false
+                appState.showWalkthrough = true
+            },
+            // Features findable by what they do, not only by their key.
+            PaletteAction(title: "Today's Calendar in the Monitor", shortcut: "A") {
+                appState.showCommandPalette = false
+                appState.showMonitor = true
+                appState.setAgendaPane(.calendar)
+            },
+            PaletteAction(title: "File Browser as a Tree", shortcut: "") {
+                appState.showCommandPalette = false
+                if !appState.showFullFileBrowser { appState.activeRightPanel = .fileBrowser }
+                appState.fileBrowserManager.treeMode.toggle()
+            },
+            PaletteAction(title: "Cycle Side Panel Width", shortcut: "⌘\\") {
+                appState.showCommandPalette = false
+                NotificationCenter.default.post(name: .cyclePanelSize, object: nil)
+            },
             PaletteAction(title: "Rename Window", shortcut: "") {
                 appState.showCommandPalette = false
                 appState.showWindowRename = true

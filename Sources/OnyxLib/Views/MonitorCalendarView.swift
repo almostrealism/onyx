@@ -27,8 +27,7 @@ struct AgendaPaneTabs: View {
         let selected = appState.appearance.agendaPane == pane
         return Button {
             guard !selected else { return }
-            appState.appearance.agendaPane = pane
-            appState.saveAppearance()
+            appState.setAgendaPane(pane)
         } label: {
             Text(title)
                 .monitorFont(size: 10, weight: .medium)

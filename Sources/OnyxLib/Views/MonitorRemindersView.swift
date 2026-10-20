@@ -377,6 +377,8 @@ struct RemindersSection: View {
                 }
             }
 
+            FeatureTipLine(place: .monitorAgenda, accent: appState.accentColor)
+
             // Transient result of a flowtree submit (auto-clears).
             if let status = flowtree.submitStatus {
                 Text(status.message)

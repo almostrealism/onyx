@@ -54,6 +54,7 @@ public extension Notification.Name {
     static let cyclePanelSize = Notification.Name("cyclePanelSize")
     static let toggleHelp = Notification.Name("toggleHelp")
     static let showWalkthrough = Notification.Name("showWalkthrough")
+    static let showWhatsNew = Notification.Name("showWhatsNew")
     static let searchFiles = Notification.Name("searchFiles")
 }
 
@@ -147,7 +148,7 @@ extension AppState {
     /// keyboard, which is what makes its single-key shortcuts work.
     public var keyboardOwnedElsewhere: Bool {
         showSettings || showCommandPalette || showSessionManager || showWindowRename
-            || showSessionNoteEditor || showHelp || showWalkthrough || showSetup
+            || showSessionNoteEditor || showHelp || showWalkthrough || showWhatsNew || showSetup
             || showTerminalText || showPipelineAdder || showFileEditor
             // The web view owns the keyboard while a browser tab is the
             // active session — a page's own text fields are the whole
@@ -224,6 +225,12 @@ public class AppState: ObservableObject {
     @Published public var showCommandPalette = false
     /// Full-screen help / keyboard-shortcut reference overlay (Cmd+/).
     @Published public var showHelp = false
+    /// The card listing what's arrived since this person last looked —
+    /// once after an update, and from Help → What's New in Onyx.
+    @Published public var showWhatsNew = false
+    /// What the open What's New lists: what's unannounced, or — reopened
+    /// from the menu with nothing new — the latest release's features.
+    @Published public var whatsNewFeatures: [Feature] = []
     /// Guided tour. Shown once on first launch, and on demand from the
     /// Help menu afterwards.
     @Published public var showWalkthrough = false
@@ -279,9 +286,16 @@ public class AppState: ObservableObject {
     /// calendar. In simple mode the pane lives in the side panel, so a
     /// closed panel opens — otherwise the switch would happen out of sight.
     public func handleAgendaKey() {
-        appearance.agendaPane = appearance.agendaPane.toggled
+        setAgendaPane(appearance.agendaPane.toggled)
+    }
+
+    /// Show Reminders or today's calendar in the agenda pane — in simple
+    /// mode, opening the side panel so the change can be seen.
+    public func setAgendaPane(_ pane: AgendaPane) {
+        appearance.agendaPane = pane
         if monitorLayout == .simple { appearance.simpleShowSidePanel = true }
         saveAppearance()
+        FeatureTipStore.shared.used("monitor.calendar")
     }
 
     /// `R`: the due-soon filter on the detailed layout's reminders list.
@@ -1139,6 +1153,62 @@ public class AppState: ObservableObject {
     public func openFileEditor(path: String) {
         fileEditor.open(path: path, host: activeHost)
         showFileEditor = true
+        FeatureTipStore.shared.used("files.edit")
+    }
+
+    // MARK: - What's New
+
+    /// Show What's New. After an update it lists what's unannounced; from
+    /// the menu with nothing unannounced, the latest release's features —
+    /// asking for it and getting an empty card would be useless.
+    /// Returns whether there was anything to show.
+    @discardableResult
+    public func openWhatsNew(evenIfNothingNew: Bool) -> Bool {
+        var features = FeatureTipStore.shared.unannounced
+        if features.isEmpty && evenIfNothingNew, let latest = FeatureCatalog.all.last?.since {
+            features = FeatureCatalog.all.filter { $0.since == latest }
+        }
+        guard !features.isEmpty else { return false }
+        whatsNewFeatures = features
+        showWhatsNew = true
+        return true
+    }
+
+    /// Close What's New; everything it listed counts as announced, by
+    /// whichever route it was closed. Showing it again on the next launch
+    /// would teach people to close it unread.
+    public func closeWhatsNew() {
+        FeatureTipStore.shared.markAnnounced(whatsNewFeatures.map(\.id))
+        showWhatsNew = false
+        recalculateFocus()
+    }
+
+    /// The features What's New can demonstrate rather than describe.
+    public static let demonstrableFeatures: Set<String> = [
+        "monitor.calendar", "files.tree", "files.paste", "terminal.ctrl-tab", "panel.divider",
+    ]
+
+    /// "Show me": close What's New and put the feature on screen.
+    public func demonstrateFeature(_ id: String) {
+        closeWhatsNew()
+        switch id {
+        case "monitor.calendar":
+            showMonitor = true
+            setAgendaPane(.calendar)
+        case "files.tree":
+            if !showFullFileBrowser { activeRightPanel = .fileBrowser }
+            fileBrowserManager.treeMode = true
+            FeatureTipStore.shared.used(id)
+        case "files.paste", "panel.divider":
+            // The tip is in the browser; the grip appears with any panel.
+            if activeRightPanel == nil && !showFullFileBrowser { activeRightPanel = .fileBrowser }
+        case "terminal.ctrl-tab":
+            settingsPane = .general
+            showSettings = true
+        default:
+            break
+        }
+        recalculateFocus()
     }
 
     /// Close the editor — unless there are unsaved edits, in which case it
@@ -1274,7 +1344,9 @@ public class AppState: ObservableObject {
 
     /// Dismiss top overlay.
     public func dismissTopOverlay() {
-        if showWalkthrough {
+        if showWhatsNew {
+            closeWhatsNew()
+        } else if showWalkthrough {
             // Escape counts as "seen" — see WalkthroughOverlay.finish().
             showWalkthrough = false
             if !appearance.hasSeenWalkthrough {

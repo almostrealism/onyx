@@ -71,6 +71,9 @@ struct OnyxApp: App {
                 Button("Onyx Walkthrough") {
                     NotificationCenter.default.post(name: .showWalkthrough, object: nil)
                 }
+                Button("What's New in Onyx") {
+                    NotificationCenter.default.post(name: .showWhatsNew, object: nil)
+                }
             }
         }
     }

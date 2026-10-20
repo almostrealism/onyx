@@ -944,11 +944,16 @@ struct DirectoryListView: View {
     }
 
     var body: some View {
-        if browser.treeMode, let root = browser.currentPath {
-            FileTreeView(appState: appState, browser: browser,
-                         roots: displayEntries, rootPath: root)
-        } else {
-            flatList
+        VStack(spacing: 0) {
+            FeatureTipLine(place: .fileBrowser, accent: appState.accentColor,
+                           insets: EdgeInsets(top: 6, leading: 10, bottom: 4, trailing: 10))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if browser.treeMode, let root = browser.currentPath {
+                FileTreeView(appState: appState, browser: browser,
+                             roots: displayEntries, rootPath: root)
+            } else {
+                flatList
+            }
         }
     }
 
@@ -1506,6 +1511,12 @@ struct FileContentView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 4)
             .background(Color.white.opacity(0.03))
+
+            if onEdit != nil {
+                FeatureTipLine(place: .fileViewer, accent: accentColor,
+                               insets: EdgeInsets(top: 5, leading: 12, bottom: 3, trailing: 12))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
 
             SelectableCodeView(
                 attributed: highlightedContent,
