@@ -488,7 +488,7 @@ final class CodableRoundTripTests: XCTestCase {
         config.prDraftFilter = .hideDrafts   // default is .all, so change it
         config.hasSeenWalkthrough = true     // default is false, so flip it
         config.showMenuBarItem = false       // default is true, so flip it
-        config.shiftTabCyclesSessions = false // default is true, so flip it
+        config.shiftTabCyclesSessions = true  // default is false, so flip it
         config.externalDelivery = .never      // default is urgentOnly, so flip it
         config.agendaPane = .calendar         // default is reminders
 
@@ -516,7 +516,7 @@ final class CodableRoundTripTests: XCTestCase {
         XCTAssertEqual(d.prDraftFilter, .hideDrafts)
         XCTAssertTrue(d.hasSeenWalkthrough)
         XCTAssertFalse(d.showMenuBarItem, "defaults true, so the round trip has to carry a false")
-        XCTAssertFalse(d.shiftTabCyclesSessions, "same — a false must survive the trip")
+        XCTAssertTrue(d.shiftTabCyclesSessions, "defaults false, so the round trip has to carry a true")
         XCTAssertEqual(d.externalDelivery, .never)
         XCTAssertEqual(d.agendaPane, .calendar)
     }
@@ -962,27 +962,27 @@ final class SessionSourceGroupingTests: XCTestCase {
 /// terminal emulator ate it.
 final class KeyboardPassthroughTests: XCTestCase {
 
-    /// On by default: it predates the conflict, and silently changing what
-    /// a key does for everyone who isn't running Claude Code would be its
-    /// own bug report.
-    func testShiftTabCyclesSessionsByDefault() {
-        XCTAssertTrue(AppearanceConfig().shiftTabCyclesSessions)
+    /// Off by default since 0.20: ⌃⇥ cycles sessions regardless, so the
+    /// key can go to the terminal, where Claude Code wants it.
+    func testShiftTabGoesToTheTerminalByDefault() {
+        XCTAssertFalse(AppearanceConfig().shiftTabCyclesSessions)
     }
 
-    /// A config written before the setting existed must keep the old
-    /// behavior rather than silently handing the key away.
-    func testAnOlderConfigKeepsTheOldBehavior() throws {
-        let json = Data(#"{"fontSize": 13}"#.utf8)
+    /// A config saved before 0.20 wrote `true` under the old key whether
+    /// or not anyone chose it, so the old key is not read: those users
+    /// get the new default.
+    func testAPre020ConfigGetsTheNewDefault() throws {
+        let json = Data(#"{"fontSize": 13, "shiftTabCyclesSessions": true}"#.utf8)
         let decoded = try JSONDecoder().decode(AppearanceConfig.self, from: json)
-        XCTAssertTrue(decoded.shiftTabCyclesSessions)
+        XCTAssertFalse(decoded.shiftTabCyclesSessions)
     }
 
     func testTheChoiceSurvivesASaveAndLoad() throws {
         var config = AppearanceConfig()
-        config.shiftTabCyclesSessions = false
+        config.shiftTabCyclesSessions = true
         let round = try JSONDecoder().decode(AppearanceConfig.self,
                                              from: try JSONEncoder().encode(config))
-        XCTAssertFalse(round.shiftTabCyclesSessions,
-                       "otherwise the key is taken back on the next launch")
+        XCTAssertTrue(round.shiftTabCyclesSessions,
+                      "otherwise the choice is lost on the next launch")
     }
 }

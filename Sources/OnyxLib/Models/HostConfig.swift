@@ -207,9 +207,9 @@ public struct AppearanceConfig: Codable {
     /// The reason to turn it off: Claude Code uses ⇧⇥ to switch permission
     /// modes, and a shortcut the terminal never receives is indistinguishable
     /// from one the program inside it ignores — the feature simply appears
-    /// broken, with nothing pointing at Onyx. On by default because it
-    /// predates the conflict; ⌘1–9 and ⌘J do the same job when it's off.
-    public var shiftTabCyclesSessions: Bool = true
+    /// broken, with nothing pointing at Onyx. Off by default since 0.20:
+    /// ⌃⇥ cycles sessions unconditionally, so the terminal can have ⇧⇥.
+    public var shiftTabCyclesSessions: Bool = false
     /// When true, Onyx puts an item in the menu bar listing the sessions
     /// that have notes and which of them an agent has alerted you about.
     ///
@@ -303,8 +303,14 @@ public struct AppearanceConfig: Codable {
         case claudeHooksGatePermissions, showFocusOutline
         case searchFileTypeIDs, remindersDueSoonOnly, simpleShowSidePanel
         case showAllContainers, prDraftFilter, hasSeenWalkthrough
-        case showMenuBarItem, shiftTabCyclesSessions, externalDelivery
+        case showMenuBarItem, externalDelivery
         case agendaPane
+        // Stored under a new name since 0.20, when the default became
+        // off. Every config saved before then wrote `true` whether or not
+        // anyone chose it, so the old key can't tell a choice from the
+        // old default — reading it would keep the key from Claude Code
+        // for everyone it was meant to reach.
+        case shiftTabCyclesSessions = "shiftTabCycles"
     }
 
     public init(from decoder: Decoder) throws {
@@ -331,7 +337,7 @@ public struct AppearanceConfig: Codable {
         self.prDraftFilter              = try c.decodeIfPresent(PRDraftFilter.self, forKey: .prDraftFilter)              ?? .all
         self.hasSeenWalkthrough         = try c.decodeIfPresent(Bool.self,           forKey: .hasSeenWalkthrough)         ?? false
         self.showMenuBarItem            = try c.decodeIfPresent(Bool.self,           forKey: .showMenuBarItem)            ?? true
-        self.shiftTabCyclesSessions     = try c.decodeIfPresent(Bool.self,           forKey: .shiftTabCyclesSessions)     ?? true
+        self.shiftTabCyclesSessions     = try c.decodeIfPresent(Bool.self,           forKey: .shiftTabCyclesSessions)     ?? false
         self.externalDelivery           = try c.decodeIfPresent(ExternalDelivery.self, forKey: .externalDelivery)         ?? .urgentOnly
         self.agendaPane                 = try c.decodeIfPresent(AgendaPane.self,     forKey: .agendaPane)                 ?? .reminders
     }

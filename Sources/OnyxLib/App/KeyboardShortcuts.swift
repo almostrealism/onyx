@@ -133,7 +133,7 @@ public class ShortcutManager {
             // permission modes, and a swallowed key looks exactly like a
             // program ignoring it — nothing points at Onyx.
             if flags == .shift && event.keyCode == 48 {
-                if appState(for: event)?.appearance.shiftTabCyclesSessions ?? true {
+                if appState(for: event)?.appearance.shiftTabCyclesSessions ?? false {
                     NotificationCenter.default.post(name: .cycleTmuxSession, object: nil)
                     return nil
                 }

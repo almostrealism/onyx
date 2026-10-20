@@ -34,8 +34,8 @@ struct WalkthroughOverlay: View {
                  keys: [("`", "monitor overlay"), ("⌘K", "command palette"), ("⌘/", "every shortcut")]),
 
             Step(title: "Move between sessions without reaching for the mouse",
-                 body: "Your terminals are tmux sessions that stay alive on the far end. New sessions get a number automatically — ⌘1 through ⌘9 — so you can jump straight to them without setting anything up. ⇧⇥ cycles through the rest in order — or hand that key back to the terminal in Settings → KEYBOARD if you use Claude Code, which wants it. The session list has everything else, including sessions you started outside Onyx.",
-                 keys: [("⌘1–9", "jump to a favorite"), ("⇧⇥", "cycle sessions"), ("⌘J", "the session list")]),
+                 body: "Your terminals are tmux sessions that stay alive on the far end. New sessions get a number automatically — ⌘1 through ⌘9 — so you can jump straight to them without setting anything up. ⌃⇥ cycles through the rest in order. (⇧⇥ can do it too, if you turn that on in Settings → KEYBOARD — it's off because Claude Code uses it.) The session list has everything else, including sessions you started outside Onyx.",
+                 keys: [("⌘1–9", "jump to a favorite"), ("⌃⇥", "cycle sessions"), ("⌘J", "the session list")]),
 
             Step(title: "Sessions that remember what they were for",
                  body: "Come back to nine terminals and the hard part isn't reconnecting, it's remembering which was which. Give each one a note — \"waiting on the migration\", \"epoch 14/40\" — and the monitor lists them with a dot showing which are still producing output. Sessions can be renamed or ended too — right-click one anywhere it appears: the session list (⌘J) or the favorites bar along the bottom.",

@@ -72,9 +72,10 @@ Draft — still being assembled.
   Onyx now sends Shift-Return as ESC CR (Meta-Return), the sequence
   Claude Code reads as a line break. It passes through tmux unchanged. In
   a zsh prompt it adds a line to the command being edited.
-- **⌃⇥ cycles tmux sessions**, whatever ⇧⇥ is set to. With ⇧⇥ given back
-  to the terminal (Settings → General → Keyboard), Claude Code's
-  permission-mode switch works and you still have a cycling key.
+- **⌃⇥ cycles tmux sessions**, and **⇧⇥ now goes to the terminal by
+  default**, so Claude Code's permission-mode switch works out of the box.
+  This applies to existing installs too — if you want ⇧⇥ to cycle
+  sessions again, turn it back on in Settings → General → Keyboard.
 - **Paste files into the file browser.** Copy files or folders in Finder
   with ⌘C, click into the file browser, and press ⌘V. They upload to the
   folder being shown, the same as dropping them there. ⌘V with text on
