@@ -211,6 +211,7 @@ extension AppState {
         startupStatus = "Starting monitors..."
         monitor.startPolling()
         TimingDataStore.shared.startPolling()
+        AgentTimeStore.shared.startPolling()
         _ = timing // trigger lazy init so it subscribes to store changes
 
         // The MCP server for agent integration — ONE per app, not one per

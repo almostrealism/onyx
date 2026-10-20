@@ -29,6 +29,22 @@ Draft — still being assembled.
 
 ## Timing
 
+- **Agent hours beside your own.** With a flowtree controller set up
+  (Settings), the monitor's Timing section adds an **agents** column: the
+  wall-clock time flowtree jobs ran this week across every workstream, per
+  day, and the 4-week and 30-day averages. It has its own color and icon
+  and sits behind a divider. Simple mode gets an **agents** tile at the end
+  of the bottom strip.
+  - It isn't drawn in the bar chart. Jobs in parallel each count in full,
+    so agents can log far more than 24 hours in a day, and one scale for
+    both would flatten your bars.
+  - Days are counted in this Mac's time zone, so they line up with
+    Timing's. A job that runs past midnight is split between the days.
+    Jobs still running count their time so far. A job whose worker has
+    gone silent stops counting at its last heartbeat.
+  - Needs a controller with `GET /api/stats/daily`. An older controller
+    shows a one-line note instead of zeros.
+
 - **Up to three Timing.app projects at once.** Settings → Monitor → Filter
   Projects now takes up to three top-level projects, in the order you
   choose them (each chip shows its place). Each one gets its own bars and

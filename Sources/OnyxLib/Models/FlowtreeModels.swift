@@ -77,3 +77,37 @@ public struct FlowtreeSubmitResult: Codable {
     public let jobId: String?
     public let error: String?
 }
+
+/// One day of agent time from `GET /api/stats/daily`: every workstream's
+/// jobs, the day counted in the time zone Onyx asked for. Jobs in parallel
+/// each count in full, so a day can hold more than 24 hours.
+public struct AgentDay: Codable, Equatable {
+    /// `yyyy-MM-dd`, in the requested zone.
+    public let date: String
+    /// Time finished jobs spent on this day.
+    public let wallClockMs: Int64
+    /// Time jobs still running have spent on this day so far.
+    public let runningMs: Int64
+    /// Jobs that started on this day.
+    public let jobCount: Int
+    /// The recorded cost of jobs that started on this day.
+    public let costUsd: Double
+
+    public init(date: String, wallClockMs: Int64, runningMs: Int64 = 0,
+                jobCount: Int = 0, costUsd: Double = 0) {
+        self.date = date
+        self.wallClockMs = wallClockMs
+        self.runningMs = runningMs
+        self.jobCount = jobCount
+        self.costUsd = costUsd
+    }
+
+    /// Finished and running time together, in hours.
+    public var hours: Double { Double(wallClockMs + runningMs) / 3_600_000 }
+}
+
+/// The `GET /api/stats/daily` response.
+public struct FlowtreeDailyStats: Codable, Equatable {
+    public let tz: String
+    public let days: [AgentDay]
+}

@@ -22,14 +22,17 @@ struct WeeklyTimingTile: View {
     /// tile to tell apart.
     var showsTitle = false
     let accentColor: Color
+    /// The agents tile: always titled, its number in the agents color,
+    /// and drawn even for a week with no agent time.
+    var isAgents = false
 
     var body: some View {
         let total = group.totalWeekHours
         let perDay = group.perDayThisWeek
 
-        if total > 0 {
+        if total > 0 || isAgents {
             VStack(alignment: .trailing, spacing: 5) {
-                if showsTitle {
+                if showsTitle || isAgents {
                     Text(group.title)
                         .monitorFont(size: 9, weight: .medium)
                         .foregroundColor(.white.opacity(0.55))
@@ -53,9 +56,9 @@ struct WeeklyTimingTile: View {
                                        thickness: 10,
                                        length: Self.contentWidth)
                 }
-                Text(formatHours(total))
+                Text(isAgents && total == 0 ? "0h" : formatHours(total))
                     .monitorFont(size: 18, weight: .light)
-                    .foregroundColor(accentColor)
+                    .foregroundColor(isAgents ? Color(hex: group.color) : accentColor)
                 HStack(spacing: 4) {
                     Text(formatHours(perDay))
                         .monitorFont(size: 10)
@@ -70,6 +73,7 @@ struct WeeklyTimingTile: View {
             .padding(.vertical, 6)
             .background(Color.white.opacity(0.04))
             .cornerRadius(4)
+            .help(isAgents ? TimingStatsGrid.agentsHelp : "")
         }
     }
 
@@ -458,9 +462,10 @@ struct TimingBarSection: View {
             // Stats: a column per selected project, plus a total when there
             // is more than one; two rows — the week's hours, then hours/day.
             TimingStatsGrid(columns: TimingStatsGrid.columns(groups: timing.groups,
-                                                             combined: timing.combined))
+                                                             combined: timing.combined),
+                            agents: timing.agents)
 
-            if let error = timing.lastError {
+            if let error = timing.lastError ?? timing.agentError {
                 Text(error)
                     .monitorFont(size: 9)
                     .foregroundColor(Color.onyxRed.opacity(0.6))
@@ -527,6 +532,12 @@ struct TimingStatsGrid: View {
     }
 
     let columns: [Column]
+    /// Agent hours from the flowtree controller, as one more column after
+    /// a divider — set apart because it isn't a person's time.
+    var agents: TimingManager.TimingGroup? = nil
+
+    /// What the agents column's numbers mean.
+    static let agentsHelp = "Agent hours: wall-clock time flowtree jobs ran, across every workstream. Jobs running in parallel each count in full, so this can exceed a day's 24 hours. Includes jobs still running. Not drawn in the bar chart, which is your time."
 
     /// The columns for a selection: each project, then the total — or a
     /// single column when there's only one group, since its total would
@@ -549,38 +560,58 @@ struct TimingStatsGrid: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             ForEach(columns) { column in
-                VStack(alignment: .leading, spacing: 6) {
-                    stat(column.group.totalWeekHours, unit: "hrs",
-                         average: String(format: "%.1f/wk", column.group.avgHoursPerWeekLast4),
-                         span: "4w")
-                    stat(column.group.perDayThisWeek, unit: "hrs/day",
-                         average: String(format: "%.1f/day", column.group.avgHoursPerDayLast30),
-                         span: "30d")
-                    HStack(spacing: 4) {
-                        if let color = column.color {
-                            Circle()
-                                .fill(Color(hex: color))
-                                .frame(width: 5, height: 5)
-                        }
-                        Text(column.label)
-                            .monitorFont(size: 9, weight: .medium)
-                            .foregroundColor(column.color == nil ? .white.opacity(0.75) : .white.opacity(0.55))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    .padding(.top, 1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                columnView(column.group, label: column.label, color: column.color)
+            }
+            if let agents {
+                Rectangle()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(width: 1)
+                columnView(agents, label: "agents", color: agents.color, isAgents: true)
+                    .help(Self.agentsHelp)
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func stat(_ value: Double, unit: String, average: String, span: String) -> some View {
+    private func columnView(_ group: TimingManager.TimingGroup, label: String, color: String?,
+                            isAgents: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            stat(group.totalWeekHours, unit: "hrs",
+                 average: String(format: "%.1f/wk", group.avgHoursPerWeekLast4),
+                 span: "4w", tint: isAgents ? color : nil)
+            stat(group.perDayThisWeek, unit: "hrs/day",
+                 average: String(format: "%.1f/day", group.avgHoursPerDayLast30),
+                 span: "30d", tint: isAgents ? color : nil)
+            HStack(spacing: 4) {
+                if isAgents {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 8))
+                        .foregroundColor(Color(hex: color ?? TimingManager.agentColor))
+                } else if let color {
+                    Circle()
+                        .fill(Color(hex: color))
+                        .frame(width: 5, height: 5)
+                }
+                Text(label)
+                    .monitorFont(size: 9, weight: .medium)
+                    .foregroundColor(color == nil ? .white.opacity(0.75) : .white.opacity(0.55))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .padding(.top, 1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// `tint` colors the number — the agents column's, so it doesn't read
+    /// as one more project of yours.
+    private func stat(_ value: Double, unit: String, average: String, span: String,
+                      tint: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(String(format: "%.1f", value))
                     .monitorFont(size: 14, weight: .medium)
-                    .foregroundColor(.white.opacity(0.9))
+                    .foregroundColor(tint.map { Color(hex: $0) } ?? .white.opacity(0.9))
                 Text(unit)
                     .monitorFont(size: 8)
                     .foregroundColor(.gray.opacity(0.5))

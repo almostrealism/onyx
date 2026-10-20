@@ -97,6 +97,36 @@ public struct FlowtreeClient {
         }
     }
 
+    /// `GET /api/stats/daily` — agent time per day, `from` to `to`
+    /// inclusive, days counted in `timeZone`.
+    ///
+    /// A controller from before this endpoint routes the path to the weekly
+    /// stats instead, which doesn't decode as days: that surfaces as
+    /// `.decode`, and callers treat it as "this controller doesn't report
+    /// agent time yet".
+    public func dailyStats(from: String, to: String,
+                           timeZone: String) async throws -> FlowtreeDailyStats {
+        let data = try await perform(path: Self.dailyStatsPath(from: from, to: to, timeZone: timeZone),
+                                     method: "GET")
+        do {
+            return try JSONDecoder().decode(FlowtreeDailyStats.self, from: data)
+        } catch {
+            throw FlowtreeError.decode(error.localizedDescription)
+        }
+    }
+
+    /// The path and query for `dailyStats`.
+    static func dailyStatsPath(from: String, to: String, timeZone: String) -> String {
+        var c = URLComponents()
+        c.path = "/api/stats/daily"
+        c.queryItems = [URLQueryItem(name: "from", value: from),
+                        URLQueryItem(name: "to", value: to),
+                        URLQueryItem(name: "tz", value: timeZone)]
+        // "/" in a zone id is legal in a query; "+" (Etc/GMT+5) is not left alone by servers.
+        c.percentEncodedQuery = c.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        return c.string ?? "/api/stats/daily"
+    }
+
     /// `GET /api/health` — true if the controller is reachable and healthy.
     public func health() async throws -> Bool {
         _ = try await perform(path: "/api/health", method: "GET")

@@ -54,12 +54,24 @@ public class TimingManager: ObservableObject {
     /// Every selected project together — the "total" column beside them.
     @Published public var combined: TimingGroup?
 
+    /// Agent hours from the flowtree controller (AgentTimeStore), shaped
+    /// like a project so it gets the same numbers: the week, per day, and
+    /// the 4-week and 30-day averages. Never in `groups`, so never in the
+    /// bar chart — parallel jobs put far more hours in a day than a person
+    /// does, and one scale for both would flatten the person's bars. Nil
+    /// when no controller is configured or it has nothing to report.
+    @Published public var agents: TimingGroup?
+
+    /// The agents column's color — apart from the project palette.
+    public static let agentColor = "9A8CFF"
+
     /// The most top-level projects that can be selected at once. Each gets
     /// its own bar per day, so three means 21 bars in the week chart —
     /// past that they stop being readable.
     public static let maxFilterProjects = 3
 
     private var storeCancellable: AnyCancellable?
+    private var agentCancellable: AnyCancellable?
     private let windowIndex: Int
 
     /// DailyTime.
@@ -159,6 +171,9 @@ public class TimingManager: ObservableObject {
         storeCancellable = TimingDataStore.shared.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.recompute() }
         }
+        agentCancellable = AgentTimeStore.shared.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.recompute() }
+        }
     }
 
     // MARK: - Per-window filter
@@ -235,6 +250,43 @@ public class TimingManager: ObservableObject {
         avgHoursPerDayLast30 = result.combined.avgHoursPerDayLast30
         heatmapAnchorMonday = store.weekMonday
         heatmap = result.heatmap
+        agents = Self.agentGroup(days: AgentTimeStore.shared.days,
+                                 monday: Self.monday(of: Date()), today: Date())
+    }
+
+    /// Why agent hours are missing, when a controller is configured.
+    public var agentError: String? { AgentTimeStore.shared.lastError }
+
+    /// The Monday that starts the week containing `date`.
+    static func monday(of date: Date, calendar: Calendar = .current) -> Date {
+        let weekday = calendar.component(.weekday, from: date)
+        let daysFromMonday = (weekday + 5) % 7
+        return calendar.startOfDay(for: calendar.date(byAdding: .day, value: -daysFromMonday, to: date)!)
+    }
+
+    /// Agent days as a group: this week's seven days, their total, and the
+    /// same averages the project columns carry. Nil when there are no days
+    /// at all (no controller, or one that can't answer). A week of zeros is
+    /// still a group — "no agent ran" is worth showing.
+    public static func agentGroup(days: [AgentDay], monday: Date, today: Date) -> TimingGroup? {
+        guard !days.isEmpty else { return nil }
+        let calendar = Calendar.current
+        let hoursByDate = Dictionary(days.map { ($0.date, $0.hours) }, uniquingKeysWith: +)
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        let labels = ["M", "T", "W", "T", "F", "S", "S"]
+        let week: [DailyTime] = (0..<7).map { i in
+            let date = calendar.date(byAdding: .day, value: i, to: monday)!
+            let key = df.string(from: date)
+            return DailyTime(id: key, dayLabel: labels[i], date: date,
+                             hours: hoursByDate[key] ?? 0, projects: [])
+        }
+        return TimingGroup(
+            id: "agents", title: "agents", color: agentColor,
+            dailyHours: week, projectTotals: [],
+            totalWeekHours: week.reduce(0) { $0 + $1.hours },
+            avgHoursPerWeekLast4: avgHoursPerWeek(hoursByDate: hoursByDate, currentMonday: monday, weeks: 4),
+            avgHoursPerDayLast30: avgHoursPerDay(hoursByDate: hoursByDate, today: today, days: 30))
     }
 
     // MARK: - The computation, pure

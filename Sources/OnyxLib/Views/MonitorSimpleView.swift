@@ -47,7 +47,7 @@ struct SimpleMonitorBody: View {
             // With more than one Timing project each tile carries its
             // project's name too, a line taller.
             let bottomStripHeight = Self.bottomStripHeight(
-                titledTimingTiles: timing.isConfigured && timing.groups.count > 1,
+                titledTimingTiles: (timing.isConfigured && timing.groups.count > 1) || timing.agents != nil,
                 fontScale: fontScale)
             let chartArea = max(0, geo.size.height - bottomStripHeight - 16)
             let showsSubRow = (monitor.showMemoryChart && !monitor.bucketedMemory().isEmpty)
@@ -209,6 +209,10 @@ struct MonitorBottomStrip<Workloads: View>: View {
                         WeeklyTimingTile(group: group, showsTitle: timing.groups.count > 1,
                                          accentColor: accentColor)
                     }
+                }
+                // Agent hours last, titled, in their own color: not yours.
+                if let agents = timing.agents {
+                    WeeklyTimingTile(group: agents, accentColor: accentColor, isAgents: true)
                 }
             }
             .frame(height: height)
