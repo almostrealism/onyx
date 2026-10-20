@@ -67,10 +67,14 @@ public struct ContentView: View {
         }
     }
 
-    /// Fraction of window width for the right panel (0.0–0.85)
-    @State private var rightPanelFraction: CGFloat = 0.4
-    /// Preset split ratios for the right panel (fraction of total width)
-    private static let panelPresets: [CGFloat] = [0.3, 0.4, 0.5, 0.6, 0.7]
+    /// The right panel's share of the window. Each window remembers its
+    /// own across launches (`PanelSplit`); loaded once the window has its
+    /// index.
+    @State private var rightPanelFraction = CGFloat(PanelSplit.defaultFraction)
+
+    private func saveRightPanelFraction() {
+        PanelSplit.save(Double(rightPanelFraction), window: appState.windowIndex)
+    }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -165,36 +169,11 @@ public struct ContentView: View {
 
                         // RIGHT: Side panel with draggable divider
                         if let panel = appState.activeRightPanel {
-                            // Drag handle — 10pt wide grab area, 1pt visible line
-                            Rectangle()
-                                .fill(Color.white.opacity(0.001)) // nearly invisible but hittable
-                                .frame(width: 10)
-                                .contentShape(Rectangle())
-                                .overlay(
-                                    Rectangle()
-                                        .fill(appState.accentColor.opacity(0.15))
-                                        .frame(width: 1)
-                                )
-                                .onHover { hovering in
-                                    if hovering {
-                                        NSCursor.resizeLeftRight.push()
-                                    } else {
-                                        NSCursor.pop()
-                                    }
-                                }
-                                .gesture(
-                                    DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                                        .onChanged { value in
-                                            let totalWidth = geo.size.width
-                                            guard totalWidth > 0 else { return }
-                                            // Convert global X to local frame X
-                                            let windowOriginX = geo.frame(in: .global).minX
-                                            let localX = value.location.x - windowOriginX
-                                            let panelWidth = totalWidth - localX
-                                            let fraction = panelWidth / totalWidth
-                                            rightPanelFraction = min(max(fraction, 0.2), 0.85)
-                                        }
-                                )
+                            PanelDivider(accent: appState.accentColor,
+                                         containerWidth: geo.size.width,
+                                         containerMinX: geo.frame(in: .global).minX,
+                                         fraction: $rightPanelFraction,
+                                         onCommit: saveRightPanelFraction)
                                 .zIndex(10)
 
                             rightPanelView(for: panel)
@@ -325,6 +304,7 @@ public struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             appState.loadConfig()
+            rightPanelFraction = CGFloat(PanelSplit.load(window: appState.windowIndex))
         }
         .onChange(of: appState.activeSession) { _, session in
             // Dismiss startup animation once a session is connected
@@ -361,12 +341,11 @@ public struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .cyclePanelSize)) { _ in
             guard hostWindow?.isKeyWindow == true else { return }
             guard appState.activeRightPanel != nil else { return }
-            let current = rightPanelFraction
-            let next = Self.panelPresets.first(where: { $0 > current + 0.01 })
-                ?? Self.panelPresets.first ?? 0.4
+            let next = CGFloat(PanelSplit.nextPreset(after: Double(rightPanelFraction)))
             withAnimation(.easeInOut(duration: 0.2)) {
                 rightPanelFraction = next
             }
+            saveRightPanelFraction()
         }
         .modifier(ContentViewNotifications(appState: appState, updateWindowTitle: updateWindowTitle, hostWindow: hostWindow))
         .onChange(of: hostWindow) { _, window in
@@ -1233,7 +1212,7 @@ struct FavoritesBar: View {
                 .padding(.trailing, 4)
 
             if appState.favoriteSessions.count > 1 {
-                Text("⇧⇥ switch")
+                Text(appState.appearance.shiftTabCyclesSessions ? "⇧⇥ switch" : "⌃⇥ switch")
                     .font(.system(size: sz(9), design: .monospaced))
                     .foregroundColor(.gray.opacity(0.25))
                     .padding(.trailing, 4)
