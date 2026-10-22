@@ -65,6 +65,17 @@ final class RemoteScriptBudgetTests: XCTestCase {
         assertFits(payload(script, state: state, host: host), "the file editor's save")
     }
 
+    // MARK: - Claude sessions
+
+    /// Fixed text — nothing scales — but it reaches a terminal on noexec
+    /// hosts, and the `#{}` formats must survive an interactive shell.
+    func testThePaneLookupFitsAndIsSafeInteractively() {
+        let (state, host) = makeState()
+        assertFits(payload(TmuxPaneLookup.script, state: state, host: host), "the tmux pane lookup")
+        XCTAssertFalse(TmuxPaneLookup.script.contains("!"), "history expansion eats the line")
+        XCTAssertFalse(TmuxPaneLookup.script.contains("*"), "an unmatched glob is fatal in zsh")
+    }
+
     // MARK: - The monitor
 
     /// The one that broke every Mac. Stats are polled per host per tick, so

@@ -52,19 +52,33 @@ public struct HookOrigin: Equatable, Hashable {
     public let machine: String
     public let user: String?
     public let session: String?
+    /// The hook's ancestor pids, nearest first — sent instead of a session
+    /// when the hook couldn't ask tmux (Claude under `su -` in another
+    /// account's tmux). Onyx looks the pane up; see `TmuxPaneLookup`.
+    public let pids: [Int]
 
-    public init(machine: String, user: String? = nil, session: String? = nil) {
+    public init(machine: String, user: String? = nil, session: String? = nil, pids: [Int] = []) {
         self.machine = machine
         self.user = user
         self.session = session
+        self.pids = pids
     }
 
     /// From the event's `onyx_origin`.
     public init?(_ raw: Any?) {
         guard let dict = raw as? [String: Any],
               let machine = dict["machine"] as? String, !machine.isEmpty else { return nil }
-        self.init(machine: machine, user: dict["user"] as? String, session: dict["session"] as? String)
+        self.init(machine: machine, user: dict["user"] as? String, session: dict["session"] as? String,
+                  pids: (dict["pids"] as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } ?? [])
     }
+
+    /// The same origin, with the session Onyx found for it.
+    public func with(session: String) -> HookOrigin {
+        HookOrigin(machine: machine, user: user, session: session, pids: pids)
+    }
+
+    /// Whether Onyx should look the session up.
+    public var needsPaneLookup: Bool { session == nil && !pids.isEmpty }
 
     /// "user@machine", the identity hooks are configured for.
     public var account: String { user.map { "\($0)@\(machine)" } ?? machine }
@@ -156,13 +170,76 @@ public class ClaudeSessionManager: ObservableObject {
     /// Create a new instance.
     public init() {}
 
+    // MARK: - Finding the tmux session a hook couldn't name
+
+    /// Asks a host's tmux which session an origin's pids belong to, and
+    /// calls back on main with the name or nil. Set once by the first
+    /// window (AppState owns the SSH); see `registerPaneLookup`.
+    public typealias PaneLookup = (HookOrigin, @escaping (String?) -> Void) -> Void
+    private var paneLookup: PaneLookup?
+    private weak var paneLookupOwner: AnyObject?
+
+    /// Per Claude session: what the lookup found, and when it last tried.
+    /// Keyed by session id, not pids: Claude starts each hook through a
+    /// fresh shell, so the nearest pid changes on every event.
+    private struct PaneLookupState {
+        var session: String?
+        var tries = 0
+        var lastTry: Date
+        var inFlight = false
+    }
+    private var paneLookups: [String: PaneLookupState] = [:]
+    /// A miss is retried this often, this many times — the session may
+    /// not be listed yet, or the host may be reconnecting. Past that it is
+    /// left unnamed rather than costing an ssh call per minute forever.
+    static let paneRetryInterval: TimeInterval = 60
+    static let paneMaxTries = 3
+
+    /// Install the lookup. First owner wins; a later one takes over only
+    /// once the first is gone (its window closed).
+    public func registerPaneLookup(owner: AnyObject, _ lookup: @escaping PaneLookup) {
+        DispatchQueue.main.async {
+            guard self.paneLookup == nil || self.paneLookupOwner == nil else { return }
+            self.paneLookupOwner = owner
+            self.paneLookup = lookup
+        }
+    }
+
+    /// The origin to show for `sessionId`: as reported, or with the
+    /// session the lookup found. Starts a lookup when one is due. Main only.
+    private func resolvedOrigin(_ origin: HookOrigin, sessionId: String, at now: Date) -> HookOrigin {
+        guard origin.needsPaneLookup else { return origin }
+        if let found = paneLookups[sessionId]?.session { return origin.with(session: found) }
+        guard let lookup = paneLookup, paneLookupOwner != nil else { return origin }
+        var state = paneLookups[sessionId] ?? PaneLookupState(lastTry: .distantPast)
+        guard !state.inFlight, state.tries < Self.paneMaxTries,
+              now.timeIntervalSince(state.lastTry) >= Self.paneRetryInterval else { return origin }
+        state.inFlight = true
+        state.tries += 1
+        state.lastTry = now
+        paneLookups[sessionId] = state
+        lookup(origin) { [weak self] found in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.paneLookups[sessionId]?.inFlight = false
+                guard let found else { return }
+                self.paneLookups[sessionId]?.session = found
+                if let current = self.sessions[sessionId]?.origin, current.session == nil {
+                    self.sessions[sessionId]?.origin = current.with(session: found)
+                }
+            }
+        }
+        return origin
+    }
+
     /// Note where an event came from. Public for tests.
     public func recordOrigin(_ origin: HookOrigin?, event: String, sessionId: String, at: Date = Date()) {
         DispatchQueue.main.async {
-            guard let origin else {
+            guard let reported = origin else {
                 self.anonymousHookEvents += 1
                 return
             }
+            let origin = self.resolvedOrigin(reported, sessionId: sessionId, at: at)
             var source = self.hookSources[origin.account]
                 ?? HookSource(account: origin.account, lastEvent: event, lastAt: at, events: 0, sessions: [])
             source.lastEvent = event

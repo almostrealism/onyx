@@ -828,6 +828,16 @@ if let flag = CommandLine.arguments.firstIndex(of: "--install-hooks") {
 }
 
 // `--hooks-status` is the one-line verdict the app's status check reads.
+// `--origin` prints what a hook run here would say about where it is:
+// machine, account, and the tmux session or the ancestor pids the desktop
+// will look the session up by. Touches nothing.
+if CommandLine.arguments.contains("--origin") {
+    let data = (try? JSONSerialization.data(withJSONObject: ClaudeHooks.origin(),
+                                            options: [.sortedKeys])) ?? Data()
+    print(String(data: data, encoding: .utf8) ?? "{}")
+    exit(0)
+}
+
 if CommandLine.arguments.contains("--hooks-status") {
     let health = ClaudeHooks.health(atPath: ClaudeHooks.settingsPath())
     print(health.line)

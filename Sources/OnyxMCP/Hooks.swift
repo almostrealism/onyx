@@ -248,15 +248,56 @@ enum ClaudeHooks {
     /// can say which host a Claude session is on — and so it can list the
     /// hosts it has heard from, which is the first question when one is
     /// missing.
-    static func origin(environment: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
-        var out: [String: String] = ["machine": machineName()]
+    ///
+    /// When this account can't ask tmux — Claude was started with `su -`
+    /// or `sudo -iu` inside someone else's tmux, which clears `TMUX` and
+    /// leaves the server's socket unreadable to us — the event carries
+    /// this process's ancestors instead (`pids`, nearest first). The
+    /// desktop connects as the tmux owner, so it can ask which pane's
+    /// shell is among them.
+    static func origin(environment: [String: String] = ProcessInfo.processInfo.environment) -> [String: Any] {
+        var out: [String: Any] = ["machine": machineName()]
         if let user = environment["USER"] ?? environment["LOGNAME"], !user.isEmpty {
             out["user"] = user
         }
         if environment["TMUX"] != nil, let session = tmuxSession(pane: environment["TMUX_PANE"]) {
             out["session"] = session
+        } else {
+            let pids = ancestorPIDs()
+            if !pids.isEmpty { out["pids"] = pids }
         }
         return out
+    }
+
+    /// This process's parent, its parent, and so on — up to `limit`, and
+    /// stopping before launchd/init. Read from the kernel, not `ps`: this
+    /// runs inside the hook's 3-second deadline.
+    static func ancestorPIDs(limit: Int = 16) -> [Int] {
+        var out: [Int] = []
+        var pid = Int(getppid())
+        while pid > 1, out.count < limit, !out.contains(pid) {
+            out.append(pid)
+            guard let parent = parentPID(of: pid) else { break }
+            pid = parent
+        }
+        return out
+    }
+
+    static func parentPID(of pid: Int) -> Int? {
+        #if os(Linux)
+        // /proc/<pid>/stat: "pid (comm) state ppid ...". comm may hold
+        // spaces and parentheses, so read from after the LAST ')'.
+        guard let stat = try? String(contentsOfFile: "/proc/\(pid)/stat", encoding: .utf8),
+              let close = stat.lastIndex(of: ")") else { return nil }
+        let fields = stat[stat.index(after: close)...].split(separator: " ")
+        return fields.count > 1 ? Int(fields[1]) : nil
+        #else
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, Int32(pid)]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        return Int(info.kp_eproc.e_ppid)
+        #endif
     }
 
     /// `gethostname`, not ProcessInfo.hostName: on macOS the latter can do

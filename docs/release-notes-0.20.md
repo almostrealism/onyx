@@ -27,6 +27,15 @@ Draft — still being assembled.
   ⌘\ still steps through preset widths, and the window remembers those
   too.
 
+## Claude sessions
+
+- **A Claude started with `su -` or `sudo -iu` inside your tmux is listed
+  under its tmux session** instead of just the machine name. Switching
+  accounts hides tmux from the agent's hooks, so the bridge sends its
+  process ancestry and Onyx asks your tmux which pane it's in. Hosts need
+  the new bridge (protocol 5), so they show "update available" until
+  reinstalled. `OnyxMCP --origin` shows what a hook on that host reports.
+
 ## Timing
 
 - **Agent hours beside your own.** With a flowtree controller set up

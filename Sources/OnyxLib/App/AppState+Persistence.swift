@@ -378,6 +378,9 @@ extension AppState {
         // Alerts attach to sessions, not to windows, so the delivery path
         // binds once to whichever window came up first.
         AlertDelivery.shared.register(appState: self)
+        // And the hook path, to name the tmux session of a Claude started
+        // under `su -`, which its own hooks can't.
+        registerPaneLookup()
         // Same rationale for the menu bar item, which shows the same
         // alerts against the same sessions. Never under XCTest: a test
         // process has no business putting an icon in the user's menu bar.

@@ -51,5 +51,8 @@ public enum OnyxVersion {
     ///     they came from (`onyx_origin`) and every hook run is recorded
     ///     in the ledger. Hosts on 3 show "update available", and the
     ///     reinstall is what writes hooks where they were never written.
-    public static let bridgeProtocol = 4
+    /// 5 — a hook that can't ask tmux itself (Claude started with `su -`
+    ///     inside another account's tmux) sends its ancestor pids in
+    ///     `onyx_origin.pids`, and the desktop finds the pane they belong to.
+    public static let bridgeProtocol = 5
 }
