@@ -148,11 +148,8 @@ public final class MCPInstaller: ObservableObject {
             fi
             \(Self.hooksStatusScript)
             """
-            let (cmd, args, stdin) = appState.remoteScriptNoTTY(script, host: host)
-            let result = RemoteExec.shared.run(cmd, args: args, stdin: stdin,
-                                               softTimeout: 20,
-                                               captureStdout: true, captureStderr: true,
-                                               label: "mcpStatus:\(host.label)")
+            let result = appState.transport.execute(.script(script, terminal: false), on: host,
+                                                    timeout: 20, label: "mcpStatus:\(host.label)")
             let output = RemoteScript.cleanedOutput(result.stdout + result.stderr)
             self.setStatus(Self.parseStatus(output), for: host.id)
         }
@@ -332,11 +329,8 @@ public final class MCPInstaller: ObservableObject {
         echo "---UNAME---"; uname -s; uname -m
         echo "---BASE---"; echo "$SHARED_OR_HOME"
         """
-        let (pcmd, pargs, pstdin) = appState.remoteScriptNoTTY(probe, host: host)
-        let probed = RemoteExec.shared.run(pcmd, args: pargs, stdin: pstdin,
-                                           softTimeout: 20,
-                                           captureStdout: true, captureStderr: true,
-                                           label: "mcpProbe:\(host.label)")
+        let probed = appState.transport.execute(.script(probe, terminal: false), on: host,
+                                                timeout: 20, label: "mcpProbe:\(host.label)")
         let probeOut = RemoteScript.cleanedOutput(probed.stdout + probed.stderr)
         let status = Self.parseStatus(probeOut + "\n---BIN---\nABSENT")
         guard let base = status.path.map({ String($0.dropLast("/\(MCPInstall.relativeBinaryPath)".count)) }),
@@ -372,10 +366,8 @@ public final class MCPInstaller: ObservableObject {
         //    would run a truncated file and fail in a way that points
         //    nowhere near here.
         let mk = "mkdir -p \"$(dirname \(Self.shellQuote(remotePath)))\""
-        let (mkc, mka, mks) = appState.remoteScriptNoTTY(mk, host: host)
-        _ = RemoteExec.shared.run(mkc, args: mka, stdin: mks, softTimeout: 20,
-                                  captureStdout: false, captureStderr: false,
-                                  label: "mcpMkdir:\(host.label)")
+        _ = appState.transport.execute(.script(mk, terminal: false), on: host,
+                                       timeout: 20, label: "mcpMkdir:\(host.label)")
 
         let staging = remotePath + ".new"
         if host.isLocal {
@@ -392,13 +384,9 @@ public final class MCPInstaller: ObservableObject {
                 return false
             }
         } else {
-            let (scpCmd, scpArgs) = appState.scpCommandAbsolute(localPath: localBinary.path,
-                                                                remotePath: staging,
-                                                                host: host)
-            let upload = RemoteExec.shared.run(scpCmd, args: scpArgs, stdin: nil,
-                                               softTimeout: 180,
-                                               captureStdout: true, captureStderr: true,
-                                               label: "mcpUpload:\(host.label)")
+            let upload = appState.transport.upload(localBinary.path, to: staging, on: host,
+                                                   recursive: false, timeout: 180,
+                                                   label: "mcpUpload:\(host.label)")
             guard upload.exit == 0 else {
                 let why = (upload.stderr + upload.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
                 fail("Upload failed: \(why.isEmpty ? "scp exit \(upload.exit)" : why)", for: host.id)
@@ -471,11 +459,8 @@ public final class MCPInstaller: ObservableObject {
         \(Self.multiUserScript(binaryPath: remotePath, base: base))
         echo "---DONE---"
         """
-        let (icmd, iargs, istdin) = appState.remoteScriptNoTTY(install, host: host)
-        let installed = RemoteExec.shared.run(icmd, args: iargs, stdin: istdin,
-                                               softTimeout: 60,
-                                               captureStdout: true, captureStderr: true,
-                                               label: "mcpInstall:\(host.label)")
+        let installed = appState.transport.execute(.script(install, terminal: false), on: host,
+                                                   timeout: 60, label: "mcpInstall:\(host.label)")
         let out = RemoteScript.cleanedOutput(installed.stdout + installed.stderr)
 
         guard out.range(of: "---DONE---", options: .backwards) != nil else {

@@ -494,16 +494,13 @@ public final class LSPManager: ObservableObject {
         // a script's size stops being a silent failure mode on every host
         // that isn't hostile.
         //
-        // Both commands are built HERE, on the actor that owns the state,
-        // and only the resulting values cross to the background queue —
+        // The transport is taken HERE, on the actor that owns the state;
         // AppState isn't Sendable and has no business being captured.
-        let piped = appState.remoteScriptNoTTY(script, host: host)
-        let tty = appState.remoteScript(script, host: host)
-        let label = host.label
+        let transport = appState.transport
         return await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: FileBrowserManager.runScriptWithFallback(
-                    piped: piped, tty: tty, label: label, timeout: timeout).cleaned)
+                cont.resume(returning: transport.runScript(script, on: host, timeout: timeout,
+                                                           label: "lsp:\(host.label)").cleaned)
             }
         }
     }

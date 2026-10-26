@@ -35,24 +35,21 @@ extension AppState {
         let candidates = named.isEmpty ? usable.filter { !$0.isLocal } : named
         guard !candidates.isEmpty else { return done(nil) }
 
-        // Build the commands here, where AppState lives; run them off main.
-        let jobs: [(label: String, piped: (cmd: String, args: [String], stdin: String?),
-                    tty: (cmd: String, args: [String], stdin: String?), release: () -> Void)]
-            = candidates.compactMap { host in
-                guard let release = acquireUtilityChannel("tmux-panes", host: host) else { return nil }
-                let tty = remoteScript(TmuxPaneLookup.script, host: host)
-                let piped = host.isLocal ? tty : remoteScriptNoTTY(TmuxPaneLookup.script, host: host)
-                return (host.label, piped, tty, release)
-            }
+        // Claim the channels here, where AppState lives; run off main.
+        let jobs: [(host: HostConfig, release: () -> Void)] = candidates.compactMap { host in
+            guard let release = acquireUtilityChannel("tmux-panes", host: host) else { return nil }
+            return (host, release)
+        }
         guard !jobs.isEmpty else { return done(nil) }
         let trustSingleOnly = named.isEmpty
+        let transport = self.transport
 
         DispatchQueue.global(qos: .utility).async {
             var hits: [String] = []
             for job in jobs {
                 defer { job.release() }
-                let run = FileBrowserManager.runScriptWithFallback(piped: job.piped, tty: job.tty,
-                                                                   label: job.label, timeout: 8)
+                let run = transport.runScript(TmuxPaneLookup.script, on: job.host, timeout: 8,
+                                              label: "tmux-panes:\(job.host.label)")
                 guard let output = run.cleaned,
                       let name = TmuxPaneLookup.session(ancestors: origin.pids,
                                                         panes: TmuxPaneLookup.parse(output)) else { continue }

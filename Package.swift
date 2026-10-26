@@ -75,6 +75,11 @@ let package = Package(
             dependencies: ["OnyxVersion"],
             path: "Sources/OnyxMCP"
         ),
+        // A real sshd for tests (LocalSSHD). Test-only: no product uses it.
+        .target(
+            name: "OnyxTestSupport",
+            path: "Tests/OnyxTestSupport"
+        ),
         .testTarget(
             name: "OnyxTests",
             dependencies: ["OnyxCore", "OnyxLib"],
@@ -82,7 +87,7 @@ let package = Package(
         ),
         .testTarget(
             name: "OnyxIntegrationTests",
-            dependencies: ["OnyxCore", "OnyxLib"],
+            dependencies: ["OnyxCore", "OnyxLib", "OnyxTestSupport"],
             path: "Tests/OnyxIntegrationTests"
         ),
     ]

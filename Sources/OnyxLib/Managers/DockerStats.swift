@@ -136,20 +136,17 @@ public class DockerStatsManager: ObservableObject {
         docker stats --no-stream --format "STAT|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}" 2>/dev/null; \
         docker ps --format "PS|{{.Names}}|{{.Status}}" 2>/dev/null
         """
-        let (cmd, args, stdinScript) = appState.remoteScript(script)
-
-        let hostLabel = appState.activeHost?.label ?? "local"
+        let target = appState.activeHost ?? .localhost
+        let transport = appState.transport
+        let hostLabel = target.label
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             defer { releaseChannel() }
-            // Route through the central executor for bounded execution +
-            // PID tracking. Previously this was a raw Process with a
-            // SIGTERM-only kill timer.
-            let result = RemoteExec.shared.run(
-                cmd, args: args, stdin: stdinScript,
-                softTimeout: 10,
-                captureStdout: true,
-                captureStderr: false,
+            // Bounded and tracked by the transport. Previously this was a
+            // raw Process with a SIGTERM-only kill timer.
+            let result = transport.execute(
+                .script(script, terminal: true), on: target,
+                timeout: 10,
                 label: "dockerStats:\(hostLabel)"
             )
             let raw = result.stdout

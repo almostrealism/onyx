@@ -185,24 +185,11 @@ extension OnyxTerminalView {
                 continue
             }
 
-            let (cmd, args) = appState.remoteCommand(script, host: host)
-            let process = Process()
-            let pipe = Pipe()
-            process.executableURL = URL(fileURLWithPath: cmd)
-            process.arguments = args
-            process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-            } catch {
-                continue
-            }
-
+            let result = appState.transport.runCommand(script, on: host, timeout: 15,
+                                                       label: "recreateFavorite")
             // Only add to results if the command succeeded (exit 0)
-            guard process.terminationStatus == 0 else { continue }
-            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            guard result.exit == 0 else { continue }
+            let output = result.stdout
             guard output.contains("CREATED") || output.contains("EXISTS") else { continue }
 
             print("recreateMissingFavorites: recreated \(session.displayLabel)")
@@ -310,26 +297,8 @@ extension OnyxTerminalView {
             return
         }
 
-        let (cmd, args) = appState.remoteCommand(script, host: host)
-
-        let process = Process()
-        let stdoutPipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: cmd)
-        process.arguments = args
-        process.standardOutput = stdoutPipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            completion([])
-            return
-        }
-
-        let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        let output = String(data: outputData, encoding: .utf8) ?? ""
+        let output = appState.transport.runCommand(script, on: host, timeout: 15,
+                                                   label: "tmux ls:\(host.label)").stdout
         let parsed = Self.parseSessionList(output, source: source)
         for (session, activity) in parsed {
             guard let activity else { continue }
@@ -376,26 +345,8 @@ extension OnyxTerminalView {
 
     private func fetchDockerContainerSessions(host: HostConfig, completion: @escaping ([TmuxSession]) -> Void) {
         let listScript = "docker ps --format \"{{.Names}}\" 2>/dev/null || true"
-        let (cmd, args) = appState.remoteCommand(listScript, host: host)
-
-        let process = Process()
-        let stdoutPipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: cmd)
-        process.arguments = args
-        process.standardOutput = stdoutPipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            completion([])
-            return
-        }
-
-        let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        let output = String(data: outputData, encoding: .utf8) ?? ""
+        let output = appState.transport.runCommand(listScript, on: host, timeout: 15,
+                                                   label: "docker ps:\(host.label)").stdout
         let containerNames = output.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }

@@ -215,15 +215,10 @@ public final class CPUFleetPoller {
             "fleetPoller:\(host.id)", host: host) else { return nil }
         defer { releaseChannel() }
 
-        let (cmd, args, stdinScript) = appState.statsCommand(host: host)
-
-        // Route through the central executor — bounded with SIGKILL
-        // escalation, PID tracked in the unified registry.
-        let result = RemoteExec.shared.run(
-            cmd, args: args, stdin: stdinScript,
-            softTimeout: Self.perHostTimeout,
-            captureStdout: true,
-            captureStderr: true,
+        // Bounded with SIGKILL escalation, tracked — the transport's job.
+        let result = appState.transport.execute(
+            .script(AppState.statsScript, terminal: true), on: host,
+            timeout: Self.perHostTimeout,
             label: "fleetPoller:\(host.label)"
         )
         return (result.stdout + result.stderr)
@@ -276,12 +271,9 @@ public final class CPUFleetPoller {
             "fleetAccel:\(host.id)", host: host) else { return nil }
         defer { release() }
 
-        let (cmd, args, stdinScript) = appState.acceleratorCommand(.amdGPU, host: host)
-        let result = RemoteExec.shared.run(
-            cmd, args: args, stdin: stdinScript,
-            softTimeout: Self.perHostTimeout,
-            captureStdout: true, captureStderr: true,
-            label: "fleetAccel:\(host.label)")
+        let result = appState.transport.execute(
+            .script(AppState.acceleratorScript(.amdGPU), terminal: true), on: host,
+            timeout: Self.perHostTimeout, label: "fleetAccel:\(host.label)")
         let output = (result.stdout + result.stderr)
             .replacingOccurrences(of: "\r", with: "")
         return MonitorManager.parse(output: output)?.gpuUsage

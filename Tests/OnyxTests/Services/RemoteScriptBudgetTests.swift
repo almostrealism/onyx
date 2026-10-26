@@ -114,7 +114,7 @@ final class RemoteScriptBudgetTests: XCTestCase {
 
     // MARK: - Shared state
 
-    /// Both go through runScriptWithFallback, which retries over a TTY.
+    /// Both go through runScript, which retries over a TTY.
     func testTheSharedStateScriptsFit() {
         let (state, host) = makeState()
         assertFits(payload(SharedStateSync.makeDirectoryScript, state: state, host: host),
@@ -192,7 +192,7 @@ final class RemoteScriptBudgetTests: XCTestCase {
     ///
     /// That makes them safe and fragile at once — safe as written, and one
     /// call-site change away from silent truncation, because
-    /// `runScriptWithFallback` retries over a TTY. So the rule is asserted
+    /// `runScript` retries over a TTY. So the rule is asserted
     /// where it can't be enforced by a type: the installer must never use
     /// the fallback helper.
     func testTheInstallerNeverUsesTheTTYFallback() throws {
@@ -204,13 +204,17 @@ final class RemoteScriptBudgetTests: XCTestCase {
         let source = try String(
             contentsOf: root.appendingPathComponent("Sources/OnyxLib/Managers/MCPInstaller.swift"),
             encoding: .utf8)
-        XCTAssertFalse(source.contains("runScriptWithFallback"),
+        // Every script the installer runs goes `.script(_, terminal: false)`
+        // through the transport. `runScript` (pipe, then a terminal) or a
+        // terminal delivery would truncate them.
+        XCTAssertFalse(source.contains("runScriptWithFallback") || source.contains(".runScript(")
+                       || source.contains("terminal: true"),
                        """
                        MCPInstaller's scripts exceed the ~1KB TTY ceiling by design and go \
-                       over a pipe. runScriptWithFallback retries over a TTY, which would \
-                       truncate them — and the symptom is an install that reports nothing.
+                       over a pipe. runScript retries over a TTY, which would truncate them \
+                       — and the symptom is an install that reports nothing.
                        """)
-        XCTAssertTrue(source.contains("remoteScriptNoTTY"),
+        XCTAssertTrue(source.contains("terminal: false"),
                       "the installer relies on the pipe path; if that changed, this file's "
                       + "reasoning about the install scripts no longer holds")
     }

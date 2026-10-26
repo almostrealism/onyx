@@ -354,15 +354,9 @@ class OnyxTerminalView: NSView {
             tmuxCmd = "tmux \(targeted)"
         }
 
-        let (cmd, args) = appState.remoteCommand(tmuxCmd, host: host)
+        let transport = appState.transport
         DispatchQueue.global(qos: .userInitiated).async {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: cmd)
-            process.arguments = args
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            try? process.run()
-            process.waitUntilExit()
+            _ = transport.runCommand(tmuxCmd, on: host, timeout: 10, label: "tmux")
         }
     }
 
@@ -987,17 +981,11 @@ class OnyxTerminalView: NSView {
 
         // mkdir is fire-and-forget: scp fails loudly enough on its own if
         // the directory isn't there.
-        let (mkCmd, mkArgs) = appState.remoteCommand("mkdir -p ~/\(remoteDir)", host: host)
-        _ = RemoteExec.shared.run(mkCmd, args: mkArgs, stdin: nil, softTimeout: 10,
-                                  captureStdout: false, captureStderr: false, label: "drop:mkdir")
+        _ = appState.transport.runCommand("mkdir -p ~/\(remoteDir)", on: host,
+                                          timeout: 10, label: "drop:mkdir")
 
-        let (scpCmd, scpArgs) = appState.scpCommand(localPath: url.path,
-                                                    remotePath: "\(remoteDir)/\(name)",
-                                                    host: host)
-        let copied = RemoteExec.shared.run(scpCmd, args: scpArgs, stdin: nil,
-                                           softTimeout: 120,
-                                           captureStdout: true, captureStderr: true,
-                                           label: "drop:scp")
+        let copied = appState.transport.upload(url.path, to: "\(remoteDir)/\(name)", on: host,
+                                               recursive: false, timeout: 120, label: "drop:scp")
         guard copied.exit == 0 else {
             let why = (copied.stderr + copied.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
             DiagnosticLog.shared.record(
@@ -1015,11 +1003,8 @@ class OnyxTerminalView: NSView {
         let dir = TerminalDrop.containerDir
         let script = "docker exec \(safe) mkdir -p \(dir)"
             + " && docker cp ~/\(remoteDir)/\(name) \(safe):\(dir)/\(name)"
-        let (cpCmd, cpArgs) = appState.remoteCommand(script, host: host)
-        let intoContainer = RemoteExec.shared.run(cpCmd, args: cpArgs, stdin: nil,
-                                                  softTimeout: 60,
-                                                  captureStdout: true, captureStderr: true,
-                                                  label: "drop:docker-cp")
+        let intoContainer = appState.transport.runCommand(script, on: host,
+                                                          timeout: 60, label: "drop:docker-cp")
         guard intoContainer.exit == 0 else {
             let why = (intoContainer.stderr + intoContainer.stdout)
                 .trimmingCharacters(in: .whitespacesAndNewlines)

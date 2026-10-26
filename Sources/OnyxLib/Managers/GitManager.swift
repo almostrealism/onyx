@@ -87,10 +87,11 @@ public class GitManager: ObservableObject {
         currentRepoPath = path
 
         let script = Self.statusScript(for: path)
-        let state = appState
+        let host = appState.activeHost ?? .localhost
+        let transport = appState.transport
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let run = FileBrowserManager.runScriptWithFallback(script, appState: state)
+            let run = transport.runScript(script, on: host, label: "git:status")
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoading = false
@@ -178,10 +179,10 @@ public class GitManager: ObservableObject {
             script += " -- \(escapedFile)"
         }
 
-        let (cmd, args, stdin) = appState.remoteScript(script)
+        let run = scriptRunner()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin)
+            let output = run(script)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoadingLog = false
@@ -207,10 +208,10 @@ public class GitManager: ObservableObject {
         git -C \(escaped) diff-tree -p --stat \(hash) 2>/dev/null
         """
 
-        let (cmd, args, stdin) = appState.remoteScript(script)
+        let run = scriptRunner()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin)
+            let output = run(script)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoadingCommit = false
@@ -218,6 +219,15 @@ public class GitManager: ObservableObject {
                 self.commitDetail = self.parseCommitDetail(output, hash: hash)
             }
         }
+    }
+
+    /// Run a git script on the host active NOW, through the transport;
+    /// the cleaned output, or nil when it didn't verifiably run. Captured
+    /// on the main thread, callable from any.
+    private func scriptRunner() -> (String) -> String? {
+        let host = appState.activeHost ?? .localhost
+        let transport = appState.transport
+        return { script in transport.runScript(script, on: host, label: "git").cleaned }
     }
 
     /// Close log.
@@ -245,10 +255,10 @@ public class GitManager: ObservableObject {
             script = "git -C \(escaped) diff -- '\(filePath)' 2>/dev/null"
         }
 
-        let (cmd, args, stdin) = appState.remoteScript(script)
+        let run = scriptRunner()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin)
+            let output = run(script)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoadingDiff = false
@@ -272,10 +282,10 @@ public class GitManager: ObservableObject {
         git -C \(escaped) diff 2>/dev/null
         """
 
-        let (cmd, args, stdin) = appState.remoteScript(script)
+        let run = scriptRunner()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin)
+            let output = run(script)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isLoadingDiff = false

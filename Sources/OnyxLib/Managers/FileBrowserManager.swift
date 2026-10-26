@@ -11,7 +11,7 @@
 // Invariants:
 //   - savedFolders / recentFiles are filtered by activeHost.id at read time
 //   - currentPath, when set, refers to a path on the currently active host
-//   - At most one searchProcess is running at a time
+//   - At most one searchJob is running at a time
 //   - recentFiles is bounded by maxRecentFiles per host
 //
 // See: ADR-004 (per-host isolation)
@@ -103,7 +103,7 @@ public class FileBrowserManager: ObservableObject {
     @Published public var isSearching = false
     @Published public var searchResults = SearchResultTree()
     @Published public var isSearchActive = false
-    private var searchProcess: Process?
+    private var searchJob: RemoteJob?
     private var searchCancellable: AnyCancellable?
 
     private let appState: AppState
@@ -411,9 +411,10 @@ public class FileBrowserManager: ObservableObject {
     }
 
     private func fetchTreeFolder(_ path: String) {
-        let (cmd, args) = appState.remoteCommand("ls -lAp \(escapeForShell(path)) 2>&1")
+        let run = commandRunner()
+        let script = "ls -lAp \(escapeForShell(path)) 2>&1"
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Self.runProcessWithStatus(cmd: cmd, args: args)
+            let result = run(script, 10)
             DispatchQueue.main.async {
                 guard let self else { return }
                 let trimmed = result.output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -510,17 +511,29 @@ public class FileBrowserManager: ObservableObject {
     /// useful output), mark the mux stale and retry exactly once. The retry
     /// pays for the inevitable cold-start cost of the next ssh invocation
     /// after a stale-mux cleanup. Called from a background queue.
-    private func runRemoteScriptWithRetry(_ script: String, timeout: TimeInterval = 30) -> ProcessResult {
-        let (cmd, args) = appState.remoteCommand(script)
-        let first = Self.runProcessWithStatus(cmd: cmd, args: args, timeout: timeout)
+    private func runRemoteScriptWithRetry(_ script: String, run: CommandRunner,
+                                          timeout: TimeInterval = 30) -> ProcessResult {
+        let first = run(script, timeout)
         let trimmed = first.output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let isTransient = first.exitCode == 255 && trimmed.isEmpty && !first.timedOut
         guard isTransient else { return first }
 
         // Mark stale and retry once with a fresh mux.
         DispatchQueue.main.sync { self.handleSSHFailure() }
-        let (cmd2, args2) = appState.remoteCommand(script)
-        return Self.runProcessWithStatus(cmd: cmd2, args: args2, timeout: timeout)
+        return run(script, timeout)
+    }
+
+    typealias CommandRunner = (_ script: String, _ timeout: TimeInterval) -> ProcessResult
+
+    /// Run a command (`exec $SHELL -lc`) on the host that is active NOW,
+    /// through the transport. Captured on the main thread — where the
+    /// active host and the transport live — and safe to call from any.
+    func commandRunner() -> CommandRunner {
+        let host = appState.activeHost ?? .localhost
+        let transport = appState.transport
+        return { script, timeout in
+            ProcessResult(transport.runCommand(script, on: host, timeout: timeout, label: "fileBrowser"))
+        }
     }
 
     private func listDirectory(_ path: String) {
@@ -536,10 +549,10 @@ public class FileBrowserManager: ObservableObject {
         // ls -lA with a marker to distinguish dirs: append / to dirs
         let escaped = escapeForShell(path)
         let script = "ls -lAp \(escaped) 2>&1"
-        let (cmd, args) = appState.remoteCommand(script)
+        let run = commandRunner()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Self.runProcessWithStatus(cmd: cmd, args: args)
+            let result = run(script, 10)
             DispatchQueue.main.async {
                 self?.isLoading = false
                 guard let self = self else { return }
@@ -602,10 +615,10 @@ public class FileBrowserManager: ObservableObject {
             """)
         }
         let script = scriptParts.joined(separator: "; ")
-        let (cmd, args) = appState.remoteCommand(script)
+        let run = commandRunner()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let output = FileBrowserManager.runProcess(cmd: cmd, args: args) ?? ""
+            let output = run(script, 10).output ?? ""
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isCollapsingPaths = false
@@ -705,10 +718,11 @@ public class FileBrowserManager: ObservableObject {
         else head -2000 \(escaped) 2>&1; fi
         """
 
+        let run = commandRunner()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // Run with retry: a stale mux frequently causes a transient
             // failure that the very next call cleans up automatically.
-            let result = self?.runRemoteScriptWithRetry(script, timeout: 30)
+            let result = self?.runRemoteScriptWithRetry(script, run: run, timeout: 30)
                 ?? ProcessResult(output: nil, exitCode: -1, timedOut: false)
             DispatchQueue.main.async {
                 self?.isLoading = false
@@ -740,10 +754,10 @@ public class FileBrowserManager: ObservableObject {
     private func readImageFile(path escaped: String, name: String) {
         // Base64-encode the image and transfer as text
         let script = "base64 < \(escaped) 2>&1"
-        let (cmd, args) = appState.remoteCommand(script)
+        let run = commandRunner()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Self.runProcessWithStatus(cmd: cmd, args: args, timeout: 30)
+            let result = run(script, 30)
             DispatchQueue.main.async {
                 self?.isLoading = false
                 guard let self = self else { return }
@@ -765,168 +779,36 @@ public class FileBrowserManager: ObservableObject {
         }
     }
 
+    /// A command's output in the shape the browser's callers read: stdout
+    /// and stderr merged, nil when there was none.
     struct ProcessResult {
         let output: String?
         let exitCode: Int32
         let timedOut: Bool
-    }
 
-    static func runProcess(cmd: String, args: [String], stdin: String? = nil) -> String? {
-        let result = runProcessWithStatus(cmd: cmd, args: args, stdin: stdin)
-        return result.output
-    }
+        init(output: String?, exitCode: Int32, timedOut: Bool) {
+            self.output = output
+            self.exitCode = exitCode
+            self.timedOut = timedOut
+        }
 
-    /// Run a (cmd, args, stdin?) triple produced by `AppState.remoteScript`,
-    /// verify the script actually executed on the remote, and return the
-    /// cleaned output (CR stripped, marker removed). Returns nil if the
-    /// remote shell didn't run the script (noexec) — caller can treat that
-    /// as a failure indistinguishable from a connection error, which is
-    /// the right call: the stale data on screen is more useful than empty.
-    static func runRemoteScript(cmd: String, args: [String], stdin: String?, timeout: TimeInterval = 10) -> String? {
-        runRemoteScriptDetailed(cmd: cmd, args: args, stdin: stdin, timeout: timeout).cleaned
-    }
-
-    /// What a remote script run actually produced, failure included.
-    ///
-    /// `runRemoteScript` collapses every failure to nil, which is fine for
-    /// callers that just keep stale data — but it means nobody can say WHY
-    /// it failed. That is how the git panel spent months absent with no
-    /// explanation available anywhere. Callers that show the user
-    /// something should use this and report `failureDetail`.
-    struct RemoteRun {
-        /// Cleaned output, or nil when the script didn't verifiably run.
-        let cleaned: String?
-        let exitCode: Int32
-        let timedOut: Bool
-        /// The remote's own words, when it said anything.
-        let hostSaid: String?
-        /// Did any output arrive at all?
-        let hadOutput: Bool
-        /// How much came back, and the start of it (control sequences
-        /// stripped, newlines flattened). "A login banner then silence"
-        /// and "our own script echoed back but never ran" are
-        /// indistinguishable without this, and they point at completely
-        /// different faults.
-        let byteCount: Int
-        let preview: String
-
-        /// One line naming what went wrong, in the host's words where
-        /// possible.
-        var failureDetail: String {
-            if timedOut { return "no answer within the time budget" }
-            if !hadOutput { return "no output at all (exit \(exitCode))" }
-            // Output came back without the completion marker: the session
-            // answered but our script never ran to the end. Say THAT —
-            // quoting the host's first line alone showed a login banner
-            // as though the banner were the error.
-            let opening = hostSaid.map { ", starting \"\($0)\"" } ?? ""
-            return "the session answered but never ran the script "
-                + "(\(byteCount)B back, exit \(exitCode)\(opening))"
+        init(_ remote: RemoteOutput) {
+            let merged = remote.combined
+            self.init(output: merged.isEmpty ? nil : merged, exitCode: remote.exit,
+                      timedOut: remote.timedOut)
         }
     }
 
-    static func runRemoteScriptDetailed(cmd: String, args: [String], stdin: String?,
-                                        timeout: TimeInterval = 10) -> RemoteRun {
-        let result = runProcessWithStatus(cmd: cmd, args: args, stdin: stdin, timeout: timeout)
-        let raw = result.output ?? ""
-        let verified = RemoteScript.executionVerified(in: raw)
-        let flattened = RemoteScript.stripControlSequences(
-            raw.replacingOccurrences(of: "\r", with: "\n"))
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .joined(separator: " | ")
-        return RemoteRun(
-            cleaned: verified ? RemoteScript.cleanedOutput(raw) : nil,
-            exitCode: result.exitCode,
-            timedOut: result.timedOut,
-            hostSaid: RemoteScript.remoteComplaint(in: raw),
-            hadOutput: !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            byteCount: raw.count,
-            preview: String(flattened.prefix(400)))
-    }
-
-    /// Run a script on a host, preferring a pipe over a terminal.
-    ///
-    /// Order matters and is the whole point:
-    ///
-    ///   1. `-T` (no tty). stdin is a plain pipe — no ~1KB input queue, no
-    ///      line discipline, nothing that can truncate or mangle the
-    ///      script. This is how a data command SHOULD be delivered, and it
-    ///      is what fixes hosts that were corrupting the payload's tail
-    ///      (the shell would report "command not found" for the mangled
-    ///      remainder and exit 127, with no completion marker).
-    ///
-    ///   2. Only if that comes back WITHOUT the completion marker, retry
-    ///      with `-tt`. A missing marker is the noexec signature — the
-    ///      remote profile refusing to execute a non-interactive shell —
-    ///      which is precisely what the interactive form defeats. So the
-    ///      defense is intact; we just stop paying a terminal's
-    ///      constraints for every call on every healthy host.
-    ///
-    /// Local hosts have neither problem and run once.
+    /// Run a script on a host and verify it ran — through the app's
+    /// transport, a pipe first and a terminal only when the marker doesn't
+    /// come back. See `RemoteTransport.runScript`.
     static func runScriptWithFallback(_ script: String,
                                       appState: AppState,
                                       host: HostConfig? = nil,
                                       timeout: TimeInterval = 10) -> RemoteRun {
-        let target = host ?? appState.activeHost
-        if target?.isLocal ?? true {
-            let (cmd, args, stdin) = appState.remoteScript(script, host: target)
-            return runRemoteScriptDetailed(cmd: cmd, args: args, stdin: stdin, timeout: timeout)
-        }
-        return runScriptWithFallback(piped: appState.remoteScriptNoTTY(script, host: target),
-                                     tty: appState.remoteScript(script, host: target),
-                                     label: target?.label ?? "host",
-                                     timeout: timeout)
-    }
-
-    /// The same two attempts, from PRE-BUILT commands.
-    ///
-    /// Both triples are plain values, so this can be called from a
-    /// background queue without dragging AppState (which isn't Sendable)
-    /// across the boundary. Callers that are already off the main thread —
-    /// LSPManager's async reads — build the commands where the state lives
-    /// and run them here.
-    static func runScriptWithFallback(piped: (cmd: String, args: [String], stdin: String?),
-                                      tty: (cmd: String, args: [String], stdin: String?),
-                                      label: String,
-                                      timeout: TimeInterval = 10) -> RemoteRun {
-        let first = runRemoteScriptDetailed(cmd: piped.cmd, args: piped.args,
-                                            stdin: piped.stdin, timeout: timeout)
-        if first.cleaned != nil { return first }
-
-        DiagnosticLog.shared.record("ssh",
-            "\(label): no marker over a plain pipe — retrying with a terminal")
-        let second = runRemoteScriptDetailed(cmd: tty.cmd, args: tty.args,
-                                             stdin: tty.stdin, timeout: timeout)
-        // Report whichever attempt got further, so the failure message
-        // describes the better evidence rather than the last try.
-        return second.cleaned != nil || second.byteCount >= first.byteCount ? second : first
-    }
-
-    static func runProcessWithStatus(cmd: String,
-                                     args: [String],
-                                     stdin: String? = nil,
-                                     timeout: TimeInterval = 10) -> ProcessResult {
-        // Route through the central RemoteExec so the PID gets tracked
-        // in the unified registry — every spawned process is reachable
-        // by the orphan reaper and inventory dump regardless of which
-        // manager initiated it. This is the migration the user asked
-        // for: ONE component for engaging with remote hosts.
-        let result = RemoteExec.shared.run(
-            cmd, args: args, stdin: stdin,
-            softTimeout: timeout,
-            captureStdout: true,
-            captureStderr: true,
-            label: "fileBrowser:\((cmd as NSString).lastPathComponent)"
-        )
-        // Old contract merged stdout and stderr together. Preserve it.
-        let merged = result.stdout + (result.stderr.isEmpty ? "" : "\n" + result.stderr)
-        return ProcessResult(
-            output: merged.isEmpty ? nil : merged,
-            exitCode: result.exit,
-            timedOut: result.timedOut
-        )
+        let target = host ?? appState.activeHost ?? .localhost
+        return appState.transport.runScript(script, on: target, timeout: timeout,
+                                            label: "script:\(target.label)")
     }
 
     /// Build a user-facing error message from a failed ProcessResult. Prefers
@@ -1020,97 +902,55 @@ public class FileBrowserManager: ObservableObject {
         // When the extension list was too long to fit in the script, the
         // filtering happens here instead.
         let localExtensions = command.filterExtensionsLocally ? Set(wanted) : []
-        let (cmd, args, stdinScript) = appState.remoteScript(command.script)
+        let host = appState.activeHost ?? .localhost
 
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: cmd)
-        process.arguments = args
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
+        // Results stream in line by line; a chunk can end mid-line, so the
+        // tail waits for the next one.
+        let buffer = LineBuffer()
+        let handle: (String) -> Void = { [weak self] text in
+            guard let self else { return }
+            // Strip CR from ssh -tt CR-LF endings so split + trim work
+            // identically across local and remote.
+            for line in buffer.append(text.replacingOccurrences(of: "\r", with: "")) {
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                // Drop the execution marker — it isn't a search result.
+                if trimmed == RemoteScript.executionMarker { continue }
+                // Find emits absolute paths; ignore anything that doesn't
+                // look like one. With ssh -tt the stream contains
+                // MOTD/banner/prompt noise mixed with real results, and
+                // accepting non-path lines fills the results panel with
+                // garbage.
+                guard trimmed.hasPrefix("/") else { continue }
 
-        let inputPipe: Pipe? = stdinScript.map { _ in Pipe() }
-        if let inputPipe = inputPipe {
-            process.standardInput = inputPipe
-        }
+                // Convert the absolute result into a path relative to the
+                // search base. If it isn't under the base (or IS the base),
+                // skip it — never hand an absolute path to insertPath, which
+                // joins it onto basePath and would DOUBLE the segments
+                // (/a/b + /a/b/c → /a/b/a/b/c): the source of the nonsensical
+                // paths "back" navigated into.
+                guard let relative = Self.relativeSearchPath(result: trimmed, base: basePath) else { continue }
 
-        // Read output progressively line by line
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let self = self else {
-                // EOF
-                return
-            }
+                if !localExtensions.isEmpty {
+                    let ext = (relative as NSString).pathExtension.lowercased()
+                    guard localExtensions.contains(ext) else { continue }
+                }
 
-            if let text = String(data: data, encoding: .utf8) {
-                // Strip CR from ssh -tt CR-LF endings so split + trim work
-                // identically across local and remote.
-                let lines = text.replacingOccurrences(of: "\r", with: "")
-                    .components(separatedBy: "\n")
-                for line in lines {
-                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty else { continue }
-                    // Drop the execution marker — it isn't a search result.
-                    if trimmed == RemoteScript.executionMarker { continue }
-                    // Find emits absolute paths; ignore anything that
-                    // doesn't look like one. With ssh -tt the stream
-                    // contains MOTD/banner/prompt noise mixed with real
-                    // results, and accepting non-path lines fills the
-                    // results panel with garbage.
-                    guard trimmed.hasPrefix("/") else { continue }
-
-                    // Convert the absolute result into a path relative to the
-                    // search base. If it isn't under the base (or IS the base),
-                    // skip it — never hand an absolute path to insertPath, which
-                    // joins it onto basePath and would DOUBLE the segments
-                    // (/a/b + /a/b/c → /a/b/a/b/c): the source of the nonsensical
-                    // paths "back" navigated into.
-                    guard let relative = Self.relativeSearchPath(result: trimmed, base: basePath) else { continue }
-
-                    if !localExtensions.isEmpty {
-                        let ext = (relative as NSString).pathExtension.lowercased()
-                        guard localExtensions.contains(ext) else { continue }
-                    }
-
-                    DispatchQueue.main.async {
-                        self.searchResults.insertPath(relative, basePath: basePath)
-                    }
+                DispatchQueue.main.async {
+                    self.searchResults.insertPath(relative, basePath: basePath)
                 }
             }
         }
 
-        // Set up a kill timer (30 seconds max)
-        let killTimer = DispatchSource.makeTimerSource(queue: .global())
-        killTimer.schedule(deadline: .now() + 30)
-        killTimer.setEventHandler { if process.isRunning { process.terminate() } }
-        killTimer.resume()
-
-        searchProcess = process
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            do {
-                try process.run()
-                if let inputPipe = inputPipe,
-                   let scriptText = stdinScript,
-                   let data = scriptText.data(using: .utf8) {
-                    // Paced, like every other remote script: a terminal
-                    // can't take a script at full speed, and writing to a
-                    // dead ssh raises SIGPIPE. See RemoteExec.writePaced.
-                    RemoteExec.writePaced(data, to: inputPipe.fileHandleForWriting,
-                                          while: { process.isRunning })
-                    try? inputPipe.fileHandleForWriting.close()
-                }
-                process.waitUntilExit()
-            } catch {
-                // ignore
-            }
-            killTimer.cancel()
-            pipe.fileHandleForReading.readabilityHandler = nil
-
-            DispatchQueue.main.async {
-                self?.isSearching = false
-            }
-        }
+        // 30 seconds at most. A terminal, as before: find's output is
+        // filtered to absolute paths, so the echo costs nothing.
+        searchJob = appState.transport.start(
+            .script(command.script, terminal: true), on: host, timeout: 30, label: "fileBrowser:search",
+            onOutput: handle,
+            onExit: { [weak self] _ in
+                handle("\n")   // a last line without its newline
+                DispatchQueue.main.async { self?.isSearching = false }
+            })
     }
 
     /// Whether a listed entry matches the active search type filter.
@@ -1209,10 +1049,8 @@ public class FileBrowserManager: ObservableObject {
     }
 
     public func cancelSearch() {
-        if let process = searchProcess, process.isRunning {
-            process.terminate()
-        }
-        searchProcess = nil
+        searchJob?.cancel()
+        searchJob = nil
         isSearching = false
     }
 
@@ -1246,6 +1084,8 @@ public class FileBrowserManager: ObservableObject {
         guard let dest = currentPath else { return }
         isUploading = true
         uploadStatus = "Uploading \(urls.count) item\(urls.count == 1 ? "" : "s")..."
+        let host = appState.activeHost ?? .localhost
+        let transport = appState.transport
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -1256,12 +1096,12 @@ public class FileBrowserManager: ObservableObject {
                     self.uploadStatus = "Uploading (\(i + 1)/\(urls.count)): \(url.lastPathComponent)"
                 }
 
-                let success: Bool
-                if self.appState.activeHost?.isLocal ?? true {
-                    success = self.copyLocal(url, toDir: dest)
-                } else {
-                    success = self.scpUpload(url, toDir: dest)
-                }
+                // Into the folder, under the item's own name. Folders go
+                // whole; a local host is a plain copy (the transport does it).
+                let target = (dest as NSString).appendingPathComponent(url.lastPathComponent)
+                let result = transport.upload(url.path, to: target, on: host, recursive: true,
+                                              timeout: 1800, label: "fileBrowser:upload")
+                let success = result.exit == 0
                 if !success {
                     errors.append(url.lastPathComponent)
                 }
@@ -1283,39 +1123,6 @@ public class FileBrowserManager: ObservableObject {
                     }
                 }
             }
-        }
-    }
-
-    private func copyLocal(_ url: URL, toDir dest: String) -> Bool {
-        let destPath = (dest as NSString).appendingPathComponent(url.lastPathComponent)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/cp")
-        process.arguments = ["-R", url.path, destPath]
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
-        }
-    }
-
-    private func scpUpload(_ url: URL, toDir dest: String) -> Bool {
-        guard let host = appState.activeHost else { return false }
-        var args = appState.scpBaseArgs(for: host)
-        args.append("-r")  // recursive for directories
-        args.append(url.path)
-        args.append("\(appState.sshUserHost(for: host)):\(dest)/")
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
-        process.arguments = args
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
         }
     }
 
@@ -1345,15 +1152,15 @@ public class FileBrowserManager: ObservableObject {
 
         isDownloading = true
         downloadStatus = "Downloading \((remotePath as NSString).lastPathComponent)..."
+        let host = appState.activeHost ?? .localhost
+        let transport = appState.transport
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let success: Bool
-            if self.appState.activeHost?.isLocal ?? true {
-                success = self.copyLocalDown(remotePath, to: destURL, isDirectory: isDirectory)
-            } else {
-                success = self.scpDownload(remotePath, to: destURL, isDirectory: isDirectory)
-            }
+            let result = transport.download(remotePath, to: destURL.path, from: host,
+                                            recursive: isDirectory, timeout: 1800,
+                                            label: "fileBrowser:download")
+            let success = result.exit == 0
 
             DispatchQueue.main.async {
                 self.isDownloading = false
@@ -1364,45 +1171,6 @@ public class FileBrowserManager: ObservableObject {
                     }
                 }
             }
-        }
-    }
-
-    private func copyLocalDown(_ remotePath: String, to destURL: URL, isDirectory: Bool) -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/cp")
-        process.arguments = isDirectory ? ["-R", remotePath, destURL.path] : [remotePath, destURL.path]
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
-        }
-    }
-
-    private func scpDownload(_ remotePath: String, to destURL: URL, isDirectory: Bool) -> Bool {
-        guard let host = appState.activeHost else { return false }
-        var args = appState.scpBaseArgs(for: host)
-        if isDirectory { args.append("-r") }
-        args.append("\(appState.sshUserHost(for: host)):\(remotePath)")
-        args.append(destURL.path)
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
-        process.arguments = args
-        do {
-            try process.run()
-
-            let killTimer = DispatchSource.makeTimerSource(queue: .global())
-            killTimer.schedule(deadline: .now() + 60)
-            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
-            killTimer.resume()
-
-            process.waitUntilExit()
-            killTimer.cancel()
-            return process.terminationStatus == 0
-        } catch {
-            return false
         }
     }
 

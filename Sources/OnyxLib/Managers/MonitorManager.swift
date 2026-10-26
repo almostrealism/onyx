@@ -387,22 +387,21 @@ public class MonitorManager: ObservableObject {
             noteSkip("previous poll still in flight", for: hostID)
             return
         }
-        let (cmd, args, stdinScript) = appState.statsCommand()
+        let target = appState.activeHost ?? .localhost
+        let transport = appState.transport
         DispatchQueue.global(qos: .utility).async { [weak self] in
             defer { releaseChannel() }
-            // Route through the central executor — bounded, tracked,
-            // SIGKILL-escalated. Previously this was a raw Process with
-            // a SIGTERM-only kill timer that ssh could (and did) ignore.
-            let result = RemoteExec.shared.run(
-                cmd, args: args, stdin: stdinScript,
+            // Bounded, tracked, SIGKILL-escalated by the transport.
+            // Previously this was a raw Process with a SIGTERM-only kill
+            // timer that ssh could (and did) ignore.
+            let result = transport.execute(
+                .script(AppState.statsScript, terminal: true), on: target,
                 // Generous: `docker stats` alone can take seconds on a
                 // busy daemon, and a loaded host's `top` isn't instant.
                 // Overlapping polls can't pile up — the channel budget
                 // dedups them — so a long budget costs nothing but a
                 // skipped cycle.
-                softTimeout: 25,
-                captureStdout: true,
-                captureStderr: true,
+                timeout: 25,
                 label: "monitor:\(hostLabel)"
             )
             let output = (result.stdout + result.stderr)
@@ -493,6 +492,8 @@ public class MonitorManager: ObservableObject {
             self.hostData[hostID] = stamped
             guard let release = self.appState.acquireUtilityChannel(
                 "accel:\(hostID)", host: host) else { return }
+            let target = host ?? .localhost
+            let transport = self.appState.transport
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 defer { release() }
                 guard let self else { return }
@@ -500,12 +501,9 @@ public class MonitorManager: ObservableObject {
                 // would truncate. Both are cheap sysfs reads.
                 var merged = self.hostData[hostID]?.accelerator
                 for probe in [AppState.AcceleratorProbe.amdGPU, .npu] {
-                    let (cmd, args, stdinScript) =
-                        self.appState.acceleratorCommand(probe, host: host)
-                    let result = RemoteExec.shared.run(
-                        cmd, args: args, stdin: stdinScript,
-                        softTimeout: 12, captureStdout: true, captureStderr: true,
-                        label: "accel:\(host?.label ?? "local")")
+                    let result = transport.execute(
+                        .script(AppState.acceleratorScript(probe), terminal: true),
+                        on: target, timeout: 12, label: "accel:\(target.label)")
                     let output = (result.stdout + result.stderr)
                         .replacingOccurrences(of: "\r", with: "")
                     guard let reading = Self.parse(output: output) else { continue }

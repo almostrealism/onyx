@@ -528,11 +528,9 @@ public final class SharedStateSync: ObservableObject {
     private func fetch(host: HostConfig, appState: AppState) -> Fetched {
         let local = scratch
         try? FileManager.default.removeItem(at: local)
-        let (cmd, args) = appState.scpFetchCommand(remotePath: Self.remotePath,
-                                                   localPath: local.path, host: host)
-        let result = RemoteExec.shared.run(cmd, args: args, stdin: nil, softTimeout: 30,
-                                           captureStdout: true, captureStderr: true,
-                                           label: "sharedStatePull:\(host.label)")
+        let result = appState.transport.download(Self.remotePath, to: local.path, from: host,
+                                                 recursive: false, timeout: 30,
+                                                 label: "sharedStatePull:\(host.label)")
         defer { try? FileManager.default.removeItem(at: local) }
 
         guard let data = try? Data(contentsOf: local) else {
@@ -584,11 +582,9 @@ public final class SharedStateSync: ObservableObject {
         let local = scratch.deletingLastPathComponent()
             .appendingPathComponent("onyx-shared-state-backup.json")
         try? FileManager.default.removeItem(at: local)
-        let (cmd, args) = appState.scpFetchCommand(remotePath: Self.remoteBackupPath,
-                                                   localPath: local.path, host: host)
-        _ = RemoteExec.shared.run(cmd, args: args, stdin: nil, softTimeout: 30,
-                                  captureStdout: true, captureStderr: true,
-                                  label: "sharedStateBackup:\(host.label)")
+        _ = appState.transport.download(Self.remoteBackupPath, to: local.path, from: host,
+                                        recursive: false, timeout: 30,
+                                        label: "sharedStateBackup:\(host.label)")
         defer { try? FileManager.default.removeItem(at: local) }
         guard let data = try? Data(contentsOf: local),
               let decoded = try? JSONDecoder().decode(SharedState.self, from: data),
@@ -617,11 +613,9 @@ public final class SharedStateSync: ObservableObject {
         // in the clear: an interrupted transfer straight onto the
         // destination leaves a truncated file, and a truncated
         // shared-state.json read by the next Mac is every note gone.
-        let (cmd, args) = appState.scpCommand(localPath: local.path,
-                                              remotePath: Self.remoteStagingPath, host: host)
-        let upload = RemoteExec.shared.run(cmd, args: args, stdin: nil, softTimeout: 30,
-                                           captureStdout: true, captureStderr: true,
-                                           label: "sharedStatePush:\(host.label)")
+        let upload = appState.transport.upload(local.path, to: Self.remoteStagingPath, on: host,
+                                               recursive: false, timeout: 30,
+                                               label: "sharedStatePush:\(host.label)")
         guard upload.exit == 0 else {
             if upload.exit == 255 { appState.reportSSHFailure(host: host) }
             report(.failed(Self.shortError(upload.stderr) ?? "couldn't write to \(host.label)"))

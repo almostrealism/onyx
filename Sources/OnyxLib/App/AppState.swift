@@ -501,6 +501,11 @@ public class AppState: ObservableObject {
         claudeSessions.gatePermissions = appearance.claudeHooksGatePermissions
     }
 
+    /// The one way anything here reaches a host: scripts, commands and file
+    /// transfers. `ProcessTransport` (ssh/scp over the ConnectionPair) on
+    /// the Mac; see RemoteTransport and docs/ios-plan.md.
+    public lazy var transport: RemoteTransport = ProcessTransport(appState: self)
+
     private var todayCancellable: AnyCancellable?
     /// What the Today sections read — Timing, reminders, calendar, PRs,
     /// pipelines — and nothing else, so the iPhone can have them without
@@ -598,6 +603,10 @@ public class AppState: ObservableObject {
                 self?.objectWillChange.send()
             }
         }
+        // Made here, on the thread that made the window, rather than by
+        // whichever background queue reads it first: a lazy var is not
+        // safe to initialize from two threads at once.
+        _ = transport
     }
 
     deinit {
@@ -1061,16 +1070,16 @@ public class AppState: ObservableObject {
     /// inside its container. Returns nil for sources that aren't tmux
     /// (browser tabs, docker logs/top) — there's nothing to rename.
     private func tmuxAdminCommand(_ args: String,
-                                  for session: TmuxSession) -> (cmd: String, args: [String])? {
+                                  for session: TmuxSession) -> (host: HostConfig, command: String)? {
         switch session.source {
         case .host(let hostID):
             guard let host = hosts.first(where: { $0.id == hostID })
                     ?? (hostID == HostConfig.localhostID ? HostConfig.localhost : nil) else { return nil }
-            return remoteCommand("tmux \(args)", host: host)
+            return (host, "tmux \(args)")
         case .docker(let hostID, let containerName):
             guard let host = hosts.first(where: { $0.id == hostID }) else { return nil }
             let safe = sanitizedContainer(containerName)
-            return remoteCommand("docker exec \(safe) tmux \(args)", host: host)
+            return (host, "docker exec \(safe) tmux \(args)")
         case .dockerLogs, .dockerTop, .browser:
             return nil
         }
@@ -1086,20 +1095,18 @@ public class AppState: ObservableObject {
     public func renameSession(_ session: TmuxSession, to rawName: String) {
         let newName = rawName.trimmingCharacters(in: .whitespaces)
         guard Self.isValidSessionName(newName), newName != session.name,
-              let (cmd, args) = tmuxAdminCommand(
+              let (host, command) = tmuxAdminCommand(
                 "rename-session -t \(Self.shellQuote(session.name)) \(Self.shellQuote(newName))",
                 for: session)
         else { return }
+        let transport = self.transport
 
         let renamed = TmuxSession(name: newName, source: session.source)
         let oldID = session.id
         let wasActive = activeSession?.id == oldID
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = RemoteExec.shared.run(cmd, args: args, stdin: nil,
-                                               softTimeout: 10,
-                                               captureStdout: true, captureStderr: true,
-                                               label: "renameSession")
+            let result = transport.runCommand(command, on: host, timeout: 10, label: "renameSession")
             let failure = (result.stderr + result.stdout)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             DispatchQueue.main.async {
@@ -1241,8 +1248,9 @@ public class AppState: ObservableObject {
 
     /// Kill a tmux session and forget what was attached to it.
     public func killSession(_ session: TmuxSession) {
-        guard let (cmd, args) = tmuxAdminCommand(
+        guard let (host, command) = tmuxAdminCommand(
             "kill-session -t \(Self.shellQuote(session.name))", for: session) else { return }
+        let transport = self.transport
 
         let id = session.id
         let wasActive = activeSession?.id == id
@@ -1253,10 +1261,7 @@ public class AppState: ObservableObject {
         }
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = RemoteExec.shared.run(cmd, args: args, stdin: nil,
-                                               softTimeout: 10,
-                                               captureStdout: true, captureStderr: true,
-                                               label: "killSession")
+            let result = transport.runCommand(command, on: host, timeout: 10, label: "killSession")
             let failure = (result.stderr + result.stdout)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             DispatchQueue.main.async {

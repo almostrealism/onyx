@@ -120,25 +120,30 @@ The naive pattern `ssh user@host "<command>"` invokes `$SHELL -c "<command>"` on
 
 For any data-reading SSH command, **don't pass a command argument to ssh**. `ssh -tt user@host` (no command) starts the remote `$SHELL` *interactively* — bash's "interactive disqualified by `-c`" rule doesn't apply, the shell ignores `set -n`, and `BASH_ENV` is only sourced for non-interactive shells. Drive the shell by piping the script via stdin.
 
-This pattern is encapsulated in `Services/RemoteScript.swift` and `AppState.remoteScript(_:host:)`. Use them.
+**Everything remote goes through `appState.transport` (`RemoteTransport`, in OnyxCore).** It runs commands and scripts, streams a long-running one (`start`), and moves files (`upload`/`download`). The Mac's `ProcessTransport` builds the same `ssh`/`scp` invocations as before (`remoteScript`, `remoteScriptNoTTY`, `remoteCommand`, `scpCommand` — the shapes `AppStateTests` locks) and runs them through `RemoteExec`; the iOS apps get an in-process implementation of the same protocol (docs/ios-plan.md). **Never spawn `ssh`/`scp` yourself, and never build a command triple to run by hand** — a manager that does can't run on an iPad, and bypasses the timeout and the reaper. Capture `appState.transport` and the host on the main thread, run off it. The completion marker and the pipe-then-terminal fallback live in the protocol extension (`runScript`), once, for every transport.
 
 ```swift
-// Good — RemoteScript-based, noexec-safe:
-let (cmd, args, stdin) = appState.remoteScript("git status --porcelain")
-guard let output = FileBrowserManager.runRemoteScript(cmd: cmd, args: args, stdin: stdin) else {
-    // execution failed (noexec or connection error) — keep stale data
-    return
+// Good — noexec-safe, verified, transport-agnostic:
+let host = appState.activeHost ?? .localhost
+let transport = appState.transport
+DispatchQueue.global(qos: .userInitiated).async {
+    let run = transport.runScript("git status --porcelain", on: host, label: "git")
+    guard let output = run.cleaned else {
+        // didn't verifiably run — keep stale data, report run.failureDetail
+        return
+    }
+    // `output` is already cleaned: \r stripped, execution marker removed
 }
-// `output` is already cleaned: \r stripped, execution marker removed
 
 // Bad — vulnerable to noexec hosts:
-let (cmd, args) = appState.remoteCommand("git status --porcelain")
-let output = FileBrowserManager.runProcess(cmd: cmd, args: args)  // empty/garbage on broken hosts
+transport.runCommand("git status --porcelain", on: host, label: "git")  // empty/garbage on broken hosts
 ```
 
-### When `remoteCommand` is still OK
+Transfer paths are file-transfer paths (relative to the remote home, or absolute), never shell paths — see "scp paths are NOT shell paths" above. Transport failures follow ssh's conventions so callers can tell them apart: exit 255 is the connection, anything else with the server's message is the operation (`SharedStateSync.classify` depends on it). `LocalSSHD` (Tests/OnyxTestSupport) is a private, unprivileged sshd for testing a transport against the real thing.
 
-`remoteCommand` (the legacy `$SHELL -lc` pattern) is acceptable for **fire-and-forget side effects** where graceful failure on broken hosts is fine: hook setup (mkdir/chmod), MCP port cleanup. New uses should justify why noexec failure is harmless.
+### When `runCommand` is still OK
+
+`runCommand` (an exec request: `exec $SHELL -lc '…'`, built by `remoteCommand`) is acceptable for **fire-and-forget side effects** where graceful failure on broken hosts is fine — mkdir/chmod, MCP port cleanup, tmux control — and for reads whose callers already accept losing to a noexec host (session enumeration, the file browser). New uses should justify why noexec failure is harmless.
 
 ### Interactive sessions are inherently safe
 
@@ -155,7 +160,7 @@ Driving an *interactive* shell is what defeats noexec — but interactive shells
 
 **`Tests/OnyxTests/Services/RemoteScriptBudgetTests.swift` measures the ~1KB ceiling for every TTY-bound script in one place.** Add a case there for any new one, with an adversarial input — every regression of this class was a script whose size scaled with something (a path, a filter list, a probe). Scripts that travel only by pipe (`remoteScriptNoTTY`) are exempt and say so; the installer's are the only ones, and a test asserts it never adopts the TTY fallback helper.
 
-**Prefer a pipe; keep the terminal as the fallback.** `-tt` exists solely to defeat noexec shells, and it drags in every terminal constraint: a ~1KB input queue, a line discipline that has been observed handing the remote shell a MANGLED tail (which then reports "command not found" and exits 127 with no marker), and an echo that pollutes the output. `AppState.remoteScriptNoTTY` sends the same wrapped script over a plain pipe — no limit, no echo, nothing to corrupt — and `FileBrowserManager.runScriptWithFallback` retries with `-tt` only when the completion marker doesn't come back, which is the noexec signature. New data-reading callers should use the fallback helper rather than `remoteScript` directly.
+**Prefer a pipe; keep the terminal as the fallback.** `-tt` exists solely to defeat noexec shells, and it drags in every terminal constraint: a ~1KB input queue, a line discipline that has been observed handing the remote shell a MANGLED tail (which then reports "command not found" and exits 127 with no marker), and an echo that pollutes the output. `AppState.remoteScriptNoTTY` sends the same wrapped script over a plain pipe — no limit, no echo, nothing to corrupt — and `transport.runScript` (default delivery `.pipeThenTerminal`) retries with `-tt` only when the completion marker doesn't come back, which is the noexec signature. New data-reading callers should use it with the default delivery.
 
 **A terminal cannot be written to at full speed.** `-tt` means the far end is a terminal, and a terminal's input buffer is ~1KB on macOS (4KB on Linux). The remote shell reads a line, runs it (`top` takes ~0.5s), and everything still arriving piles into that buffer and is **discarded** once it's full — the shell then waits forever for the rest of a line, and the caller sees only the login banner before its watchdog fires. `RemoteExec.writePaced` delivers stdin in 512-byte chunks 60ms apart — necessary, but not sufficient: measured against a real host, a 2.2KB script unpaced returned *nothing*, and paced returned only its first sections (a CPU reading, then truncation before MEM, and no `exit`, so the session hung). **Keep each payload under ~1KB in total** and split anything bigger into a second command (see `AppState.acceleratorCommand`, which is also gated to hosts that can answer it).
 

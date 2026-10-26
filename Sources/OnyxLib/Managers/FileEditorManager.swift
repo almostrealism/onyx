@@ -173,10 +173,9 @@ public final class FileEditorManager: ObservableObject {
         let local = FileManager.default.temporaryDirectory
             .appendingPathComponent("onyx-edit-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: local) }
-        let (cmd, args) = appState.scpFetchCommand(remotePath: RemoteFileEdit.scpPath(path),
-                                                   localPath: local.path, host: host)
-        let result = RemoteExec.shared.run(cmd, args: args, softTimeout: 30,
-                                           captureStderr: true, label: "editor fetch")
+        let result = appState.transport.download(RemoteFileEdit.scpPath(path), to: local.path,
+                                                 from: host, recursive: false, timeout: 30,
+                                                 label: "editor fetch")
         guard result.exit == 0, let data = FileManager.default.contents(atPath: local.path) else {
             if result.exit == 255 { appState.reportSSHFailure(host: host) }
             let said = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -212,11 +211,9 @@ public final class FileEditorManager: ObservableObject {
             return .failed("Couldn't stage the file locally: \(error.localizedDescription)")
         }
 
-        let (cmd, args) = appState.scpCommand(localPath: local.path,
-                                              remotePath: RemoteFileEdit.scpPath(temporary),
-                                              host: host)
-        let upload = RemoteExec.shared.run(cmd, args: args, softTimeout: 60,
-                                           captureStderr: true, label: "editor upload")
+        let upload = appState.transport.upload(local.path, to: RemoteFileEdit.scpPath(temporary),
+                                               on: host, recursive: false, timeout: 60,
+                                               label: "editor upload")
         guard upload.exit == 0 else {
             if upload.exit == 255 { appState.reportSSHFailure(host: host) }
             let said = upload.stderr.trimmingCharacters(in: .whitespacesAndNewlines)

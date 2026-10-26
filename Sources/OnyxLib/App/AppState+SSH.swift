@@ -54,8 +54,13 @@ extension AppState {
         [
             "-o", "ControlMaster=no",
             "-o", "ControlPath=\(sshControlPath(for: host))",
-        ]
+        ] + Self.testSSHOptions
     }
+
+    /// Extra `-o` options for every utility ssh and scp. Tests point these
+    /// at a private sshd's known_hosts (LocalSSHD) so they never touch the
+    /// user's own; empty in the app.
+    static var testSSHOptions: [String] = []
 
     /// The bundled MCP bridge for a platform, or nil if this build
     /// doesn't carry one for it.
@@ -200,7 +205,7 @@ extension AppState {
     /// SSH args for short-lived utility commands (stats, enumeration, file browser).
     /// Uses mux for efficiency — these are ephemeral and can retry if mux dies.
     func sshBaseArgs(for host: HostConfig, batchMode: Bool = true, connectTimeout: Int = 5) -> [String] {
-        var args = sshMuxArgs(for: host)
+        var args = sshMuxArgs(for: host)   // testSSHOptions ride along
         if batchMode {
             args.append("-o"); args.append("BatchMode=yes")
         }
@@ -616,22 +621,10 @@ extension AppState {
     public func cleanupRemoteMCPPort(host h: HostConfig) {
         guard !h.isLocal, mcpServer?.tcpPort != nil else { return }
         let remotePort = MCPSocketServer.defaultRemotePort
-        let (cmd, args) = remoteCommand("lsof -ti tcp:\(remotePort) 2>/dev/null | xargs kill 2>/dev/null", host: h)
+        let transport = self.transport
         DispatchQueue.global(qos: .utility).async {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: cmd)
-            process.arguments = args
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-
-            let killTimer = DispatchSource.makeTimerSource(queue: .global())
-            killTimer.schedule(deadline: .now() + 5)
-            killTimer.setEventHandler { if process.isRunning { process.terminate() } }
-            killTimer.resume()
-
-            try? process.run()
-            process.waitUntilExit()
-            killTimer.cancel()
+            _ = transport.runCommand("lsof -ti tcp:\(remotePort) 2>/dev/null | xargs kill 2>/dev/null",
+                                     on: h, timeout: 5, label: "mcpPortCleanup")
         }
     }
 
@@ -758,7 +751,11 @@ extension AppState {
     /// process's standard input. We use this for remote hosts to drive
     /// an interactive SSH shell — see the comment on the SSH branch.
     public func statsCommand(host h: HostConfig? = nil) -> (cmd: String, args: [String], stdin: String?) {
-        let host = h ?? activeHost ?? .localhost
+        remoteScript(Self.statsScript, host: h ?? activeHost ?? .localhost)
+    }
+
+    /// The stats collection script, fed to a remote TERMINAL (see below).
+    public static var statsScript: String {
         // The DOCKER section was added for the screensaver's per-container
         // moon ring. MonitorManager.parse silently ignores unknown
         // sections, so this change is invisible to the existing monitor
@@ -796,7 +793,7 @@ extension AppState {
         echo "---DOCKER---"; T=""; command -v timeout >/dev/null 2>&1 && T="timeout 6"
         $T docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}" 2>/dev/null || true
         """
-        return remoteScript(statsScript, host: host)
+        return statsScript
     }
 
     /// Which accelerator to ask about. They're separate calls because a
@@ -816,7 +813,11 @@ extension AppState {
     /// there bought nothing and cost every Mac its stats.
     public func acceleratorCommand(_ probe: AcceleratorProbe,
                                    host h: HostConfig? = nil) -> (cmd: String, args: [String], stdin: String?) {
-        let host = h ?? activeHost ?? .localhost
+        remoteScript(Self.acceleratorScript(probe), host: h ?? activeHost ?? .localhost)
+    }
+
+    /// The accelerator probe for `probe`, fed to a remote terminal.
+    public static func acceleratorScript(_ probe: AcceleratorProbe) -> String {
         let script: String
         switch probe {
         case .amdGPU:
@@ -832,7 +833,7 @@ extension AppState {
             echo "---NPU---"; [ -n "$P" ] && echo "$P" || echo "N/A"
             """
         }
-        return remoteScript(script, host: host)
+        return script
     }
 
     /// Build a shell command that generates a key (if needed) and runs ssh-copy-id

@@ -20,10 +20,9 @@ public class DependencyAnalyzer {
     /// Runs on a background thread. Calls completion on main thread.
     public func analyze(repoPath: String, host: HostConfig? = nil, completion: @escaping (String?) -> Void) {
         let h = host ?? appState.activeHost ?? .localhost
+        let transport = appState.transport
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-
+        DispatchQueue.global(qos: .userInitiated).async {
             // Step 1: Write the analysis script to a temp file
             let tmpDir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("onyx-deps-\(ProcessInfo.processInfo.processIdentifier)")
@@ -33,70 +32,50 @@ public class DependencyAnalyzer {
             let scriptFile = tmpDir.appendingPathComponent("analyze_deps.py")
             try? Self.analysisScript.write(to: scriptFile, atomically: true, encoding: .utf8)
 
-            let remoteScript = "~/.onyx/analyze_deps.py"
-
             if h.isLocal {
                 // Local: run directly
                 print("DependencyAnalyzer: running locally for \(repoPath)")
-                let result = self.runScript(scriptFile.path, repoPath: repoPath)
+                let result = Self.runLocally(scriptFile.path, repoPath: repoPath)
                 DispatchQueue.main.async { completion(result) }
-            } else {
-                // Remote: SCP script, execute, clean up
-                print("DependencyAnalyzer: uploading script to \(h.label)...")
-                let mkdirResult = self.runRemote("mkdir -p ~/.onyx", host: h)
-                if mkdirResult == nil {
-                    print("DependencyAnalyzer: failed to create ~/.onyx on remote")
-                }
-
-                var scpArgs = self.appState.scpBaseArgs(for: h)
-                scpArgs.append(scriptFile.path)
-                scpArgs.append("\(self.appState.sshUserHost(for: h)):\(remoteScript)")
-
-                let scpProcess = Process()
-                let scpErr = Pipe()
-                scpProcess.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
-                scpProcess.arguments = scpArgs
-                scpProcess.standardOutput = FileHandle.nullDevice
-                scpProcess.standardError = scpErr
-                try? scpProcess.run()
-                scpProcess.waitUntilExit()
-
-                if scpProcess.terminationStatus != 0 {
-                    let errData = scpErr.fileHandleForReading.readDataToEndOfFile()
-                    let errStr = String(data: errData, encoding: .utf8) ?? ""
-                    print("DependencyAnalyzer: SCP failed (\(scpProcess.terminationStatus)): \(errStr)")
-                    DispatchQueue.main.async { completion(nil) }
-                    return
-                }
-
-                print("DependencyAnalyzer: running script on \(h.label)...")
-                let escaped = repoPath.replacingOccurrences(of: "'", with: "'\\''")
-                let (cmd, args) = self.appState.remoteCommand(
-                    "python3 \(remoteScript) '\(escaped)'; EXIT=$?; rm -f \(remoteScript); exit $EXIT",
-                    host: h
-                )
-
-                let result = FileBrowserManager.runProcessWithStatus(cmd: cmd, args: args)
-                print("DependencyAnalyzer: remote exit=\(result.exitCode), output=\(result.output?.prefix(200) ?? "nil")")
-                DispatchQueue.main.async { completion(result.output) }
+                return
             }
+
+            // Remote: copy the script up, run it, clean up. The upload path
+            // is relative to the remote home — a file-transfer path, not a
+            // shell path (CLAUDE.md, "scp paths are NOT shell paths").
+            print("DependencyAnalyzer: uploading script to \(h.label)...")
+            let mkdir = transport.runCommand("mkdir -p ~/.onyx", on: h, label: "deps:mkdir")
+            if mkdir.exit != 0 {
+                print("DependencyAnalyzer: failed to create ~/.onyx on remote")
+            }
+            let upload = transport.upload(scriptFile.path, to: ".onyx/analyze_deps.py", on: h,
+                                          recursive: false, timeout: 30, label: "deps:upload")
+            guard upload.exit == 0 else {
+                print("DependencyAnalyzer: upload failed (\(upload.exit)): \(upload.stderr)")
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+
+            print("DependencyAnalyzer: running script on \(h.label)...")
+            let escaped = repoPath.replacingOccurrences(of: "'", with: "'\\''")
+            let remoteScript = "~/.onyx/analyze_deps.py"
+            let result = transport.runCommand(
+                "python3 \(remoteScript) '\(escaped)'; EXIT=$?; rm -f \(remoteScript); exit $EXIT",
+                on: h, label: "deps:run")
+            let output = result.combined.isEmpty ? nil : result.combined
+            print("DependencyAnalyzer: remote exit=\(result.exit), output=\(output?.prefix(200) ?? "nil")")
+            DispatchQueue.main.async { completion(output) }
         }
     }
 
-    /// Run a script locally and return stdout
-    private func runScript(_ scriptPath: String, repoPath: String) -> String? {
-        let result = FileBrowserManager.runProcessWithStatus(
-            cmd: "/usr/bin/python3",
-            args: [scriptPath, repoPath]
-        )
-        print("DependencyAnalyzer: local exit=\(result.exitCode), output=\(result.output?.prefix(200) ?? "nil")")
-        return result.output
-    }
-
-    /// Run a command on a remote host and return stdout
-    private func runRemote(_ script: String, host: HostConfig) -> String? {
-        let (cmd, args) = appState.remoteCommand(script, host: host)
-        return FileBrowserManager.runProcess(cmd: cmd, args: args)
+    /// Run the analysis script locally and return its output.
+    private static func runLocally(_ scriptPath: String, repoPath: String) -> String? {
+        let result = RemoteExec.shared.run("/usr/bin/python3", args: [scriptPath, repoPath],
+                                           softTimeout: 10, captureStdout: true, captureStderr: true,
+                                           label: "deps:local")
+        let merged = result.stdout + (result.stderr.isEmpty ? "" : "\n" + result.stderr)
+        print("DependencyAnalyzer: local exit=\(result.exit), output=\(merged.prefix(200))")
+        return merged.isEmpty ? nil : merged
     }
 
     // MARK: - Analysis Script
