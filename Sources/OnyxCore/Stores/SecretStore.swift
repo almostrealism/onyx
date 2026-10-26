@@ -152,6 +152,12 @@ public final class SecretStore {
         return syncedOnce
     }
 
+    /// Whether this secret is held in iCloud Keychain (rather than on this
+    /// device only) — answerable at launch, before anything is written.
+    public func isSynced(_ key: SecretKey) -> Bool {
+        synced.read(key) != nil
+    }
+
     /// Forget cached values, so the next read goes to storage — after
     /// iCloud may have delivered a change from another device.
     public func reload() {

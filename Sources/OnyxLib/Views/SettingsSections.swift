@@ -21,6 +21,7 @@ import SwiftUI
 import AppKit
 import OnyxCore
 import OnyxUI
+import OnyxSSH
 
 struct FlowtreeSettingsSection: View {
     @ObservedObject private var config = FlowtreeConfigStore.shared
@@ -942,5 +943,143 @@ struct ClaudeHooksSettingsSection: View {
                 .foregroundColor(.gray.opacity(0.4))
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+// MARK: - Sync to iPhone and iPad
+
+/// The switch that lets Onyx Today on a phone reach the home host
+/// (docs/ios-plan.md, "How a new device is set up"), and the pairing code
+/// for a phone that can't get the key from iCloud Keychain.
+///
+/// The code is a credential to the home host, so it is shown only when
+/// asked for, inline — no popover (CLAUDE.md: a popover that changes size
+/// crashes the app) — and hidden again with one click.
+struct DeviceSyncSettingsSection: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject private var sync = SharedStateSync.shared
+    @ObservedObject private var device = DeviceSyncManager.shared
+    @State private var showingCode = false
+
+    private var home: HostConfig? { sync.homeHost(in: appState.hosts) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SectionHeader(title: "IPHONE AND IPAD")
+
+            Toggle(isOn: Binding(
+                get: { device.isOn },
+                set: { on in
+                    if on, let home { device.enable(home: home, appState: appState) }
+                    if !on { showingCode = false; device.disable(home: home, appState: appState) }
+                }
+            )) {
+                Text("Sync to iPhone and iPad")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            .toggleStyle(.switch)
+            .disabled(home == nil || isWorking)
+
+            Text(statusText)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(statusColor)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if device.isOn {
+                Button(action: { showingCode.toggle() }) {
+                    Text(showingCode ? "Hide pairing code" : "Show pairing code")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(appState.accentColor)
+                }
+                .buttonStyle(.plain)
+
+                if showingCode, let pairing = device.pairingCode() {
+                    PairingCodeView(pairing: pairing.code, tokensIncluded: pairing.tokensIncluded,
+                                    accent: appState.accentColor)
+                }
+            }
+
+            Text("Makes an SSH key for Onyx, adds it to the home host's ~/.ssh/authorized_keys (the line ends \(OnyxKey.comment)), checks the phone's SSH client can sign in with it, and puts it in iCloud Keychain with the host's address and host key. Onyx Today on your iPhone then reads the same shared state as this Mac. Turning it off removes the key from the host and from iCloud Keychain.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var isWorking: Bool {
+        if case .working = device.state { return true }
+        return false
+    }
+
+    private var statusText: String {
+        guard home != nil else { return "Choose a home host above first: it's what the phone connects to." }
+        switch device.state {
+        case .off: return "Off."
+        case .working(let what): return what
+        case .failed(let why): return "Not set up: \(why)"
+        case .on(let pointer, let synced):
+            let target = "\(pointer.user)@\(pointer.address)" + (pointer.port == 22 ? "" : ":\(pointer.port)")
+            return synced
+                ? "On — your iPhone and iPad find \(target) through iCloud Keychain."
+                : "On for \(target), but this build of Onyx can't use iCloud Keychain — pair your phone with the code."
+        }
+    }
+
+    private var statusColor: Color {
+        switch device.state {
+        case .failed: return Color.onyxRed.opacity(0.8)
+        case .working: return appState.accentColor.opacity(0.8)
+        case .on(_, let synced): return synced ? .gray.opacity(0.6) : Color.onyxAmber.opacity(0.8)
+        case .off: return .gray.opacity(0.45)
+        }
+    }
+}
+
+/// A pairing code as a QR code the phone's camera opens, and as text.
+struct PairingCodeView: View {
+    let pairing: PairingCode
+    let tokensIncluded: Bool
+    let accent: Color
+    @State private var copied = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            if let url = pairing.url, let image = QRCode.image(for: url.absoluteString, size: 180) {
+                Image(nsImage: image)
+                    .interpolation(.none)
+                    .resizable()
+                    .frame(width: 180, height: 180)
+                    .background(Color.white)
+                    .cornerRadius(4)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Point your iPhone's camera at the code and open it in Onyx Today, or copy it and paste it there.")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.75))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(tokensIncluded
+                     ? "It holds the key to the home host and your API tokens — treat it like a password."
+                     : "It holds the key to the home host — treat it like a password. Your API tokens didn't fit; they arrive through iCloud Keychain, or enter them on the phone.")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(Color.onyxAmber.opacity(0.8))
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(action: copy) {
+                    Text(copied ? "Copied" : "Copy code")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(accent)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.03))
+        .cornerRadius(6)
+    }
+
+    private func copy() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(pairing.text, forType: .string)
+        copied = true
     }
 }

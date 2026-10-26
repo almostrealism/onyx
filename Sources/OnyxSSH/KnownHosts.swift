@@ -39,17 +39,21 @@ public final class KnownHostsStore {
     /// "[host]:port" (or "host" for 22) → "ssh-ed25519 AAAA…"
     private var keys: [String: String] = [:]
 
+    /// The user's OpenSSH known_hosts, on a Mac; none on iOS.
+    public static var userOpenSSHFiles: [URL] {
+        #if os(macOS)
+        return [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh/known_hosts")]
+        #else
+        return []
+        #endif
+    }
+
     /// The app's store: `known_hosts.json` in Application Support, plus
     /// `~/.ssh/known_hosts` on a Mac.
     public static let shared: KnownHostsStore = {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        #if os(macOS)
-        let openSSH = [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh/known_hosts")]
-        #else
-        let openSSH: [URL] = []
-        #endif
         return KnownHostsStore(url: support?.appendingPathComponent("Onyx/known_hosts.json"),
-                               openSSHFiles: openSSH)
+                               openSSHFiles: userOpenSSHFiles)
     }()
 
     /// `url` nil keeps everything in memory (tests).

@@ -248,3 +248,41 @@ final class BuiltInSSHResolverTests: XCTestCase {
         XCTAssertEqual(out.stdout, "resolved\n", out.stderr)
     }
 }
+
+/// The proof step of "Sync to iPhone and iPad": sign in the way the phone
+/// will, and learn the host's address and key on the way.
+final class DeviceSyncProofTests: XCTestCase {
+
+    func testTheProofSignsInAndRecordsTheHost() throws {
+        let sshd: LocalSSHD
+        do { sshd = try LocalSSHD.start() } catch let why as LocalSSHD.Unavailable { throw XCTSkip(why.description) }
+        defer { sshd.stop() }
+        let host = HostConfig(label: "home", ssh: SSHConfig(host: sshd.hostName, user: sshd.user, port: sshd.port))
+        let key = SSHIdentity(privateKey: try OpenSSHKeyFile.parse(String(contentsOf: sshd.clientKey, encoding: .utf8)),
+                              source: "test key")
+        switch DeviceSyncManager.prove(identity: key, home: host) {
+        case .failure(let why):
+            XCTFail(why.description)
+        case .success(let pointer):
+            // As ssh -G resolved it: OpenSSH writes 127.1 out in full.
+            XCTAssertTrue(["127.1", "127.0.0.1"].contains(pointer.address), pointer.address)
+            XCTAssertEqual(pointer.port, sshd.port)
+            XCTAssertEqual(pointer.user, sshd.user)
+            XCTAssertEqual(pointer.hostKey, sshd.hostPublicKey)
+            XCTAssertEqual(pointer.hostID, host.id)
+        }
+    }
+
+    func testAKeyTheHostRefusesIsCaughtOnTheMac() throws {
+        let sshd: LocalSSHD
+        do { sshd = try LocalSSHD.start() } catch let why as LocalSSHD.Unavailable { throw XCTSkip(why.description) }
+        defer { sshd.stop() }
+        let host = HostConfig(label: "home", ssh: SSHConfig(host: sshd.hostName, user: sshd.user, port: sshd.port))
+        let stranger = OnyxKey.loadOrCreate(in: SecretStore(synced: InMemorySecretBackend(), local: nil,
+                                                            defaults: UserDefaults(suiteName: "p-\(UUID())")!))
+        guard case .failure(let why) = DeviceSyncManager.prove(identity: stranger, home: host) else {
+            return XCTFail("a refused key must not be published")
+        }
+        XCTAssertTrue(why.description.contains("Permission denied"), why.description)
+    }
+}
