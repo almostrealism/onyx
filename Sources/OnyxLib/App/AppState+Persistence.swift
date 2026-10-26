@@ -388,7 +388,8 @@ extension AppState {
             // the first sync merges against real local content rather than
             // an empty set — merging an empty local copy into the host's
             // would look exactly like "this Mac deleted everything".
-            SharedStateSync.shared.configure(url: sharedStateURL, appState: self)
+            SharedStateSync.shared.configure(url: sharedStateURL, environment: self)
+            _ = AppState.observeActivationForSharedState
         }
         // Wire up the screensaver pipeline. Both calls are no-ops under
         // XCTest so unit tests don't write to the user's real cpu-stream.json

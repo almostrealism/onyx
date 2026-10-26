@@ -1,10 +1,14 @@
 //
 // SharedStateSync.swift
 //
-// Responsibility: Keeping session notes and favorites on a chosen remote
-//                 host, so every Mac running Onyx sees the same set.
+// Responsibility: Keeping session notes, favorites, tracked pipelines and
+//                 the shared settings on a chosen remote host, so every Mac
+//                 — and the iPhone and iPad — sees the same set.
 // Scope: Shared singleton. Owns the home-host choice, the shadow copy of
-//        what was last synced, and the transfer.
+//        what was last synced, and the transfer. What it needs from the
+//        app (hosts, a transport, a gate on the connection) comes through
+//        `SharedStateEnvironment`: the Mac's AppState, or the iPhone's
+//        Today app, which has no AppState (docs/ios-plan.md).
 // Threading: transfers on a utility queue; stores and @Published state on
 //            main. Nothing here blocks the UI.
 //
@@ -26,9 +30,27 @@
 //
 
 import Foundation
-import AppKit
 import Combine
-import OnyxCore
+
+/// What the sync needs from the app it runs in.
+public protocol SharedStateEnvironment: AnyObject {
+    /// The configured hosts, where the home host is looked up. Main thread.
+    var sharedStateHosts: [HostConfig] { get }
+    /// What the transfers ride.
+    var syncTransport: RemoteTransport { get }
+    /// Whether the host may be contacted now (not paused, not known down).
+    func canSync(with host: HostConfig) -> Bool
+    /// Claim a slot to talk to the host; nil when none is free. Call the
+    /// returned closure when done.
+    func claimSyncSlot(for host: HostConfig) -> (() -> Void)?
+    /// The connection failed (exit 255).
+    func syncConnectionFailed(host: HostConfig)
+    /// Whether the app is frontmost, for the poll's back-off.
+    var isFrontmost: Bool { get }
+    /// This device's own hosts, to publish for the iPad (key paths
+    /// blanked); nil for a device that publishes none (the iPhone).
+    var ownHosts: [HostConfig]? { get }
+}
 
 public final class SharedStateSync: ObservableObject {
     public static let shared = SharedStateSync()
@@ -76,7 +98,11 @@ public final class SharedStateSync: ObservableObject {
     /// Who wrote the copy we last pulled, for the status line.
     @Published public private(set) var lastWrittenBy: String?
 
-    private weak var appState: AppState?
+    private weak var environment: SharedStateEnvironment?
+    /// The hosts this device published last time, so a host it has since
+    /// removed is removed for everyone — and another device's hosts are
+    /// left alone.
+    private var publishedHostIDs: Set<UUID> = []
     private var url: URL?
     /// Lock-guarded copy of the home host, readable off main.
     private var storedHome: UUID?
@@ -102,9 +128,14 @@ public final class SharedStateSync: ObservableObject {
         var homeHostID: UUID?
         var shadow: SharedState?
         var lastSync: Date?
+        var publishedHostIDs: Set<UUID>?
     }
 
-    public func configure(url: URL, appState: AppState) {
+    /// The name this device signs its copies with ("last written by …").
+    /// The iOS app sets the device's name; a Mac uses its computer name.
+    public static var deviceName: String?
+
+    public func configure(url: URL, environment: SharedStateEnvironment) {
         lock.lock()
         let alreadyConfigured = self.url != nil
         if !alreadyConfigured {
@@ -113,6 +144,7 @@ public final class SharedStateSync: ObservableObject {
                let record = try? JSONDecoder().decode(Record.self, from: data) {
                 shadow = record.shadow
                 lastSync = record.lastSync
+                publishedHostIDs = record.publishedHostIDs ?? []
                 storedHome = record.homeHostID
                 let home = record.homeHostID
                 DispatchQueue.main.async {
@@ -122,7 +154,7 @@ public final class SharedStateSync: ObservableObject {
             }
         }
         lock.unlock()
-        if self.appState == nil { self.appState = appState }
+        if self.environment == nil { self.environment = environment }
         guard !alreadyConfigured else { return }
 
         // Local edits schedule a push. Debounced, because typing a note
@@ -135,7 +167,15 @@ public final class SharedStateSync: ObservableObject {
             .merge(with: FavoritesStore.shared.$entries.map { _ in () },
                    GitHubConfigStore.shared.objectWillChange.map { _ in () },
                    GitLabConfigStore.shared.objectWillChange.map { _ in () },
-                   WorkflowFilterStore.shared.includedChanged)
+                   WorkflowFilterStore.shared.includedChanged,
+                   // Only the shared settings: the appearance config also
+                   // holds which session each window last showed, which
+                   // changes all day and is nobody else's business.
+                   AppearanceStore.shared.$config
+                       .map { SharedSetting.snapshot(of: $0) }
+                       .removeDuplicates()
+                       .dropFirst()
+                       .map { _ in () })
             .debounce(for: .seconds(4), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.localChanged() }
             .store(in: &watches)
@@ -185,25 +225,24 @@ public final class SharedStateSync: ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
 
-        // Coming back to a Mac is the moment you expect to see what the
-        // other one did. Waiting up to a minute for a tick is exactly the
-        // delay this whole cadence exists to avoid.
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            self.lock.lock(); let last = self.lastAttemptAt; self.lock.unlock()
-            if let last, Date().timeIntervalSince(last) < Cadence.activationThrottle { return }
-            self.sync(reason: "app activated")
-        }
-
         sync(reason: "launch")
+    }
+
+    /// The app came to the front. Coming back to a device is the moment you
+    /// expect to see what the other one did; waiting up to a minute for a
+    /// tick is exactly the delay this whole cadence exists to avoid. The
+    /// platform calls this (NSApplication's activation on the Mac, the
+    /// scene going active on iOS).
+    public func appDidBecomeActive() {
+        lock.lock(); let last = lastAttemptAt; lock.unlock()
+        if let last, Date().timeIntervalSince(last) < Cadence.activationThrottle { return }
+        sync(reason: "app activated")
     }
 
     private func tick() {
         lock.lock(); let last = lastAttemptAt; lock.unlock()
         guard Cadence.shouldRun(now: Date(), lastAttempt: last,
-                                isActive: NSApp?.isActive ?? true) else { return }
+                                isActive: environment?.isFrontmost ?? true) else { return }
         sync(reason: "tick")
     }
 
@@ -244,7 +283,7 @@ public final class SharedStateSync: ObservableObject {
     // MARK: - Syncing
 
     private func sync(reason: String) {
-        guard let appState else { return }
+        guard let environment else { return }
         lock.lock(); let home = storedHome; lock.unlock()
         guard let home else { return }
         queue.async { [weak self] in
@@ -253,7 +292,7 @@ public final class SharedStateSync: ObservableObject {
             defer { self.finishRun() }
             self.lock.lock(); self.lastAttemptAt = Date(); self.lock.unlock()
 
-            let hosts = DispatchQueue.main.sync { appState.hosts }
+            let hosts = DispatchQueue.main.sync { environment.sharedStateHosts }
             guard let host = hosts.first(where: { $0.id == home }) else {
                 // The host was deleted from Settings. Say so rather than
                 // silently reverting to local-only, which looks like the
@@ -261,19 +300,18 @@ public final class SharedStateSync: ObservableObject {
                 self.report(.failed("the host this was synced to is no longer configured"))
                 return
             }
-            guard appState.hostUsable(host) else {
+            guard environment.canSync(with: host) else {
                 self.report(.waitingForHost)
                 return
             }
-            guard let release = appState.acquireUtilityChannel("sharedState:\(host.id)",
-                                                              host: host) else {
+            guard let release = environment.claimSyncSlot(for: host) else {
                 self.report(.waitingForHost)
                 return
             }
             defer { release() }
 
             DispatchQueue.main.async { self.status = .syncing }
-            self.run(host: host, appState: appState, reason: reason)
+            self.run(host: host, environment: environment, reason: reason)
         }
     }
 
@@ -291,7 +329,7 @@ public final class SharedStateSync: ObservableObject {
         lock.lock(); running = false; lock.unlock()
     }
 
-    private func run(host: HostConfig, appState: AppState, reason: String) {
+    private func run(host: HostConfig, environment: SharedStateEnvironment, reason: String) {
         // The fetch first, and NO local snapshot before it.
         //
         // Taking one here was a race with the user: the fetch takes
@@ -302,7 +340,7 @@ public final class SharedStateSync: ObservableObject {
         // it three times". Activation triggers a sync, so the worst window
         // is the few seconds after you switch to Onyx: exactly when you
         // sit down and write a note.
-        let fetched = fetch(host: host, appState: appState)
+        let fetched = fetch(host: host, environment: environment)
         switch fetched {
         case .failure(let message):
             report(.failed(message))
@@ -312,8 +350,13 @@ public final class SharedStateSync: ObservableObject {
 
             // Snapshot, merge, check and apply in ONE main-thread block.
             // Nothing the user does can land in the middle of it.
+            let published = publishedHostIDs
             let outcome: Outcome = DispatchQueue.main.sync {
-                let local = localStateNow()
+                var local = localStateNow()
+                local.hosts = Self.localHosts(own: environment.ownHosts, published: published,
+                                              known: base?.hosts ?? remoteCopy?.hosts ?? [])
+                local.settings = Self.localSettings(own: local.settings,
+                                                    known: base?.settings ?? remoteCopy?.settings ?? [:])
                 let merged: SharedState
                 if let remote = remoteCopy {
                     merged = SharedStateMerge.merge(base: base, local: local, remote: remote)
@@ -362,13 +405,14 @@ public final class SharedStateSync: ObservableObject {
             // forever, for nothing.
             if let remote = remoteCopy, merged.sameContent(as: remote) {
                 // Nothing to send.
-            } else if !push(merged, host: host, appState: appState) {
+            } else if !push(merged, host: host, environment: environment) {
                 return
             }
 
             lock.lock()
             shadow = merged
             lastSync = Date()
+            if let own = environment.ownHosts { publishedHostIDs = Set(own.map(\.id)) }
             let stamp = lastSync!
             persist()
             lock.unlock()
@@ -414,7 +458,8 @@ public final class SharedStateSync: ObservableObject {
             + "clear them on this Mac and they will sync normally."
     }
 
-    /// Caller must already be on main.
+    /// Caller must already be on main. Hosts are filled in by the run,
+    /// which knows what was there before (`localHosts`).
     private func localStateNow() -> SharedState {
         SharedState(notes: SessionNotesStore.shared.notes,
                     favorites: FavoritesStore.shared.entries,
@@ -422,7 +467,29 @@ public final class SharedStateSync: ObservableObject {
                     gitlabPipelines: GitLabConfigStore.shared.pipelineURLs,
                     prWorkflows: WorkflowFilterStore.shared.includedList,
                     updated: Date(),
-                    writtenBy: Self.thisMachine)
+                    writtenBy: Self.thisMachine,
+                    settings: SharedSetting.snapshot(of: AppearanceStore.shared.config))
+    }
+
+    /// This device's settings, plus the ones it doesn't know as they were
+    /// last seen — a setting a newer Onyx added isn't this device's to
+    /// delete, and leaving it out would read as exactly that.
+    static func localSettings(own: [String: JSONValue], known: [String: JSONValue]) -> [String: JSONValue] {
+        let mine = Set(SharedSetting.allCases.map(\.rawValue))
+        return own.merging(known.filter { !mine.contains($0.key) }) { ours, _ in ours }
+    }
+
+    /// This device's view of the host list: every other device's hosts as
+    /// last seen, plus its own as they are now — minus the ones it
+    /// published before and has since removed. So each device owns its own
+    /// entries and leaves the rest alone. A device that publishes none
+    /// (`own` nil, the iPhone) just echoes what it was given, which the
+    /// merge reads as "no change from here".
+    static func localHosts(own: [HostConfig]?, published: Set<UUID>, known: [HostConfig]) -> [HostConfig] {
+        guard let own else { return known }
+        let mine = Set(own.map(\.id))
+        let retired = published.subtracting(mine)
+        return own + known.filter { !mine.contains($0.id) && !retired.contains($0.id) }
     }
 
     /// Keep a copy of what we are about to replace.
@@ -467,6 +534,13 @@ public final class SharedStateSync: ObservableObject {
         if WorkflowFilterStore.shared.includedList != state.prWorkflows {
             WorkflowFilterStore.shared.included = Set(state.prWorkflows)
         }
+        // The settings that follow the user. Hosts are never adopted: a
+        // device's host list is its own (the iPad reads them separately).
+        let current = AppearanceStore.shared.config
+        let next = SharedSetting.applying(state.settings, to: current)
+        if SharedSetting.snapshot(of: next) != SharedSetting.snapshot(of: current) {
+            AppearanceStore.shared.config = next
+        }
         applying = false
     }
 
@@ -479,13 +553,19 @@ public final class SharedStateSync: ObservableObject {
         guard let url else { return }
         // storedHome, not the @Published mirror: this runs on the sync
         // queue, and the mirror belongs to main.
-        let record = Record(homeHostID: storedHome, shadow: shadow, lastSync: lastSync)
+        let record = Record(homeHostID: storedHome, shadow: shadow, lastSync: lastSync,
+                            publishedHostIDs: publishedHostIDs)
         guard let data = try? JSONEncoder().encode(record) else { return }
         try? data.write(to: url)
     }
 
-    static var thisMachine: String {
-        Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+    public static var thisMachine: String {
+        if let deviceName { return deviceName }
+        #if os(macOS)
+        return Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        #else
+        return ProcessInfo.processInfo.hostName
+        #endif
     }
 
     // MARK: - Transfer
@@ -525,10 +605,10 @@ public final class SharedStateSync: ObservableObject {
             .appendingPathComponent("onyx-shared-state-\(ProcessInfo.processInfo.processIdentifier).json")
     }
 
-    private func fetch(host: HostConfig, appState: AppState) -> Fetched {
+    private func fetch(host: HostConfig, environment: SharedStateEnvironment) -> Fetched {
         let local = scratch
         try? FileManager.default.removeItem(at: local)
-        let result = appState.syncTransport.download(Self.remotePath, to: local.path, from: host,
+        let result = environment.syncTransport.download(Self.remotePath, to: local.path, from: host,
                                                  recursive: false, timeout: 30,
                                                  label: "sharedStatePull:\(host.label)")
         defer { try? FileManager.default.removeItem(at: local) }
@@ -537,7 +617,7 @@ public final class SharedStateSync: ObservableObject {
             let verdict = Self.classify(exit: result.exit, stderr: result.stderr)
             switch verdict {
             case .connectionFailure(let why):
-                Self.reportConnectionFailure(host: host, appState: appState)
+                environment.syncConnectionFailed(host: host)
                 return .failure(why ?? "couldn't reach \(host.label)")
             case .transferFailure(let why):
                 return .failure(why)
@@ -549,7 +629,7 @@ public final class SharedStateSync: ObservableObject {
             // for the backup: on a genuinely fresh host there isn't one,
             // and where there IS one the primary going missing is the
             // failure this whole commit is about.
-            if let rescued = fetchBackup(host: host, appState: appState) {
+            if let rescued = fetchBackup(host: host, environment: environment) {
                 DiagnosticLog.shared.record(
                     "config",
                     "shared state: \(host.label) lost its copy — recovered "
@@ -578,11 +658,11 @@ public final class SharedStateSync: ObservableObject {
     }
 
     /// Read the host's backup copy, if it has one.
-    private func fetchBackup(host: HostConfig, appState: AppState) -> SharedState? {
+    private func fetchBackup(host: HostConfig, environment: SharedStateEnvironment) -> SharedState? {
         let local = scratch.deletingLastPathComponent()
             .appendingPathComponent("onyx-shared-state-backup.json")
         try? FileManager.default.removeItem(at: local)
-        _ = appState.syncTransport.download(Self.remoteBackupPath, to: local.path, from: host,
+        _ = environment.syncTransport.download(Self.remoteBackupPath, to: local.path, from: host,
                                         recursive: false, timeout: 30,
                                         label: "sharedStateBackup:\(host.label)")
         defer { try? FileManager.default.removeItem(at: local) }
@@ -592,15 +672,7 @@ public final class SharedStateSync: ObservableObject {
         return decoded
     }
 
-    /// A dead connection is the ConnectionPair's to recover — but only
-    /// when it was the pair's connection. The built-in client keeps its
-    /// own, and failing over the pair for its trouble would drop healthy
-    /// terminals.
-    private static func reportConnectionFailure(host: HostConfig, appState: AppState) {
-        if appState.appearance.sshEngine == .openSSH { appState.reportSSHFailure(host: host) }
-    }
-
-    private func push(_ state: SharedState, host: HostConfig, appState: AppState) -> Bool {
+    private func push(_ state: SharedState, host: HostConfig, environment: SharedStateEnvironment) -> Bool {
         let local = scratch
         guard let data = try? JSONEncoder().encode(state),
               (try? data.write(to: local)) != nil else {
@@ -610,7 +682,7 @@ public final class SharedStateSync: ObservableObject {
         defer { try? FileManager.default.removeItem(at: local) }
 
         // The directory may not exist yet; scp won't make it.
-        let mkdir = appState.syncTransport.runScript(
+        let mkdir = environment.syncTransport.runScript(
             Self.makeDirectoryScript, on: host, timeout: 20, label: "sharedStateDir:\(host.label)")
         guard mkdir.cleaned?.contains("READY") == true else {
             report(.failed(mkdir.failureDetail))
@@ -621,16 +693,16 @@ public final class SharedStateSync: ObservableObject {
         // in the clear: an interrupted transfer straight onto the
         // destination leaves a truncated file, and a truncated
         // shared-state.json read by the next Mac is every note gone.
-        let upload = appState.syncTransport.upload(local.path, to: Self.remoteStagingPath, on: host,
+        let upload = environment.syncTransport.upload(local.path, to: Self.remoteStagingPath, on: host,
                                                recursive: false, timeout: 30,
                                                label: "sharedStatePush:\(host.label)")
         guard upload.exit == 0 else {
-            if upload.exit == 255 { Self.reportConnectionFailure(host: host, appState: appState) }
+            if upload.exit == 255 { environment.syncConnectionFailed(host: host) }
             report(.failed(Self.shortError(upload.stderr) ?? "couldn't write to \(host.label)"))
             return false
         }
 
-        let move = appState.syncTransport.runScript(
+        let move = environment.syncTransport.runScript(
             Self.moveIntoPlaceScript(backingUp: !state.isEmpty),
             on: host, timeout: 20, label: "sharedStateMove:\(host.label)")
         guard move.cleaned?.contains("MOVED") == true else {

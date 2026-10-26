@@ -47,6 +47,18 @@ public struct SharedState: Codable, Equatable {
     /// Which Mac wrote it, so the status line can say "last written by
     /// laptop" when two machines are sharing.
     public var writtenBy: String
+    /// Every Mac's hosts, for the iPad (docs/ios-plan.md): HostConfig with
+    /// the per-machine key path blanked. A Mac contributes its hosts and
+    /// never adopts another's — its host list is its own.
+    public var hosts: [HostConfig]
+    /// The settings that follow the user (`SharedSetting`), by name, as
+    /// JSON — so a setting a newer Onyx added survives an older one's
+    /// merge.
+    public var settings: [String: JSONValue]
+    /// Top-level fields this build doesn't know, kept verbatim and written
+    /// back. An older Onyx that dropped them would delete a newer one's
+    /// data every time it synced.
+    public var unknownFields: [String: JSONValue]
 
     public init(notes: [String: SessionNote] = [:],
                 favorites: [FavoriteEntry] = [],
@@ -54,7 +66,10 @@ public struct SharedState: Codable, Equatable {
                 gitlabPipelines: [String] = [],
                 prWorkflows: [String] = [],
                 updated: Date = Date(),
-                writtenBy: String = "") {
+                writtenBy: String = "",
+                hosts: [HostConfig] = [],
+                settings: [String: JSONValue] = [:],
+                unknownFields: [String: JSONValue] = [:]) {
         self.notes = notes
         self.favorites = favorites
         self.githubPipelines = githubPipelines
@@ -62,6 +77,9 @@ public struct SharedState: Codable, Equatable {
         self.prWorkflows = prWorkflows.sorted()
         self.updated = updated
         self.writtenBy = writtenBy
+        self.hosts = hosts
+        self.settings = settings
+        self.unknownFields = unknownFields
     }
 
     /// Decoded field by field, every one optional.
@@ -81,15 +99,49 @@ public struct SharedState: Codable, Equatable {
         prWorkflows = (try c.decodeIfPresent([String].self, forKey: .prWorkflows) ?? []).sorted()
         updated = try c.decodeIfPresent(Date.self, forKey: .updated) ?? .distantPast
         writtenBy = try c.decodeIfPresent(String.self, forKey: .writtenBy) ?? ""
+        hosts = (try? c.decodeIfPresent([HostConfig].self, forKey: .hosts)) ?? []
+        settings = (try? c.decodeIfPresent([String: JSONValue].self, forKey: .settings)) ?? [:]
+
+        let known = Set(CodingKeys.allCases.map(\.rawValue))
+        let all = try decoder.container(keyedBy: AnyCodingKey.self)
+        var unknown: [String: JSONValue] = [:]
+        for key in all.allKeys where !known.contains(key.stringValue) {
+            unknown[key.stringValue] = try all.decode(JSONValue.self, forKey: key)
+        }
+        unknownFields = unknown
     }
 
-    private enum CodingKeys: String, CodingKey {
+    public func encode(to encoder: Encoder) throws {
+        // Unknown fields first, so a known one of the same name can never
+        // be shadowed by a stale copy.
+        var all = encoder.container(keyedBy: AnyCodingKey.self)
+        for (key, value) in unknownFields {
+            try all.encode(value, forKey: AnyCodingKey(key))
+        }
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(notes, forKey: .notes)
+        try c.encode(favorites, forKey: .favorites)
+        try c.encode(githubPipelines, forKey: .githubPipelines)
+        try c.encode(gitlabPipelines, forKey: .gitlabPipelines)
+        try c.encode(prWorkflows, forKey: .prWorkflows)
+        try c.encode(updated, forKey: .updated)
+        try c.encode(writtenBy, forKey: .writtenBy)
+        try c.encode(hosts, forKey: .hosts)
+        try c.encode(settings, forKey: .settings)
+    }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case notes, favorites, githubPipelines, gitlabPipelines, prWorkflows, updated, writtenBy
+        case hosts, settings
     }
 
     public static let empty = SharedState(updated: .distantPast)
 
-    /// Nothing in it at all.
+    /// Nothing in it at all — of the user's own content.
+    ///
+    /// Hosts and settings don't count: every Mac always has some, so
+    /// counting them would mean this was never true, and the refusal it
+    /// powers would never fire on the notes it exists to protect.
     ///
     /// The shape of the disaster this guards: a copy with zero of
     /// everything is never a legitimate destination once anything existed.
@@ -111,6 +163,8 @@ public struct SharedState: Codable, Equatable {
             && githubPipelines == other.githubPipelines
             && gitlabPipelines == other.gitlabPipelines
             && prWorkflows == other.prWorkflows
+            && hosts == other.hosts && settings == other.settings
+            && unknownFields == other.unknownFields
     }
 }
 
@@ -139,7 +193,54 @@ public enum SharedStateMerge {
                                     local: local.prWorkflows,
                                     remote: remote.prWorkflows),
             updated: Date(),
-            writtenBy: local.writtenBy)
+            writtenBy: local.writtenBy,
+            hosts: mergeHosts(base: base?.hosts, local: local.hosts, remote: remote.hosts),
+            settings: mergeValues(base: base?.settings, local: local.settings, remote: remote.settings,
+                                  withoutShadowPrefer: .remote),
+            // Kept, never decided: whatever a newer Onyx wrote, the newest
+            // copy of it — the host's — wins.
+            unknownFields: local.unknownFields.merging(remote.unknownFields) { _, theirs in theirs })
+    }
+
+    // MARK: - Values by key (settings, hosts)
+
+    enum Side { case local, remote }
+
+    /// Three-way per key. A side unchanged since the shadow takes the
+    /// other's value — a deletion included; both changed, local wins (and
+    /// the next sync carries it everywhere). With no shadow nothing is
+    /// deleted, and a disagreement goes to `withoutShadowPrefer`: settings
+    /// prefer the host's, because a new device's settings are only its
+    /// defaults, and adopting them would reset every other device.
+    static func mergeValues<V: Equatable>(base: [String: V]?, local: [String: V],
+                                          remote: [String: V],
+                                          withoutShadowPrefer: Side = .local) -> [String: V] {
+        var result: [String: V] = [:]
+        for key in Set(local.keys).union(remote.keys).union(base?.keys ?? [:].keys) {
+            let l = local[key], r = remote[key], b = base?[key]
+            if l == r { if let l { result[key] = l }; continue }
+            guard base != nil else {
+                let value = withoutShadowPrefer == .local ? (l ?? r) : (r ?? l)
+                if let value { result[key] = value }
+                continue
+            }
+            if l == b { if let r { result[key] = r }; continue }
+            if r == b { if let l { result[key] = l }; continue }
+            // Both changed: an edit beats a deletion, then local wins.
+            if let value = l ?? r { result[key] = value }
+        }
+        return result
+    }
+
+    /// Hosts by id, with the same rules; local order first.
+    static func mergeHosts(base: [HostConfig]?, local: [HostConfig], remote: [HostConfig]) -> [HostConfig] {
+        func keyed(_ hosts: [HostConfig]) -> [String: HostConfig] {
+            Dictionary(hosts.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { first, _ in first })
+        }
+        let merged = mergeValues(base: base.map(keyed), local: keyed(local), remote: keyed(remote))
+        var order = local.map(\.id.uuidString)
+        for host in remote where !order.contains(host.id.uuidString) { order.append(host.id.uuidString) }
+        return order.compactMap { merged[$0] }
     }
 
     // MARK: - Notes

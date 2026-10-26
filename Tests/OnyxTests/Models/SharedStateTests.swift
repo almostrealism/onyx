@@ -742,3 +742,138 @@ final class SharedStateWorkflowChoiceTests: XCTestCase {
                        ["CI", "Lint"])
     }
 }
+
+/// What the shared state grew for the iPhone and iPad (docs/ios-plan.md):
+/// hosts, settings, and the rule that nothing a newer Onyx wrote is lost.
+final class SharedStateGrowthTests: XCTestCase {
+
+    private func decode(_ json: String) throws -> SharedState {
+        try JSONDecoder().decode(SharedState.self, from: Data(json.utf8))
+    }
+
+    func testAFileFromBeforeTheNewFieldsStillReads() throws {
+        let old = try decode(#"{"notes":{},"favorites":[],"githubPipelines":["https://github.com/o/r/actions/workflows/ci.yml"]}"#)
+        XCTAssertEqual(old.githubPipelines.count, 1)
+        XCTAssertEqual(old.hosts, [])
+        XCTAssertEqual(old.settings, [:])
+    }
+
+    /// A newer Onyx's fields survive an older one's read, merge and write.
+    func testFieldsThisBuildDoesntKnowAreKept() throws {
+        let remote = try decode(#"{"notes":{},"favorites":[],"futureThing":{"a":[1,true,"x"]},"settings":{"someNewSetting":42}}"#)
+        XCTAssertEqual(remote.unknownFields["futureThing"], .object(["a": .array([.number(1), .bool(true), .string("x")])]))
+        let local = SharedState(writtenBy: "me",
+                                settings: SharedStateSync.localSettings(own: [:], known: remote.settings))
+        let merged = SharedStateMerge.merge(base: remote, local: local, remote: remote)
+        let written = try JSONEncoder().encode(merged)
+        let back = try JSONDecoder().decode(SharedState.self, from: written)
+        XCTAssertEqual(back.unknownFields["futureThing"], remote.unknownFields["futureThing"])
+        XCTAssertEqual(back.settings["someNewSetting"], .number(42), "an unknown SETTING is kept too")
+    }
+
+    func testHostsAndSettingsDontCountAsContent() {
+        let state = SharedState(hosts: [HostConfig(label: "h", ssh: SSHConfig(host: "h"))],
+                                settings: ["use12HourClock": .bool(true)])
+        XCTAssertTrue(state.isEmpty, "the wipe guard protects notes, favorites and pipelines")
+        XCTAssertFalse(state.sameContent(as: SharedState()), "but a change to them is still pushed")
+    }
+
+    // MARK: - Settings
+
+    func testANewDeviceAdoptsTheSettingsItFinds() {
+        let mine = SharedState(settings: ["use12HourClock": .bool(false), "agendaPane": .string("reminders")])
+        let theirs = SharedState(settings: ["use12HourClock": .bool(true), "agendaPane": .string("calendar")])
+        let merged = SharedStateMerge.merge(base: nil, local: mine, remote: theirs)
+        XCTAssertEqual(merged.settings, theirs.settings,
+                       "a first sync has only defaults to offer; they must not reset everyone else")
+    }
+
+    func testAChangedSettingTravels() {
+        let base = SharedState(settings: ["use12HourClock": .bool(false)])
+        let mine = SharedState(settings: ["use12HourClock": .bool(true)])
+        XCTAssertEqual(SharedStateMerge.merge(base: base, local: mine, remote: base).settings["use12HourClock"], .bool(true))
+        XCTAssertEqual(SharedStateMerge.merge(base: base, local: base, remote: mine).settings["use12HourClock"], .bool(true))
+    }
+
+    func testBothChangedLocalWins() {
+        let base = SharedState(settings: ["agendaPane": .string("reminders")])
+        let mine = SharedState(settings: ["agendaPane": .string("calendar")])
+        let theirs = SharedState(settings: ["agendaPane": .string("other")])
+        XCTAssertEqual(SharedStateMerge.merge(base: base, local: mine, remote: theirs).settings["agendaPane"],
+                       .string("calendar"))
+    }
+
+    // MARK: - Hosts
+
+    private let a = HostConfig(id: UUID(), label: "a", ssh: SSHConfig(host: "a"))
+    private let b = HostConfig(id: UUID(), label: "b", ssh: SSHConfig(host: "b"))
+    private let c = HostConfig(id: UUID(), label: "c", ssh: SSHConfig(host: "c"))
+
+    /// Each device owns its own hosts and leaves the others' alone.
+    func testADeviceOnlyAnswersForItsOwnHosts() {
+        // This Mac has a; another Mac published b. This Mac used to have c.
+        let local = SharedStateSync.localHosts(own: [a], published: [a.id, c.id], known: [a, b, c])
+        XCTAssertEqual(local.map(\.label), ["a", "b"], "b is someone else's; c was ours and is gone")
+        let base = SharedState(hosts: [a, b, c])
+        let merged = SharedStateMerge.merge(base: base, local: SharedState(hosts: local), remote: base)
+        XCTAssertEqual(merged.hosts.map(\.label), ["a", "b"])
+    }
+
+    func testAnotherDevicesNewHostIsntDeletedByThisOne() {
+        let base = SharedState(hosts: [a])
+        let remote = SharedState(hosts: [a, b])   // the other Mac added b
+        let local = SharedStateSync.localHosts(own: [a], published: [a.id], known: base.hosts)
+        let merged = SharedStateMerge.merge(base: base, local: SharedState(hosts: local), remote: remote)
+        XCTAssertEqual(Set(merged.hosts.map(\.label)), ["a", "b"])
+    }
+
+    func testAPhoneLeavesTheHostListAsItIs() {
+        let remote = SharedState(hosts: [a, b])
+        let local = SharedStateSync.localHosts(own: nil, published: [], known: remote.hosts)
+        let merged = SharedStateMerge.merge(base: remote, local: SharedState(hosts: local), remote: remote)
+        XCTAssertEqual(merged.hosts, remote.hosts)
+    }
+}
+
+/// The settings that follow the user, named one by one: adding a setting
+/// here changes what other devices do, so it should be a decision.
+final class SharedSettingsTests: XCTestCase {
+
+    func testTheSharedSettingsAreExactlyThese() {
+        XCTAssertEqual(Set(SharedSetting.allCases.map(\.rawValue)), [
+            "prDraftFilter", "remindersLists", "remindersDueSoonOnly",
+            "agendaPane", "extraTimezones", "use12HourClock",
+        ])
+    }
+
+    /// Where alerts go is per machine by rule (CLAUDE.md); so are the
+    /// window's own settings.
+    func testPerMachineSettingsStayLocal() {
+        let names = Set(SharedSetting.allCases.map(\.rawValue))
+        for local in ["externalDelivery", "windowOpacity", "lastSessionByWindow", "sshEngine",
+                      "windowAccents", "simpleShowSidePanel", "showMenuBarItem"] {
+            XCTAssertFalse(names.contains(local), "\(local) belongs to one machine")
+        }
+    }
+
+    func testEverySettingRoundTrips() {
+        var config = AppearanceConfig()
+        config.prDraftFilter = .hideDrafts
+        config.remindersLists = ["Work", "Home"]
+        config.remindersDueSoonOnly = true
+        config.agendaPane = .calendar
+        config.extraTimezones = ["Asia/Tokyo"]
+        config.use12HourClock = true
+        let snapshot = SharedSetting.snapshot(of: config)
+        XCTAssertEqual(snapshot.count, SharedSetting.allCases.count)
+        let applied = SharedSetting.applying(snapshot, to: AppearanceConfig())
+        XCTAssertEqual(SharedSetting.snapshot(of: applied), snapshot)
+    }
+
+    func testAValueOfTheWrongShapeIsIgnored() {
+        let applied = SharedSetting.applying(["use12HourClock": .string("yes please"),
+                                              "notASetting": .bool(true)],
+                                             to: AppearanceConfig())
+        XCTAssertFalse(applied.use12HourClock)
+    }
+}
