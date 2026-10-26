@@ -18,6 +18,37 @@ Draft — still being assembled.
   calendar in the monitor, the file browser as a tree, cycling the side
   panel's width, What's New and the walkthrough.
 
+## Shared state, your other Macs, and your phone
+
+- **API tokens are in the Keychain now**, not in Onyx's preferences file.
+  Your GitHub, GitLab, Timing and flowtree tokens move over the first time
+  they're used. In a build that can use iCloud Keychain they reach your
+  other devices that way; otherwise they stay on this Mac. They still
+  never travel in the shared state.
+- **More of your settings follow you between Macs** through the home host:
+  the PR draft filter, which reminder lists show and whether only items
+  due soon do, the agenda pane, the extra clocks and the 12-hour clock,
+  the GitHub repos and GitLab projects (with their usernames and "mine
+  only"), the flowtree controller, and the first window's Timing projects.
+  Window layout, where alerts go and anything else about one desk stay on
+  each Mac. A Mac syncing settings for the first time adopts the ones
+  already on the host rather than overwriting them.
+- **A copy of the shared state written by a newer Onyx is no longer
+  trimmed** by an older one. Fields and settings it doesn't know are kept.
+- **A built-in SSH client for shared-state sync.** Settings → Shared state
+  → Connect with: Built-in syncs over Onyx's own SSH client, the one the
+  iPhone app uses, instead of OpenSSH. It reads your ~/.ssh/config and
+  known_hosts, signs in with an Ed25519 or ECDSA key (not RSA, not through
+  ssh-agent), and refuses a host reached through ProxyJump rather than
+  connecting around it. OpenSSH stays the default.
+- **Sync to iPhone and iPad** (Settings → Shared state). Turning it on
+  makes an SSH key for Onyx, adds it to the home host's authorized_keys
+  (the line ends `onyx-sync`), checks that the phone's SSH client can sign
+  in with it, and puts it in iCloud Keychain with the host's address and
+  host key. A build that can't use iCloud Keychain shows a pairing code —
+  a QR code the iPhone camera opens, or text to paste. Turning it off
+  takes the key off the host and out of the Keychain.
+
 ## Side panel
 
 - **The divider shows it can be dragged.** It has a grip, lights up under

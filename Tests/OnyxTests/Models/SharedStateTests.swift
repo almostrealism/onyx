@@ -788,6 +788,18 @@ final class SharedStateGrowthTests: XCTestCase {
                        "a first sync has only defaults to offer; they must not reset everyone else")
     }
 
+    /// A Mac that synced notes before settings existed has a shadow with
+    /// no settings in it. That is "never synced these", not "had none".
+    func testASettingNeverSyncedBeforeIsAdoptedToo() {
+        let oldShadow = SharedState(notes: [:])
+        let mine = SharedState(settings: ["githubRepos": .array([.string("mine")])])
+        let theirs = SharedState(settings: ["githubRepos": .array([.string("theirs")])])
+        XCTAssertEqual(SharedStateMerge.merge(base: oldShadow, local: mine, remote: theirs).settings, theirs.settings)
+        let nobodyElse = SharedState()
+        XCTAssertEqual(SharedStateMerge.merge(base: oldShadow, local: mine, remote: nobodyElse).settings, mine.settings,
+                       "the first device to sync a setting publishes it")
+    }
+
     func testAChangedSettingTravels() {
         let base = SharedState(settings: ["use12HourClock": .bool(false)])
         let mine = SharedState(settings: ["use12HourClock": .bool(true)])
@@ -843,6 +855,9 @@ final class SharedSettingsTests: XCTestCase {
         XCTAssertEqual(Set(SharedSetting.allCases.map(\.rawValue)), [
             "prDraftFilter", "remindersLists", "remindersDueSoonOnly",
             "agendaPane", "extraTimezones", "use12HourClock",
+            "githubRepos", "githubUsername", "githubMineOnly",
+            "gitlabProjects", "gitlabUsername", "gitlabMineOnly",
+            "flowtreeURL", "flowtreeClientID", "timingProjects",
         ])
     }
 
@@ -864,10 +879,10 @@ final class SharedSettingsTests: XCTestCase {
         config.agendaPane = .calendar
         config.extraTimezones = ["Asia/Tokyo"]
         config.use12HourClock = true
-        let snapshot = SharedSetting.snapshot(of: config)
-        XCTAssertEqual(snapshot.count, SharedSetting.allCases.count)
+        let snapshot = SharedSetting.snapshot(of: config).filter { SharedSetting(rawValue: $0.key)?.livesInAStore == false }
+        XCTAssertEqual(snapshot.count, SharedSetting.allCases.filter { !$0.livesInAStore }.count)
         let applied = SharedSetting.applying(snapshot, to: AppearanceConfig())
-        XCTAssertEqual(SharedSetting.snapshot(of: applied), snapshot)
+        XCTAssertEqual(SharedSetting.snapshot(of: applied).filter { snapshot.keys.contains($0.key) }, snapshot)
     }
 
     func testAValueOfTheWrongShapeIsIgnored() {

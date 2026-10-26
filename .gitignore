@@ -2,6 +2,9 @@
 .swiftpm/
 DerivedData/
 *.xcodeproj
+# The iOS app's project is real source (Apps/OnyxToday); generated ones aren't.
+!Apps/*/*.xcodeproj
+xcuserdata/
 *.xcworkspace
 .DS_Store
 *.dSYM

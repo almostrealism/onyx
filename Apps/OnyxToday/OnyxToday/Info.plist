@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The rest is generated from build settings (GENERATE_INFOPLIST_FILE). This
+	     part can't be: the pairing link the Mac's QR code carries. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Onyx pairing code</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>onyx-today</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

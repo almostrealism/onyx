@@ -73,6 +73,7 @@ public class TimingManager: ObservableObject {
 
     private var storeCancellable: AnyCancellable?
     private var agentCancellable: AnyCancellable?
+    private var sharedCancellable: AnyCancellable?
     private let windowIndex: Int
 
     /// DailyTime.
@@ -174,6 +175,15 @@ public class TimingManager: ObservableObject {
         }
         agentCancellable = AgentTimeStore.shared.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.recompute() }
+        }
+        // The first window's projects follow the user between devices.
+        if windowIndex == 0 {
+            sharedCancellable = NotificationCenter.default.publisher(for: SharedSetting.timingProjectsChanged)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.objectWillChange.send()
+                    self?.recompute()
+                }
         }
     }
 

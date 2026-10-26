@@ -1,0 +1,6 @@
+// The app's version: the same number as every other Onyx
+// (Sources/OnyxVersion/OnyxVersion.swift). VersionParityTests fails when
+// the two disagree, so a release can't ship an iOS build calling itself
+// something else.
+MARKETING_VERSION = 0.19
+CURRENT_PROJECT_VERSION = 1

@@ -27,8 +27,12 @@ public struct FeatureTipLine: View {
         self.insets = insets
     }
 
+    /// Off where the tips don't apply: the Mac's tips name its keys, and
+    /// a phone has none (Onyx Today turns them off).
+    public static var enabled = true
+
     public var body: some View {
-        if let feature = tips.tip(at: place) {
+        if Self.enabled, let feature = tips.tip(at: place) {
             HStack(spacing: 6) {
                 Text("NEW")
                     .font(.system(size: fontSize - 2, weight: .bold, design: .monospaced))

@@ -167,6 +167,7 @@ public final class SharedStateSync: ObservableObject {
             .merge(with: FavoritesStore.shared.$entries.map { _ in () },
                    GitHubConfigStore.shared.objectWillChange.map { _ in () },
                    GitLabConfigStore.shared.objectWillChange.map { _ in () },
+                   FlowtreeConfigStore.shared.objectWillChange.map { _ in () },
                    WorkflowFilterStore.shared.includedChanged,
                    // Only the shared settings: the appearance config also
                    // holds which session each window last showed, which
@@ -559,6 +560,15 @@ public final class SharedStateSync: ObservableObject {
         try? data.write(to: url)
     }
 
+    /// "this Mac", or on a phone or tablet "this device".
+    static var thisDevice: String {
+        #if os(macOS)
+        return "this Mac"
+        #else
+        return "this device"
+        #endif
+    }
+
     public static var thisMachine: String {
         if let deviceName { return deviceName }
         #if os(macOS)
@@ -770,13 +780,13 @@ public final class SharedStateSync: ObservableObject {
                                  lastWrittenBy: String?, now: Date = Date()) -> String {
         switch status {
         case .localOnly:
-            return "Notes and favorites are stored on this Mac only."
+            return "Notes and favorites are stored on \(thisDevice) only."
         case .syncing:
             return "Syncing with \(hostLabel ?? "the host")…"
         case .waitingForHost:
-            return "Waiting for \(hostLabel ?? "the host") — using the copy on this Mac."
+            return "Waiting for \(hostLabel ?? "the host") — using the copy on \(thisDevice)."
         case .failed(let why):
-            return "Not synced: \(why). The copy on this Mac is unaffected."
+            return "Not synced: \(why). The copy on \(thisDevice) is unaffected."
         case .synced(let at):
             var line = "Synced \(ago(at, now: now)) with \(hostLabel ?? "the host")"
             if let by = lastWrittenBy, by != thisMachine {

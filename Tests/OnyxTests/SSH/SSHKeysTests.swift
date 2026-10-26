@@ -195,6 +195,14 @@ final class NIOTransportWireTests: XCTestCase {
         XCTAssertEqual(refused.stderr, "ssh: connect to host h port 22: Connection refused")
     }
 
+    /// Only "no address at all" is this device. A loopback address is a
+    /// server like any other — from an iOS simulator it's the Mac.
+    func testOnlyAnEmptyAddressIsThisDevice() {
+        XCTAssertTrue(NIOTransport.isThisDevice(.localhost))
+        XCTAssertFalse(NIOTransport.isThisDevice(HostConfig(label: "l", ssh: SSHConfig(host: "127.0.0.1"))))
+        XCTAssertFalse(NIOTransport.isThisDevice(HostConfig(label: "l", ssh: SSHConfig(host: "localhost"))))
+    }
+
     func testATildeMeansTheHome() {
         XCTAssertEqual(SFTPClient.wirePath("~/.onyx/x"), ".onyx/x")
         XCTAssertEqual(SFTPClient.wirePath("~"), ".")

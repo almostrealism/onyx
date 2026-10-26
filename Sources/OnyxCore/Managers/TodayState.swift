@@ -69,6 +69,34 @@ public final class TodayState: ObservableObject {
     public var workflows: WorkflowMonitor { .shared }
     public var gitLabPipelines: GitLabPipelineMonitor { .shared }
 
+    // MARK: - Starting
+
+    /// Start the services the Today sections show: Timing and agent
+    /// hours, PRs and their CI, tracked pipelines. The Mac starts these as
+    /// part of its own launch; an app that is only Today calls this.
+    public static func startServices() {
+        TimingDataStore.shared.startPolling()
+        AgentTimeStore.shared.startPolling()
+        PullRequestManager.shared.startPolling()
+        WorkflowMonitor.shared.startPolling()
+        GitLabMergeRequestManager.shared.startPolling()
+        GitLabPipelineMonitor.shared.startPolling()
+        PRPipelineMonitor.shared.start(following:
+            Publishers.CombineLatest(PullRequestManager.shared.$pullRequests,
+                                     GitLabMergeRequestManager.shared.$mergeRequests)
+                .map { $0 + $1 }
+                .eraseToAnyPublisher())
+    }
+
+    /// Ask every service for fresh data now — after the settings or the
+    /// tokens changed, or when the app comes back to the front.
+    public static func refreshServices() {
+        PullRequestManager.shared.refresh()
+        GitLabMergeRequestManager.shared.refresh()
+        WorkflowMonitor.shared.refresh()
+        GitLabPipelineMonitor.shared.refresh()
+    }
+
     // MARK: - Settings
 
     public var settings: AppearanceConfig { appearanceStore.config }

@@ -219,7 +219,10 @@ public enum SharedStateMerge {
         for key in Set(local.keys).union(remote.keys).union(base?.keys ?? [:].keys) {
             let l = local[key], r = remote[key], b = base?[key]
             if l == r { if let l { result[key] = l }; continue }
-            guard base != nil else {
+            // No shadow — or none for this key (a setting this device
+            // never synced before, like every setting the first time a
+            // device that synced notes learns to sync settings).
+            guard base != nil, b != nil || l == nil || r == nil else {
                 let value = withoutShadowPrefer == .local ? (l ?? r) : (r ?? l)
                 if let value { result[key] = value }
                 continue

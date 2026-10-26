@@ -221,7 +221,7 @@ public final class NIOTransport: RemoteTransport {
 
     public func execute(_ invocation: RemoteInvocation, on host: HostConfig,
                         timeout: TimeInterval, label: String) -> RemoteOutput {
-        if host.isLocal { return Self.noLocal }
+        if Self.isThisDevice(host) { return Self.noLocal }
         let started = Date()
         let stdout = OutputCollector()
         let stderr = OutputCollector()
@@ -253,7 +253,7 @@ public final class NIOTransport: RemoteTransport {
                       label: String, onOutput: @escaping (String) -> Void,
                       onExit: @escaping (Int32) -> Void) -> RemoteJob {
         let job = NIOJob()
-        guard !host.isLocal else {
+        guard !Self.isThisDevice(host) else {
             job.attach(nil, onExit: onExit)
             DispatchQueue.global().async { job.finish(-1) }
             return job
@@ -295,7 +295,7 @@ public final class NIOTransport: RemoteTransport {
 
     public func upload(_ localPath: String, to remotePath: String, on host: HostConfig,
                        recursive: Bool, timeout: TimeInterval, label: String) -> RemoteOutput {
-        if host.isLocal { return Self.noLocal }
+        if Self.isThisDevice(host) { return Self.noLocal }
         return transfer(host, timeout: timeout) { sftp in
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: localPath, isDirectory: &isDirectory) else {
@@ -318,7 +318,7 @@ public final class NIOTransport: RemoteTransport {
 
     public func download(_ remotePath: String, to localPath: String, from host: HostConfig,
                          recursive: Bool, timeout: TimeInterval, label: String) -> RemoteOutput {
-        if host.isLocal { return Self.noLocal }
+        if Self.isThisDevice(host) { return Self.noLocal }
         return transfer(host, timeout: timeout) { sftp in
             let attributes = try sftp.stat(remotePath)
             var local = URL(fileURLWithPath: localPath)
@@ -424,6 +424,15 @@ public final class NIOTransport: RemoteTransport {
         default:
             return RemoteOutput(exit: 255, stdout: "", stderr: "ssh: \(error)", timedOut: false)
         }
+    }
+
+    /// The one host this client can't reach: "this device", with no
+    /// address at all. A loopback address is a TCP connection like any
+    /// other — and from an iOS simulator it is the Mac running it —
+    /// unlike `HostConfig.isLocal`, which on the Mac means "run it here
+    /// as a process", a decision for the process transport.
+    static func isThisDevice(_ host: HostConfig) -> Bool {
+        host.ssh.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     static let noLocal = RemoteOutput.failed("the built-in SSH client doesn't run commands on this device")

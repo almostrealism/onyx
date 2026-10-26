@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "OnyxCore", targets: ["OnyxCore"]),
         .library(name: "OnyxSSH", targets: ["OnyxSSH"]),
         .library(name: "OnyxUI", targets: ["OnyxUI"]),
+        .library(name: "OnyxToday", targets: ["OnyxToday"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
@@ -78,6 +79,14 @@ let package = Package(
             dependencies: ["OnyxCore"],
             path: "Sources/OnyxUI"
         ),
+        // Onyx Today: the iPhone app's model and page, from the shared
+        // sections and the built-in SSH client. The app target that wraps
+        // it is Apps/OnyxToday.
+        .target(
+            name: "OnyxToday",
+            dependencies: ["OnyxCore", "OnyxUI", "OnyxSSH"],
+            path: "Sources/OnyxToday"
+        ),
         .target(
             name: "OnyxLib",
             dependencies: [
@@ -112,7 +121,7 @@ let package = Package(
         ),
         .testTarget(
             name: "OnyxTests",
-            dependencies: ["OnyxCore", "OnyxUI", "OnyxLib", "OnyxSSH"],
+            dependencies: ["OnyxCore", "OnyxUI", "OnyxLib", "OnyxSSH", "OnyxToday", "OnyxVersion"],
             path: "Tests/OnyxTests"
         ),
         .testTarget(

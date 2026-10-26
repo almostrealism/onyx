@@ -4,7 +4,9 @@
 // Responsibility: Which settings follow the user between devices through
 //                 the shared state, and how each is read from and written
 //                 to AppearanceConfig.
-// Scope: Model. Pure functions over AppearanceConfig.
+// Scope: Model. Most are AppearanceConfig fields (pure functions over it);
+//        the services' non-secret settings live in their stores, which this
+//        reads and writes through their own properties so they notice.
 //
 // A setting is local unless it is listed here (docs/ios-plan.md, "What goes
 // where"). The ones listed shape the Today page — what the iPhone shows —
@@ -17,14 +19,32 @@
 import Foundation
 
 public enum SharedSetting: String, CaseIterable, Codable {
+    // In AppearanceConfig.
     case prDraftFilter
     case remindersLists
     case remindersDueSoonOnly
     case agendaPane
     case extraTimezones
     case use12HourClock
+    // The services', in their stores. Without them a phone would have the
+    // tokens and nothing to ask for: no repos, so no PRs.
+    case githubRepos
+    case githubUsername
+    case githubMineOnly
+    case gitlabProjects
+    case gitlabUsername
+    case gitlabMineOnly
+    case flowtreeURL
+    case flowtreeClientID
+    /// The first window's Timing projects: the phone's tiles show the same.
+    case timingProjects
 
-    /// The setting's value in `config`, as JSON.
+    /// Posted when a synced setting changed the first window's Timing
+    /// projects, which TimingManager reads straight from UserDefaults.
+    public static let timingProjectsChanged = Notification.Name("OnyxSharedTimingProjectsChanged")
+    static let timingProjectsKey = "timing_filters_0"
+
+    /// The setting's value, as JSON: from `config`, or from its store.
     public func value(in config: AppearanceConfig) -> JSONValue? {
         switch self {
         case .prDraftFilter:        return .from(config.prDraftFilter)
@@ -33,12 +53,26 @@ public enum SharedSetting: String, CaseIterable, Codable {
         case .agendaPane:           return .from(config.agendaPane)
         case .extraTimezones:       return .from(config.extraTimezones)
         case .use12HourClock:       return .from(config.use12HourClock)
+        case .githubRepos:          return .from(GitHubConfigStore.shared.repoURLs)
+        case .githubUsername:       return .from(GitHubConfigStore.shared.username)
+        case .githubMineOnly:       return .from(GitHubConfigStore.shared.mineOnly)
+        case .gitlabProjects:       return .from(GitLabConfigStore.shared.projectURLs)
+        case .gitlabUsername:       return .from(GitLabConfigStore.shared.username)
+        case .gitlabMineOnly:       return .from(GitLabConfigStore.shared.mineOnly)
+        case .flowtreeURL:          return .from(FlowtreeConfigStore.shared.controllerURL)
+        case .flowtreeClientID:     return .from(FlowtreeConfigStore.shared.clientId)
+        case .timingProjects:
+            return .from(UserDefaults.standard.stringArray(forKey: Self.timingProjectsKey) ?? [])
         }
     }
 
-    /// Write `value` into `config`. A value of the wrong shape (a newer
-    /// Onyx's idea of the setting) is ignored rather than guessed at.
+    /// Write `value` into `config`, or into its store — only when it
+    /// differs, so an unchanged setting doesn't make the store announce a
+    /// change (and refresh everything that watches it). A value of the
+    /// wrong shape (a newer Onyx's idea of the setting) is ignored rather
+    /// than guessed at.
     public func apply(_ value: JSONValue, to config: inout AppearanceConfig) {
+        if value == self.value(in: config) { return }
         switch self {
         case .prDraftFilter:        if let v = value.decoded(as: PRDraftFilter.self) { config.prDraftFilter = v }
         case .remindersLists:       if let v = value.decoded(as: [String].self) { config.remindersLists = v }
@@ -46,6 +80,30 @@ public enum SharedSetting: String, CaseIterable, Codable {
         case .agendaPane:           if let v = value.decoded(as: AgendaPane.self) { config.agendaPane = v }
         case .extraTimezones:       if let v = value.decoded(as: [String].self) { config.extraTimezones = v }
         case .use12HourClock:       if let v = value.decoded(as: Bool.self) { config.use12HourClock = v }
+        case .githubRepos:          if let v = value.decoded(as: [String].self) { GitHubConfigStore.shared.repoURLs = v }
+        case .githubUsername:       if let v = value.decoded(as: String.self) { GitHubConfigStore.shared.username = v }
+        case .githubMineOnly:       if let v = value.decoded(as: Bool.self) { GitHubConfigStore.shared.mineOnly = v }
+        case .gitlabProjects:       if let v = value.decoded(as: [String].self) { GitLabConfigStore.shared.projectURLs = v }
+        case .gitlabUsername:       if let v = value.decoded(as: String.self) { GitLabConfigStore.shared.username = v }
+        case .gitlabMineOnly:       if let v = value.decoded(as: Bool.self) { GitLabConfigStore.shared.mineOnly = v }
+        case .flowtreeURL:          if let v = value.decoded(as: String.self) { FlowtreeConfigStore.shared.controllerURL = v }
+        case .flowtreeClientID:     if let v = value.decoded(as: String.self) { FlowtreeConfigStore.shared.clientId = v }
+        case .timingProjects:
+            if let v = value.decoded(as: [String].self) {
+                UserDefaults.standard.set(v, forKey: Self.timingProjectsKey)
+                NotificationCenter.default.post(name: Self.timingProjectsChanged, object: nil)
+            }
+        }
+    }
+
+    /// Settings kept in a store rather than in AppearanceConfig.
+    public var livesInAStore: Bool {
+        switch self {
+        case .prDraftFilter, .remindersLists, .remindersDueSoonOnly, .agendaPane,
+             .extraTimezones, .use12HourClock:
+            return false
+        default:
+            return true
         }
     }
 
