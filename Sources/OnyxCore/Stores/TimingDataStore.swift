@@ -9,7 +9,7 @@
 // Threading: Timer fires on main; URL fetches use URLSession completion
 //            handlers and dispatch back to main before mutating state.
 // Invariants:
-//   - apiToken is stored in UserDefaults; setting an empty token is allowed
+//   - apiToken is stored in SecretStore; setting an empty token is allowed
 //     but isConfigured returns false
 //   - timer is non-nil iff polling is active; startPolling is idempotent
 //   - rawRows always corresponds to the week beginning weekMonday
@@ -57,9 +57,9 @@ public class TimingDataStore: ObservableObject {
 
     /// Api token.
     public var apiToken: String {
-        get { UserDefaults.standard.string(forKey: "timing_api_token") ?? "" }
+        get { SecretStore.shared.get(.timingToken) }
         set {
-            UserDefaults.standard.set(newValue, forKey: "timing_api_token")
+            SecretStore.shared.set(.timingToken, newValue)
             objectWillChange.send()
             if !newValue.isEmpty {
                 print("Timing: token set, fetching...")

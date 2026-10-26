@@ -16,12 +16,12 @@ public final class GitHubConfigStore: ObservableObject {
 
     public static let shared = GitHubConfigStore()
 
-    /// PAT for the GitHub API. Stored verbatim — same convention as
-    /// TimingDataStore.apiToken. Empty string means "not configured".
+    /// PAT for the GitHub API, in the Keychain (SecretStore). Empty
+    /// string means "not configured".
     public var token: String {
-        get { UserDefaults.standard.string(forKey: "github_token") ?? "" }
+        get { SecretStore.shared.get(.githubToken) }
         set {
-            UserDefaults.standard.set(newValue, forKey: "github_token")
+            SecretStore.shared.set(.githubToken, newValue)
             objectWillChange.send()
         }
     }
@@ -104,7 +104,7 @@ public final class GitHubConfigStore: ObservableObject {
 
     /// Test-only — wipes the persisted config so unit tests start clean.
     public func resetForTesting() {
-        UserDefaults.standard.removeObject(forKey: "github_token")
+        SecretStore.shared.set(.githubToken, "")
         UserDefaults.standard.removeObject(forKey: "github_repos")
         objectWillChange.send()
     }

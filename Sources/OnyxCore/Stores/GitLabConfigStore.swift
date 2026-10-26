@@ -23,9 +23,9 @@ public final class GitLabConfigStore: ObservableObject {
     /// GitLab personal access token (scope: api / read_api). Empty = not
     /// configured. Sent as the `PRIVATE-TOKEN` header.
     public var token: String {
-        get { UserDefaults.standard.string(forKey: "gitlab_token") ?? "" }
+        get { SecretStore.shared.get(.gitlabToken) }
         set {
-            UserDefaults.standard.set(newValue, forKey: "gitlab_token")
+            SecretStore.shared.set(.gitlabToken, newValue)
             objectWillChange.send()
         }
     }
@@ -97,7 +97,7 @@ public final class GitLabConfigStore: ObservableObject {
 
     /// Test-only — wipes the persisted config so unit tests start clean.
     public func resetForTesting() {
-        UserDefaults.standard.removeObject(forKey: "gitlab_token")
+        SecretStore.shared.set(.gitlabToken, "")
         UserDefaults.standard.removeObject(forKey: "gitlab_projects")
         UserDefaults.standard.removeObject(forKey: "gitlab_pipelines")
         UserDefaults.standard.removeObject(forKey: "gitlab_mine_only")

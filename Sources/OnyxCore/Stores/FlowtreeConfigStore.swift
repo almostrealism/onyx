@@ -38,9 +38,9 @@ public final class FlowtreeConfigStore: ObservableObject {
 
     /// Cloudflare Access service-token secret. Optional.
     public var clientSecret: String {
-        get { UserDefaults.standard.string(forKey: "flowtree_client_secret") ?? "" }
+        get { SecretStore.shared.get(.flowtreeClientSecret) }
         set {
-            UserDefaults.standard.set(newValue, forKey: "flowtree_client_secret")
+            SecretStore.shared.set(.flowtreeClientSecret, newValue)
             objectWillChange.send()
         }
     }
@@ -61,7 +61,7 @@ public final class FlowtreeConfigStore: ObservableObject {
     public func resetForTesting() {
         UserDefaults.standard.removeObject(forKey: "flowtree_url")
         UserDefaults.standard.removeObject(forKey: "flowtree_client_id")
-        UserDefaults.standard.removeObject(forKey: "flowtree_client_secret")
+        SecretStore.shared.set(.flowtreeClientSecret, "")
         objectWillChange.send()
     }
 }
