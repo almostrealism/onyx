@@ -100,12 +100,6 @@ struct MonitorView: View {
     // removed forwarding sinks in AppState.
     @ObservedObject private var monitor: MonitorManager
     @ObservedObject private var dockerStats: DockerStatsManager
-    /// One EventKit client for every at-a-glance layout (simple + both
-    /// fleet views). Owned here rather than inside each body so cycling
-    /// `S` doesn't tear one down and build another — which would mean an
-    /// access check and a re-fetch on every press, and an empty column
-    /// for the first second after each.
-    @StateObject private var overlayReminders = RemindersManager()
 
     init(appState: AppState) {
         self.appState = appState
@@ -319,7 +313,11 @@ struct MonitorView: View {
                             dockerStats: dockerStats,
                             timing: appState.timing,
                             accentColor: appState.accentColor,
-                            reminders: overlayReminders
+                            // One EventKit client for every at-a-glance
+                            // layout, owned by Today rather than by a body,
+                            // so cycling `S` doesn't tear one down and
+                            // re-fetch on every press.
+                            reminders: appState.today.reminders
                         )
                         .padding(.horizontal, 40)
                     } else {
@@ -348,7 +346,7 @@ struct MonitorView: View {
                                         ClaudeSessionsSection(appState: appState)
                                     }
                                     if appState.appearance.agendaPane == .calendar {
-                                        TodayCalendarSection(appState: appState)
+                                        TodayCalendarSection(today: appState.today)
                                     } else {
                                         RemindersSection(appState: appState)
                                     }

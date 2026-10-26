@@ -293,10 +293,7 @@ public class AppState: ObservableObject {
     /// Show Reminders or today's calendar in the agenda pane — in simple
     /// mode, opening the side panel so the change can be seen.
     public func setAgendaPane(_ pane: AgendaPane) {
-        appearance.agendaPane = pane
-        if monitorLayout == .simple { appearance.simpleShowSidePanel = true }
-        saveAppearance()
-        FeatureTipStore.shared.used("monitor.calendar")
+        today.setAgendaPane(pane)
     }
 
     /// `R`: the due-soon filter on the detailed layout's reminders list.
@@ -504,15 +501,27 @@ public class AppState: ObservableObject {
         claudeSessions.gatePermissions = appearance.claudeHooksGatePermissions
     }
 
-    private var timingCancellable: AnyCancellable?
-    /// Timing.
-    public lazy var timing: TimingManager = {
-        let t = TimingManager(windowIndex: windowIndex)
-        timingCancellable = t.objectWillChange.sink { [weak self] _ in
+    private var todayCancellable: AnyCancellable?
+    /// What the Today sections read — Timing, reminders, calendar, PRs,
+    /// pipelines — and nothing else, so the iPhone can have them without
+    /// an AppState (docs/ios-plan.md). Today sections take this, never
+    /// the AppState.
+    public lazy var today: TodayState = {
+        let t = TodayState(windowIndex: windowIndex)
+        // Simple mode keeps the agenda pane in its side panel: a switch
+        // made while the panel is closed would happen out of sight.
+        t.onAgendaPaneSet = { [weak self] _ in
+            guard let self, self.monitorLayout == .simple else { return }
+            AppearanceStore.shared.config.simpleShowSidePanel = true
+        }
+        todayCancellable = t.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
         return t
     }()
+
+    /// Timing (Today's).
+    public var timing: TimingManager { today.timing }
 
     private var browserCancellable: AnyCancellable?
     /// Browser manager.

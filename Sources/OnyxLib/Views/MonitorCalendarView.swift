@@ -10,7 +10,7 @@ import OnyxCore
 /// "REMINDERS · CALENDAR" — the pane's title, and the switch between the
 /// two. The one showing is lit.
 struct AgendaPaneTabs: View {
-    @ObservedObject var appState: AppState
+    @ObservedObject var today: TodayState
     /// What the reminders side is called right now ("TODAY", a list name).
     let remindersTitle: String
 
@@ -25,14 +25,14 @@ struct AgendaPaneTabs: View {
     }
 
     private func tab(_ title: String, _ pane: AgendaPane) -> some View {
-        let selected = appState.appearance.agendaPane == pane
+        let selected = today.settings.agendaPane == pane
         return Button {
             guard !selected else { return }
-            appState.setAgendaPane(pane)
+            today.setAgendaPane(pane)
         } label: {
             Text(title)
                 .monitorFont(size: 10, weight: .medium)
-                .foregroundColor(selected ? appState.accentColor : .gray.opacity(0.4))
+                .foregroundColor(selected ? today.accentColor : .gray.opacity(0.4))
                 .tracking(2)
         }
         .buttonStyle(.plain)
@@ -43,13 +43,13 @@ struct AgendaPaneTabs: View {
 /// The detailed layout's agenda column, showing today's calendar: the
 /// whole day, with what's over dimmed and what's on now marked.
 struct TodayCalendarSection: View {
-    @ObservedObject var appState: AppState
+    @ObservedObject var today: TodayState
     @ObservedObject private var calendar = TodayCalendarStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                AgendaPaneTabs(appState: appState, remindersTitle: "REMINDERS")
+                AgendaPaneTabs(today: today, remindersTitle: "REMINDERS")
                 Spacer()
                 if !calendar.events.isEmpty {
                     Text("\(calendar.events.count)")
@@ -60,8 +60,8 @@ struct TodayCalendarSection: View {
 
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 CalendarEventList(events: calendar.events, access: calendar.access,
-                                  now: context.date, accentColor: appState.accentColor,
-                                  use12Hour: appState.appearance.use12HourClock,
+                                  now: context.date, accentColor: today.accentColor,
+                                  use12Hour: today.settings.use12HourClock,
                                   titleSize: 12, emptyText: "Nothing on the calendar today")
             }
         }
@@ -71,7 +71,7 @@ struct TodayCalendarSection: View {
 
 /// Simple mode's agenda: what's left of today, capped.
 struct SimpleTodayCalendar: View {
-    @ObservedObject var appState: AppState
+    @ObservedObject var today: TodayState
     @ObservedObject private var calendar = TodayCalendarStore.shared
 
     /// Same budget as the reminders list it stands in for.
@@ -79,13 +79,13 @@ struct SimpleTodayCalendar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            AgendaPaneTabs(appState: appState, remindersTitle: "TODAY")
+            AgendaPaneTabs(today: today, remindersTitle: "TODAY")
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 let left = TodayEvent.remaining(calendar.events, at: context.date)
                 VStack(alignment: .leading, spacing: 5) {
                     CalendarEventList(events: Array(left.prefix(maxShown)), access: calendar.access,
-                                      now: context.date, accentColor: appState.accentColor,
-                                      use12Hour: appState.appearance.use12HourClock,
+                                      now: context.date, accentColor: today.accentColor,
+                                      use12Hour: today.settings.use12HourClock,
                                       titleSize: 13, emptyText: "Nothing more on the calendar today")
                     if left.count > maxShown {
                         Text("+\(left.count - maxShown) more")

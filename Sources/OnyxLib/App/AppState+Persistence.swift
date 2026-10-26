@@ -148,15 +148,10 @@ extension AppState {
     }
 
     /// Accent color.
-    public var accentColor: Color {
-        let hex = appearance.windowAccents[windowIndex] ?? appearance.accentHex
-        return Color(hex: hex)
-    }
+    public var accentColor: Color { today.accentColor }
 
     /// The effective accent hex for this window
-    public var effectiveAccentHex: String {
-        appearance.windowAccents[windowIndex] ?? appearance.accentHex
-    }
+    public var effectiveAccentHex: String { today.accentHex }
 
     /// Scale factor for UI text relative to default size of 12
     public var uiScale: CGFloat {
@@ -213,7 +208,7 @@ extension AppState {
         monitor.startPolling()
         TimingDataStore.shared.startPolling()
         AgentTimeStore.shared.startPolling()
-        _ = timing // trigger lazy init so it subscribes to store changes
+        _ = today.timing // trigger lazy init so it subscribes to store changes
 
         // The MCP server for agent integration — ONE per app, not one per
         // window. Each window used to start its own: every one unlinked

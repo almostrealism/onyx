@@ -17,7 +17,7 @@ xcodebuild -scheme OnyxCore -destination 'generic/platform=iOS Simulator' build 
 
 ## Layered architecture
 
-The code is organized into strict layers. A file may only depend on files in layers **below** it. Never introduce upward or sideways dependencies. Models, Stores and Services live in `Sources/OnyxCore/`; Managers, App and Views in `Sources/OnyxLib/`.
+The code is organized into strict layers. A file may only depend on files in layers **below** it. Never introduce upward or sideways dependencies. Models, Stores and Services live in `Sources/OnyxCore/`; Managers, App and Views in `Sources/OnyxLib/` — except the Today managers, which are in `Sources/OnyxCore/Managers/` (below).
 
 ```
 Views        ← SwiftUI views, NSViewRepresentables (presentation only)
@@ -63,7 +63,8 @@ Services sit in `OnyxCore`, except six that stay in `Sources/OnyxLib/Services/` 
 - `SharedStateSync` — session notes, favorites, tracked pipeline URLs and the PR-workflow choice on a chosen "home host" (`~/.onyx/shared-state.json`), three-way merged against a local shadow. Moving home hosts UNIONS instead of adopting, and the local files stay the working copy — a missing shadow must never delete anything.
 - `MenuBarController` — the menu bar item: sessions with notes and their unread agent alerts, plus tracked pipelines (failures first, retry attempt shown)
 - `AlertForwarder` — pushes urgent/external alerts off the Mac (ntfy, Pushover, webhook, iMessage). An Apple Watch mirrors a PHONE, not a Mac, so this is the only path to a wrist. Agent-authored text is never interpolated into AppleScript — `AlertForwardRequest.imessageCommand` passes it via `on run argv`.
-- `NotesManager`, `ClaudeSessionManager`, `TimingManager`
+- `NotesManager`, `ClaudeSessionManager`
+- **`TodayState`** and the managers it holds (`TimingManager`, `RemindersManager`, `PullRequestManager`, `GitLabMergeRequestManager`, `PRPipelineMonitor`, `WorkflowMonitor`, `GitLabPipelineMonitor`) live in `OnyxCore/Managers`, because the iPhone app is exactly these (docs/ios-plan.md). `AppState.today` is the window's; the Today sections — `SimpleTodayReminders`, `SimpleTodayCalendar`, `TodayCalendarSection`, `AgendaPaneTabs`, `SimplePullRequests`, `SimplePipelinesStrip` — take a `TodayState` and never an `AppState`, so whatever they show on the Mac the phone can show too. `TodayStateTests` fails if one reaches for `AppState`; add a new Today section to its list. Settings are read from `AppearanceStore` through `today.settings`, not copied; Mac-only behavior around a Today action (simple mode opening its panel) hangs off a callback like `onAgendaPaneSet`.
 
 Managers depend on Stores, Services, and Models — not on Views or other Managers (prefer communication through AppState or Stores).
 

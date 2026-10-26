@@ -239,13 +239,13 @@ struct SimpleSidePanel: View {
                 ClaudeSessionsSection(appState: appState, maxShown: 5)
             }
             if appState.appearance.agendaPane == .calendar {
-                SimpleTodayCalendar(appState: appState)
+                SimpleTodayCalendar(today: appState.today)
             } else {
-                SimpleTodayReminders(appState: appState, reminders: reminders,
+                SimpleTodayReminders(today: appState.today, reminders: reminders,
                                      accentColor: accentColor,
                                      listOrder: appState.appearance.remindersLists)
             }
-            SimplePullRequests(appState: appState, accentColor: accentColor)
+            SimplePullRequests(today: appState.today, accentColor: accentColor)
             Spacer(minLength: 0)
         }
     }
@@ -291,7 +291,7 @@ struct SimpleSidePanel: View {
                            store: SessionNotesStore = .shared) -> Bool {
         if !orderedSessionNotes(appState: appState, store: store).isEmpty { return true }
         if hasClaudeSessions(appState) { return true }
-        if !SimplePullRequests.visiblePRs(appState: appState).isEmpty { return true }
+        if !appState.today.visiblePullRequests().isEmpty { return true }
         // The calendar always has something to say, if only that the day
         // is clear or access is needed — and it's how you'd switch back.
         if appState.appearance.agendaPane == .calendar { return true }
@@ -394,7 +394,7 @@ struct SimpleSessionNotes: View {
 /// nothing running says "passed" or "failed" instead, because a branch
 /// name on its own answers nothing.
 struct SimplePullRequests: View {
-    @ObservedObject var appState: AppState
+    @ObservedObject var today: TodayState
     @ObservedObject private var ghManager = PullRequestManager.shared
     @ObservedObject private var glManager = GitLabMergeRequestManager.shared
     @ObservedObject private var ci = PRPipelineMonitor.shared
@@ -411,63 +411,12 @@ struct SimplePullRequests: View {
 
     /// The PRs this section lists, in its order — what the bottom strip
     /// checks so it doesn't show a job the panel already shows.
-    static func shown(appState: AppState, ci: PRPipelineMonitor = .shared) -> [PullRequest] {
-        Array(ordered(visiblePRs(appState: appState)) { ci.runs(for: $0) }.prefix(maxShown))
-    }
-
-    /// The same merged, draft-filtered list the detailed overlay shows,
-    /// so the two can't disagree about which PRs are yours.
-    static func visiblePRs(appState: AppState,
-                           gh: PullRequestManager = .shared,
-                           gl: GitLabMergeRequestManager = .shared) -> [PullRequest] {
-        (gh.pullRequests + gl.mergeRequests)
-            .filter { appState.appearance.prDraftFilter.keeps($0) }
-    }
-
-    /// How interesting a PR is at a glance, lowest first.
-    ///
-    /// This layout answers one question — what is happening — so a PR
-    /// with something in flight outranks one that is merely broken, and a
-    /// broken one outranks one that is finished and green. A green PR
-    /// needs nothing from you, which is exactly why it goes last and is
-    /// the first to be dropped when the list overflows.
-    enum Interest: Int, Comparable {
-        case busy = 0        // something running or queued
-        case failing = 1     // nothing in flight, but something is red
-        case settled = 2     // finished, nothing failing
-
-        static func < (a: Interest, b: Interest) -> Bool { a.rawValue < b.rawValue }
-
-        static func of(_ runs: [PRPipelineRun]) -> Interest {
-            if PRPipelineRun.mostRecentlyActive(runs) != nil { return .busy }
-            if runs.contains(where: \.needsAttention) { return .failing }
-            return .settled
-        }
-    }
-
-    /// Busy PRs first — most recently busy at the top — then failing
-    /// ones, then the settled ones. Within a tier the forge's own order
-    /// is kept, so the list doesn't reshuffle on every poll.
-    static func ordered(_ prs: [PullRequest],
-                        runs: (PullRequest) -> [PRPipelineRun]) -> [PullRequest] {
-        prs.enumerated().sorted { a, b in
-            let (ra, rb) = (runs(a.element), runs(b.element))
-            let (ia, ib) = (Interest.of(ra), Interest.of(rb))
-            if ia != ib { return ia < ib }
-            // Inside the busy tier, the newest thing to have started or
-            // been queued is the one worth reading first.
-            if ia == .busy,
-               let sa = PRPipelineRun.mostRecentlyActive(ra)?.activeJob?.since,
-               let sb = PRPipelineRun.mostRecentlyActive(rb)?.activeJob?.since,
-               sa != sb {
-                return sa > sb
-            }
-            return a.offset < b.offset
-        }.map(\.element)
+    static func shown(today: TodayState) -> [PullRequest] {
+        Array(today.orderedPullRequests().prefix(maxShown))
     }
 
     var body: some View {
-        let prs = Self.ordered(Self.visiblePRs(appState: appState)) { ci.runs(for: $0) }
+        let prs = today.orderedPullRequests()
         if !prs.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 Text("OPEN PRs")
@@ -562,7 +511,7 @@ struct SimplePRLine: View {
 /// lists), so `reminders.reminders` is already exactly what's due by end
 /// of today, overdue included, across every list.
 struct SimpleTodayReminders: View {
-    @ObservedObject var appState: AppState
+    @ObservedObject var today: TodayState
     @ObservedObject var reminders: RemindersManager
     let accentColor: Color
     /// The user's configured list order, so the groups read in the same
@@ -591,7 +540,7 @@ struct SimpleTodayReminders: View {
         }
 
         return VStack(alignment: .leading, spacing: 9) {
-            AgendaPaneTabs(appState: appState, remindersTitle: "TODAY")
+            AgendaPaneTabs(today: today, remindersTitle: "TODAY")
             FeatureTipLine(place: .monitorAgenda, accent: accentColor)
 
             ForEach(shown, id: \.id) { group in
@@ -740,16 +689,14 @@ struct MonitorWorkloadStrip: View {
             }))
         }
         sources.append(PRJobStripSource(
-            prs: SimplePullRequests.ordered(SimplePullRequests.visiblePRs(appState: appState)) {
-                ci.runs(for: $0)
-            },
+            prs: appState.today.orderedPullRequests(),
             runs: { ci.runs(for: $0) }))
         return sources
     }
 
     private var context: MonitorStripContext {
         MonitorStripContext(prsInSidePanel: sidePanelOpen
-            ? Set(SimplePullRequests.shown(appState: appState, ci: ci).map(\.id))
+            ? Set(SimplePullRequests.shown(today: appState.today).map(\.id))
             : [])
     }
 }

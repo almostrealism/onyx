@@ -455,7 +455,7 @@ final class CompactPRLineTests: XCTestCase {
             older.id: [run("CI", job: job("test", .running, at: 100))],
             newer.id: [run("CI", job: job("test", .running, at: 900))],
         ]
-        let ordered = SimplePullRequests.ordered([quiet, older, newer]) { byPR[$0.id] ?? [] }
+        let ordered = TodayState.ordered([quiet, older, newer]) { byPR[$0.id] ?? [] }
         XCTAssertEqual(ordered.map(\.number), [3, 2, 1])
     }
 
@@ -473,7 +473,7 @@ final class CompactPRLineTests: XCTestCase {
             busy.id: [run("CI", job: job("test", .running, at: 5))],
         ]
         XCTAssertEqual(
-            SimplePullRequests.ordered([settled, failing, busy]) { byPR[$0.id] ?? [] }
+            TodayState.ordered([settled, failing, busy]) { byPR[$0.id] ?? [] }
                 .map(\.number),
             [3, 2, 1])
     }
@@ -482,13 +482,13 @@ final class CompactPRLineTests: XCTestCase {
     /// run isn't over, and what it is doing now is the live fact.
     func testARedRunThatIsStillGoingIsBusyNotFailing() {
         let runs = [run("CI", job: job("retry", .running, at: 50), overall: .mixed)]
-        XCTAssertEqual(SimplePullRequests.Interest.of(runs), .busy)
+        XCTAssertEqual(TodayState.PRInterest.of(runs), .busy)
     }
 
     func testTheInterestTiersAreOrdered() {
-        XCTAssertTrue(SimplePullRequests.Interest.busy < SimplePullRequests.Interest.failing)
-        XCTAssertTrue(SimplePullRequests.Interest.failing < SimplePullRequests.Interest.settled)
-        XCTAssertEqual(SimplePullRequests.Interest.of([]), .settled,
+        XCTAssertTrue(TodayState.PRInterest.busy < TodayState.PRInterest.failing)
+        XCTAssertTrue(TodayState.PRInterest.failing < TodayState.PRInterest.settled)
+        XCTAssertEqual(TodayState.PRInterest.of([]), .settled,
                        "a PR with no pipelines at all asks nothing of you")
     }
 
@@ -501,9 +501,9 @@ final class CompactPRLineTests: XCTestCase {
             a.id: [run("CI", job: nil, overall: .failure)],
             b.id: [run("CI", job: nil, overall: .failure)],
         ]
-        XCTAssertEqual(SimplePullRequests.ordered([a, b]) { byPR[$0.id] ?? [] }.map(\.number),
+        XCTAssertEqual(TodayState.ordered([a, b]) { byPR[$0.id] ?? [] }.map(\.number),
                        [1, 2])
-        XCTAssertEqual(SimplePullRequests.ordered([b, a]) { byPR[$0.id] ?? [] }.map(\.number),
+        XCTAssertEqual(TodayState.ordered([b, a]) { byPR[$0.id] ?? [] }.map(\.number),
                        [2, 1])
     }
 
