@@ -1,5 +1,6 @@
 import XCTest
 import Combine
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Tests for AppearanceStore — the shared singleton that persists

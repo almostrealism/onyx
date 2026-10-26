@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import OnyxCore
 
 /// NSVisualEffectView wrapped for SwiftUI — provides the dark translucent glass look.
 struct VibrancyBackground: NSViewRepresentable {

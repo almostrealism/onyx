@@ -1,6 +1,7 @@
 import XCTest
 import SwiftUI
 import AppKit
+@testable import OnyxCore
 @testable import OnyxLib
 
 final class PaletteTests: XCTestCase {

@@ -13,7 +13,7 @@ public enum GitFileStatus: String {
     case untracked = "?"
     case unmerged = "U"
 
-    var label: String {
+    public var label: String {
         switch self {
         case .modified: return "M"
         case .added: return "A"
@@ -25,7 +25,7 @@ public enum GitFileStatus: String {
         }
     }
 
-    func color(for area: GitFileArea) -> Color {
+    public func color(for area: GitFileArea) -> Color {
         switch (self, area) {
         case (_, .staged): return Color.onyxGreen
         case (.deleted, _): return Color.onyxRed
@@ -53,6 +53,12 @@ public struct GitChangedFile: Identifiable {
     public let status: GitFileStatus
     /// Area.
     public let area: GitFileArea
+
+    public init(path: String, status: GitFileStatus, area: GitFileArea) {
+        self.path = path
+        self.status = status
+        self.area = area
+    }
 }
 
 /// GitDiffStats.
@@ -63,6 +69,12 @@ public struct GitDiffStats {
     public let insertions: Int
     /// Deletions.
     public let deletions: Int
+
+    public init(filesChanged: Int, insertions: Int, deletions: Int) {
+        self.filesChanged = filesChanged
+        self.insertions = insertions
+        self.deletions = deletions
+    }
 }
 
 /// GitRepoStatus.
@@ -75,6 +87,13 @@ public struct GitRepoStatus {
     public let changedFiles: [GitChangedFile]
     /// Diff stats.
     public let diffStats: GitDiffStats?
+
+    public init(branch: String, isDetachedHead: Bool, changedFiles: [GitChangedFile], diffStats: GitDiffStats?) {
+        self.branch = branch
+        self.isDetachedHead = isDetachedHead
+        self.changedFiles = changedFiles
+        self.diffStats = diffStats
+    }
 
     /// Staged files.
     public var stagedFiles: [GitChangedFile] { changedFiles.filter { $0.area == .staged } }
@@ -98,6 +117,14 @@ public struct GitLogEntry: Identifiable {
     public let author: String
     /// Date.
     public let date: String   // relative or short date
+
+    public init(id: String, hash: String, message: String, author: String, date: String) {
+        self.id = id
+        self.hash = hash
+        self.message = message
+        self.author = author
+        self.date = date
+    }
 }
 
 /// GitCommitDetail.
@@ -112,4 +139,12 @@ public struct GitCommitDetail {
     public let date: String
     /// Diff.
     public let diff: String   // full diff output
+
+    public init(hash: String, message: String, author: String, date: String, diff: String) {
+        self.hash = hash
+        self.message = message
+        self.author = author
+        self.date = date
+        self.diff = diff
+    }
 }

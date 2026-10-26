@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// What the shipped bundle says its version is.

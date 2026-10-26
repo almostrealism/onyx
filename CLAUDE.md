@@ -9,11 +9,15 @@ swift build     # or ./run.sh
 swift test
 ```
 
-Dependencies: SwiftTerm 1.2+ via SPM. Main target `Onyx` is an executableTarget that links `OnyxLib` (the bulk of the code). `OnyxMCP` is a separate cross-platform (macOS + Linux) executable.
+Dependencies: SwiftTerm 1.2+ via SPM. Main target `Onyx` is an executableTarget that links `OnyxLib` (Managers, App, Views — the Mac app), which builds on `OnyxCore` (Models, Stores, Services — no AppKit, builds for iOS too). `OnyxMCP` is a separate cross-platform (macOS + Linux) executable.
+
+```
+xcodebuild -scheme OnyxCore -destination 'generic/platform=iOS Simulator' build   # the core's iOS build; CI runs it
+```
 
 ## Layered architecture
 
-`Sources/OnyxLib/` is organized into strict layers. A file may only depend on files in layers **below** it. Never introduce upward or sideways dependencies.
+The code is organized into strict layers. A file may only depend on files in layers **below** it. Never introduce upward or sideways dependencies. Models, Stores and Services live in `Sources/OnyxCore/`; Managers, App and Views in `Sources/OnyxLib/`.
 
 ```
 Views        ← SwiftUI views, NSViewRepresentables (presentation only)
@@ -40,6 +44,8 @@ Models       ← Pure data types; no dependencies on anything else
 - `DependencyAnalyzer.swift` — embedded Python script for Java dep graphs
 - `MCPServer.swift` — MCP JSON-RPC server (Unix socket + TCP)
 - `DashboardServer.swift` — HTTP server for browser dashboard
+
+Services sit in `OnyxCore`, except six that stay in `Sources/OnyxLib/Services/` because iOS can't have them: `SSHProcess` and `RemoteExec` launch `ssh` (the Mac transport, until phase 1 of `docs/ios-plan.md` puts a `RemoteTransport` seam in front of it), `TerminalKeyTranslation` reads `NSEvent` key codes, and `MCPServer`, `DashboardServer` and `DependencyAnalyzer` reach up into Managers and `AppState`, which makes them Managers in all but folder. Nothing in `OnyxCore` may import AppKit, UIKit, SwiftTerm or WebKit, or launch a `Process`: `CorePortabilityTests` checks that in `swift test`, and the iOS build in CI checks everything else. A type a Mac-side file builds from the core needs a `public init` — Swift keeps the synthesized memberwise one `internal`.
 
 **Stores** — Shared singletons (one instance across the whole app). Disk-persisted. Thread-safe. Depend on Models and Services.
 - `FavoritesStore`, `AppearanceStore`, `NetworkTopologyStore`, `TimingDataStore`

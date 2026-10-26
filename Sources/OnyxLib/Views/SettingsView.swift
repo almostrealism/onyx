@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import EventKit
+import OnyxCore
 
 struct SettingsView: View {
     @ObservedObject var appState: AppState

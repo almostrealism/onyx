@@ -23,6 +23,7 @@
 
 import Foundation
 import Combine
+import OnyxCore
 
 public final class PullRequestManager: ObservableObject {
 

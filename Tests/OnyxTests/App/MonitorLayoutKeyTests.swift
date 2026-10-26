@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// A monitor key must never change something the current layout doesn't

@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// The file browser's tree: folders open in place, their entries loaded

@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// The merge that decides whether a sync keeps or loses a note.

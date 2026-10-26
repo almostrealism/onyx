@@ -1,4 +1,5 @@
 import SwiftUI
+import OnyxCore
 
 /// Bottom panel that renders code-navigation results (subclasses, implementors,
 /// references, …) from LSPManager. Selecting a row opens that file and jumps to

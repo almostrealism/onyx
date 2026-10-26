@@ -28,6 +28,7 @@ import SwiftTerm
 import OnyxAppKitShims
 import Foundation
 import Combine
+import OnyxCore
 
 // MARK: - Connection Pool
 

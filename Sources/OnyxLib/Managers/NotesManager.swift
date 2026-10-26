@@ -14,6 +14,7 @@
 
 import Foundation
 import Combine
+import OnyxCore
 
 /// Note.
 public struct Note: Identifiable, Comparable {

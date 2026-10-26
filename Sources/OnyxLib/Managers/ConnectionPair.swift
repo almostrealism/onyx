@@ -28,6 +28,7 @@
 
 import Foundation
 import Darwin
+import OnyxCore
 
 // MARK: - SSH side-effect boundary (injectable for tests)
 

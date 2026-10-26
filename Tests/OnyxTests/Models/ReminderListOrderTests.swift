@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Reordering the monitor's Reminders lists. The order of the array is the

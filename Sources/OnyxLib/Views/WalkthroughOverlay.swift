@@ -1,4 +1,5 @@
 import SwiftUI
+import OnyxCore
 
 /// A short guided tour of what Onyx does, shown once on first launch and
 /// reachable afterwards from Help → Onyx Walkthrough.

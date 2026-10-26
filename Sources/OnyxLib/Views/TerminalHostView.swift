@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import SwiftTerm
+import OnyxCore
 
 struct TerminalHostView: NSViewRepresentable {
     @ObservedObject var appState: AppState

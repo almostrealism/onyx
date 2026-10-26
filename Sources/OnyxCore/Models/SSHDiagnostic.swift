@@ -25,6 +25,18 @@ public struct SSHMuxDiagnostic: Equatable {
     public let host: HostConfig
     public let timestamp: Date
 
+    public init(muxAlive: Bool, controlPath: String, socketExists: Bool, socketAgeSeconds: TimeInterval?, checkCommand: String, checkOutput: String, checkExitCode: Int32?, host: HostConfig, timestamp: Date) {
+        self.muxAlive = muxAlive
+        self.controlPath = controlPath
+        self.socketExists = socketExists
+        self.socketAgeSeconds = socketAgeSeconds
+        self.checkCommand = checkCommand
+        self.checkOutput = checkOutput
+        self.checkExitCode = checkExitCode
+        self.host = host
+        self.timestamp = timestamp
+    }
+
     public var summary: String {
         if muxAlive { return "Mux is alive" }
         if !socketExists { return "No mux socket — connection never established" }
@@ -45,4 +57,13 @@ public struct SSHConnectTest: Equatable {
     public let output: String
     public let exitCode: Int32?
     public let timestamp: Date
+
+    public init(host: HostConfig, success: Bool, command: String, output: String, exitCode: Int32?, timestamp: Date) {
+        self.host = host
+        self.success = success
+        self.command = command
+        self.output = output
+        self.exitCode = exitCode
+        self.timestamp = timestamp
+    }
 }

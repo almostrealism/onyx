@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import OnyxCore
 
 /// Lightweight HTTP server that serves a live-updating monitoring dashboard.
 /// Designed to be opened as a browser new-tab page for at-a-glance system status.

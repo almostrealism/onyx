@@ -2,6 +2,7 @@
 # See https://github.com/realm/SwiftLint
 
 included:
+  - Sources/OnyxCore
   - Sources/OnyxLib
   - Sources/OnyxApp
   - Sources/OnyxMCP

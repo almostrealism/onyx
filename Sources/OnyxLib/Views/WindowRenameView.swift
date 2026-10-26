@@ -1,4 +1,5 @@
 import SwiftUI
+import OnyxCore
 
 struct WindowRenameView: View {
     @ObservedObject var appState: AppState

@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// `ssh -tt` puts a terminal on the far end, and a terminal's input buffer

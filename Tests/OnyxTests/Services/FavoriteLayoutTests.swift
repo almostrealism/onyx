@@ -1,5 +1,6 @@
 import XCTest
 import CoreGraphics
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// The layout's whole purpose is that every box can be READ. These tests

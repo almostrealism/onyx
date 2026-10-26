@@ -24,6 +24,7 @@
 
 import Foundation
 import Combine
+import OnyxCore
 
 @MainActor
 public final class LSPManager: ObservableObject {

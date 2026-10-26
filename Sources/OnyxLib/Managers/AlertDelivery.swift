@@ -20,6 +20,7 @@ import Foundation
 import AppKit
 #if canImport(UserNotifications)
 import UserNotifications
+import OnyxCore
 #endif
 
 public final class AlertDelivery {

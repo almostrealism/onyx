@@ -1,6 +1,7 @@
 import XCTest
 import Foundation
 import Network
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Round-trip integration tests for the OnyxMCP stdio bridge.

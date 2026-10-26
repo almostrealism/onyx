@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// `cleanedOutput` strips the remote TTY's echo of our own script. Its

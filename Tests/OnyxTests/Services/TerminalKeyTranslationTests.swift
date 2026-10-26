@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Shift-Return must reach the terminal as something a program can tell

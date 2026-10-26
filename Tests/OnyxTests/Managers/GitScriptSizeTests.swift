@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Git queries go over the same `-tt` path as everything else, so they're

@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Tests for GitManager's extractSection + parseOutput on polluted captured

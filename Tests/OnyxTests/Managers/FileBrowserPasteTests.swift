@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// ⌘V in the file browser uploads files copied in Finder — and only files.

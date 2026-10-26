@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Syntax Highlighting
 
-enum SyntaxHighlighter {
+public enum SyntaxHighlighter {
     // Theme colors (dark background friendly)
     private static let keyword = Color.onyxPurple     // purple
     private static let type = Color.onyxBlue         // blue
@@ -33,7 +33,7 @@ enum SyntaxHighlighter {
         case java, kotlin, swift, javascript, typescript, python, go, rust, c, ruby, shell, json, yaml, toml, xml
     }
 
-    static func highlight(_ content: String, fileName: String) -> AttributedString {
+    public static func highlight(_ content: String, fileName: String) -> AttributedString {
         let ext = (fileName as NSString).pathExtension.lowercased()
         guard let language = languages[ext] else {
             var attr = AttributedString(content)

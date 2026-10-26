@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 // MARK: - GitLab pipeline URL parsing (via the shared PipelineSpec.parse)

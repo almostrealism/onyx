@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Pure framing tests for LSPProtocol. These lock the trickiest part of the

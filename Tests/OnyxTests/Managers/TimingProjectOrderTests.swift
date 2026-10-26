@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Pins the contract for the daily-hours bar chart's slice ordering.

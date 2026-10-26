@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// A failed probe used to mean exactly one thing: "install your SSH key".

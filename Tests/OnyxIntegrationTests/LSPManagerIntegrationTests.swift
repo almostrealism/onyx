@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// End-to-end test of the code-navigation stack (LSPManager → LSPSession →

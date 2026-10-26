@@ -20,6 +20,7 @@
 import Foundation
 import Combine
 import AppKit
+import OnyxCore
 
 /// FileBrowserManager.
 public class FileBrowserManager: ObservableObject {

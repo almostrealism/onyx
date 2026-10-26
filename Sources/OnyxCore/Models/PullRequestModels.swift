@@ -4,8 +4,8 @@ import Foundation
 /// `/projects/:id` segment: only the slash (and other reserved chars)
 /// get escaped; -._ and alphanumerics pass through, matching GitLab's
 /// documented `group%2Fproject-client` form.
-enum GitLabPath {
-    static let allowed: CharacterSet = {
+public enum GitLabPath {
+    public static let allowed: CharacterSet = {
         var set = CharacterSet.alphanumerics
         set.insert(charactersIn: "-._")
         return set

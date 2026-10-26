@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Today's calendar in the agenda pane: all-day first, then by time; what

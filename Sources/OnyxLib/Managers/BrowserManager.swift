@@ -19,6 +19,7 @@
 import SwiftUI
 import WebKit
 import Combine
+import OnyxCore
 
 // MARK: - Browser Manager
 

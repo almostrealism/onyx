@@ -1,4 +1,5 @@
 import SwiftUI
+import OnyxCore
 
 struct PaletteAction: Identifiable {
     let id = UUID()

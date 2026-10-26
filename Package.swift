@@ -2,11 +2,18 @@
 import PackageDescription
 
 // OnyxMCP must build on both macOS and Linux (no platform-specific dependencies).
-// OnyxLib and the main Onyx app require macOS 14+.
+// OnyxLib and the main Onyx app require macOS 14+. OnyxCore also builds for
+// iOS 17 (see docs/ios-plan.md); nothing else here does yet.
 let package = Package(
     name: "Onyx",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v14),
+        .iOS(.v17),
+    ],
+    products: [
+        // Declared so the iOS build of the core has a scheme of its own
+        // (`xcodebuild -scheme OnyxCore`), and for the iOS app to link.
+        .library(name: "OnyxCore", targets: ["OnyxCore"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
@@ -35,10 +42,19 @@ let package = Package(
             name: "OnyxAppKitShims",
             path: "Sources/OnyxAppKitShims"
         ),
+        // Everything that isn't drawing or Mac-only: Models, Stores and the
+        // Services that don't launch processes. No AppKit, no UIKit — it
+        // builds for macOS and iOS, and the iOS build is what keeps it so.
+        .target(
+            name: "OnyxCore",
+            dependencies: ["OnyxVersion"],
+            path: "Sources/OnyxCore"
+        ),
         .target(
             name: "OnyxLib",
             dependencies: [
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
+                "OnyxCore",
                 "OnyxVersion",
                 "OnyxAppKitShims",
             ],
@@ -61,12 +77,12 @@ let package = Package(
         ),
         .testTarget(
             name: "OnyxTests",
-            dependencies: ["OnyxLib"],
+            dependencies: ["OnyxCore", "OnyxLib"],
             path: "Tests/OnyxTests"
         ),
         .testTarget(
             name: "OnyxIntegrationTests",
-            dependencies: ["OnyxLib"],
+            dependencies: ["OnyxCore", "OnyxLib"],
             path: "Tests/OnyxIntegrationTests"
         ),
     ]

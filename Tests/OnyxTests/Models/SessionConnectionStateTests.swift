@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Locks the overlay/input-gating contract of SessionConnectionState.

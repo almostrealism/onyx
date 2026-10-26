@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import OnyxCore
 
 /// ShortcutManager.
 public class ShortcutManager {

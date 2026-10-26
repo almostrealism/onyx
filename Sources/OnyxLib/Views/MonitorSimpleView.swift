@@ -1,5 +1,6 @@
 import SwiftUI
 import EventKit
+import OnyxCore
 
 // MARK: - Simple Monitor view
 //

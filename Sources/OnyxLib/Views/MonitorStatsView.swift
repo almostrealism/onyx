@@ -1,4 +1,5 @@
 import SwiftUI
+import OnyxCore
 
 /// Color ramp for container CPU bars, shared between DockerStatsSection
 /// (the full list) and SimpleContainersStrip (the simple-mode strip) so

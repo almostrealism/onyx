@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Editing a file on a host by hand: exact bytes in and out, and a save

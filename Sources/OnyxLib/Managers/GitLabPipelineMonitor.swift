@@ -16,6 +16,7 @@
 
 import Foundation
 import Combine
+import OnyxCore
 
 public final class GitLabPipelineMonitor: ObservableObject {
 

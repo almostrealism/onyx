@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 // MARK: - Hex parsing
 
@@ -21,21 +20,6 @@ public extension Color {
             r = 1; g = 1; b = 1
         }
         self.init(red: r, green: g, blue: b)
-    }
-}
-
-extension NSColor {
-    /// AppKit counterpart of `Color(hex:)` for the few SceneKit / layer
-    /// surfaces that need an NSColor. Returns nil on a malformed hex.
-    convenience init?(hex: String) {
-        let h = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        guard h.count == 6, let int = UInt64(h, radix: 16) else { return nil }
-        self.init(
-            red: CGFloat((int >> 16) & 0xFF) / 255.0,
-            green: CGFloat((int >> 8) & 0xFF) / 255.0,
-            blue: CGFloat(int & 0xFF) / 255.0,
-            alpha: 1.0
-        )
     }
 }
 

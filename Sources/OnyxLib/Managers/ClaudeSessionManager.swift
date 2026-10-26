@@ -18,6 +18,7 @@
 import Foundation
 import Combine
 import AppKit
+import OnyxCore
 
 // MARK: - Claude Code Session Tracking
 

@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import OnyxVersion
+import OnyxCore
 
 // MARK: - JSON-RPC Types
 

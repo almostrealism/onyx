@@ -20,6 +20,7 @@ import Foundation
 import Darwin
 import Network
 import AppKit
+import OnyxCore
 
 public final class ConnectionPairRegistry: ObservableObject {
 

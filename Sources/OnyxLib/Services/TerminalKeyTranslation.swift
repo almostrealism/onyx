@@ -16,6 +16,7 @@
 //
 
 import AppKit
+import OnyxCore
 
 public enum TerminalKeyTranslation {
 

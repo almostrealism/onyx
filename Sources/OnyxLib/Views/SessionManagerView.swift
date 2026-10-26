@@ -1,4 +1,5 @@
 import SwiftUI
+import OnyxCore
 
 struct SessionManagerView: View {
     @ObservedObject var appState: AppState

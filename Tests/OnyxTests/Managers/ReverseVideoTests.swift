@@ -1,6 +1,7 @@
 import XCTest
 import AppKit
 import SwiftTerm
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Pasted text in zsh (`zle_highlight` paste=standout) and bash 5.1+ (active

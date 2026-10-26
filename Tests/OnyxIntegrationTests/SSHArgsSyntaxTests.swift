@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Verifies that the option strings produced by AppState's SSH/SCP arg

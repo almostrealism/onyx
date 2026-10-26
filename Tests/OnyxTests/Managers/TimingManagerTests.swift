@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Tests for the pure helpers that back the Timing panel stats and heatmap.

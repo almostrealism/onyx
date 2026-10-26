@@ -1,4 +1,5 @@
 import AppKit
+import OnyxCore
 
 /// AppDelegate.
 public class AppDelegate: NSObject, NSApplicationDelegate {

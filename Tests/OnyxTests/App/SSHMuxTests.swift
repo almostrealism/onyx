@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Regression tests for SSH ControlMaster path handling and the

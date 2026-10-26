@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Tests for `OnyxMCP --hook` invocation.

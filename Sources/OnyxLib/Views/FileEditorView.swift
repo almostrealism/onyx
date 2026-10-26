@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import OnyxCore
 
 /// A file from the file browser, full-window and editable. ⌘S saves, Esc
 /// closes (asking first if there are unsaved edits).

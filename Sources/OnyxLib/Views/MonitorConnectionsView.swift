@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import OnyxCore
 
 struct ConnectionPoolSection: View {
     @ObservedObject var appState: AppState

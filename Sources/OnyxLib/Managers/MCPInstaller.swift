@@ -22,6 +22,7 @@
 
 import Foundation
 import OnyxVersion
+import OnyxCore
 
 /// What the app knows about the bridge on one host.
 public struct MCPHostStatus: Equatable {

@@ -1,4 +1,5 @@
 import Foundation
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Shared fixture for simulating remote-output pollution.

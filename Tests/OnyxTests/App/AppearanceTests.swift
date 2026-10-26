@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Onyx is a jet-black overlay: every color in it assumes a dark

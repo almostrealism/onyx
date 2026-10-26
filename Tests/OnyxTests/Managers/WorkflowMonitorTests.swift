@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Regression tests for the duplicate-id crash: adding a pipeline URL that

@@ -15,6 +15,7 @@
 //
 
 import Foundation
+import OnyxCore
 
 // @unchecked Sendable: all mutable state (buffer, pending, nextId, stopped) is
 // guarded by `lock`; the pipes/process are configured once in start(). We

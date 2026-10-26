@@ -19,6 +19,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import OnyxCore
 
 // MARK: - GitManager
 

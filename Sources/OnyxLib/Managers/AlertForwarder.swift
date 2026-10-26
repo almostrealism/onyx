@@ -17,6 +17,7 @@
 
 import Foundation
 import AppKit
+import OnyxCore
 
 public final class AlertForwarder: ObservableObject {
     public static let shared = AlertForwarder()

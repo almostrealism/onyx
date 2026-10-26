@@ -8,6 +8,7 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import OnyxCore
 
 // MARK: - Sidebar
 

@@ -23,6 +23,7 @@
 
 import SwiftUI
 import AppKit
+import OnyxCore
 
 /// NSTextField-backed text field we can focus and select atomically on
 /// appear. SwiftUI's TextField + @FocusState is async, so any

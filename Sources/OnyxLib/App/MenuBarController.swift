@@ -24,6 +24,7 @@
 
 import AppKit
 import Combine
+import OnyxCore
 
 public final class MenuBarController: NSObject, NSMenuDelegate {
     public static let shared = MenuBarController()

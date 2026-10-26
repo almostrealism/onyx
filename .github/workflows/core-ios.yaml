@@ -1,0 +1,59 @@
+name: "Core for iOS"
+
+# Builds OnyxCore for iOS, which is the whole of what keeps it portable.
+#
+# OnyxCore (Models, Stores and the Services that don't launch processes)
+# is meant to be shared with the iPad and iPhone apps — see
+# docs/ios-plan.md. Nobody builds for iOS before committing, and a Mac
+# happily compiles an AppKit import or a Process inside the core, so
+# without this the boundary erodes one convenient import at a time.
+# `CorePortabilityTests` catches the obvious cases locally; this catches
+# everything the compiler can.
+#
+# Simulator and device are both built: they differ in SDK, and an API
+# that exists on one and not the other shows up only here.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - 'Sources/OnyxCore/**'
+      - 'Sources/OnyxVersion/**'
+      - 'Package.swift'
+      - '.github/workflows/core-ios.yaml'
+  pull_request:
+    paths:
+      - 'Sources/OnyxCore/**'
+      - 'Sources/OnyxVersion/**'
+      - 'Package.swift'
+      - '.github/workflows/core-ios.yaml'
+
+concurrency:
+  group: core-ios-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "OnyxCore (${{ matrix.destination }})"
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        destination:
+          - "iOS Simulator"
+          - "iOS"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          xcodebuild -scheme OnyxCore \
+            -destination "generic/platform=${{ matrix.destination }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            build

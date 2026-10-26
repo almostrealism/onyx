@@ -1,4 +1,5 @@
 import SwiftUI
+import OnyxCore
 
 struct ClaudeSessionsSection: View {
     @ObservedObject var appState: AppState

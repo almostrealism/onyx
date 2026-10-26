@@ -37,6 +37,7 @@
 
 import Foundation
 import Darwin
+import OnyxCore
 
 public final class RemoteExec {
 

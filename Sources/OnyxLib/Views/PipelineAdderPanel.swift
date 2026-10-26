@@ -33,6 +33,7 @@
 //
 
 import SwiftUI
+import OnyxCore
 
 struct PipelineAdderPanel: View {
     @ObservedObject var appState: AppState

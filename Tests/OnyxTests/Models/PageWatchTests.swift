@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// A watch fires once, possibly weeks after it was set, and the user acts

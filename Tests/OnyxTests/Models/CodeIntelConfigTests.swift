@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// Back-compat tests for CodeIntelConfig on HostConfig. Hosts decode with

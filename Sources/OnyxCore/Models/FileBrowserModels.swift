@@ -85,6 +85,8 @@ public class SearchResultTree: ObservableObject {
     /// Max results.
     public let maxResults = 100
 
+    public init() {}
+
     /// Insert a path into the tree relative to a base directory
     public func insertPath(_ relativePath: String, basePath: String) {
         guard resultCount < maxResults else { return }

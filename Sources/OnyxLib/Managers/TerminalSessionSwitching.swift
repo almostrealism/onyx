@@ -21,6 +21,7 @@
 
 import AppKit
 import SwiftTerm
+import OnyxCore
 
 extension OnyxTerminalView {
     // A handful of members below are internal rather than private: they

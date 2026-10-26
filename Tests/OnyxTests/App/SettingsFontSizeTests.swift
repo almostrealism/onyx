@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 // Settings staged-text behavior for numeric font-size fields.

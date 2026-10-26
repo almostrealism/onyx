@@ -1,4 +1,5 @@
 import SwiftUI
+import OnyxCore
 
 /// Side-by-side companion to SessionNotesSection in the monitor overlay.
 /// Reads from `PullRequestManager.shared` (polled in the background); the

@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// A failed stats poll has to be told apart from a failed *connection*.

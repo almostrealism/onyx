@@ -13,6 +13,7 @@
 
 import Foundation
 import AppKit
+import OnyxCore
 
 extension AppState {
 

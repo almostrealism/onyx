@@ -23,6 +23,7 @@
 
 import AppKit
 import Foundation
+import OnyxCore
 
 /// Polls CPU% on every connected host and feeds the screensaver stream.
 public final class CPUFleetPoller {

@@ -1,4 +1,5 @@
 import Foundation
+import OnyxCore
 
 /// Analyzes dependency relationships between changed files in a git repo.
 /// Runs a Python script on the remote host (via SSH) that:

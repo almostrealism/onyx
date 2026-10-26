@@ -28,6 +28,7 @@
 import Foundation
 import AppKit
 import Combine
+import OnyxCore
 
 public final class SharedStateSync: ObservableObject {
     public static let shared = SharedStateSync()

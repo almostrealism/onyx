@@ -63,6 +63,17 @@ public struct ConnectionInfo: Identifiable {
     /// Connection status.
     public let connectionStatus: ConnectionStatus
 
+    public init(id: String, label: String, hostLabel: String, isRunning: Bool, isActive: Bool, lastActiveTime: Date, source: SessionSource?, connectionStatus: ConnectionStatus) {
+        self.id = id
+        self.label = label
+        self.hostLabel = hostLabel
+        self.isRunning = isRunning
+        self.isActive = isActive
+        self.lastActiveTime = lastActiveTime
+        self.source = source
+        self.connectionStatus = connectionStatus
+    }
+
     /// Status.
     public var status: String { connectionStatus.label }
     /// Status color.

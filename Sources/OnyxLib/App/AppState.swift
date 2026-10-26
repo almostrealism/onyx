@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import OnyxCore
 
 public extension Notification.Name {
     static let toggleNotes = Notification.Name("toggleNotes")

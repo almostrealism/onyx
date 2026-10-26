@@ -14,6 +14,7 @@
 import Foundation
 import Combine
 import EventKit
+import OnyxCore
 
 public final class FlowtreeManager: ObservableObject {
 

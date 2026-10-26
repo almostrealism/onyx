@@ -19,6 +19,7 @@
 
 import Foundation
 import Combine
+import OnyxCore
 
 /// MonitorManager.
 public class MonitorManager: ObservableObject {

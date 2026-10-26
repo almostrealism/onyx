@@ -177,6 +177,11 @@ public struct SessionGroup: Identifiable {
     public let source: SessionSource
     /// Sessions.
     public let sessions: [TmuxSession]
+
+    public init(source: SessionSource, sessions: [TmuxSession]) {
+        self.source = source
+        self.sessions = sessions
+    }
 }
 
 /// HostGroup.
@@ -187,6 +192,11 @@ public struct HostGroup: Identifiable {
     public let host: HostConfig
     /// Groups.
     public let groups: [SessionGroup]
+
+    public init(host: HostConfig, groups: [SessionGroup]) {
+        self.host = host
+        self.groups = groups
+    }
 }
 
 /// A persisted browser session entry for saving/loading from disk.

@@ -20,6 +20,7 @@
 
 import Foundation
 import Darwin
+import OnyxCore
 
 public enum SSHProcess {
 

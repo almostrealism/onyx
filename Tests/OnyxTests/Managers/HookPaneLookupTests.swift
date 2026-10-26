@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// A Claude started with `su -` inside another account's tmux: its hooks

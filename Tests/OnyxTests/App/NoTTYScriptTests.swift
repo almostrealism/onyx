@@ -1,4 +1,5 @@
 import XCTest
+@testable import OnyxCore
 @testable import OnyxLib
 
 /// A terminal on the far end is what makes remote scripts fragile: a ~1KB

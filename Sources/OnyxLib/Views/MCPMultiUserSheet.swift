@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import OnyxCore
 
 /// Shown once after a successful MCP install, explaining what the other
 /// accounts on that machine need to do.
