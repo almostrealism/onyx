@@ -506,6 +506,13 @@ public class AppState: ObservableObject {
     /// the Mac; see RemoteTransport and docs/ios-plan.md.
     public lazy var transport: RemoteTransport = ProcessTransport(appState: self)
 
+    /// What shared-state sync rides: OpenSSH, or — by the user's choice
+    /// (`AppearanceConfig.sshEngine`) — the built-in client the iPhone and
+    /// iPad use, so it can be proven against a real home host first.
+    public var syncTransport: RemoteTransport {
+        appearance.sshEngine == .builtInForSharedState ? BuiltInSSH.transport : transport
+    }
+
     private var todayCancellable: AnyCancellable?
     /// What the Today sections read — Timing, reminders, calendar, PRs,
     /// pipelines — and nothing else, so the iPhone can have them without

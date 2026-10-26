@@ -714,6 +714,35 @@ struct SharedStateSettingsSection: View {
                 }
             }
 
+            if sync.homeHostID != nil {
+                HStack(spacing: 8) {
+                    Text("Connect with")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.6))
+                    Picker("", selection: Binding(
+                        get: { appState.appearance.sshEngine },
+                        set: {
+                            appState.appearance.sshEngine = $0
+                            appState.saveAppearance()
+                            SharedStateSync.shared.syncNow()
+                        }
+                    )) {
+                        ForEach(SSHEngine.allCases) { engine in
+                            Text(engine.label).tag(engine)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 180)
+                }
+                .padding(.top, 4)
+
+                Text("Built-in is the SSH client the iPhone and iPad apps use: it reads your ~/.ssh/config and known_hosts and signs in with your Ed25519 or ECDSA key (never RSA, and not through ssh-agent). Choosing it here proves it against your home host before a phone has to.")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Text("Session notes, favorite sessions, tracked pipelines and which workflows show under open PRs are kept in ~/.onyx/shared-state.json on the chosen host, so every Mac running Onyx sees the same set. A change reaches your other machines within about a minute, or straight away when you switch to one. API tokens are never shared — they stay on this Mac. Your Mac keeps its own copy and works normally when the host is unreachable. Changing hosts merges the two sets — nothing is replaced or deleted.")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.4))

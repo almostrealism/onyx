@@ -20,7 +20,7 @@ final class ProcessTransportSSHTests: XCTestCase {
         AppState.testSSHOptions = sshd.sshOptions
         app = AppState()
         host = HostConfig(label: "local-sshd",
-                          ssh: SSHConfig(host: "127.0.0.1", user: sshd.user, port: sshd.port,
+                          ssh: SSHConfig(host: sshd.hostName, user: sshd.user, port: sshd.port,
                                          identityFile: sshd.clientKey.path))
     }
 

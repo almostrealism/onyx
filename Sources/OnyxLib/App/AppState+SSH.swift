@@ -476,7 +476,7 @@ extension AppState {
     /// Static: it is a constant of the protocol with remote hosts, not
     /// state of a window — and an extension can't hold stored properties
     /// anyway.
-    static let extraPathValue = "PATH=$PATH:/opt/homebrew/bin:/usr/local/bin:/snap/bin"
+    static let extraPathValue = RemoteWire.extraPath
     var extraPath: String { Self.extraPathValue }
 
     /// Run a shell command on a host and return (executable, args).
@@ -497,7 +497,7 @@ extension AppState {
 
         var args = sshBaseArgs(for: h)
         args.append(sshUserHost(for: h))
-        args.append("exec $SHELL -lc 'export \(extraPath); \(script)'")
+        args.append(RemoteWire.execCommand(script))
         return ("/usr/bin/ssh", args)
     }
 
@@ -562,20 +562,14 @@ extension AppState {
         args.append(sshUserHost(for: h))
         guard allocateTTY else {
             // No tty: no echo to suppress, and the shell exits at EOF.
-            return ("/usr/bin/ssh", args, wrapped + "\n")
+            return ("/usr/bin/ssh", args, RemoteWire.pipeStdin(script))
         }
         // NB: `-tt` puts a TERMINAL on the far end, and a terminal cannot
         // be written to at full speed — see RemoteExec's paced stdin
         // writer, which is what actually gets this script delivered
         // intact. Keeping lines short (see statsCommand) matters for the
         // same reason.
-        let stdinScript = """
-        stty -echo 2>/dev/null
-        \(wrapped)
-        exit
-
-        """
-        return ("/usr/bin/ssh", args, stdinScript)
+        return ("/usr/bin/ssh", args, RemoteWire.terminalStdin(script))
     }
 
     /// Sanitize a session name for safe shell interpolation

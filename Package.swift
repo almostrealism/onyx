@@ -14,9 +14,15 @@ let package = Package(
         // Declared so the iOS build of the core has a scheme of its own
         // (`xcodebuild -scheme OnyxCore`), and for the iOS app to link.
         .library(name: "OnyxCore", targets: ["OnyxCore"]),
+        .library(name: "OnyxSSH", targets: ["OnyxSSH"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
+        // The in-process SSH client (OnyxSSH): iOS can't run `ssh`, and the
+        // Mac can opt in. See docs/ios-plan.md.
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.80.0"),
+        .package(url: "https://github.com/apple/swift-nio-ssh.git", from: "0.12.0"),
+        .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0" ..< "6.0.0"),
         // NOTE: SwiftLint is intentionally NOT integrated as a SwiftPM plugin.
         // Both realm/SwiftLint and SimplyDanny/SwiftLintPlugins ship build-tool
         // plugins with prebuild capability, and SwiftPM 6.x rejects them with:
@@ -50,11 +56,26 @@ let package = Package(
             dependencies: ["OnyxVersion"],
             path: "Sources/OnyxCore"
         ),
+        // In-process SSH on SwiftNIO SSH: connections, exec and shell
+        // channels, PTYs, SFTP, forwarding, keys and known hosts. Builds for
+        // macOS and iOS, and implements OnyxCore's RemoteTransport.
+        .target(
+            name: "OnyxSSH",
+            dependencies: [
+                "OnyxCore",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOSSH", package: "swift-nio-ssh"),
+                .product(name: "Crypto", package: "swift-crypto"),
+            ],
+            path: "Sources/OnyxSSH"
+        ),
         .target(
             name: "OnyxLib",
             dependencies: [
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 "OnyxCore",
+                "OnyxSSH",
                 "OnyxVersion",
                 "OnyxAppKitShims",
             ],
@@ -82,12 +103,12 @@ let package = Package(
         ),
         .testTarget(
             name: "OnyxTests",
-            dependencies: ["OnyxCore", "OnyxLib"],
+            dependencies: ["OnyxCore", "OnyxLib", "OnyxSSH"],
             path: "Tests/OnyxTests"
         ),
         .testTarget(
             name: "OnyxIntegrationTests",
-            dependencies: ["OnyxCore", "OnyxLib", "OnyxTestSupport"],
+            dependencies: ["OnyxCore", "OnyxLib", "OnyxSSH", "OnyxTestSupport"],
             path: "Tests/OnyxIntegrationTests"
         ),
     ]

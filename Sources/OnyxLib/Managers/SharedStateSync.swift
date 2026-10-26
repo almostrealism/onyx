@@ -490,7 +490,7 @@ public final class SharedStateSync: ObservableObject {
 
     // MARK: - Transfer
 
-    /// Both scripts go through `runScriptWithFallback`, which retries over a
+    /// Both scripts go through `runScript`, which falls back to a
     /// TTY — so both are bound by the ~1KB payload ceiling and are named
     /// here so `RemoteScriptBudgetTests` can measure them.
     static let makeDirectoryScript =
@@ -528,7 +528,7 @@ public final class SharedStateSync: ObservableObject {
     private func fetch(host: HostConfig, appState: AppState) -> Fetched {
         let local = scratch
         try? FileManager.default.removeItem(at: local)
-        let result = appState.transport.download(Self.remotePath, to: local.path, from: host,
+        let result = appState.syncTransport.download(Self.remotePath, to: local.path, from: host,
                                                  recursive: false, timeout: 30,
                                                  label: "sharedStatePull:\(host.label)")
         defer { try? FileManager.default.removeItem(at: local) }
@@ -537,7 +537,7 @@ public final class SharedStateSync: ObservableObject {
             let verdict = Self.classify(exit: result.exit, stderr: result.stderr)
             switch verdict {
             case .connectionFailure(let why):
-                appState.reportSSHFailure(host: host)
+                Self.reportConnectionFailure(host: host, appState: appState)
                 return .failure(why ?? "couldn't reach \(host.label)")
             case .transferFailure(let why):
                 return .failure(why)
@@ -582,7 +582,7 @@ public final class SharedStateSync: ObservableObject {
         let local = scratch.deletingLastPathComponent()
             .appendingPathComponent("onyx-shared-state-backup.json")
         try? FileManager.default.removeItem(at: local)
-        _ = appState.transport.download(Self.remoteBackupPath, to: local.path, from: host,
+        _ = appState.syncTransport.download(Self.remoteBackupPath, to: local.path, from: host,
                                         recursive: false, timeout: 30,
                                         label: "sharedStateBackup:\(host.label)")
         defer { try? FileManager.default.removeItem(at: local) }
@@ -590,6 +590,14 @@ public final class SharedStateSync: ObservableObject {
               let decoded = try? JSONDecoder().decode(SharedState.self, from: data),
               !decoded.isEmpty else { return nil }
         return decoded
+    }
+
+    /// A dead connection is the ConnectionPair's to recover — but only
+    /// when it was the pair's connection. The built-in client keeps its
+    /// own, and failing over the pair for its trouble would drop healthy
+    /// terminals.
+    private static func reportConnectionFailure(host: HostConfig, appState: AppState) {
+        if appState.appearance.sshEngine == .openSSH { appState.reportSSHFailure(host: host) }
     }
 
     private func push(_ state: SharedState, host: HostConfig, appState: AppState) -> Bool {
@@ -602,8 +610,8 @@ public final class SharedStateSync: ObservableObject {
         defer { try? FileManager.default.removeItem(at: local) }
 
         // The directory may not exist yet; scp won't make it.
-        let mkdir = FileBrowserManager.runScriptWithFallback(
-            Self.makeDirectoryScript, appState: appState, host: host, timeout: 20)
+        let mkdir = appState.syncTransport.runScript(
+            Self.makeDirectoryScript, on: host, timeout: 20, label: "sharedStateDir:\(host.label)")
         guard mkdir.cleaned?.contains("READY") == true else {
             report(.failed(mkdir.failureDetail))
             return false
@@ -613,18 +621,18 @@ public final class SharedStateSync: ObservableObject {
         // in the clear: an interrupted transfer straight onto the
         // destination leaves a truncated file, and a truncated
         // shared-state.json read by the next Mac is every note gone.
-        let upload = appState.transport.upload(local.path, to: Self.remoteStagingPath, on: host,
+        let upload = appState.syncTransport.upload(local.path, to: Self.remoteStagingPath, on: host,
                                                recursive: false, timeout: 30,
                                                label: "sharedStatePush:\(host.label)")
         guard upload.exit == 0 else {
-            if upload.exit == 255 { appState.reportSSHFailure(host: host) }
+            if upload.exit == 255 { Self.reportConnectionFailure(host: host, appState: appState) }
             report(.failed(Self.shortError(upload.stderr) ?? "couldn't write to \(host.label)"))
             return false
         }
 
-        let move = FileBrowserManager.runScriptWithFallback(
+        let move = appState.syncTransport.runScript(
             Self.moveIntoPlaceScript(backingUp: !state.isEmpty),
-            appState: appState, host: host, timeout: 20)
+            on: host, timeout: 20, label: "sharedStateMove:\(host.label)")
         guard move.cleaned?.contains("MOVED") == true else {
             report(.failed(move.failureDetail))
             return false

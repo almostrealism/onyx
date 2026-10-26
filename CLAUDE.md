@@ -9,10 +9,11 @@ swift build     # or ./run.sh
 swift test
 ```
 
-Dependencies: SwiftTerm 1.2+ via SPM. Main target `Onyx` is an executableTarget that links `OnyxLib` (Managers, App, Views — the Mac app), which builds on `OnyxCore` (Models, Stores, Services — no AppKit, builds for iOS too). `OnyxMCP` is a separate cross-platform (macOS + Linux) executable.
+Dependencies: SwiftTerm 1.2+ via SPM. Main target `Onyx` is an executableTarget that links `OnyxLib` (Managers, App, Views — the Mac app), which builds on `OnyxCore` (Models, Stores, Services — no AppKit, builds for iOS too) and `OnyxSSH` (the in-process SSH client, SwiftNIO SSH — what the iOS apps connect with). `OnyxMCP` is a separate cross-platform (macOS + Linux) executable.
 
 ```
 xcodebuild -scheme OnyxCore -destination 'generic/platform=iOS Simulator' build   # the core's iOS build; CI runs it
+xcodebuild -scheme OnyxSSH -destination 'generic/platform=iOS Simulator' build    # likewise the SSH client
 ```
 
 ## Layered architecture
@@ -139,7 +140,9 @@ DispatchQueue.global(qos: .userInitiated).async {
 transport.runCommand("git status --porcelain", on: host, label: "git")  // empty/garbage on broken hosts
 ```
 
-Transfer paths are file-transfer paths (relative to the remote home, or absolute), never shell paths — see "scp paths are NOT shell paths" above. Transport failures follow ssh's conventions so callers can tell them apart: exit 255 is the connection, anything else with the server's message is the operation (`SharedStateSync.classify` depends on it). `LocalSSHD` (Tests/OnyxTestSupport) is a private, unprivileged sshd for testing a transport against the real thing.
+Transfer paths are file-transfer paths (relative to the remote home, or absolute), never shell paths — see "scp paths are NOT shell paths" above. Transport failures follow ssh's conventions so callers can tell them apart: exit 255 is the connection, anything else with the server's message is the operation (`SharedStateSync.classify` depends on it). `LocalSSHD` (Tests/OnyxTestSupport) is a private, unprivileged sshd for testing a transport against the real thing. **Connect to it as `sshd.hostName` (`127.1`), never `127.0.0.1`**: `HostConfig.isLocal` treats `127.0.0.1` and `localhost` as this Mac and runs everything as a local process, so a test that spelled it that way never reached the server — and passed.
+
+**`OnyxSSH` is the second transport, `NIOTransport`** — SwiftNIO SSH in process, the only kind iOS can have. One connection per host (`SSHConnection`), sessions as channels capped at 8 (OpenSSH's MaxSessions is 10), a dead connection replaced once. It puts exactly the bytes `ProcessTransport` does on the wire (`RemoteWire`: the exec line, the piped script, the paced terminal script), and fails the same way: exit 255 with ssh's wording for the connection, exit 1 with scp's wording for a file (`NIOTransportSSHTests` holds it to every `ProcessTransportSSHTests` case). Transfers are our own SFTP v3 (`SFTPClient`). Keys: Ed25519 and ECDSA only, never RSA, no agent — the Onyx key (`OnyxKey`, in `SecretStore`) first, then the user's unencrypted key files; RSA and passphrase files are skipped with a reason, which the "Permission denied" message names. Host keys: accept-new with our own `KnownHostsStore`, consulting the user's `~/.ssh/known_hosts` (plain and hashed) read-only on a Mac; a changed key is refused. On the Mac it's `BuiltInSSH.transport`, which asks `ssh -G` where and as whom (so `~/.ssh/config` aliases work, and a ProxyJump host is refused rather than connected to directly), and shared-state sync rides it when Settings → Shared state → Connect with is "Built-in" (`AppState.syncTransport`; a built-in failure must not fail over the ConnectionPair). Every NIO promise must be completed on every path — NIO traps on a dropped one in debug builds.
 
 ### When `runCommand` is still OK
 

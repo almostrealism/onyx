@@ -178,8 +178,8 @@ public final class RemoteExec {
         signal(SIGPIPE, SIG_IGN)
     }()
 
-    public static let stdinChunk = 512
-    public static let stdinPause: TimeInterval = 0.06
+    public static let stdinChunk = RemoteWire.terminalChunk
+    public static let stdinPause: TimeInterval = RemoteWire.terminalPause
 
     /// Write `data` to a process's stdin in paced chunks, giving up the
     /// moment the process is gone.

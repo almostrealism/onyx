@@ -205,3 +205,46 @@ public enum RemoteScript {
     /// form (`$((1+1))`) is what a noexec shell would echo back.
     private static let executionMarkerEcho = "---ONYX-OK-$((1+1))---"
 }
+
+// MARK: - What crosses the wire
+
+/// The exact text each kind of invocation sends, shared by every transport
+/// so `ssh` processes and the in-process client put the same bytes on the
+/// wire.
+public enum RemoteWire {
+
+    /// PATH additions for exec requests: Homebrew on both architectures and
+    /// snap, which a non-login `$SHELL -lc` may not have.
+    public static let extraPath = "PATH=$PATH:/opt/homebrew/bin:/usr/local/bin:/snap/bin"
+
+    /// The command line of an exec request (`ssh host '<this>'`): the user's
+    /// login shell, so profile PATHs apply. Defeated by a noexec profile —
+    /// see `RemoteInvocation.command`.
+    public static func execCommand(_ script: String) -> String {
+        "exec $SHELL -lc 'export \(extraPath); \(script)'"
+    }
+
+    /// stdin for a shell request without a terminal: the wrapped script.
+    /// No echo to suppress, and the shell exits at EOF.
+    public static func pipeStdin(_ script: String) -> String {
+        RemoteScript.wrap(script) + "\n"
+    }
+
+    /// stdin for a shell request WITH a terminal: echo off first, then the
+    /// wrapped script, then an explicit exit — a terminal doesn't end at
+    /// EOF the way a pipe does. Deliver it paced (RemoteExec.writePaced):
+    /// a terminal's input queue is ~1KB and drops what it can't hold.
+    public static func terminalStdin(_ script: String) -> String {
+        """
+        stty -echo 2>/dev/null
+        \(RemoteScript.wrap(script))
+        exit
+
+        """
+    }
+
+    /// How fast a terminal can be fed: bytes per write, and the pause
+    /// between writes (RemoteExec.writePaced documents why).
+    public static let terminalChunk = 512
+    public static let terminalPause: TimeInterval = 0.06
+}

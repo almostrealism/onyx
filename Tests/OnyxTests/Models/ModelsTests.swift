@@ -492,6 +492,7 @@ final class CodableRoundTripTests: XCTestCase {
         config.shiftTabCyclesSessions = true  // default is false, so flip it
         config.externalDelivery = .never      // default is urgentOnly, so flip it
         config.agendaPane = .calendar         // default is reminders
+        config.sshEngine = .builtInForSharedState  // default is openSSH
 
         let data = try JSONEncoder().encode(config)
         let d = try JSONDecoder().decode(AppearanceConfig.self, from: data)
@@ -520,6 +521,7 @@ final class CodableRoundTripTests: XCTestCase {
         XCTAssertTrue(d.shiftTabCyclesSessions, "defaults false, so the round trip has to carry a true")
         XCTAssertEqual(d.externalDelivery, .never)
         XCTAssertEqual(d.agendaPane, .calendar)
+        XCTAssertEqual(d.sshEngine, .builtInForSharedState)
     }
 
     /// Tripwire: if you add a stored property to AppearanceConfig, this
@@ -528,7 +530,7 @@ final class CodableRoundTripTests: XCTestCase {
     /// missing one of those steps is wiping every user's settings.
     func testAppearanceConfig_storedPropertyCount_isLocked() {
         let count = Mirror(reflecting: AppearanceConfig()).children.count
-        XCTAssertEqual(count, 25, """
+        XCTAssertEqual(count, 26, """
             AppearanceConfig has \(count) stored properties but the test
             expects a different number. If you ADDED a field, you must also:
               1. Add it to `CodingKeys` in HostConfig.swift

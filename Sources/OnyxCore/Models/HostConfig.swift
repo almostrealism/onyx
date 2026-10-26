@@ -105,6 +105,25 @@ public struct HostConfig: Codable, Identifiable, Hashable {
 }
 
 /// AppearanceConfig.
+/// Which SSH client carries what (docs/ios-plan.md, phases 2 and 4).
+public enum SSHEngine: String, Codable, CaseIterable, Identifiable {
+    /// The system's ssh and scp, riding the ConnectionPair. Everything.
+    case openSSH
+    /// The built-in client (SwiftNIO SSH, what the iPhone and iPad use)
+    /// for shared-state sync; OpenSSH for the rest. The way to prove the
+    /// built-in client against a real home host before an iPhone needs it.
+    case builtInForSharedState
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .openSSH:               return "OpenSSH"
+        case .builtInForSharedState: return "Built-in"
+        }
+    }
+}
+
 /// Where an alert goes on this Mac once it has landed in the app.
 public enum ExternalDelivery: String, Codable, CaseIterable, Identifiable {
     /// Every alert reaches Notification Center.
@@ -197,6 +216,8 @@ public struct AppearanceConfig: Codable {
     /// Whether the monitor's agenda pane shows Reminders or today's
     /// calendar. `A` while the overlay is up, or click the pane's header.
     public var agendaPane: AgendaPane = .reminders
+    /// Which SSH client shared-state sync uses.
+    public var sshEngine: SSHEngine = .openSSH
     /// How far an agent's alert travels on this Mac, beyond the indicator
     /// in the app. The person's choice per device — an agent can't know
     /// which of the user's machines they are sitting at, so it has no say.
@@ -304,7 +325,7 @@ public struct AppearanceConfig: Codable {
         case searchFileTypeIDs, remindersDueSoonOnly, simpleShowSidePanel
         case showAllContainers, prDraftFilter, hasSeenWalkthrough
         case showMenuBarItem, externalDelivery
-        case agendaPane
+        case agendaPane, sshEngine
         // Stored under a new name since 0.20, when the default became
         // off. Every config saved before then wrote `true` whether or not
         // anyone chose it, so the old key can't tell a choice from the
@@ -340,5 +361,6 @@ public struct AppearanceConfig: Codable {
         self.shiftTabCyclesSessions     = try c.decodeIfPresent(Bool.self,           forKey: .shiftTabCyclesSessions)     ?? false
         self.externalDelivery           = try c.decodeIfPresent(ExternalDelivery.self, forKey: .externalDelivery)         ?? .urgentOnly
         self.agendaPane                 = try c.decodeIfPresent(AgendaPane.self,     forKey: .agendaPane)                 ?? .reminders
+        self.sshEngine                  = try c.decodeIfPresent(SSHEngine.self,      forKey: .sshEngine)                  ?? .openSSH
     }
 }

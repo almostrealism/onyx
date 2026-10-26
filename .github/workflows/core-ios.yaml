@@ -10,6 +10,9 @@ name: "Core for iOS"
 # `CorePortabilityTests` catches the obvious cases locally; this catches
 # everything the compiler can.
 #
+# OnyxSSH, the in-process SSH client the iOS apps connect with, is built
+# the same way: it is iOS code first and Mac code second.
+#
 # Simulator and device are both built: they differ in SDK, and an API
 # that exists on one and not the other shows up only here.
 
@@ -20,14 +23,18 @@ on:
       - master
     paths:
       - 'Sources/OnyxCore/**'
+      - 'Sources/OnyxSSH/**'
       - 'Sources/OnyxVersion/**'
       - 'Package.swift'
+      - 'Package.resolved'
       - '.github/workflows/core-ios.yaml'
   pull_request:
     paths:
       - 'Sources/OnyxCore/**'
+      - 'Sources/OnyxSSH/**'
       - 'Sources/OnyxVersion/**'
       - 'Package.swift'
+      - 'Package.resolved'
       - '.github/workflows/core-ios.yaml'
 
 concurrency:
@@ -39,12 +46,15 @@ permissions:
 
 jobs:
   build:
-    name: "OnyxCore (${{ matrix.destination }})"
+    name: "${{ matrix.scheme }} (${{ matrix.destination }})"
     runs-on: macos-15
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        scheme:
+          - OnyxCore
+          - OnyxSSH
         destination:
           - "iOS Simulator"
           - "iOS"
@@ -53,7 +63,7 @@ jobs:
 
       - name: Build
         run: |
-          xcodebuild -scheme OnyxCore \
+          xcodebuild -scheme ${{ matrix.scheme }} \
             -destination "generic/platform=${{ matrix.destination }}" \
             CODE_SIGNING_ALLOWED=NO \
             build

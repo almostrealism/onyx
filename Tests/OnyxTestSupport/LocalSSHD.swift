@@ -25,6 +25,12 @@ public final class LocalSSHD {
     /// The server's public host key line ("ssh-ed25519 AAAA…").
     public let hostPublicKey: String
     public var user: String { NSUserName() }
+    /// The name to connect to. Loopback, but NOT spelled "127.0.0.1" or
+    /// "localhost": Onyx treats those as this Mac (`HostConfig.isLocal`)
+    /// and runs everything as a local process, so a test using them would
+    /// never reach the server at all — which is exactly what the first
+    /// version of these tests did, quietly passing.
+    public let hostName = "127.1"
 
     private let process: Process
 
@@ -66,7 +72,7 @@ public final class LocalSSHD {
             .split(separator: " ").prefix(2).joined(separator: " ")
 
         port = Self.freePort()
-        try "[127.0.0.1]:\(port) \(hostPublicKey)\n".write(to: knownHosts, atomically: true, encoding: .utf8)
+        try "[127.1]:\(port),[127.0.0.1]:\(port) \(hostPublicKey)\n".write(to: knownHosts, atomically: true, encoding: .utf8)
 
         let config = directory.appendingPathComponent("sshd_config")
         try """
