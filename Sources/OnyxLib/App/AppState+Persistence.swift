@@ -23,6 +23,7 @@ import Combine
 import AppKit
 import SwiftUI
 import OnyxCore
+import OnyxUI
 
 extension AppState {
     // MARK: - Persistence

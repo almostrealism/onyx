@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import OnyxCore
+import OnyxUI
 
 /// The draggable edge between the terminal and the side panel.
 ///

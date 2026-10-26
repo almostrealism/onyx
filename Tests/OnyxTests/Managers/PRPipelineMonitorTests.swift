@@ -1,6 +1,7 @@
 import XCTest
 @testable import OnyxCore
 @testable import OnyxLib
+@testable import OnyxUI
 
 /// The CI on an open PR, found without tracking anything.
 ///

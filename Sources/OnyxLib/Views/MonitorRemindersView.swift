@@ -1,6 +1,7 @@
 import SwiftUI
 import EventKit
 import OnyxCore
+import OnyxUI
 
 struct RemindersSection: View {
     @ObservedObject var appState: AppState

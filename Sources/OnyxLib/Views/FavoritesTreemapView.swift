@@ -1,5 +1,6 @@
 import SwiftUI
 import OnyxCore
+import OnyxUI
 
 /// Favorites as a treemap of nested block buttons.
 ///

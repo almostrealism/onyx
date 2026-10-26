@@ -1,6 +1,7 @@
 import XCTest
 @testable import OnyxCore
 @testable import OnyxLib
+@testable import OnyxUI
 
 /// TodayState is what the Today sections read, on the Mac and (later) on
 /// the iPhone. These pin the parts that used to live on AppState, so the
@@ -97,26 +98,30 @@ final class TodayStateTests: XCTestCase {
         "AgendaPaneTabs", "SimplePullRequests", "SimplePipelinesStrip",
     ]
 
+    /// The sections live in OnyxUI, which can't see AppState at all — the
+    /// compiler is the check. This makes sure they stay there, and that
+    /// nothing in the shared UI reaches into the Mac's code.
     func testNoTodaySectionTakesTheAppState() throws {
-        let views = URL(fileURLWithPath: #filePath)
+        let repo = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // Managers
             .deletingLastPathComponent()   // OnyxTests
             .deletingLastPathComponent()   // Tests
             .deletingLastPathComponent()   // repo
-            .appendingPathComponent("Sources/OnyxLib/Views")
-        let files = try FileManager.default.contentsOfDirectory(at: views, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "swift" }
         var found = Set<String>()
-        for file in files {
-            let text = try String(contentsOf: file, encoding: .utf8)
-            for name in Self.todaySections {
-                guard let body = Self.declaration(of: name, in: text) else { continue }
-                found.insert(name)
-                XCTAssertFalse(body.contains("AppState") || body.contains("appState"),
-                               "\(name) (\(file.lastPathComponent)) reads AppState; Today sections read TodayState")
+        for folder in ["Sources/OnyxUI", "Sources/OnyxToday"] {
+            let dir = repo.appendingPathComponent(folder)
+            guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            else { continue }
+            for file in files where file.pathExtension == "swift" {
+                let text = try String(contentsOf: file, encoding: .utf8)
+                XCTAssertFalse(text.contains("import OnyxLib"),
+                               "\(folder)/\(file.lastPathComponent) imports the Mac app's code")
+                for name in Self.todaySections where Self.declaration(of: name, in: text) != nil {
+                    found.insert(name)
+                }
             }
         }
-        XCTAssertEqual(found, Set(Self.todaySections), "every section must be found, or the check proves nothing")
+        XCTAssertEqual(found, Set(Self.todaySections), "every Today section lives in the shared UI")
     }
 
     /// The text of `struct <name>` up to its closing brace.

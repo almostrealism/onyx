@@ -1,5 +1,6 @@
 import SwiftUI
 import OnyxCore
+import OnyxUI
 
 /// Side-by-side companion to SessionNotesSection in the monitor overlay.
 /// Reads from `PullRequestManager.shared` (polled in the background); the
@@ -575,35 +576,5 @@ private struct PipelineRow: View {
         guard let target = status.runURL.flatMap(URL.init(string:))
                 ?? URL(string: status.spec.url) else { return }
         NSWorkspace.shared.open(target)
-    }
-}
-
-struct PipelineStatusDot: View {
-    let overall: PipelineOverallStatus
-    var size: CGFloat = 6
-    var body: some View {
-        Circle().fill(color).frame(width: size, height: size).help(tooltip)
-    }
-    private var color: Color {
-        switch overall {
-        case .running:  return Color.onyxBlue
-        case .success:  return Color.onyxGreen
-        case .failure:  return Color.onyxRed
-        case .mixed:    return Color.onyxAmber
-        case .queued:   return Color.onyxAmber
-        case .skipped:  return Color.gray.opacity(0.5)
-        case .unknown:  return Color.gray.opacity(0.4)
-        }
-    }
-    private var tooltip: String {
-        switch overall {
-        case .running:  return "Pipeline running"
-        case .success:  return "All jobs passed"
-        case .failure:  return "Failed"
-        case .mixed:    return "Some failures, some successes"
-        case .queued:   return "Queued — hasn't started"
-        case .skipped:  return "Skipped"
-        case .unknown:  return "No run data yet"
-        }
     }
 }

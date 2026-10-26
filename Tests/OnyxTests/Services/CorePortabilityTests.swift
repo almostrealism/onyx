@@ -1,20 +1,25 @@
 import XCTest
 
-/// OnyxCore builds for iOS as well as macOS (docs/ios-plan.md). CI proves
+/// OnyxCore — and OnyxUI, OnyxSSH and OnyxToday, which build on it for
+/// the iOS apps — build for iOS as well as macOS (docs/ios-plan.md). CI proves
 /// it by building the core for the iOS simulator, but nobody runs that
 /// before committing — and a Mac compiles an AppKit import, or a
 /// `Process`, without a word. These catch both in `swift test`.
 final class CorePortabilityTests: XCTestCase {
 
+    static let portableTargets = ["OnyxCore", "OnyxUI", "OnyxSSH", "OnyxToday"]
+
     private var coreSources: [URL] {
-        let root = URL(fileURLWithPath: #filePath)
+        let repo = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // Services
             .deletingLastPathComponent()   // OnyxTests
             .deletingLastPathComponent()   // Tests
             .deletingLastPathComponent()   // repo
-            .appendingPathComponent("Sources/OnyxCore")
-        let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)
-        return (walker?.allObjects as? [URL] ?? []).filter { $0.pathExtension == "swift" }
+        return Self.portableTargets.flatMap { target -> [URL] in
+            let walker = FileManager.default.enumerator(at: repo.appendingPathComponent("Sources/\(target)"),
+                                                        includingPropertiesForKeys: nil)
+            return (walker?.allObjects as? [URL] ?? []).filter { $0.pathExtension == "swift" }
+        }
     }
 
     func testTheCoreIsFound() {
@@ -33,8 +38,8 @@ final class CorePortabilityTests: XCTestCase {
                 guard words.first == "import", words.count == 2,
                       banned.contains(String(words[1])) else { continue }
                 XCTFail("""
-                    \(file.lastPathComponent) imports \(words[1]), which OnyxCore can't: \
-                    it builds for iOS. Put the platform half in OnyxLib (see Palette+AppKit.swift).
+                    \(file.lastPathComponent) imports \(words[1]), which the portable targets can't: \
+                    they build for iOS. Put the platform half in OnyxLib (see Palette+AppKit.swift).
                     """)
             }
         }

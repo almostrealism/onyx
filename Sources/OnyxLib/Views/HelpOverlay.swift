@@ -1,5 +1,6 @@
 import SwiftUI
 import OnyxCore
+import OnyxUI
 
 /// Full-screen reference overlay (Cmd+/) explaining what Onyx does and
 /// every keyboard command. Read-only; dismissed with Esc, the same

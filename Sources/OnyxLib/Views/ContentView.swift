@@ -1,6 +1,7 @@
 import SwiftUI
 import SceneKit
 import OnyxCore
+import OnyxUI
 
 // MARK: - Window Finder
 

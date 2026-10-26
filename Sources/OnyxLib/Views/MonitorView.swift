@@ -1,52 +1,7 @@
 import SwiftUI
 import EventKit
 import OnyxCore
-
-// MARK: - Monitor font scaling
-//
-// All text in MonitorView and its descendants scales with the user's
-// UI font size preference (Settings → UI font size). The "design"
-// sizes used at each call site are the values that look right at the
-// default scale of 1.0 (when uiFontSize = 12). At other sizes they
-// scale proportionally so the visual hierarchy stays intact.
-
-private struct MonitorFontScaleKey: EnvironmentKey {
-    static let defaultValue: CGFloat = 1.0
-}
-
-extension EnvironmentValues {
-    /// Scale factor applied to all `.monitorFont(...)` calls inside
-    /// MonitorView. Injected at the MonitorView root from
-    /// `appearance.uiFontSize / 12`.
-    var monitorFontScale: CGFloat {
-        get { self[MonitorFontScaleKey.self] }
-        set { self[MonitorFontScaleKey.self] = newValue }
-    }
-}
-
-extension View {
-    /// Use this instead of `.font(.system(size:weight:design:))` for
-    /// any text or icon inside MonitorView. The `size` argument is the
-    /// design intent at the default UI scale; the ambient
-    /// `monitorFontScale` multiplies it. Default design is
-    /// `.monospaced` since that's what 95% of MonitorView uses; pass
-    /// `.default` explicitly for icons.
-    func monitorFont(size: CGFloat,
-                     weight: Font.Weight = .regular,
-                     design: Font.Design = .monospaced) -> some View {
-        modifier(MonitorFontModifier(baseSize: size, weight: weight, design: design))
-    }
-}
-
-private struct MonitorFontModifier: ViewModifier {
-    @Environment(\.monitorFontScale) private var scale
-    let baseSize: CGFloat
-    let weight: Font.Weight
-    let design: Font.Design
-    func body(content: Content) -> some View {
-        content.font(.system(size: baseSize * scale, weight: weight, design: design))
-    }
-}
+import OnyxUI
 
 /// NPU chip text. Prefer active-time residency over the interval — it
 /// catches bursts that begin and end between polls. Fall back to the

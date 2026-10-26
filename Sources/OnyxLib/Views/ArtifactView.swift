@@ -2,6 +2,7 @@ import SwiftUI
 import WebKit
 import SceneKit
 import OnyxCore
+import OnyxUI
 
 // MARK: - Artifact Panel
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import OnyxCore
+import OnyxUI
 
 /// The bell that lights when an agent has said something about a session.
 ///

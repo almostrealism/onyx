@@ -1,5 +1,6 @@
 import SwiftUI
 import OnyxCore
+import OnyxUI
 
 /// Reports a measured width up the view tree (used to pick a grid column
 /// count from the available panel width).

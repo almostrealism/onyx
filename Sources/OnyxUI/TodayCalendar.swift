@@ -1,20 +1,26 @@
+//
+// TodayCalendar.swift
+//
+// Responsibility: Today's calendar in the agenda pane, and the switch
+//                 between it and Reminders (`A` on the Mac, a tap on the
+//                 phone). Shared by the Mac and the iPhone.
+//
 import SwiftUI
 import OnyxCore
 
-// MARK: - Today's calendar, in the monitor's agenda pane
-//
-// The agenda pane — the reminders column in the detailed layout, the list
-// in simple mode's side panel — shows Reminders or today's calendar. `A`
-// switches it, or click the header.
-
 /// "REMINDERS · CALENDAR" — the pane's title, and the switch between the
 /// two. The one showing is lit.
-struct AgendaPaneTabs: View {
+public struct AgendaPaneTabs: View {
     @ObservedObject var today: TodayState
     /// What the reminders side is called right now ("TODAY", a list name).
     let remindersTitle: String
 
-    var body: some View {
+    public init(today: TodayState, remindersTitle: String) {
+        self._today = ObservedObject(wrappedValue: today)
+        self.remindersTitle = remindersTitle
+    }
+
+    public var body: some View {
         HStack(spacing: 6) {
             tab(remindersTitle, .reminders)
             Text("·")
@@ -42,11 +48,15 @@ struct AgendaPaneTabs: View {
 
 /// The detailed layout's agenda column, showing today's calendar: the
 /// whole day, with what's over dimmed and what's on now marked.
-struct TodayCalendarSection: View {
+public struct TodayCalendarSection: View {
     @ObservedObject var today: TodayState
+
+    public init(today: TodayState) {
+        self._today = ObservedObject(wrappedValue: today)
+    }
     @ObservedObject private var calendar = TodayCalendarStore.shared
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 AgendaPaneTabs(today: today, remindersTitle: "REMINDERS")
@@ -70,14 +80,18 @@ struct TodayCalendarSection: View {
 }
 
 /// Simple mode's agenda: what's left of today, capped.
-struct SimpleTodayCalendar: View {
+public struct SimpleTodayCalendar: View {
     @ObservedObject var today: TodayState
+
+    public init(today: TodayState) {
+        self._today = ObservedObject(wrappedValue: today)
+    }
     @ObservedObject private var calendar = TodayCalendarStore.shared
 
     /// Same budget as the reminders list it stands in for.
     private let maxShown = 10
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             AgendaPaneTabs(today: today, remindersTitle: "TODAY")
             TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -100,7 +114,7 @@ struct SimpleTodayCalendar: View {
 }
 
 /// The rows, shared by both layouts.
-struct CalendarEventList: View {
+public struct CalendarEventList: View {
     let events: [TodayEvent]
     let access: TodayCalendarStore.Access
     let now: Date
@@ -110,7 +124,17 @@ struct CalendarEventList: View {
     let titleSize: CGFloat
     let emptyText: String
 
-    var body: some View {
+    public init(events: [TodayEvent], access: TodayCalendarStore.Access, now: Date, accentColor: Color, use12Hour: Bool, titleSize: CGFloat, emptyText: String) {
+        self.events = events
+        self.access = access
+        self.now = now
+        self.accentColor = accentColor
+        self.use12Hour = use12Hour
+        self.titleSize = titleSize
+        self.emptyText = emptyText
+    }
+
+    public var body: some View {
         switch access {
         case .notRequested:
             message("Asking for calendar access…")

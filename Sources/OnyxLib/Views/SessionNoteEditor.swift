@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import OnyxCore
+import OnyxUI
 
 struct SessionNoteEditor: View {
     @ObservedObject var appState: AppState

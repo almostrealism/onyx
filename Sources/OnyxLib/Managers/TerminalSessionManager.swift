@@ -29,6 +29,7 @@ import OnyxAppKitShims
 import Foundation
 import Combine
 import OnyxCore
+import OnyxUI
 
 // MARK: - Connection Pool
 

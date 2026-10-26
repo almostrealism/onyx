@@ -1,5 +1,6 @@
 import SwiftUI
 import OnyxCore
+import OnyxUI
 
 struct SetupView: View {
     @ObservedObject var appState: AppState

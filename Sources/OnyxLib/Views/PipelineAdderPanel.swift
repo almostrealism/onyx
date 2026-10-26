@@ -34,6 +34,7 @@
 
 import SwiftUI
 import OnyxCore
+import OnyxUI
 
 struct PipelineAdderPanel: View {
     @ObservedObject var appState: AppState

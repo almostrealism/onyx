@@ -1,5 +1,6 @@
 import SwiftUI
 import OnyxCore
+import OnyxUI
 
 extension Binding where Value == String {
     /// Wraps a string binding so any macOS smart-quote / smart-dash / ellipsis

@@ -20,6 +20,7 @@
 import SwiftUI
 import AppKit
 import OnyxCore
+import OnyxUI
 
 struct FlowtreeSettingsSection: View {
     @ObservedObject private var config = FlowtreeConfigStore.shared

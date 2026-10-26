@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 import OnyxCore
+import OnyxUI
 
 // MARK: - Views
 

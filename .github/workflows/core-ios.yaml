@@ -24,6 +24,7 @@ on:
     paths:
       - 'Sources/OnyxCore/**'
       - 'Sources/OnyxSSH/**'
+      - 'Sources/OnyxUI/**'
       - 'Sources/OnyxVersion/**'
       - 'Package.swift'
       - 'Package.resolved'
@@ -32,6 +33,7 @@ on:
     paths:
       - 'Sources/OnyxCore/**'
       - 'Sources/OnyxSSH/**'
+      - 'Sources/OnyxUI/**'
       - 'Sources/OnyxVersion/**'
       - 'Package.swift'
       - 'Package.resolved'
@@ -55,6 +57,7 @@ jobs:
         scheme:
           - OnyxCore
           - OnyxSSH
+          - OnyxUI
         destination:
           - "iOS Simulator"
           - "iOS"

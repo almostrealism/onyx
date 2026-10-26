@@ -1,6 +1,7 @@
 import SwiftUI
 import Foundation
 import OnyxCore
+import OnyxUI
 
 struct NotesView: View {
     @ObservedObject var appState: AppState

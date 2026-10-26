@@ -15,6 +15,7 @@ let package = Package(
         // (`xcodebuild -scheme OnyxCore`), and for the iOS app to link.
         .library(name: "OnyxCore", targets: ["OnyxCore"]),
         .library(name: "OnyxSSH", targets: ["OnyxSSH"]),
+        .library(name: "OnyxUI", targets: ["OnyxUI"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
@@ -70,11 +71,19 @@ let package = Package(
             ],
             path: "Sources/OnyxSSH"
         ),
+        // SwiftUI views shared by the Mac and the iOS apps — the Today
+        // sections first (docs/ios-plan.md). No AppKit, no UIKit.
+        .target(
+            name: "OnyxUI",
+            dependencies: ["OnyxCore"],
+            path: "Sources/OnyxUI"
+        ),
         .target(
             name: "OnyxLib",
             dependencies: [
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 "OnyxCore",
+                "OnyxUI",
                 "OnyxSSH",
                 "OnyxVersion",
                 "OnyxAppKitShims",
@@ -103,7 +112,7 @@ let package = Package(
         ),
         .testTarget(
             name: "OnyxTests",
-            dependencies: ["OnyxCore", "OnyxLib", "OnyxSSH"],
+            dependencies: ["OnyxCore", "OnyxUI", "OnyxLib", "OnyxSSH"],
             path: "Tests/OnyxTests"
         ),
         .testTarget(

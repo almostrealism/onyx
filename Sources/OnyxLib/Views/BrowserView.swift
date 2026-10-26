@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import OnyxCore
+import OnyxUI
 
 // MARK: - Browser Host View
 
