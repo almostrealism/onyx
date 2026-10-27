@@ -89,9 +89,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # SwiftTerm (the iPad's terminal) ships a build-tool plugin, which an
+      # Xcode project build won't run until someone trusts it — and CI has
+      # nobody to click Trust.
       - name: Build
         run: |
           xcodebuild -project Apps/OnyxToday/OnyxToday.xcodeproj -scheme TodayApp \
             -destination "generic/platform=iOS Simulator" \
+            -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO \
             build

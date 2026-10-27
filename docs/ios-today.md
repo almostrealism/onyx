@@ -84,6 +84,10 @@ xcodebuild -project Apps/OnyxToday/OnyxToday.xcodeproj -scheme TodayApp \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
 
+On a machine that hasn't built it in Xcode before, add
+`-skipPackagePluginValidation` (or open the project once and trust
+SwiftTerm's build plugin): SwiftTerm, the iPad's terminal, ships one.
+
 CI ("Core for iOS") builds the app and every portable target for iOS on
 each push that touches them.
 
