@@ -19,8 +19,6 @@
 import Foundation
 import Combine
 import SwiftUI
-import OnyxCore
-import OnyxUI
 
 // MARK: - GitManager
 
@@ -45,7 +43,7 @@ public class GitManager: ObservableObject {
     /// had broken or been removed.
     @Published public var unavailableReason: String?
 
-    private let appState: AppState
+    private let appState: RemoteEnvironment
     /// internal(set) var currentRepoPath: String?
     public internal(set) var currentRepoPath: String?
 
@@ -55,12 +53,12 @@ public class GitManager: ObservableObject {
     private var healthObserver: AnyCancellable?
 
     /// Create a new instance.
-    public init(appState: AppState) {
+    public init(appState: RemoteEnvironment) {
         self.appState = appState
         // A host that isn't usable at the moment you open a folder used to
         // mean no git panel until you navigated somewhere else and back —
         // one bad moment, gone for good. Re-run when the host comes back.
-        healthObserver = ConnectionPairRegistry.shared.$healthByHost
+        healthObserver = appState.hostHealthChanged
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self, let path = self.pendingPath,

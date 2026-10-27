@@ -19,8 +19,6 @@
 
 import Foundation
 import Combine
-import AppKit
-import OnyxCore
 
 /// FileBrowserManager.
 public class FileBrowserManager: ObservableObject {
@@ -106,7 +104,9 @@ public class FileBrowserManager: ObservableObject {
     private var searchJob: RemoteJob?
     private var searchCancellable: AnyCancellable?
 
-    private let appState: AppState
+    private let appState: RemoteEnvironment
+    /// Where the favorite folders are kept (the Mac's folders.json).
+    private let savedFoldersURL: URL
     private var gitCancellable: AnyCancellable?
 
     /// Git manager.
@@ -118,14 +118,21 @@ public class FileBrowserManager: ObservableObject {
         return g
     }()
 
+    private let legacyHostID: UUID
+
     private var recentFilesURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return appSupport.appendingPathComponent("Onyx/recent-files.json")
     }
 
     /// Create a new instance.
-    public init(appState: AppState) {
+    /// `savedFoldersURL`: where the favorite folders live. Entries from
+    /// before folders had hosts are given `legacyHostID`.
+    public init(appState: RemoteEnvironment, savedFoldersURL: URL,
+                legacyHostID: UUID = HostConfig.localhostID) {
         self.appState = appState
+        self.savedFoldersURL = savedFoldersURL
+        self.legacyHostID = legacyHostID
         loadSavedFolders()
         loadRecentFiles()
     }
@@ -139,13 +146,13 @@ public class FileBrowserManager: ObservableObject {
     // MARK: - Persistence
 
     private func loadSavedFolders() {
-        guard let data = try? Data(contentsOf: appState.savedFoldersURL) else { return }
+        guard let data = try? Data(contentsOf: savedFoldersURL) else { return }
         // Try new format first
         if let folders = try? JSONDecoder().decode([SavedFolder].self, from: data) {
             savedFolders = folders
         } else if let legacyPaths = try? JSONDecoder().decode([String].self, from: data) {
             // Migrate from old [String] format — assign to first host (or localhost)
-            let hostID = appState.hosts.first?.id ?? HostConfig.localhostID
+            let hostID = legacyHostID
             savedFolders = legacyPaths.map { SavedFolder(path: $0, hostID: hostID) }
             saveFolders()
         }
@@ -153,7 +160,7 @@ public class FileBrowserManager: ObservableObject {
 
     private func saveFolders() {
         if let data = try? JSONEncoder().encode(savedFolders) {
-            try? data.write(to: appState.savedFoldersURL)
+            try? data.write(to: savedFoldersURL)
         }
     }
 
@@ -169,7 +176,7 @@ public class FileBrowserManager: ObservableObject {
         }
     }
 
-    func trackRecentFile(path: String, name: String) {
+    public func trackRecentFile(path: String, name: String) {
         let hostID = appState.activeHost?.id ?? HostConfig.localhostID
         let file = RecentFile(path: path, name: name, hostID: hostID)
         // Remove existing entry for same path, then prepend
@@ -337,31 +344,6 @@ public class FileBrowserManager: ObservableObject {
 
     /// Status message for dependency analysis
     @Published public var depsStatus: String?
-
-    /// Analyze Java dependency graph and show as artifact diagram
-    public func analyzeDependencies(repoPath: String, appState: AppState) {
-        depsStatus = "Analyzing dependencies..."
-        print("analyzeDependencies: starting for \(repoPath)")
-
-        let analyzer = DependencyAnalyzer(appState: appState)
-        analyzer.analyze(repoPath: repoPath) { [weak self] mermaid in
-            if let mermaid = mermaid, !mermaid.isEmpty {
-                print("analyzeDependencies: got \(mermaid.count) chars of Mermaid")
-                let content = ArtifactContent.diagram(content: mermaid, format: .mermaid)
-                _ = appState.artifactManager.setSlot(0, title: "Dependency Graph", content: content)
-                appState.activeRightPanel = .artifacts
-                self?.depsStatus = nil
-            } else {
-                print("analyzeDependencies: no output returned")
-                self?.depsStatus = "No dependency data (need python3 + Java files)"
-                DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-                    if self?.depsStatus?.hasPrefix("No dep") == true {
-                        self?.depsStatus = nil
-                    }
-                }
-            }
-        }
-    }
 
     /// Refresh the current directory listing and git status
     public func listCurrentDirectory() {
@@ -588,7 +570,7 @@ public class FileBrowserManager: ObservableObject {
     /// For each directory in entries, walk single-child directory chains and
     /// produce collapsed entries like "org/almostrealism/collect".
     /// Uses a single remote command that checks all directories at once.
-    func resolveCollapsedPaths(_ basePath: String) {
+    public func resolveCollapsedPaths(_ basePath: String) {
         let dirs = entries.filter(\.isDirectory).map(\.name)
         guard !dirs.isEmpty else {
             collapsedEntries = []
@@ -802,8 +784,8 @@ public class FileBrowserManager: ObservableObject {
     /// Run a script on a host and verify it ran — through the app's
     /// transport, a pipe first and a terminal only when the marker doesn't
     /// come back. See `RemoteTransport.runScript`.
-    static func runScriptWithFallback(_ script: String,
-                                      appState: AppState,
+    public static func runScriptWithFallback(_ script: String,
+                                      appState: RemoteEnvironment,
                                       host: HostConfig? = nil,
                                       timeout: TimeInterval = 10) -> RemoteRun {
         let target = host ?? appState.activeHost ?? .localhost
@@ -893,7 +875,7 @@ public class FileBrowserManager: ObservableObject {
         searchResults.clear()
 
         let escaped = escapeForShell(basePath)
-        let wanted = appState.appearance.searchExtensions
+        let wanted = AppearanceStore.shared.config.searchExtensions
         let command = Self.searchCommand(
             escapedBase: escaped,
             query: query,
@@ -959,7 +941,7 @@ public class FileBrowserManager: ObservableObject {
     /// in the directory listing.
     public func matchesSearchFilter(_ entry: RemoteEntry) -> Bool {
         if entry.isDirectory { return true }
-        let exts = appState.appearance.searchExtensions
+        let exts = AppearanceStore.shared.config.searchExtensions
         if exts.isEmpty { return true }
         return exts.contains((entry.name as NSString).pathExtension.lowercased())
     }
@@ -1067,15 +1049,8 @@ public class FileBrowserManager: ObservableObject {
     @Published public var uploadStatus: String?
     @Published public var isUploading = false
 
-    /// The files on a pasteboard — what Finder puts there on ⌘C. Empty
-    /// when it holds anything else, text included.
-    public static func fileURLs(on pasteboard: NSPasteboard) -> [URL] {
-        fileURLs(in: pasteboard.readObjects(forClasses: [NSURL.self],
-                                            options: [.urlReadingFileURLsOnly: true]))
-    }
-
     /// The file URLs among what a pasteboard read returned.
-    static func fileURLs(in objects: [Any]?) -> [URL] {
+    public static func fileURLs(in objects: [Any]?) -> [URL] {
         (objects ?? []).compactMap { $0 as? URL }.filter(\.isFileURL)
     }
 
@@ -1131,25 +1106,16 @@ public class FileBrowserManager: ObservableObject {
     @Published public var downloadStatus: String?
     @Published public var isDownloading = false
 
-    /// Download entry.
-    public func downloadEntry(_ entry: RemoteEntry) {
-        guard let current = currentPath else { return }
-        let fullPath = current.hasSuffix("/") ? "\(current)\(entry.name)" : "\(current)/\(entry.name)"
-        downloadPath(fullPath, isDirectory: entry.isDirectory)
+    /// The full path of an entry in the folder being shown.
+    public func fullPath(of entry: RemoteEntry) -> String? {
+        guard let current = currentPath else { return nil }
+        return current.hasSuffix("/") ? "\(current)\(entry.name)" : "\(current)/\(entry.name)"
     }
 
-    /// Download path.
-    public func downloadPath(_ remotePath: String, isDirectory: Bool) {
-        // Show save panel to pick local destination
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = (remotePath as NSString).lastPathComponent
-        panel.canCreateDirectories = true
-        if isDirectory {
-            // For directories, treat the name as a folder
-            panel.nameFieldStringValue = (remotePath as NSString).lastPathComponent
-        }
-        guard panel.runModal() == .OK, let destURL = panel.url else { return }
-
+    /// Download `remotePath` to `destURL`, a place the platform asked the
+    /// user for (the Mac's save panel; the iPad's document picker).
+    public func download(_ remotePath: String, isDirectory: Bool, to destURL: URL,
+                         done: ((Bool) -> Void)? = nil) {
         isDownloading = true
         downloadStatus = "Downloading \((remotePath as NSString).lastPathComponent)..."
         let host = appState.activeHost ?? .localhost
@@ -1164,6 +1130,7 @@ public class FileBrowserManager: ObservableObject {
 
             DispatchQueue.main.async {
                 self.isDownloading = false
+                done?(success)
                 self.downloadStatus = success ? "Download complete" : "Download failed"
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                     if self.downloadStatus?.hasPrefix("Download") == true {

@@ -9,7 +9,6 @@
 //
 
 import Foundation
-import OnyxCore
 
 public final class FileEditorManager: ObservableObject {
 
@@ -42,9 +41,9 @@ public final class FileEditorManager: ObservableObject {
     /// what the host's copy must still be for a save to go ahead.
     private var original = Data()
     private var host: HostConfig?
-    private let appState: AppState
+    private let appState: RemoteEnvironment
 
-    public init(appState: AppState) {
+    public init(appState: RemoteEnvironment) {
         self.appState = appState
     }
 
@@ -220,9 +219,9 @@ public final class FileEditorManager: ObservableObject {
             return .failed(said.isEmpty ? "Upload to \(host.label) failed; nothing was changed." : said)
         }
 
-        let run = FileBrowserManager.runScriptWithFallback(
+        let run = appState.transport.runScript(
             RemoteFileEdit.commitScript(temporary: temporary, target: path),
-            appState: appState, host: host, timeout: 20)
+            on: host, timeout: 20, label: "script:\(host.label)")
         guard let output = run.cleaned, output.contains(RemoteFileEdit.savedMarker) else {
             let said = run.hostSaid ?? "no reply"
             return .failed("Uploaded, but couldn't put it in place (\(said)). "

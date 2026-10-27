@@ -435,7 +435,8 @@ public class AppState: ObservableObject {
 
     /// File browser manager.
     public lazy var fileBrowserManager: FileBrowserManager = {
-        FileBrowserManager(appState: self)
+        FileBrowserManager(appState: self, savedFoldersURL: savedFoldersURL,
+                           legacyHostID: hosts.first?.id ?? HostConfig.localhostID)
     }()
 
     /// The full-window editor for a file from the file browser.

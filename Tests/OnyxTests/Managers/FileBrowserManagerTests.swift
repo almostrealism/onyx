@@ -7,7 +7,7 @@ final class FileBrowserTests: XCTestCase {
     private func makeBrowser() -> FileBrowserManager {
         let state = AppState()
         state.hosts = [.localhost]
-        return FileBrowserManager(appState: state)
+        return FileBrowserManager(appState: state, savedFoldersURL: state.savedFoldersURL)
     }
 
     // MARK: - parseLsOutput
@@ -646,7 +646,7 @@ class SearchCommandTests: XCTestCase {
     func testSearchCommand_noSingleQuotes() {
         // The find command must NOT contain single quotes since remoteCommand wraps in single quotes
         let appState = AppState()
-        let browser = FileBrowserManager(appState: appState)
+        let browser = FileBrowserManager(appState: appState, savedFoldersURL: appState.savedFoldersURL)
 
         // Simulate what startSearch builds
         let query = "test"
@@ -664,7 +664,7 @@ class SearchCommandTests: XCTestCase {
 
     func testSearchCommand_specialCharactersEscaped() {
         let appState = AppState()
-        let browser = FileBrowserManager(appState: appState)
+        let browser = FileBrowserManager(appState: appState, savedFoldersURL: appState.savedFoldersURL)
 
         let query = "test\"file"
         let safeQuery = query
@@ -817,7 +817,7 @@ final class FileBrowserFavoriteToggleTests: XCTestCase {
         host.ssh.host = "example.com"
         state.hosts = [host]
         state.activeSession = TmuxSession(name: "m", source: .host(hostID: host.id))
-        let browser = FileBrowserManager(appState: state)
+        let browser = FileBrowserManager(appState: state, savedFoldersURL: state.savedFoldersURL)
         browser.savedFolders = []
         return (browser, state, host)
     }

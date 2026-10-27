@@ -19,7 +19,6 @@
 
 import Foundation
 import Combine
-import OnyxCore
 
 /// MonitorManager.
 public class MonitorManager: ObservableObject {
@@ -45,7 +44,7 @@ public class MonitorManager: ObservableObject {
     public var cpuDiagnostic: String? { activeHostData.cpuParseFailureReason }
 
     private var timer: Timer?
-    private let appState: AppState
+    private let appState: RemoteEnvironment
     private let maxSamples = 720
 
     /// Active host's data (or creates empty)
@@ -207,14 +206,14 @@ public class MonitorManager: ObservableObject {
     }
 
     /// Create a new instance.
-    public init(appState: AppState) {
+    public init(appState: RemoteEnvironment) {
         self.appState = appState
     }
 
     /// Fast cadence while the overlay is on screen; slow cadence when it's
     /// hidden (keeps a little history warm so the chart isn't empty on reopen,
     /// without spawning a stats subprocess every 5s in the background).
-    static let activeInterval: TimeInterval = 5
+    public static let activeInterval: TimeInterval = 5
     static let idleInterval: TimeInterval = 30
     private var overlayVisible = false
 
@@ -395,7 +394,7 @@ public class MonitorManager: ObservableObject {
             // Previously this was a raw Process with a SIGTERM-only kill
             // timer that ssh could (and did) ignore.
             let result = transport.execute(
-                .script(AppState.statsScript, terminal: true), on: target,
+                .script(HostStats.script, terminal: true), on: target,
                 // Generous: `docker stats` alone can take seconds on a
                 // busy daemon, and a loaded host's `top` isn't instant.
                 // Overlapping polls can't pile up — the channel budget
@@ -500,9 +499,9 @@ public class MonitorManager: ObservableObject {
                 // Two small calls rather than one that a remote terminal
                 // would truncate. Both are cheap sysfs reads.
                 var merged = self.hostData[hostID]?.accelerator
-                for probe in [AppState.AcceleratorProbe.amdGPU, .npu] {
+                for probe in [HostStats.AcceleratorProbe.amdGPU, .npu] {
                     let result = transport.execute(
-                        .script(AppState.acceleratorScript(probe), terminal: true),
+                        .script(HostStats.acceleratorScript(probe), terminal: true),
                         on: target, timeout: 12, label: "accel:\(target.label)")
                     let output = (result.stdout + result.stderr)
                         .replacingOccurrences(of: "\r", with: "")

@@ -9,6 +9,7 @@
 
 import Foundation
 import AppKit
+import Combine
 import OnyxCore
 
 extension AppState: SharedStateEnvironment {
@@ -63,4 +64,12 @@ extension AppState: SharedStateEnvironment {
             SharedStateSync.shared.appDidBecomeActive()
         }
     }()
+}
+
+/// The monitor, git, the editor and the file browser are OnyxCore's, shared
+/// with the iPad; on the Mac their gates are the ConnectionPair's.
+extension AppState: RemoteEnvironment {
+    public var hostHealthChanged: AnyPublisher<Void, Never> {
+        ConnectionPairRegistry.shared.$healthByHost.map { _ in () }.eraseToAnyPublisher()
+    }
 }
