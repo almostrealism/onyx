@@ -25,7 +25,7 @@ extension AppState: SharedStateEnvironment {
     /// it was the pair's connection. The built-in client keeps its own, and
     /// failing over the pair for its trouble would drop healthy terminals.
     public func syncConnectionFailed(host: HostConfig) {
-        if appearance.sshEngine == .openSSH { reportSSHFailure(host: host) }
+        if !appearance.sshEngine.syncsBuiltIn { reportSSHFailure(host: host) }
     }
 
     public var isFrontmost: Bool { NSApp?.isActive ?? true }

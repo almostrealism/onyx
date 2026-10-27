@@ -505,13 +505,20 @@ public class AppState: ObservableObject {
     /// The one way anything here reaches a host: scripts, commands and file
     /// transfers. `ProcessTransport` (ssh/scp over the ConnectionPair) on
     /// the Mac; see RemoteTransport and docs/ios-plan.md.
-    public lazy var transport: RemoteTransport = ProcessTransport(appState: self)
+    ///
+    /// Which client a call rides is the user's choice (`sshEngine`):
+    /// OpenSSH, or the built-in one the iPhone and iPad use. Local hosts
+    /// always run as processes.
+    public lazy var transport: RemoteTransport = EngineTransport(
+        process: ProcessTransport(appState: self),
+        builtIn: BuiltInSSH.transport,
+        engine: { AppearanceStore.shared.config.sshEngine == .builtIn ? .builtIn : .openSSH })
 
-    /// What shared-state sync rides: OpenSSH, or — by the user's choice
-    /// (`AppearanceConfig.sshEngine`) — the built-in client the iPhone and
-    /// iPad use, so it can be proven against a real home host first.
+    /// What shared-state sync rides: the built-in client when the user has
+    /// chosen it for shared state or for everything, so it can be proven
+    /// against a real home host before a phone depends on it.
     public var syncTransport: RemoteTransport {
-        appearance.sshEngine == .builtInForSharedState ? BuiltInSSH.transport : transport
+        appearance.sshEngine.syncsBuiltIn ? BuiltInSSH.transport : transport
     }
 
     private var todayCancellable: AnyCancellable?

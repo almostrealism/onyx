@@ -133,8 +133,34 @@ public final class NIOTransport: RemoteTransport {
             if self.pool[key] === fresh { self.pool[key] = nil }
             self.lock.unlock()
         }
+        keepAlive(connection)
         DiagnosticLog.shared.record("ssh", "built-in: connected to \(target.poolKey)")
         return fresh
+    }
+
+    /// How often an idle connection is checked, and how long it has to
+    /// answer. A connection the network dropped silently (a laptop that
+    /// slept, a phone that changed networks) is found and closed here, so
+    /// the next call reconnects instead of waiting out its own timeout.
+    static let keepaliveInterval: TimeInterval = 30
+    static let keepaliveTimeout: TimeInterval = 10
+
+    private func keepAlive(_ connection: SSHConnection) {
+        let loop = connection.channel.eventLoop
+        let interval = TimeAmount.milliseconds(Int64(Self.keepaliveInterval * 1000))
+        let task = loop.scheduleRepeatedAsyncTask(initialDelay: interval, delay: interval) { task in
+            guard connection.isActive else {
+                task.cancel()
+                return loop.makeSucceededVoidFuture()
+            }
+            return connection.ping(timeout: Self.keepaliveTimeout).map { alive in
+                if !alive {
+                    DiagnosticLog.shared.record("ssh", "built-in: \(connection.target.poolKey) stopped answering")
+                    connection.close()
+                }
+            }
+        }
+        connection.closeFuture.whenComplete { _ in task.cancel() }
     }
 
     /// Drop a host's connection (its next call reconnects).
@@ -200,6 +226,44 @@ public final class NIOTransport: RemoteTransport {
                 continue
             }
         }
+    }
+
+    /// A connection for a terminal. Terminals don't take a session slot:
+    /// they live for hours, and a few open terminals would starve every
+    /// short call of the cap. They count against the server's MaxSessions
+    /// all the same, which is why the cap leaves room for them.
+    func withTerminalConnection<T>(_ host: HostConfig, _ body: (SSHConnection) throws -> T) throws -> T {
+        let target = try target(for: host)
+        let first = try pooled(for: target)
+        do {
+            return try body(first.connection)
+        } catch where !first.connection.isActive {
+            lock.lock()
+            if pool[target.poolKey] === first { pool[target.poolKey] = nil }
+            lock.unlock()
+            return try body(try pooled(for: target).connection)
+        }
+    }
+
+    // MARK: - Reverse forwards
+
+    /// Have `host` listen on `remotePort` and send its connections to
+    /// `localPort` on this device (`ssh -R`). Returns the port bound. The
+    /// forward lasts as long as the host's connection; call again after a
+    /// reconnect (`isConnected` tells).
+    public func forwardRemotePort(_ remotePort: Int, on host: HostConfig, toLocalPort localPort: Int,
+                                  timeout: TimeInterval = 10) throws -> Int {
+        try withTerminalConnection(host) { connection in
+            try connection.forwardRemotePort(remotePort, port: localPort)
+                .waitBounded(timeout, host: connection.target.host)
+        }
+    }
+
+    /// Whether there's a live connection to `host` right now.
+    public func isConnected(_ host: HostConfig) -> Bool {
+        guard let key = try? target(for: host).poolKey else { return false }
+        lock.lock(); defer { lock.unlock() }
+        return pool[key]?.connection.isActive == true
     }
 
     // MARK: - RemoteTransport

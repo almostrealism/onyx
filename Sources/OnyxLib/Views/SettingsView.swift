@@ -110,7 +110,10 @@ struct SettingsView: View {
         switch pane {
         case .general: generalPane
         case .appearance: appearancePane
-        case .hosts: hostsPane
+        case .hosts:
+            hostsPane
+            SSHClientSettingsSection(appState: appState)
+                .padding(.top, 12)
         case .monitor: monitorPane
         case .reminders: RemindersSettingsPane(appState: appState, reminders: remindersManager)
         case .pullRequests: pullRequestsPane

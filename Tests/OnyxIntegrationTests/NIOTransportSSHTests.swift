@@ -286,3 +286,128 @@ final class DeviceSyncProofTests: XCTestCase {
         XCTAssertTrue(why.description.contains("Permission denied"), why.description)
     }
 }
+
+import NIOCore
+import NIOPosix
+
+/// Phase 4's parts of the built-in client: terminals, reverse forwards and
+/// the keepalive — against the same real server.
+final class NIOTerminalAndForwardTests: XCTestCase {
+
+    private var sshd: LocalSSHD!
+    private var host: HostConfig!
+    private var transport: NIOTransport!
+
+    override func setUpWithError() throws {
+        do { sshd = try LocalSSHD.start() } catch let why as LocalSSHD.Unavailable { throw XCTSkip(why.description) }
+        host = HostConfig(label: "local-sshd", ssh: SSHConfig(host: sshd.hostName, user: sshd.user, port: sshd.port))
+        let known = KnownHostsStore(url: nil)
+        known.pin(host: sshd.hostName, port: sshd.port, key: sshd.hostPublicKey)
+        let key = SSHIdentity(privateKey: try OpenSSHKeyFile.parse(String(contentsOf: sshd.clientKey, encoding: .utf8)),
+                              source: "test key")
+        transport = NIOTransport(knownHosts: known, connectTimeout: 5, identities: { _ in ([key], []) })
+    }
+
+    override func tearDown() {
+        transport?.disconnectAll()
+        sshd?.stop()
+        super.tearDown()
+    }
+
+    private final class Screen {
+        private let lock = NSLock()
+        private var bytes = Data()
+        func append(_ d: Data) { lock.lock(); bytes.append(d); lock.unlock() }
+        var text: String { lock.lock(); defer { lock.unlock() }; return String(decoding: bytes, as: UTF8.self) }
+    }
+
+    private func waitFor(_ what: String, in screen: Screen, timeout: TimeInterval = 10) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if screen.text.contains(what) { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return false
+    }
+
+    func testATerminalIsARealTerminal() {
+        let screen = Screen()
+        let ended = expectation(description: "end")
+        var end: RemoteTerminalEnd?
+        _ = transport.openTerminal("tty; echo cols=$(tput cols)", on: host, columns: 132, rows: 40, term: "xterm-256color",
+                                   onOutput: screen.append, onEnd: { end = $0; ended.fulfill() })
+        wait(for: [ended], timeout: 15)
+        XCTAssertTrue(screen.text.contains("/dev/tty"), screen.text)
+        XCTAssertTrue(screen.text.contains("cols=132"), "the size requested is the size given: \(screen.text)")
+        XCTAssertEqual(end, .exited(0))
+    }
+
+    func testKeystrokesReachTheProgram() {
+        let screen = Screen()
+        let ended = expectation(description: "end")
+        let terminal = transport.openTerminal("cat", on: host, columns: 80, rows: 24, term: "xterm",
+                                              onOutput: screen.append, onEnd: { _ in ended.fulfill() })
+        // Sent before the channel is up: held, then delivered.
+        terminal.send(Data("typed-early\r".utf8))
+        XCTAssertTrue(waitFor("typed-early", in: screen))
+        terminal.resize(columns: 100, rows: 30)
+        terminal.send(Data([0x04]))   // ^D: cat exits
+        wait(for: [ended], timeout: 10)
+    }
+
+    func testClosingATerminalEndsIt() {
+        let ended = expectation(description: "end")
+        let terminal = transport.openTerminal("sleep 60", on: host, columns: 80, rows: 24, term: "xterm",
+                                              onOutput: { _ in }, onEnd: { _ in ended.fulfill() })
+        Thread.sleep(forTimeInterval: 1)
+        terminal.close()
+        wait(for: [ended], timeout: 10)
+    }
+
+    func testAnUnreachableHostEndsTheTerminalWithSSHsWords() {
+        let ended = expectation(description: "end")
+        var end: RemoteTerminalEnd?
+        let nobody = HostConfig(label: "closed", ssh: SSHConfig(host: sshd.hostName, user: sshd.user, port: 1))
+        _ = transport.openTerminal(nil, on: nobody, columns: 80, rows: 24, term: "xterm",
+                                   onOutput: { _ in }, onEnd: { end = $0; ended.fulfill() })
+        wait(for: [ended], timeout: 15)
+        guard case .failed(let why)? = end else { return XCTFail("\(String(describing: end))") }
+        XCTAssertTrue(why.contains("Connection refused"), why)
+    }
+
+    /// `ssh -R`: a connection to the host's port arrives at ours.
+    func testAReverseForwardReachesThisDevice() throws {
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { try? group.syncShutdownGracefully() }
+        // A local echo server stands in for the app's MCP server.
+        let server = try ServerBootstrap(group: group)
+            .childChannelInitializer { $0.pipeline.addHandler(EchoHandler()) }
+            .bind(host: "127.0.0.1", port: 0).wait()
+        defer { server.close(promise: nil) }
+        let localPort = try XCTUnwrap(server.localAddress?.port)
+
+        let bound = try transport.forwardRemotePort(0, on: host, toLocalPort: localPort)
+        XCTAssertGreaterThan(bound, 0)
+        let out = transport.runCommand("echo through-the-tunnel | nc -w 2 127.0.0.1 \(bound)", on: host,
+                                       timeout: 15, label: "t")
+        XCTAssertTrue(out.stdout.contains("through-the-tunnel"), "\(out.stdout) \(out.stderr)\n\(sshd.log)")
+    }
+
+    func testTheKeepaliveSeesALiveServerAndAClosedConnection() throws {
+        let connection = try transport.connection(for: host)
+        XCTAssertTrue(try connection.ping(timeout: 5).waitBounded(6, host: "t"),
+                      "the refusal of a bogus cancel is an answer")
+        connection.close()
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertFalse(try connection.ping(timeout: 2).waitBounded(3, host: "t"))
+        XCTAssertFalse(transport.isConnected(host))
+    }
+
+    private final class EchoHandler: ChannelInboundHandler {
+        typealias InboundIn = ByteBuffer
+        typealias OutboundOut = ByteBuffer
+        func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+            context.writeAndFlush(data, promise: nil)
+        }
+    }
+}

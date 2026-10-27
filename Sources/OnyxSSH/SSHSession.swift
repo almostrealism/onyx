@@ -169,9 +169,11 @@ final class SessionHandler: ChannelDuplexHandler {
                 onStderr(b)
             }
         case ChannelEvent.inputClosed:
-            // The server's EOF. Its exit status may still be on the way;
-            // the channel close that follows is what ends the run.
-            break
+            // The server's EOF: the program is done writing. Send ours, if
+            // we haven't — sshd keeps a terminal session open until the
+            // client closes its side too, and the run would never end.
+            // (Exec and piped runs sent theirs with their input.)
+            context.close(mode: .output, promise: nil)
         default:
             context.fireUserInboundEventTriggered(event)
         }

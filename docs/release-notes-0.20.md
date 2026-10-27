@@ -35,9 +35,10 @@ Draft — still being assembled.
   already on the host rather than overwriting them.
 - **A copy of the shared state written by a newer Onyx is no longer
   trimmed** by an older one. Fields and settings it doesn't know are kept.
-- **A built-in SSH client for shared-state sync.** Settings → Shared state
-  → Connect with: Built-in syncs over Onyx's own SSH client, the one the
-  iPhone app uses, instead of OpenSSH. It reads your ~/.ssh/config and
+- **A built-in SSH client.** Settings → Hosts → SSH client can move
+  shared-state sync — or every remote call except terminals: git, files,
+  stats, docker — onto Onyx's own SSH client, the one the iPhone app uses,
+  instead of OpenSSH. It reads your ~/.ssh/config and
   known_hosts, signs in with an Ed25519 or ECDSA key (not RSA, not through
   ssh-agent), and refuses a host reached through ProxyJump rather than
   connecting around it. OpenSSH stays the default.

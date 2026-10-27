@@ -113,15 +113,23 @@ public enum SSHEngine: String, Codable, CaseIterable, Identifiable {
     /// for shared-state sync; OpenSSH for the rest. The way to prove the
     /// built-in client against a real home host before an iPhone needs it.
     case builtInForSharedState
+    /// The built-in client for every remote call — scripts, git, files,
+    /// stats, shared state — with OpenSSH kept for terminals, which on the
+    /// Mac are `ssh` processes inside SwiftTerm. Experimental (phase 4).
+    case builtIn
 
     public var id: String { rawValue }
 
     public var label: String {
         switch self {
         case .openSSH:               return "OpenSSH"
-        case .builtInForSharedState: return "Built-in"
+        case .builtInForSharedState: return "Built-in for shared state"
+        case .builtIn:               return "Built-in for everything but terminals"
         }
     }
+
+    /// Whether shared-state sync rides the built-in client.
+    public var syncsBuiltIn: Bool { self != .openSSH }
 }
 
 /// Where an alert goes on this Mac once it has landed in the app.

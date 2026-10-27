@@ -148,11 +148,10 @@ public final class SSHConnection {
 
     public let target: SSHTarget
     let channel: Channel
-    private let handler: NIOSSHHandler
+    let handler: NIOSSHHandler
+    /// Reverse forwards' targets (SSHForwarding.swift).
+    let forwards = ForwardTable()
 
-    /// Called (on the event loop) with each channel the server opens to
-    /// us — a reverse forward's connections (phase 4). Rejected without one.
-    var onInboundChannel: ((Channel, SSHChannelType) -> EventLoopFuture<Void>)?
 
     public var isActive: Bool { channel.isActive }
     public var closeFuture: EventLoopFuture<Void> { channel.closeFuture }
@@ -294,16 +293,17 @@ public final class SSHConnection {
     }
 }
 
-/// Holds the connection for the NIOSSHHandler's inbound-channel callback,
-/// which is made before the connection exists.
+/// Routes the channels the server opens to us (a reverse forward's
+/// connections) to the connection's forwards — it exists before the
+/// connection does, because the NIOSSHHandler needs it first.
 private final class InboundRouter {
     weak var connection: SSHConnection?
 
     func route(_ child: Channel, _ type: SSHChannelType) -> EventLoopFuture<Void> {
-        guard let handler = connection?.onInboundChannel else {
+        guard let connection else {
             return child.eventLoop.makeFailedFuture(SSHConnectionError.rejected("channel refused"))
         }
-        return handler(child, type)
+        return connection.forwards.accept(child, type)
     }
 }
 

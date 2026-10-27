@@ -717,32 +717,11 @@ struct SharedStateSettingsSection: View {
             }
 
             if sync.homeHostID != nil {
-                HStack(spacing: 8) {
-                    Text("Connect with")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.gray.opacity(0.6))
-                    Picker("", selection: Binding(
-                        get: { appState.appearance.sshEngine },
-                        set: {
-                            appState.appearance.sshEngine = $0
-                            appState.saveAppearance()
-                            SharedStateSync.shared.syncNow()
-                        }
-                    )) {
-                        ForEach(SSHEngine.allCases) { engine in
-                            Text(engine.label).tag(engine)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(maxWidth: 180)
-                }
-                .padding(.top, 4)
-
-                Text("Built-in is the SSH client the iPhone and iPad apps use: it reads your ~/.ssh/config and known_hosts and signs in with your Ed25519 or ECDSA key (never RSA, and not through ssh-agent). Choosing it here proves it against your home host before a phone has to.")
+                Text("Connects with \(appState.appearance.sshEngine.syncsBuiltIn ? "the built-in SSH client" : "OpenSSH") — change it in Settings → Hosts → SSH client.")
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.4))
+                    .foregroundColor(.gray.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
             }
 
             Text("Session notes, favorite sessions, tracked pipelines and which workflows show under open PRs are kept in ~/.onyx/shared-state.json on the chosen host, so every Mac running Onyx sees the same set. A change reaches your other machines within about a minute, or straight away when you switch to one. API tokens are never shared — they stay on this Mac. Your Mac keeps its own copy and works normally when the host is unreachable. Changing hosts merges the two sets — nothing is replaced or deleted.")
@@ -1081,5 +1060,41 @@ struct PairingCodeView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(pairing.text, forType: .string)
         copied = true
+    }
+}
+
+// MARK: - SSH client
+
+/// Which SSH client Onyx's remote calls ride (docs/ios-plan.md, phase 4):
+/// OpenSSH, or the built-in one the iPhone and iPad have no alternative
+/// to — for shared state only, or for everything but terminals.
+struct SSHClientSettingsSection: View {
+    @ObservedObject var appState: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionHeader(title: "SSH CLIENT")
+
+            Picker("", selection: Binding(
+                get: { appState.appearance.sshEngine },
+                set: {
+                    appState.appearance.sshEngine = $0
+                    appState.saveAppearance()
+                    SharedStateSync.shared.syncNow()
+                }
+            )) {
+                ForEach(SSHEngine.allCases) { engine in
+                    Text(engine.label).tag(engine)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .frame(maxWidth: 320, alignment: .leading)
+
+            Text("Built-in is Onyx's own SSH client — the one the iPhone and iPad apps use. It reads your ~/.ssh/config and known_hosts and signs in with your Ed25519 or ECDSA key (never RSA, and not through ssh-agent); a host reached through ProxyJump is refused rather than connected to directly. \"For everything\" moves git, files, stats, docker and shared state onto it; terminals stay on OpenSSH. OpenSSH is the default, and switching back takes effect at once.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
