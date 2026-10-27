@@ -81,6 +81,14 @@ public final class PadModel: ObservableObject {
         startPolling()
     }
 
+    /// A file beside the phone's own (Application Support/Onyx).
+    public static func supportURL(_ name: String) -> URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Onyx", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent(name)
+    }
+
     // MARK: - Hosts
 
     /// The iPad's host list: every shared host, in the order the Macs
@@ -172,6 +180,7 @@ public final class PadModel: ObservableObject {
 
     public func setFrontmost(_ active: Bool) {
         frontmost = active
+        PadNotifier.isFrontmost = active
         phone.setFrontmost(active)
         if active { refreshAll() }
     }
@@ -193,6 +202,7 @@ public final class PadModel: ObservableObject {
         var items: [PaletteItem] = [.today]
         items += allSessions.map { .session($0.session, host: $0.host) }
         let typed = query.trimmingCharacters(in: .whitespaces)
+        if let url = PadWebTab.url(from: typed) { items.append(.web(url)) }
         if !typed.isEmpty {
             for host in hosts where host.route != nil {
                 if let session = newSession(named: typed, on: host),
@@ -210,12 +220,14 @@ public enum PaletteItem: Identifiable, Equatable {
     case today
     case session(TmuxSession, host: PadHost)
     case newSession(TmuxSession, host: PadHost)
+    case web(URL)
 
     public var id: String {
         switch self {
         case .today: return "today"
         case .session(let s, _): return "session:\(s.id)"
         case .newSession(let s, _): return "new:\(s.id)"
+        case .web(let url): return "web:\(url.absoluteString)"
         }
     }
 
@@ -224,6 +236,7 @@ public enum PaletteItem: Identifiable, Equatable {
         case .today: return "Today"
         case .session(let s, let host): return "\(s.name) — \(host.label)"
         case .newSession(let s, let host): return "New session \"\(s.name)\" on \(host.label)"
+        case .web(let url): return "Open \(url.absoluteString)"
         }
     }
 
@@ -233,6 +246,7 @@ public enum PaletteItem: Identifiable, Equatable {
         case .today: return "today"
         case .session(let s, let host): return "\(s.name) \(host.label)"
         case .newSession(let s, let host): return "\(s.name) \(host.label) new"
+        case .web(let url): return url.absoluteString
         }
     }
 
@@ -242,6 +256,7 @@ public enum PaletteItem: Identifiable, Equatable {
         guard !query.isEmpty else { return items.filter { if case .newSession = $0 { return false }; return true } }
         let scored = items.compactMap { item -> (PaletteItem, Int)? in
             if case .newSession = item { return (item, Int.min + 1) }
+            if case .web = item { return (item, Int.max) }
             guard let score = score(query.lowercased(), in: item.haystack.lowercased()) else { return nil }
             return (item, score)
         }

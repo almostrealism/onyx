@@ -184,3 +184,48 @@ final class PadTests: XCTestCase {
         XCTAssertEqual(provider.terminals[0].sent, Data([0x1B]))
     }
 }
+
+/// Web tabs and notifications on the iPad.
+final class PadWebAndNotifierTests: XCTestCase {
+
+    func testWhatCountsAsAnAddress() {
+        XCTAssertEqual(PadWebTab.url(from: "github.com/acme/api")?.absoluteString, "https://github.com/acme/api")
+        XCTAssertEqual(PadWebTab.url(from: "http://localhost:3000/x")?.absoluteString, "http://localhost:3000/x")
+        XCTAssertEqual(PadWebTab.url(from: "localhost:8080")?.absoluteString, "https://localhost:8080")
+        XCTAssertNil(PadWebTab.url(from: "deploy"), "a session name, not a site")
+        XCTAssertNil(PadWebTab.url(from: "two words.com"))
+        XCTAssertNil(PadWebTab.url(from: "ftp://x.org"))
+    }
+
+    func testWebTabsJoinTheStripAndCloseToTheLast() throws {
+        let workspace = PadWorkspace()
+        let url = try XCTUnwrap(URL(string: "https://example.com"))
+        let tab = workspace.openWeb(url)
+        XCTAssertTrue(workspace.openWeb(url) === tab, "the same address is the same tab")
+        XCTAssertEqual(workspace.order, [.today, .web(tab.id)])
+        XCTAssertTrue(workspace.currentWeb === tab)
+        workspace.cycle(by: 1)
+        XCTAssertEqual(workspace.selection, .today)
+        workspace.selection = .web(tab.id)
+        workspace.close(tab)
+        XCTAssertEqual(workspace.selection, .today)
+    }
+
+    func testTheAddressBarOffersTheAddressFirst() throws {
+        let url = try XCTUnwrap(URL(string: "https://example.com"))
+        let ranked = PaletteItem.ranked([.today, .web(url)], query: "example.com")
+        XCTAssertEqual(ranked.first, .web(url))
+    }
+
+    func testNotificationsAreForWhenYoureElsewhere() {
+        PadNotifier.reset()
+        PadNotifier.isFrontmost = true
+        PadNotifier.post(title: "a", body: "b", id: "x")
+        XCTAssertTrue(PadNotifier.posted.isEmpty, "in front, it's already on screen")
+        PadNotifier.isFrontmost = false
+        PadNotifier.post(title: "a", body: "b", id: "x")
+        XCTAssertEqual(PadNotifier.posted.count, 1)
+        PadNotifier.isFrontmost = true
+        PadNotifier.reset()
+    }
+}

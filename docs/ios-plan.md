@@ -12,7 +12,7 @@ As of 2026-10-26 (first written 2026-10-23 as the iPad plan). Estimates are appr
 | 3 · Onyx Today on iPhone | Built and run in the simulator; needs signing, TestFlight and a device (docs/ios-today.md) |
 | 4 · OnyxSSH on the Mac | Done behind Settings → Hosts → SSH client, except the Mac's terminals, which stay OpenSSH. No standby connection: one connection per host, replaced once, with a keepalive |
 | 5 · First iPad build | Built and run in the simulator: hosts and routes from the shared state, tmux sessions, terminals, tabs per window, ⌘K, notes, ⌘. for Esc |
-| 6 · iPad parity | Not started |
+| 6 · iPad parity | Built and run in the simulator: the monitor, files with in-place editing, git (status, diffs, log), web tabs, local notifications while open. The managers are the Mac's, moved to OnyxCore behind `RemoteEnvironment`. Not on the iPad: file search, the tree view, upload/download, docker detail, the fleet view, artifacts |
 | 7 · Agent integration | Not started |
 
 ## Summary

@@ -17,8 +17,6 @@
 
 import Foundation
 import Combine
-import AppKit
-import OnyxCore
 
 // MARK: - Claude Code Session Tracking
 
@@ -137,9 +135,11 @@ public class ClaudeSessionManager: ObservableObject {
     @Published public var sessions: [String: ClaudeActivity] = [:]
     @Published public var pendingPermissions: [PermissionRequest] = []
 
-    /// Outstanding dock-bounce request, so it can be cancelled when the
-    /// agent stops waiting.
-    private var attentionToken: Int?
+    /// How this platform gets noticed while an agent is blocked on a
+    /// decision, and stops: the Mac bounces its dock icon; the iPad posts
+    /// a notification. Set once by the app; nil does nothing.
+    public var attention: (begin: () -> Void, end: () -> Void)?
+    private var attentionActive = false
     @Published public var recentTools: [(date: Date, session: String, tool: String)] = []
 
     private let lock = NSLock()
@@ -155,7 +155,18 @@ public class ClaudeSessionManager: ObservableObject {
     /// — meaning auto-allowed tools (Read, Grep, etc., plus anything the
     /// user's settings.json has explicitly allowed) never trigger it. This
     /// naturally respects the user's existing permission configuration.
-    public var gatePermissions: Bool = false
+    ///
+    /// Read from the settings (`claudeHooksGatePermissions`, a shared
+    /// setting: the prompt goes to whichever Onyx the host's agents reach),
+    /// unless something set it here.
+    public var gatePermissions: Bool {
+        get { gateOverride ?? AppearanceStore.shared.config.claudeHooksGatePermissions }
+        set { gateOverride = newValue }
+    }
+    private var gateOverride: Bool?
+
+    /// Follow the setting again after `gatePermissions` was set directly.
+    public func followGateSetting() { gateOverride = nil }
 
     /// Hook sources heard from since launch, keyed by account.
     @Published public private(set) var hookSources: [String: HookSource] = [:]
@@ -512,28 +523,22 @@ public class ClaudeSessionManager: ObservableObject {
 
 extension ClaudeSessionManager {
 
-    /// Bounce the dock icon while an agent is blocked on a decision.
+    /// Ask to be noticed while an agent is blocked on a decision.
     ///
     /// A blocked agent nobody notices is the exact problem this app
     /// exists to solve — the request has a 120-second timeout, so not
     /// seeing it doesn't just delay the work, it abandons it.
-    ///
-    /// `.criticalRequest` keeps bouncing until the app is activated,
-    /// which is right here: one bounce is easy to miss while you're in
-    /// another window, and that's precisely when this happens. Nothing
-    /// bounces when Onyx is already the active app — you can see the
-    /// banner.
     func beginAttentionRequest() {
-        guard !NSApp.isActive, attentionToken == nil else { return }
-        attentionToken = NSApp.requestUserAttention(.criticalRequest)
+        guard let attention, !attentionActive else { return }
+        attentionActive = true
+        attention.begin()
     }
 
-    /// Stop bouncing once nothing is waiting. Called when a request is
-    /// answered OR times out, so an abandoned request doesn't leave the
-    /// dock jumping forever.
+    /// Stop once nothing is waiting. Called when a request is answered OR
+    /// times out, so an abandoned request doesn't keep asking forever.
     func endAttentionRequestIfIdle() {
-        guard pendingPermissions.isEmpty, let token = attentionToken else { return }
-        NSApp.cancelUserAttentionRequest(token)
-        attentionToken = nil
+        guard pendingPermissions.isEmpty, attentionActive else { return }
+        attentionActive = false
+        attention?.end()
     }
 }

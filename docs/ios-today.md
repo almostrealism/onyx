@@ -35,13 +35,29 @@ On an iPad (simulator, two demo hosts on this Mac, one not yet set up):
 - **Windows**: each iPad window has its own tabs (Stage Manager, Split
   View); the host list is shared.
 - **Notes** are the Macs' session notes, edited beside the terminal.
+- **The side panel** (the toolbar's right button, or ⌘⇧N / ⌘⇧M / ⌘⇧F /
+  ⌘⇧G) shows the front terminal's host: its note, its monitor (CPU,
+  memory, GPU, the last hour), its files (tap a file to edit it in place —
+  the Mac's editor, which won't save over a copy that changed on the host),
+  and git for the folder Files is in (changed files, diffs, the log). These
+  are the Mac's own managers, so they behave the same.
+- **Web tabs**: type an address in ⌘K. A page keeps its state across tab
+  switches.
+- **Notifications**, while Onyx is open but not in front: a terminal's bell
+  (an agent or a build finishing) and a terminal whose connection went.
+  Permission is asked when the first terminal opens.
+
+| Monitor | Git |
+| --- | --- |
+| ![](images/onyx-pad-monitor.png) | ![](images/onyx-pad-git.png) |
+
 
 ## Where the code is
 
 | Part | What it is |
 | --- | --- |
 | `Apps/OnyxToday/` | The Xcode project: the `@main` entry point, the icon, Info.plist additions (the `onyx-today://` pairing link), entitlements, and `Version.xcconfig` (kept equal to `OnyxVersion` by `VersionParityTests`). Target `TodayApp`, product "Onyx Today", bundle id `com.onyx.today`. |
-| `Sources/OnyxPad` | The iPad: `PadModel` (hosts, routes, session listings, the palette), `PadTerminal`/`PadWorkspace` (open terminals and tabs, per window), `PadRoot` (the window), `PadTerminalView` (SwiftTerm's UIKit view; the one iOS-only file). |
+| `Sources/OnyxPad` | The iPad: `PadModel` (hosts, routes, session listings, the palette), `PadTerminal`/`PadWorkspace` (open terminals and web tabs, per window), `PadTools` (the side panel's managers, and their `RemoteEnvironment`), `PadRoot` and `PadToolViews` (the window), `PadTerminalView` and `PadWeb` (SwiftTerm's and WebKit's UIKit views; placeholders on the Mac), `PadNotifier`. |
 | `Sources/OnyxToday` | `TodayModel` (the app's state, and its `SharedStateEnvironment`), `TodayPage`, `PairingView`, `TodaySettingsView`. Builds on macOS too, so `swift build` checks it. |
 | `Sources/OnyxUI` | The Today sections, shared with the Mac's simple mode. |
 | `Sources/OnyxSSH` | The SSH client (SwiftNIO SSH) and SFTP. |
@@ -67,7 +83,9 @@ SIMCTL_CHILD_ONYX_TODAY_PAIRING_CODE='onyx1:…' xcrun simctl launch booted com.
 
 — and the simulator's 127.0.0.1 is the Mac. On an iPad simulator,
 `SIMCTL_CHILD_ONYX_PAD_OPEN=<host>/<session>` opens that session once it's
-listed (add `SIMCTL_CHILD_ONYX_PAD_NOTE=1` for its note). Run the demo sshd
+listed (add `SIMCTL_CHILD_ONYX_PAD_PANEL=note|monitor|files|git` for the
+side panel, `SIMCTL_CHILD_ONYX_PAD_PATH=<folder>` for Files and Git, or
+`SIMCTL_CHILD_ONYX_PAD_WEB=<url>` for a web tab). Run the demo sshd
 with `SetEnv HOME=… TMUX_TMPDIR=…` so the sessions it shows are its own, not
 your account's. Grant calendar and reminders
 first (`xcrun simctl privacy booted grant calendar com.onyx.today`, and

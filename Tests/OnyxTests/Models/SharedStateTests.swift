@@ -854,7 +854,7 @@ final class SharedSettingsTests: XCTestCase {
     func testTheSharedSettingsAreExactlyThese() {
         XCTAssertEqual(Set(SharedSetting.allCases.map(\.rawValue)), [
             "prDraftFilter", "remindersLists", "remindersDueSoonOnly",
-            "agendaPane", "extraTimezones", "use12HourClock",
+            "agendaPane", "extraTimezones", "use12HourClock", "claudeHooksGatePermissions",
             "githubRepos", "githubUsername", "githubMineOnly",
             "gitlabProjects", "gitlabUsername", "gitlabMineOnly",
             "flowtreeURL", "flowtreeClientID", "timingProjects",
@@ -879,6 +879,7 @@ final class SharedSettingsTests: XCTestCase {
         config.agendaPane = .calendar
         config.extraTimezones = ["Asia/Tokyo"]
         config.use12HourClock = true
+        config.claudeHooksGatePermissions = true
         let snapshot = SharedSetting.snapshot(of: config).filter { SharedSetting(rawValue: $0.key)?.livesInAStore == false }
         XCTAssertEqual(snapshot.count, SharedSetting.allCases.filter { !$0.livesInAStore }.count)
         let applied = SharedSetting.applying(snapshot, to: AppearanceConfig())

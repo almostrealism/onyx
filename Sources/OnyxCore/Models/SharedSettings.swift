@@ -26,6 +26,10 @@ public enum SharedSetting: String, CaseIterable, Codable {
     case agendaPane
     case extraTimezones
     case use12HourClock
+    /// Whether an agent's permission prompt waits for Onyx (the Mac's
+    /// banner, the iPad's sheet) — one choice, because the prompt goes to
+    /// whichever Onyx the host's agents reach.
+    case claudeHooksGatePermissions
     // The services', in their stores. Without them a phone would have the
     // tokens and nothing to ask for: no repos, so no PRs.
     case githubRepos
@@ -53,6 +57,7 @@ public enum SharedSetting: String, CaseIterable, Codable {
         case .agendaPane:           return .from(config.agendaPane)
         case .extraTimezones:       return .from(config.extraTimezones)
         case .use12HourClock:       return .from(config.use12HourClock)
+        case .claudeHooksGatePermissions: return .from(config.claudeHooksGatePermissions)
         case .githubRepos:          return .from(GitHubConfigStore.shared.repoURLs)
         case .githubUsername:       return .from(GitHubConfigStore.shared.username)
         case .githubMineOnly:       return .from(GitHubConfigStore.shared.mineOnly)
@@ -80,6 +85,8 @@ public enum SharedSetting: String, CaseIterable, Codable {
         case .agendaPane:           if let v = value.decoded(as: AgendaPane.self) { config.agendaPane = v }
         case .extraTimezones:       if let v = value.decoded(as: [String].self) { config.extraTimezones = v }
         case .use12HourClock:       if let v = value.decoded(as: Bool.self) { config.use12HourClock = v }
+        case .claudeHooksGatePermissions:
+            if let v = value.decoded(as: Bool.self) { config.claudeHooksGatePermissions = v }
         case .githubRepos:          if let v = value.decoded(as: [String].self) { GitHubConfigStore.shared.repoURLs = v }
         case .githubUsername:       if let v = value.decoded(as: String.self) { GitHubConfigStore.shared.username = v }
         case .githubMineOnly:       if let v = value.decoded(as: Bool.self) { GitHubConfigStore.shared.mineOnly = v }
@@ -100,7 +107,7 @@ public enum SharedSetting: String, CaseIterable, Codable {
     public var livesInAStore: Bool {
         switch self {
         case .prDraftFilter, .remindersLists, .remindersDueSoonOnly, .agendaPane,
-             .extraTimezones, .use12HourClock:
+             .extraTimezones, .use12HourClock, .claudeHooksGatePermissions:
             return false
         default:
             return true

@@ -56,6 +56,10 @@ Draft — still being assembled.
   host your Macs share with its tmux sessions, in real terminals over the
   app's own SSH client — tabs per window, ⌘K to jump anywhere, the
   session's note beside it, ⌘. for Esc. Today is one of its views.
+- **The host beside the terminal**: its monitor, its files (edit in
+  place), git for the folder you're in, the session's note — the Mac's own
+  monitor, git and editor underneath. Web tabs from ⌘K, and a notification
+  when a terminal rings while you're in another app.
 - **Set up every host for iPad** (Settings → Shared state, once Sync to
   iPhone and iPad is on) installs the Onyx key on each host and checks the
   iPad's client can sign in, then shares how to reach it — address and

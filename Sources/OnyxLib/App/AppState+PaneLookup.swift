@@ -14,6 +14,7 @@ extension AppState {
 
     /// Hand ClaudeSessionManager a way to ask hosts about their panes.
     func registerPaneLookup() {
+        _ = ClaudeSessionManager.installDockBounce
         ClaudeSessionManager.shared.registerPaneLookup(owner: self) { [weak self] origin, done in
             guard let self else { return done(nil) }
             self.lookUpPaneSession(origin, done: done)

@@ -91,6 +91,10 @@ struct PadTerminalView: UIViewRepresentable {
             terminal.title = title.isEmpty ? nil : title
         }
 
+        func bell(source: TerminalView) {
+            terminal.rang()
+        }
+
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
         func scrolled(source: TerminalView, position: Double) {}
         func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}

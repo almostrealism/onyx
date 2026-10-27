@@ -10,6 +10,7 @@
 //   ⌘K   the palette          ⌘0  Today
 //   ⌘W   close the tab        ⌘⇧] ⌘⇧[  next / previous tab
 //   ⌘⇧N  the session's note   ⌘R  list the sessions again
+//   ⌘⇧M ⌘⇧F ⌘⇧G  the host's monitor, files, git
 //   ⌘.   Esc, in a terminal
 //
 
@@ -42,10 +43,18 @@ public struct PadRoot: View {
 struct PadWindow: View {
     @ObservedObject var model: PadModel
     @ObservedObject var workspace: PadWorkspace
+    @StateObject private var tools: PadTools
     @ObservedObject private var notes = SessionNotesStore.shared
     @State private var showingPalette = false
     @State private var showingNote = false
     @State private var columns: NavigationSplitViewVisibility = .all
+
+    init(model: PadModel, workspace: PadWorkspace) {
+        self.model = model
+        self.workspace = workspace
+        _tools = StateObject(wrappedValue: PadTools(transport: model.phone.transport,
+                                                    foldersURL: PadModel.supportURL("pad-folders.json")))
+    }
 
     private var accent: Color { model.phone.today.accentColor }
 
@@ -55,15 +64,13 @@ struct PadWindow: View {
                 .navigationTitle("Onyx")
         } detail: {
             VStack(spacing: 0) {
-                if !workspace.terminals.isEmpty { PadTabStrip(workspace: workspace, accent: accent) }
+                if !workspace.terminals.isEmpty || !workspace.webTabs.isEmpty { PadTabStrip(workspace: workspace, accent: accent) }
                 detail
             }
             .background(Color.black)
             .inspector(isPresented: noteShown) {
-                if let terminal = workspace.current {
-                    PadNoteEditor(session: terminal.session, accent: accent)
-                        .inspectorColumnWidth(min: 240, ideal: 300, max: 420)
-                }
+                PadToolsPanel(tools: tools, session: workspace.current?.session, accent: accent)
+                    .inspectorColumnWidth(min: 260, ideal: 340, max: 480)
             }
             .toolbar { toolbar }
         }
@@ -72,7 +79,8 @@ struct PadWindow: View {
         // A terminal gets the whole width; the sidebar is a swipe or the
         // toolbar button away.
         .onChange(of: workspace.selection) { _, selection in
-            if case .terminal = selection { columns = .detailOnly }
+            if selection != .today { columns = .detailOnly }
+            tools.follow(workspace.current?.host)
         }
         .sheet(isPresented: $showingPalette) {
             PadPalette(model: model, accent: accent) { pick($0) }
@@ -87,6 +95,11 @@ struct PadWindow: View {
 
     #if DEBUG
     private func openFromEnvironment() {
+        if workspace.webTabs.isEmpty, let web = ProcessInfo.processInfo.environment["ONYX_PAD_WEB"],
+           let url = PadWebTab.url(from: web) {
+            workspace.openWeb(url)
+            return
+        }
         guard workspace.terminals.isEmpty,
               let wanted = ProcessInfo.processInfo.environment["ONYX_PAD_OPEN"] else { return }
         let parts = wanted.split(separator: "/", maxSplits: 1).map(String.init)
@@ -94,7 +107,13 @@ struct PadWindow: View {
               let found = model.allSessions.first(where: { $0.host.label == parts[0] && $0.session.name == parts[1] })
         else { return }
         workspace.open(found.session, on: found.host, using: model.phone.transport)
-        if ProcessInfo.processInfo.environment["ONYX_PAD_NOTE"] != nil { showingNote = true }
+        tools.follow(found.host)
+        if let path = ProcessInfo.processInfo.environment["ONYX_PAD_PATH"] { tools.files.navigateTo(path) }
+        if let which = ProcessInfo.processInfo.environment["ONYX_PAD_PANEL"].flatMap(PadTools.Panel.init(rawValue:)) {
+            panel(which)
+        } else if ProcessInfo.processInfo.environment["ONYX_PAD_NOTE"] != nil {
+            panel(.note)
+        }
     }
     #endif
 
@@ -104,6 +123,8 @@ struct PadWindow: View {
                 terminal.start(using: model.phone.transport)
             }
             .id(terminal.id)
+        } else if let web = workspace.currentWeb {
+            PadWebScreen(tab: web).id(web.id)
         } else {
             TodayPage(model: model.phone)
         }
@@ -120,8 +141,7 @@ struct PadWindow: View {
             }
             if let terminal = workspace.current {
                 Button(action: { showingNote.toggle() }) {
-                    Label("Note", systemImage: notes.note(for: terminal.session.id) == nil
-                          ? "note.text" : "note.text.badge.plus")
+                    Label("Panel", systemImage: "sidebar.right")
                 }
             }
         }
@@ -133,11 +153,17 @@ struct PadWindow: View {
         VStack {
             Button("Go to…") { showingPalette = true }.keyboardShortcut("k", modifiers: .command)
             Button("Today") { workspace.selection = .today }.keyboardShortcut("0", modifiers: .command)
-            Button("Close tab") { if let t = workspace.current { workspace.close(t) } }
+            Button("Close tab") {
+                if let t = workspace.current { workspace.close(t) }
+                else if let w = workspace.currentWeb { workspace.close(w) }
+            }
                 .keyboardShortcut("w", modifiers: .command)
             Button("Next tab") { workspace.cycle(by: 1) }.keyboardShortcut("]", modifiers: [.command, .shift])
             Button("Previous tab") { workspace.cycle(by: -1) }.keyboardShortcut("[", modifiers: [.command, .shift])
-            Button("Note") { showingNote.toggle() }.keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("Note") { panel(.note) }.keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("Monitor") { panel(.monitor) }.keyboardShortcut("m", modifiers: [.command, .shift])
+            Button("Files") { panel(.files) }.keyboardShortcut("f", modifiers: [.command, .shift])
+            Button("Git") { panel(.git) }.keyboardShortcut("g", modifiers: [.command, .shift])
             Button("Refresh") { model.refreshAll() }.keyboardShortcut("r", modifiers: .command)
         }
         .opacity(0)
@@ -145,11 +171,23 @@ struct PadWindow: View {
         .accessibilityHidden(true)
     }
 
+    /// Show a panel; the same chord again hides it.
+    private func panel(_ which: PadTools.Panel) {
+        if showingNote && tools.panel == which {
+            showingNote = false
+        } else {
+            tools.showPanel(which)
+            showingNote = true
+        }
+    }
+
     private func pick(_ item: PaletteItem) {
         showingPalette = false
         switch item {
         case .today:
             workspace.selection = .today
+        case .web(let url):
+            workspace.openWeb(url)
         case .session(let session, let host), .newSession(let session, let host):
             workspace.open(session, on: host, using: model.phone.transport)
             if case .newSession = item {
@@ -289,6 +327,11 @@ struct PadTabStrip: View {
                            select: { workspace.selection = .terminal(terminal.id) },
                            close: { workspace.close(terminal) })
                 }
+                ForEach(workspace.webTabs) { tab in
+                    PadWebTabLabel(tab: tab, selected: workspace.selection == .web(tab.id), accent: accent,
+                                   select: { workspace.selection = .web(tab.id) },
+                                   close: { workspace.close(tab) })
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -337,6 +380,30 @@ struct PadTab: View {
         case .live: return Color.onyxGreen
         case .ended: return Color.gray
         }
+    }
+}
+
+struct PadWebTabLabel: View {
+    @ObservedObject var tab: PadWebTab
+    let selected: Bool
+    let accent: Color
+    let select: () -> Void
+    let close: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "globe").font(.system(size: 9))
+            Text(tab.label).monitorFont(size: 11, weight: selected ? .medium : .regular).lineLimit(1)
+                .frame(maxWidth: 180)
+            Button(action: close) { Image(systemName: "xmark").font(.system(size: 9)) }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close \(tab.label)")
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(selected ? accent.opacity(0.2) : Color.white.opacity(0.05))
+        .foregroundColor(selected ? .white : .gray)
+        .cornerRadius(5)
+        .onTapGesture(perform: select)
     }
 }
 
@@ -427,7 +494,7 @@ struct PadPalette: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TextField("Go to a session, or name a new one", text: $query)
+            TextField("Go to a session, name a new one, or type an address", text: $query)
                 .monitorFont(size: 14)
                 .focused($focused)
                 .onSubmit { if let first = items.first { pick(first) } }
@@ -463,6 +530,7 @@ struct PadPalette: View {
         case .today: return "sun.max"
         case .session: return "terminal"
         case .newSession: return "plus.rectangle"
+        case .web: return "globe"
         }
     }
 }

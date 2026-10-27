@@ -490,17 +490,17 @@ public class AppState: ObservableObject {
     /// about a host, not about a window, and hook events reach one server.
     public lazy var claudeSessions: ClaudeSessionManager = {
         let c = ClaudeSessionManager.shared
-        c.gatePermissions = AppearanceStore.shared.config.claudeHooksGatePermissions
         claudeSessionCancellable = c.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
         return c
     }()
 
-    /// Sync the gate-permissions setting from appearance config into the
-    /// session manager. Call after the user toggles the setting in Settings.
+    /// The session manager reads the gate-permissions setting live (it's
+    /// shared, so another device can change it); this only drops anything
+    /// that pinned it.
     public func syncClaudeGatePermissions() {
-        claudeSessions.gatePermissions = appearance.claudeHooksGatePermissions
+        claudeSessions.followGateSetting()
     }
 
     /// The one way anything here reaches a host: scripts, commands and file

@@ -108,7 +108,16 @@ public final class PadTerminal: ObservableObject, Identifiable {
             state = .ended(code == 0 ? "Detached from \(session.name)." : "\(session.name) ended (exit \(code)).")
         case .failed(let why):
             state = .ended(why.isEmpty ? "The connection to \(host.label) went." : why)
+            PadNotifier.post(title: "\(session.name) on \(host.label)",
+                             body: "The connection went. Tap to reattach.", id: session.id)
         }
+    }
+
+    /// The terminal rang its bell — often an agent or a build saying it's
+    /// done. Worth a notification when you're looking elsewhere.
+    public func rang() {
+        PadNotifier.post(title: "\(session.name) on \(host.label)",
+                         body: title.map { "🔔 \($0)" } ?? "🔔 The terminal rang.", id: session.id)
     }
 
     private func flushPending() {
@@ -125,9 +134,11 @@ public final class PadWorkspace: ObservableObject {
     public enum Selection: Hashable {
         case today
         case terminal(UUID)
+        case web(UUID)
     }
 
     @Published public private(set) var terminals: [PadTerminal] = []
+    @Published public private(set) var webTabs: [PadWebTab] = []
     @Published public var selection: Selection = .today
 
     public init() {}
@@ -146,10 +157,40 @@ public final class PadWorkspace: ObservableObject {
             return open
         }
         let terminal = PadTerminal(session: session, host: host)
+        PadNotifier.requestPermission()
         terminals.append(terminal)
         terminal.start(using: provider)
         selection = .terminal(terminal.id)
         return terminal
+    }
+
+    public var currentWeb: PadWebTab? {
+        guard case .web(let id) = selection else { return nil }
+        return webTabs.first { $0.id == id }
+    }
+
+    /// A web tab, or the open one already showing that address.
+    @discardableResult
+    public func openWeb(_ url: URL) -> PadWebTab {
+        if let open = webTabs.first(where: { $0.url == url }) {
+            selection = .web(open.id)
+            return open
+        }
+        let tab = PadWebTab(url: url)
+        webTabs.append(tab)
+        selection = .web(tab.id)
+        return tab
+    }
+
+    public func close(_ tab: PadWebTab) {
+        guard let index = webTabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        webTabs.remove(at: index)
+        if selection == .web(tab.id) { selection = order.last ?? .today }
+    }
+
+    /// Every tab, in the strip's order.
+    public var order: [Selection] {
+        [.today] + terminals.map { .terminal($0.id) } + webTabs.map { .web($0.id) }
     }
 
     public func close(_ terminal: PadTerminal) {
@@ -165,7 +206,7 @@ public final class PadWorkspace: ObservableObject {
 
     /// The next or previous tab (⌘⇧] and ⌘⇧[).
     public func cycle(by step: Int) {
-        let order: [Selection] = [.today] + terminals.map { .terminal($0.id) }
+        let order = self.order
         guard let at = order.firstIndex(of: selection), order.count > 1 else { return }
         selection = order[(at + step + order.count) % order.count]
     }
