@@ -51,6 +51,11 @@ public struct SharedState: Codable, Equatable {
     /// the per-machine key path blanked. A Mac contributes its hosts and
     /// never adopts another's — its host list is its own.
     public var hosts: [HostConfig]
+    /// How an iPad reaches each of those hosts, by host id: the address,
+    /// account and host key a Mac proved with the Onyx key ("Set up every
+    /// host for iPad"). Not secret — the key itself never travels here.
+    /// A Mac contributes the routes it proved; the iPad only reads them.
+    public var routes: [String: HomeHostPointer]
     /// The settings that follow the user (`SharedSetting`), by name, as
     /// JSON — so a setting a newer Onyx added survives an older one's
     /// merge.
@@ -68,6 +73,7 @@ public struct SharedState: Codable, Equatable {
                 updated: Date = Date(),
                 writtenBy: String = "",
                 hosts: [HostConfig] = [],
+                routes: [String: HomeHostPointer] = [:],
                 settings: [String: JSONValue] = [:],
                 unknownFields: [String: JSONValue] = [:]) {
         self.notes = notes
@@ -78,6 +84,7 @@ public struct SharedState: Codable, Equatable {
         self.updated = updated
         self.writtenBy = writtenBy
         self.hosts = hosts
+        self.routes = routes
         self.settings = settings
         self.unknownFields = unknownFields
     }
@@ -100,6 +107,7 @@ public struct SharedState: Codable, Equatable {
         updated = try c.decodeIfPresent(Date.self, forKey: .updated) ?? .distantPast
         writtenBy = try c.decodeIfPresent(String.self, forKey: .writtenBy) ?? ""
         hosts = (try? c.decodeIfPresent([HostConfig].self, forKey: .hosts)) ?? []
+        routes = (try? c.decodeIfPresent([String: HomeHostPointer].self, forKey: .routes)) ?? [:]
         settings = (try? c.decodeIfPresent([String: JSONValue].self, forKey: .settings)) ?? [:]
 
         let known = Set(CodingKeys.allCases.map(\.rawValue))
@@ -127,12 +135,13 @@ public struct SharedState: Codable, Equatable {
         try c.encode(updated, forKey: .updated)
         try c.encode(writtenBy, forKey: .writtenBy)
         try c.encode(hosts, forKey: .hosts)
+        try c.encode(routes, forKey: .routes)
         try c.encode(settings, forKey: .settings)
     }
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case notes, favorites, githubPipelines, gitlabPipelines, prWorkflows, updated, writtenBy
-        case hosts, settings
+        case hosts, routes, settings
     }
 
     public static let empty = SharedState(updated: .distantPast)
@@ -163,7 +172,7 @@ public struct SharedState: Codable, Equatable {
             && githubPipelines == other.githubPipelines
             && gitlabPipelines == other.gitlabPipelines
             && prWorkflows == other.prWorkflows
-            && hosts == other.hosts && settings == other.settings
+            && hosts == other.hosts && routes == other.routes && settings == other.settings
             && unknownFields == other.unknownFields
     }
 }
@@ -178,7 +187,8 @@ public enum SharedStateMerge {
     public static func merge(base: SharedState?,
                              local: SharedState,
                              remote: SharedState) -> SharedState {
-        SharedState(
+        let hosts = mergeHosts(base: base?.hosts, local: local.hosts, remote: remote.hosts)
+        return SharedState(
             notes: mergeNotes(base: base?.notes, local: local.notes, remote: remote.notes),
             favorites: mergeFavorites(base: base?.favorites,
                                       local: local.favorites,
@@ -194,7 +204,11 @@ public enum SharedStateMerge {
                                     remote: remote.prWorkflows),
             updated: Date(),
             writtenBy: local.writtenBy,
-            hosts: mergeHosts(base: base?.hosts, local: local.hosts, remote: remote.hosts),
+            hosts: hosts,
+            // A route outlives nothing: once its host is gone from every
+            // list, it goes too.
+            routes: mergeValues(base: base?.routes, local: local.routes, remote: remote.routes)
+                .filter { key, _ in hosts.contains { $0.id.uuidString == key } },
             settings: mergeValues(base: base?.settings, local: local.settings, remote: remote.settings,
                                   withoutShadowPrefer: .remote),
             // Kept, never decided: whatever a newer Onyx wrote, the newest

@@ -6,7 +6,10 @@
 //                 the home host's authorized_keys, prove the phone's SSH
 //                 client can sign in with it, and leave the key and the
 //                 home host's address and host key in iCloud Keychain.
-//                 Turning it off undoes all of that.
+//                 Turning it off undoes all of that. And "Set up every
+//                 host for iPad": the same key and proof on each host, so
+//                 the iPad can open terminals there (the routes travel in
+//                 the shared state).
 // Scope: Shared singleton.
 // Threading: The work runs on a utility queue; state is published on main.
 //
@@ -36,14 +39,32 @@ public final class DeviceSyncManager: ObservableObject {
     }
 
     @Published public private(set) var state: State = .off
+    /// The hosts proved for the iPad, by host id. Published in the shared
+    /// state (`SharedState.routes`); kept here so a restart doesn't lose them.
+    @Published public private(set) var routes: [UUID: HomeHostPointer] = [:]
+    /// Per host, why the last setup didn't take.
+    @Published public private(set) var setupProblems: [UUID: String] = [:]
+    /// Which host the setup is on, while it runs.
+    @Published public private(set) var settingUp: String?
 
     private let queue = DispatchQueue(label: "com.onyx.device-sync", qos: .utility)
     private let secrets: SecretStore
+    private var routesURL: URL?
 
     init(secrets: SecretStore = .shared) {
         self.secrets = secrets
         if let pointer = HomeHostPointer.load(from: secrets), OnyxKey.load(from: secrets) != nil {
             state = .on(pointer, synced: secrets.isSynced(.homeHost))
+        }
+    }
+
+    /// Where the routes are kept. Once, at launch.
+    public func configure(routesURL url: URL) {
+        guard routesURL == nil else { return }
+        routesURL = url
+        if let data = try? Data(contentsOf: url),
+           let saved = try? JSONDecoder().decode([HomeHostPointer].self, from: data) {
+            routes = Dictionary(saved.map { ($0.hostID, $0) }, uniquingKeysWith: { _, last in last })
         }
     }
 
@@ -73,6 +94,7 @@ public final class DeviceSyncManager: ObservableObject {
             case .success(let pointer):
                 pointer.save(to: secrets)
                 DiagnosticLog.shared.record("config", "device sync on: \(pointer.user)@\(pointer.address):\(pointer.port)")
+                self.record(pointer)
                 self.finish(.on(pointer, synced: secrets.isSynced(.homeHost)))
             }
         }
@@ -81,24 +103,91 @@ public final class DeviceSyncManager: ObservableObject {
     /// Remove the key from the home host and the Keychain items with it.
     /// The Keychain goes regardless: a host that can't be reached right
     /// now must not keep the phone signed in.
+    /// Every host set up for the iPad goes the same way.
     public func disable(home: HostConfig?, appState: AppState) {
         let identity = OnyxKey.load(from: secrets)
         state = .working("Removing the Onyx key…")
         let transport = appState.transport
+        var targets = appState.hosts.filter { routes[$0.id] != nil }
+        if let home, !targets.contains(where: { $0.id == home.id }) { targets.insert(home, at: 0) }
         queue.async { [secrets] in
-            var leftover: String?
-            if let home, let identity {
-                let remove = transport.runScript(Self.removeScript(line: identity.authorizedKeysLine(comment: OnyxKey.comment)),
-                                                 on: home, timeout: 20, label: "deviceSync:remove")
-                if remove.cleaned?.contains("REMOVED") != true {
-                    leftover = "the key is still in \(home.label)'s authorized_keys (\(remove.failureDetail)); "
-                        + "remove the line ending \(OnyxKey.comment) by hand"
+            var leftovers: [String] = []
+            if let identity {
+                let line = identity.authorizedKeysLine(comment: OnyxKey.comment)
+                for host in targets {
+                    let remove = transport.runScript(Self.removeScript(line: line),
+                                                     on: host, timeout: 20, label: "deviceSync:remove")
+                    if remove.cleaned?.contains("REMOVED") != true {
+                        leftovers.append("\(host.label) (\(remove.failureDetail))")
+                    }
                 }
             }
             secrets.set(.homeHost, "")
             secrets.set(.sshPrivateKey, "")
+            DispatchQueue.main.async {
+                self.routes = [:]
+                self.setupProblems = [:]
+                self.saveRoutes()
+            }
+            let leftover = leftovers.isEmpty ? nil
+                : "the key is still in the authorized_keys of \(leftovers.joined(separator: ", ")); "
+                    + "remove the line ending \(OnyxKey.comment) by hand"
             self.finish(leftover.map { .failed($0) } ?? .off)
         }
+    }
+
+    // MARK: - Every host, for the iPad
+
+    /// Install the Onyx key on each host and prove the built-in client
+    /// signs in with it, one host at a time. `done` runs on main.
+    public func setUpEveryHost(_ hosts: [HostConfig], appState: AppState, done: @escaping () -> Void) {
+        guard isOn, settingUp == nil, let identity = OnyxKey.load(from: secrets) else { return }
+        let transport = appState.transport
+        let targets = hosts.filter { !$0.isLocal && !$0.paused }
+        settingUp = targets.first?.label ?? ""
+        queue.async {
+            let line = identity.authorizedKeysLine(comment: OnyxKey.comment)
+            for host in targets {
+                DispatchQueue.main.async { self.settingUp = host.label }
+                let problem: String?
+                let install = transport.runScript(Self.installScript(line: line), on: host,
+                                                  timeout: 20, label: "deviceSync:install")
+                if install.cleaned?.contains("INSTALLED") != true {
+                    problem = "couldn't add the key: \(install.failureDetail)"
+                } else {
+                    switch Self.prove(identity: identity, home: host) {
+                    case .failure(let why): problem = why.description
+                    case .success(let route):
+                        self.record(route)
+                        problem = nil
+                    }
+                }
+                DispatchQueue.main.async { self.setupProblems[host.id] = problem }
+                if let problem {
+                    DiagnosticLog.shared.record("config", "iPad setup of \(host.label): \(problem)", failure: true)
+                }
+            }
+            DispatchQueue.main.async {
+                self.settingUp = nil
+                done()
+            }
+        }
+    }
+
+    /// Keep a proved route.
+    private func record(_ route: HomeHostPointer) {
+        DispatchQueue.main.async {
+            self.routes[route.hostID] = route
+            self.setupProblems[route.hostID] = nil
+            self.saveRoutes()
+        }
+    }
+
+    private func saveRoutes() {
+        guard let routesURL else { return }
+        let list = routes.values.sorted { $0.label < $1.label }
+        guard let data = try? JSONEncoder().encode(list) else { return }
+        try? data.write(to: routesURL)
     }
 
     /// The code for a phone that can't get the secrets from iCloud.

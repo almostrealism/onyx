@@ -388,6 +388,7 @@ extension AppState {
             // the first sync merges against real local content rather than
             // an empty set — merging an empty local copy into the host's
             // would look exactly like "this Mac deleted everything".
+            DeviceSyncManager.shared.configure(routesURL: appSupportDir.appendingPathComponent("device-routes.json"))
             SharedStateSync.shared.configure(url: sharedStateURL, environment: self)
             _ = AppState.observeActivationForSharedState
         }

@@ -50,6 +50,13 @@ public protocol SharedStateEnvironment: AnyObject {
     /// This device's own hosts, to publish for the iPad (key paths
     /// blanked); nil for a device that publishes none (the iPhone).
     var ownHosts: [HostConfig]? { get }
+    /// How an iPad reaches this device's hosts (proved with the Onyx
+    /// key), to publish; nil for a device that proves none.
+    var ownRoutes: [HomeHostPointer]? { get }
+}
+
+public extension SharedStateEnvironment {
+    var ownRoutes: [HomeHostPointer]? { nil }
 }
 
 public final class SharedStateSync: ObservableObject {
@@ -97,6 +104,10 @@ public final class SharedStateSync: ObservableObject {
     @Published public private(set) var homeHostID: UUID?
     /// Who wrote the copy we last pulled, for the status line.
     @Published public private(set) var lastWrittenBy: String?
+    /// Every device's hosts and the routes to them, as of the last sync —
+    /// what an iPad lists. A Mac lists its own hosts, never these.
+    @Published public private(set) var sharedHosts: [HostConfig] = []
+    @Published public private(set) var sharedRoutes: [String: HomeHostPointer] = [:]
 
     private weak var environment: SharedStateEnvironment?
     /// The hosts this device published last time, so a host it has since
@@ -147,8 +158,12 @@ public final class SharedStateSync: ObservableObject {
                 publishedHostIDs = record.publishedHostIDs ?? []
                 storedHome = record.homeHostID
                 let home = record.homeHostID
+                let hosts = record.shadow?.hosts ?? []
+                let routes = record.shadow?.routes ?? [:]
                 DispatchQueue.main.async {
                     self.homeHostID = home
+                    self.sharedHosts = hosts
+                    self.sharedRoutes = routes
                     self.status = home == nil ? .localOnly : .waitingForHost
                 }
             }
@@ -358,6 +373,8 @@ public final class SharedStateSync: ObservableObject {
                                               known: base?.hosts ?? remoteCopy?.hosts ?? [])
                 local.settings = Self.localSettings(own: local.settings,
                                                     known: base?.settings ?? remoteCopy?.settings ?? [:])
+                local.routes = Self.localRoutes(own: environment.ownRoutes,
+                                                known: base?.routes ?? remoteCopy?.routes ?? [:])
                 let merged: SharedState
                 if let remote = remoteCopy {
                     merged = SharedStateMerge.merge(base: base, local: local, remote: remote)
@@ -420,6 +437,8 @@ public final class SharedStateSync: ObservableObject {
             let writer = remoteCopy?.writtenBy
             DispatchQueue.main.async {
                 self.lastWrittenBy = writer?.isEmpty == false ? writer : nil
+                if self.sharedHosts != merged.hosts { self.sharedHosts = merged.hosts }
+                if self.sharedRoutes != merged.routes { self.sharedRoutes = merged.routes }
                 self.status = .synced(stamp)
             }
             DiagnosticLog.shared.record(
@@ -491,6 +510,15 @@ public final class SharedStateSync: ObservableObject {
         let mine = Set(own.map(\.id))
         let retired = published.subtracting(mine)
         return own + known.filter { !mine.contains($0.id) && !retired.contains($0.id) }
+    }
+
+    /// The routes as last seen, with this device's own laid over them. A
+    /// route this device stops proving stays until its host goes — another
+    /// Mac may still reach it.
+    static func localRoutes(own: [HomeHostPointer]?, known: [String: HomeHostPointer]) -> [String: HomeHostPointer] {
+        var routes = known
+        for route in own ?? [] { routes[route.hostID.uuidString] = route }
+        return routes
     }
 
     /// Keep a copy of what we are about to replace.

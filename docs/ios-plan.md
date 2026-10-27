@@ -2,6 +2,19 @@
 
 As of 2026-10-26 (first written 2026-10-23 as the iPad plan). Estimates are approximate and assume one engineer working with agents.
 
+## Progress
+
+| Phase | State |
+| --- | --- |
+| 0 · Split the package | Done: OnyxCore, OnyxUI; `TodayState` |
+| 1 · Transport seam and secrets | Done: `RemoteTransport`, `SecretStore` |
+| 2 · OnyxSSH, the small part | Done: connect, Ed25519/ECDSA, known hosts, exec, SFTP; shared state can ride it |
+| 3 · Onyx Today on iPhone | Built and run in the simulator; needs signing, TestFlight and a device (docs/ios-today.md) |
+| 4 · OnyxSSH on the Mac | Done behind Settings → Hosts → SSH client, except the Mac's terminals, which stay OpenSSH. No standby connection: one connection per host, replaced once, with a keepalive |
+| 5 · First iPad build | Built and run in the simulator: hosts and routes from the shared state, tmux sessions, terminals, tabs per window, ⌘K, notes, ⌘. for Esc |
+| 6 · iPad parity | Not started |
+| 7 · Agent integration | Not started |
+
 ## Summary
 
 Onyx becomes three variants built from one Swift package:

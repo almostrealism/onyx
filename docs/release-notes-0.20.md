@@ -50,6 +50,17 @@ Draft — still being assembled.
   a QR code the iPhone camera opens, or text to paste. Turning it off
   takes the key off the host and out of the Keychain.
 
+## Onyx on iPad
+
+- **Your tmux sessions on an iPad.** The iOS app shows, on an iPad, every
+  host your Macs share with its tmux sessions, in real terminals over the
+  app's own SSH client — tabs per window, ⌘K to jump anywhere, the
+  session's note beside it, ⌘. for Esc. Today is one of its views.
+- **Set up every host for iPad** (Settings → Shared state, once Sync to
+  iPhone and iPad is on) installs the Onyx key on each host and checks the
+  iPad's client can sign in, then shares how to reach it — address and
+  host key, never the key — through the home host.
+
 ## Side panel
 
 - **The divider shows it can be dragged.** It has a grip, lights up under

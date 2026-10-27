@@ -892,3 +892,49 @@ final class SharedSettingsTests: XCTestCase {
         XCTAssertFalse(applied.use12HourClock)
     }
 }
+
+/// The routes an iPad reaches hosts by (`SharedState.routes`).
+final class SharedStateRoutesTests: XCTestCase {
+
+    private func host(_ id: UUID) -> HostConfig { HostConfig(id: id, label: "h", ssh: SSHConfig(host: "h")) }
+    private func route(_ id: UUID, port: Int = 22) -> HomeHostPointer {
+        HomeHostPointer(hostID: id, label: "h", address: "10.0.0.1", port: port, user: "me", hostKey: "k")
+    }
+
+    func testRoutesRoundTripAndOlderCopiesDecode() throws {
+        let id = UUID()
+        let state = SharedState(hosts: [host(id)], routes: [id.uuidString: route(id)])
+        let back = try JSONDecoder().decode(SharedState.self, from: JSONEncoder().encode(state))
+        XCTAssertEqual(back.routes, state.routes)
+        let old = try JSONDecoder().decode(SharedState.self, from: Data(#"{"notes":{}}"#.utf8))
+        XCTAssertEqual(old.routes, [:])
+    }
+
+    func testARouteGoesWhenItsHostDoes() {
+        let kept = UUID(), gone = UUID()
+        let base = SharedState(hosts: [host(kept), host(gone)],
+                               routes: [kept.uuidString: route(kept), gone.uuidString: route(gone)])
+        var local = base
+        local.hosts = [host(kept)]
+        let merged = SharedStateMerge.merge(base: base, local: local, remote: base)
+        XCTAssertEqual(Array(merged.routes.keys), [kept.uuidString])
+    }
+
+    func testAReprovedRouteReplacesTheOldOne() {
+        let id = UUID()
+        let base = SharedState(hosts: [host(id)], routes: [id.uuidString: route(id)])
+        var local = base
+        local.routes = SharedStateSync.localRoutes(own: [route(id, port: 2222)], known: base.routes)
+        let merged = SharedStateMerge.merge(base: base, local: local, remote: base)
+        XCTAssertEqual(merged.routes[id.uuidString]?.port, 2222)
+        XCTAssertFalse(merged.sameContent(as: base), "a changed route is a change worth pushing")
+    }
+
+    /// A device that proves none — the iPhone, the iPad — echoes what it
+    /// knows, which the merge reads as no change.
+    func testADeviceWithoutRoutesLeavesThemAlone() {
+        let id = UUID()
+        let known = [id.uuidString: route(id)]
+        XCTAssertEqual(SharedStateSync.localRoutes(own: nil, known: known), known)
+    }
+}

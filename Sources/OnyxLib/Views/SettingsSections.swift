@@ -979,6 +979,10 @@ struct DeviceSyncSettingsSection: View {
                 }
             }
 
+            if device.isOn {
+                iPadHosts
+            }
+
             Text("Makes an SSH key for Onyx, adds it to the home host's ~/.ssh/authorized_keys (the line ends \(OnyxKey.comment)), checks the phone's SSH client can sign in with it, and puts it in iCloud Keychain with the host's address and host key. Onyx Today on your iPhone then reads the same shared state as this Mac. Turning it off removes the key from the host and from iCloud Keychain.")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.4))
@@ -989,6 +993,47 @@ struct DeviceSyncSettingsSection: View {
     private var isWorking: Bool {
         if case .working = device.state { return true }
         return false
+    }
+
+    /// The iPad opens terminals on any host with a route: the same key,
+    /// installed and proved there.
+    @ViewBuilder private var iPadHosts: some View {
+        let remote = appState.hosts.filter { !$0.isLocal }
+        VStack(alignment: .leading, spacing: 4) {
+            Button(action: { appState.setUpHostsForDevices() }) {
+                Text(device.settingUp.map { "Setting up \($0)…" } ?? "Set up every host for iPad")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(appState.accentColor)
+            }
+            .buttonStyle(.plain)
+            .disabled(device.settingUp != nil || remote.isEmpty)
+
+            ForEach(remote) { host in
+                HStack(spacing: 6) {
+                    Text(host.label)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.7))
+                    Text(iPadStatus(host))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(device.setupProblems[host.id] != nil
+                                         ? Color.onyxRed.opacity(0.8) : .gray.opacity(0.5))
+                        .lineLimit(2)
+                }
+            }
+
+            Text("Adds the same key to each host's authorized_keys and checks the iPad's SSH client can sign in, so Onyx on an iPad can open your tmux sessions there. Paused hosts are skipped. The addresses and host keys travel in the shared state; the key itself stays in the keychain.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 4)
+    }
+
+    private func iPadStatus(_ host: HostConfig) -> String {
+        if let problem = device.setupProblems[host.id] { return problem }
+        if device.routes[host.id] != nil { return "ready for iPad" }
+        if host.paused { return "paused — skipped" }
+        return "not set up"
     }
 
     private var statusText: String {

@@ -11,11 +11,15 @@ import SwiftUI
 import OnyxCore
 import OnyxUI
 
-struct PairingView: View {
+public struct PairingView: View {
     @ObservedObject var model: TodayModel
     @State private var code = ""
 
-    var body: some View {
+    public init(model: TodayModel) {
+        self.model = model
+    }
+
+    public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("ONYX TODAY")

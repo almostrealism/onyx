@@ -17,6 +17,7 @@ let package = Package(
         .library(name: "OnyxSSH", targets: ["OnyxSSH"]),
         .library(name: "OnyxUI", targets: ["OnyxUI"]),
         .library(name: "OnyxToday", targets: ["OnyxToday"]),
+        .library(name: "OnyxPad", targets: ["OnyxPad"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
@@ -87,6 +88,17 @@ let package = Package(
             dependencies: ["OnyxCore", "OnyxUI", "OnyxSSH"],
             path: "Sources/OnyxToday"
         ),
+        // Onyx on an iPad: the shared hosts' tmux sessions in SwiftTerm's
+        // UIKit view over the built-in client, beside the phone's Today. The
+        // terminal view is iOS-only; the rest builds on the Mac for tests.
+        .target(
+            name: "OnyxPad",
+            dependencies: [
+                "OnyxCore", "OnyxUI", "OnyxSSH", "OnyxToday",
+                .product(name: "SwiftTerm", package: "SwiftTerm"),
+            ],
+            path: "Sources/OnyxPad"
+        ),
         .target(
             name: "OnyxLib",
             dependencies: [
@@ -121,7 +133,7 @@ let package = Package(
         ),
         .testTarget(
             name: "OnyxTests",
-            dependencies: ["OnyxCore", "OnyxUI", "OnyxLib", "OnyxSSH", "OnyxToday", "OnyxVersion"],
+            dependencies: ["OnyxCore", "OnyxUI", "OnyxLib", "OnyxSSH", "OnyxToday", "OnyxPad", "OnyxVersion"],
             path: "Tests/OnyxTests"
         ),
         .testTarget(

@@ -40,6 +40,21 @@ extension AppState: SharedStateEnvironment {
         }
     }
 
+    /// How the iPad reaches this Mac's hosts: the routes proved for the
+    /// ones still configured here.
+    public var ownRoutes: [HomeHostPointer]? {
+        let ids = Set(hosts.map(\.id))
+        return DeviceSyncManager.shared.routes.values.filter { ids.contains($0.hostID) }
+            .sorted { $0.label < $1.label }
+    }
+
+    /// "Set up every host for iPad", then sync so the routes travel.
+    func setUpHostsForDevices() {
+        DeviceSyncManager.shared.setUpEveryHost(hosts, appState: self) {
+            SharedStateSync.shared.syncNow()
+        }
+    }
+
     /// Tell the sync when the app comes to the front.
     static let observeActivationForSharedState: Void = {
         NotificationCenter.default.addObserver(

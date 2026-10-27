@@ -8,17 +8,33 @@ import XCTest
 final class CorePortabilityTests: XCTestCase {
 
     static let portableTargets = ["OnyxCore", "OnyxUI", "OnyxSSH", "OnyxToday"]
+    /// The iPad's target: UIKit and SwiftTerm are its job, but never
+    /// AppKit or a process.
+    static let padTarget = "OnyxPad"
 
-    private var coreSources: [URL] {
+    private var coreSources: [URL] { sources(in: Self.portableTargets) }
+
+    private func sources(in targets: [String]) -> [URL] {
         let repo = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // Services
             .deletingLastPathComponent()   // OnyxTests
             .deletingLastPathComponent()   // Tests
             .deletingLastPathComponent()   // repo
-        return Self.portableTargets.flatMap { target -> [URL] in
+        return targets.flatMap { target -> [URL] in
             let walker = FileManager.default.enumerator(at: repo.appendingPathComponent("Sources/\(target)"),
                                                         includingPropertiesForKeys: nil)
             return (walker?.allObjects as? [URL] ?? []).filter { $0.pathExtension == "swift" }
+        }
+    }
+
+    func testTheIPadTargetUsesNoMacOnlyAPI() throws {
+        let files = sources(in: [Self.padTarget])
+        XCTAssertGreaterThan(files.count, 2)
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            XCTAssertFalse(text.contains("import AppKit"), "\(file.lastPathComponent) imports AppKit")
+            XCTAssertFalse(text.contains("import OnyxLib"), "\(file.lastPathComponent) imports the Mac app")
+            XCTAssertFalse(text.contains("Process()"), "\(file.lastPathComponent) launches a process")
         }
     }
 

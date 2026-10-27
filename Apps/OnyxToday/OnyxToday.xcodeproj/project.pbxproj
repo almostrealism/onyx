@@ -10,6 +10,7 @@
 		0A0000000000000000000001 /* OnyxTodayApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000011 /* OnyxTodayApp.swift */; };
 		0A0000000000000000000002 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000012 /* Assets.xcassets */; };
 		0A0000000000000000000003 /* OnyxToday in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000041 /* OnyxToday */; };
+		0A0000000000000000000004 /* OnyxPad in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000043 /* OnyxPad */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +28,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0A0000000000000000000003 /* OnyxToday in Frameworks */,
+				0A0000000000000000000004 /* OnyxPad in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -79,6 +81,7 @@
 			name = TodayApp;
 			packageProductDependencies = (
 				0A0000000000000000000041 /* OnyxToday */,
+				0A0000000000000000000043 /* OnyxPad */,
 			);
 			productName = TodayApp;
 			productReference = 0A0000000000000000000016 /* Onyx Today.app */;
@@ -293,6 +296,10 @@
 		0A0000000000000000000041 /* OnyxToday */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = OnyxToday;
+		};
+		0A0000000000000000000043 /* OnyxPad */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OnyxPad;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

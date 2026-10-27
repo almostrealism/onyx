@@ -26,6 +26,7 @@ on:
       - 'Sources/OnyxSSH/**'
       - 'Sources/OnyxUI/**'
       - 'Sources/OnyxToday/**'
+      - 'Sources/OnyxPad/**'
       - 'Apps/**'
       - 'Sources/OnyxVersion/**'
       - 'Package.swift'
@@ -37,6 +38,7 @@ on:
       - 'Sources/OnyxSSH/**'
       - 'Sources/OnyxUI/**'
       - 'Sources/OnyxToday/**'
+      - 'Sources/OnyxPad/**'
       - 'Apps/**'
       - 'Sources/OnyxVersion/**'
       - 'Package.swift'
@@ -63,6 +65,7 @@ jobs:
           - OnyxSSH
           - OnyxUI
           - OnyxToday
+          - OnyxPad
         destination:
           - "iOS Simulator"
           - "iOS"

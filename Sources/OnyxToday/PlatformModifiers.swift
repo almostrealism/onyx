@@ -8,7 +8,7 @@
 
 import SwiftUI
 
-extension View {
+public extension View {
     /// A field for a code or a token: no capitals, no autocorrect.
     func codeEntry() -> some View {
         #if os(iOS)

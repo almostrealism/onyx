@@ -288,10 +288,9 @@ extension OnyxTerminalView {
             // activity in the session — the answer to the question the
             // idle indicator is asking, for every session on the host, in
             // the command we were already running.
-            script = "tmux ls -F \"#{session_name}|#{session_activity}\" 2>/dev/null || true"
+            script = TmuxSessions.listScript()
         case .docker(_, let containerName):
-            let safe = appState.sanitizedContainer(containerName)
-            script = "docker exec \(safe) tmux ls -F \"#{session_name}|#{session_activity}\" 2>/dev/null || true"
+            script = TmuxSessions.listScript(container: containerName)
         case .dockerLogs, .dockerTop, .browser:
             completion([]) // utility/browser sessions are not fetched via tmux
             return
@@ -321,26 +320,7 @@ extension OnyxTerminalView {
     /// degrades to the previous behavior rather than losing the session.
     static func parseSessionList(_ output: String,
                                  source: SessionSource) -> [(session: TmuxSession, activity: Date?)] {
-        output.components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .compactMap { line -> (TmuxSession, Date?)? in
-                let parts = line.split(separator: "|", maxSplits: 1,
-                                       omittingEmptySubsequences: false)
-                let name = String(parts[0])
-                guard !name.isEmpty, name.count < 100, !name.contains("  "),
-                      name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-"
-                                        || $0 == "_" || $0 == "." || $0 == " " })
-                else { return nil }
-
-                var activity: Date?
-                if parts.count > 1,
-                   let epoch = TimeInterval(parts[1].trimmingCharacters(in: .whitespaces)),
-                   epoch > 0 {
-                    activity = Date(timeIntervalSince1970: epoch)
-                }
-                return (TmuxSession(name: name, source: source), activity)
-            }
+        TmuxSessions.parse(output, source: source)
     }
 
     private func fetchDockerContainerSessions(host: HostConfig, completion: @escaping ([TmuxSession]) -> Void) {

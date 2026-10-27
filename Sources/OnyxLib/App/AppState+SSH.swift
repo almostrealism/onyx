@@ -573,16 +573,10 @@ extension AppState {
     }
 
     /// Sanitize a session name for safe shell interpolation
-    func sanitizedSession(_ name: String) -> String {
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
-        return String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : Character("_") })
-    }
+    func sanitizedSession(_ name: String) -> String { TmuxSessions.safeSession(name) }
 
     /// Sanitize a container name for safe shell interpolation
-    func sanitizedContainer(_ name: String) -> String {
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
-        return String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : Character("_") })
-    }
+    func sanitizedContainer(_ name: String) -> String { TmuxSessions.safeContainer(name) }
 
     /// MCP `-R` reverse-forwarding flags for the pair's MASTER connection.
     /// Port forwardings belong to the master, not to channel clients — a
