@@ -355,6 +355,65 @@ final class NIOTerminalAndForwardTests: XCTestCase {
         wait(for: [ended], timeout: 10)
     }
 
+    /// The iPad lists sessions every 20 seconds while terminals are open
+    /// on the same host: a terminal must not cost the listing its channel.
+    func testCommandsStillRunWhileATerminalIsOpen() {
+        let screen = Screen()
+        let terminal = transport.openTerminal("cat", on: host, columns: 80, rows: 24, term: "xterm",
+                                              onOutput: screen.append, onEnd: { _ in })
+        terminal.send(Data("up\r".utf8))
+        XCTAssertTrue(waitFor("up", in: screen))
+        for round in 0..<3 {
+            let out = transport.runCommand("echo listed-$((1+\(round)))", on: host, timeout: 10, label: "test")
+            XCTAssertEqual(out.exit, 0, "round \(round): \(out.stderr)")
+            XCTAssertTrue(out.stdout.contains("listed-\(1 + round)"), out.stdout)
+        }
+        terminal.close()
+    }
+
+    /// A window opening a terminal while the sidebar lists sessions: both
+    /// reach for the first connection at once.
+    func testATerminalAndACommandCanStartTogether() {
+        let screen = Screen()
+        let terminal = transport.openTerminal("cat", on: host, columns: 80, rows: 24, term: "xterm",
+                                              onOutput: screen.append, onEnd: { _ in })
+        let group = DispatchGroup()
+        var outs: [RemoteOutput] = []
+        let lock = NSLock()
+        for _ in 0..<3 {
+            group.enter()
+            DispatchQueue.global().async {
+                let out = self.transport.runCommand("echo together", on: self.host, timeout: 10, label: "test")
+                lock.lock(); outs.append(out); lock.unlock()
+                group.leave()
+            }
+        }
+        group.wait()
+        for out in outs { XCTAssertEqual(out.exit, 0, "\(out.exit) \(out.stderr)") }
+        terminal.send(Data("up\r".utf8))
+        XCTAssertTrue(waitFor("up", in: screen))
+        terminal.close()
+    }
+
+    /// Every run reports the program's own status. A half-close sent twice,
+    /// or before the status arrived, closed the channel first now and then
+    /// — and a clean exit read as 255, "couldn't connect".
+    func testEveryRunReportsItsOwnStatus() {
+        for round in 0..<40 {
+            let out = transport.runCommand("echo r\(round); exit \(round % 3)", on: host, timeout: 10, label: "test")
+            XCTAssertEqual(out.exit, Int32(round % 3), "round \(round): \(out.stderr)")
+        }
+        for round in 0..<10 {
+            let screen = Screen()
+            let ended = expectation(description: "end \(round)")
+            var end: RemoteTerminalEnd?
+            _ = transport.openTerminal("echo t\(round)", on: host, columns: 80, rows: 24, term: "xterm",
+                                       onOutput: screen.append, onEnd: { end = $0; ended.fulfill() })
+            wait(for: [ended], timeout: 10)
+            XCTAssertEqual(end, .exited(0), "terminal \(round)")
+        }
+    }
+
     func testClosingATerminalEndsIt() {
         let ended = expectation(description: "end")
         let terminal = transport.openTerminal("sleep 60", on: host, columns: 80, rows: 24, term: "xterm",

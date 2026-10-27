@@ -63,6 +63,8 @@ final class SessionHandler: ChannelDuplexHandler {
     /// The exit status, once the channel closes.
     let exited: EventLoopPromise<Int32>
     private var exitStatus: Int32?
+    private var serverDoneWriting = false
+    private var sentEOF = false
 
     init(request: SSHSessionRequest, terminal: SSHTerminalSize?, stdin: SSHStdin,
          loop: EventLoop,
@@ -114,7 +116,7 @@ final class SessionHandler: ChannelDuplexHandler {
             break
         case .piped(let data):
             write(data, context: context)
-            context.close(mode: .output, promise: nil)
+            sendEOF(context: context)
         case .paced(let data, let chunk, let pause):
             pace(data[...], chunk: chunk, pause: pause, context: context)
         }
@@ -123,7 +125,7 @@ final class SessionHandler: ChannelDuplexHandler {
     private func pace(_ rest: Data.SubSequence, chunk: Int, pause: TimeInterval, context: ChannelHandlerContext) {
         guard context.channel.isActive else { return }
         guard !rest.isEmpty else {
-            context.close(mode: .output, promise: nil)
+            sendEOF(context: context)
             return
         }
         write(Data(rest.prefix(chunk)), context: context)
@@ -160,6 +162,7 @@ final class SessionHandler: ChannelDuplexHandler {
             context.close(promise: nil)
         case let status as SSHChannelRequestEvent.ExitStatus:
             exitStatus = Int32(truncatingIfNeeded: status.exitStatus)
+            if serverDoneWriting { sendEOF(context: context) }
         case let signal as SSHChannelRequestEvent.ExitSignal:
             // ssh exits 255 when the remote command dies of a signal.
             exitStatus = 255
@@ -168,15 +171,34 @@ final class SessionHandler: ChannelDuplexHandler {
                 b.writeString(signal.errorMessage)
                 onStderr(b)
             }
+            if serverDoneWriting { sendEOF(context: context) }
         case ChannelEvent.inputClosed:
             // The server's EOF: the program is done writing. Send ours, if
             // we haven't — sshd keeps a terminal session open until the
             // client closes its side too, and the run would never end.
             // (Exec and piped runs sent theirs with their input.)
-            context.close(mode: .output, promise: nil)
+            //
+            // But not before the exit status: a terminal's EOF can arrive
+            // first, and sshd closing the channel on our EOF loses the
+            // status — a clean exit then reads as 255. Wait for it, a
+            // little.
+            serverDoneWriting = true
+            if exitStatus != nil {
+                sendEOF(context: context)
+            } else {
+                context.eventLoop.scheduleTask(in: .seconds(2)) { [self] in self.sendEOF(context: context) }
+            }
         default:
             context.fireUserInboundEventTriggered(event)
         }
+    }
+
+    /// Once: a second half-close of a channel whose output is already
+    /// closed can close it outright, before the exit status arrives.
+    private func sendEOF(context: ChannelHandlerContext) {
+        guard !sentEOF, context.channel.isActive else { return }
+        sentEOF = true
+        context.close(mode: .output, promise: nil)
     }
 
     private var rejection: String {
