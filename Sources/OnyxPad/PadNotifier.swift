@@ -31,6 +31,10 @@ public enum PadNotifier {
     public static func requestPermission() {
         guard !asked else { return }
         asked = true
+        #if DEBUG
+        // Screenshots: the simulator can't answer the prompt.
+        if ProcessInfo.processInfo.environment["ONYX_PAD_QUIET"] != nil { return }
+        #endif
         #if os(iOS)
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
         #endif

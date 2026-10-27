@@ -13,7 +13,7 @@ As of 2026-10-26 (first written 2026-10-23 as the iPad plan). Estimates are appr
 | 4 · OnyxSSH on the Mac | Done behind Settings → Hosts → SSH client, except the Mac's terminals, which stay OpenSSH. No standby connection: one connection per host, replaced once, with a keepalive |
 | 5 · First iPad build | Built and run in the simulator: hosts and routes from the shared state, tmux sessions, terminals, tabs per window, ⌘K, notes, ⌘. for Esc |
 | 6 · iPad parity | Built and run in the simulator: the monitor, files with in-place editing, git (status, diffs, log), web tabs, local notifications while open. The managers are the Mac's, moved to OnyxCore behind `RemoteEnvironment`. Not on the iPad: file search, the tree view, upload/download, docker detail, the fleet view, artifacts |
-| 7 · Agent integration | Not started |
+| 7 · Agent integration | Built and run in the simulator: the MCP server (OnyxCore, shared with the Mac) on the iPad, the bridge's port forwarded back from each host, `notify` as a banner and notification, `show_html`/`show_text` as tabs, Claude permission prompts as a sheet. Needs: signing, TestFlight and devices for 3, 5, 6 and 7 |
 
 ## Summary
 

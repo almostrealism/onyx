@@ -51,13 +51,27 @@ On an iPad (simulator, two demo hosts on this Mac, one not yet set up):
 | --- | --- |
 | ![](images/onyx-pad-monitor.png) | ![](images/onyx-pad-git.png) |
 
+- **Agents** on a host reach the iPad while Onyx is open: it runs the same
+  MCP server as a Mac and forwards the bridge's port (19432) back from
+  every host it can list. `notify` arrives as a banner and in the
+  sidebar's AGENTS section (and as a notification when you're in another
+  app), `show_html`/`show_text` open a tab, and with **Permission prompts
+  wait for Onyx** on (a shared setting — the Macs' Claude setting, too) a
+  Claude permission prompt is a sheet: ⏎ allows, ⎋ denies. A host's agents
+  reach one Onyx — whoever holds the port there; a connected Mac usually
+  does, and the sidebar says so.
+
+| Agents (sidebar) | A permission prompt |
+| --- | --- |
+| ![](images/onyx-pad-agents.png) | ![](images/onyx-pad-permission.png) |
+
 
 ## Where the code is
 
 | Part | What it is |
 | --- | --- |
 | `Apps/OnyxToday/` | The Xcode project: the `@main` entry point, the icon, Info.plist additions (the `onyx-today://` pairing link), entitlements, and `Version.xcconfig` (kept equal to `OnyxVersion` by `VersionParityTests`). Target `TodayApp`, product "Onyx Today", bundle id `com.onyx.today`. |
-| `Sources/OnyxPad` | The iPad: `PadModel` (hosts, routes, session listings, the palette), `PadTerminal`/`PadWorkspace` (open terminals and web tabs, per window), `PadTools` (the side panel's managers, and their `RemoteEnvironment`), `PadRoot` and `PadToolViews` (the window), `PadTerminalView` and `PadWeb` (SwiftTerm's and WebKit's UIKit views; placeholders on the Mac), `PadNotifier`. |
+| `Sources/OnyxPad` | The iPad: `PadModel` (hosts, routes, session listings, the palette), `PadTerminal`/`PadWorkspace` (open terminals and web tabs, per window), `PadTools` (the side panel's managers, and their `RemoteEnvironment`), `PadRoot` and `PadToolViews` (the window), `PadTerminalView` and `PadWeb` (SwiftTerm's and WebKit's UIKit views; placeholders on the Mac), `PadNotifier`, `PadAgents` (the MCP server, the forwards, alerts and pages) and `PadAgentViews` (the permission sheet, the banner, the AGENTS section). |
 | `Sources/OnyxToday` | `TodayModel` (the app's state, and its `SharedStateEnvironment`), `TodayPage`, `PairingView`, `TodaySettingsView`. Builds on macOS too, so `swift build` checks it. |
 | `Sources/OnyxUI` | The Today sections, shared with the Mac's simple mode. |
 | `Sources/OnyxSSH` | The SSH client (SwiftNIO SSH) and SFTP. |
@@ -85,7 +99,11 @@ SIMCTL_CHILD_ONYX_TODAY_PAIRING_CODE='onyx1:…' xcrun simctl launch booted com.
 `SIMCTL_CHILD_ONYX_PAD_OPEN=<host>/<session>` opens that session once it's
 listed (add `SIMCTL_CHILD_ONYX_PAD_PANEL=note|monitor|files|git` for the
 side panel, `SIMCTL_CHILD_ONYX_PAD_PATH=<folder>` for Files and Git, or
-`SIMCTL_CHILD_ONYX_PAD_WEB=<url>` for a web tab). Run the demo sshd
+`SIMCTL_CHILD_ONYX_PAD_WEB=<url>` for a web tab). `SIMCTL_CHILD_ONYX_PAD_MCP_PORT`
+moves the forwarded MCP port — use it: on the default port, a demo sshd on
+this Mac would capture the agents running here. `SIMCTL_CHILD_ONYX_PAD_QUIET=1`
+skips the notification prompt, which the simulator can't answer (and which
+outlives the app until the simulator reboots). Run the demo sshd
 with `SetEnv HOME=… TMUX_TMPDIR=…` so the sessions it shows are its own, not
 your account's. Grant calendar and reminders
 first (`xcrun simctl privacy booted grant calendar com.onyx.today`, and

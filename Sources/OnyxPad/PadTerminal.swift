@@ -182,6 +182,15 @@ public final class PadWorkspace: ObservableObject {
         return tab
     }
 
+    /// An agent's page, in a tab of its own.
+    @discardableResult
+    public func openPage(_ page: PadPage) -> PadWebTab {
+        let tab = PadWebTab(page: page)
+        webTabs.append(tab)
+        selection = .web(tab.id)
+        return tab
+    }
+
     public func close(_ tab: PadWebTab) {
         guard let index = webTabs.firstIndex(where: { $0.id == tab.id }) else { return }
         webTabs.remove(at: index)

@@ -138,7 +138,7 @@ let package = Package(
         ),
         .testTarget(
             name: "OnyxIntegrationTests",
-            dependencies: ["OnyxCore", "OnyxLib", "OnyxSSH", "OnyxTestSupport"],
+            dependencies: ["OnyxCore", "OnyxLib", "OnyxSSH", "OnyxPad", "OnyxTestSupport"],
             path: "Tests/OnyxIntegrationTests"
         ),
     ]

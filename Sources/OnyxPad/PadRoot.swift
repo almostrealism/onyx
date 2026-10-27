@@ -48,6 +48,8 @@ struct PadWindow: View {
     @State private var showingPalette = false
     @State private var showingNote = false
     @State private var columns: NavigationSplitViewVisibility = .all
+    @ObservedObject private var sessions = ClaudeSessionManager.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     init(model: PadModel, workspace: PadWorkspace) {
         self.model = model
@@ -68,6 +70,7 @@ struct PadWindow: View {
                 detail
             }
             .background(Color.black)
+            .overlay(alignment: .top) { PadAlertBanner(agents: model.agents, accent: accent) }
             .inspector(isPresented: noteShown) {
                 PadToolsPanel(tools: tools, session: workspace.current?.session, accent: accent)
                     .inspectorColumnWidth(min: 260, ideal: 340, max: 480)
@@ -84,6 +87,15 @@ struct PadWindow: View {
         }
         .sheet(isPresented: $showingPalette) {
             PadPalette(model: model, accent: accent) { pick($0) }
+        }
+        // The window in front answers; a prompt shows once, not per window.
+        .sheet(item: Binding(get: { scenePhase == .active ? sessions.pendingPermissions.first : nil },
+                             set: { _ in })) { request in
+            PadPermissionSheet(request: request, sessions: sessions, accent: accent)
+        }
+        .onReceive(model.agents.$pendingPage) { page in
+            guard let page, scenePhase == .active, model.agents.take(page) else { return }
+            workspace.openPage(page)
         }
         .background(shortcuts)
         #if DEBUG
@@ -232,6 +244,7 @@ struct PadSidebar: View {
                     }
                 }
             }
+            PadAgentsSection(agents: model.agents, hosts: model.hosts, accent: accent)
         }
         .listStyle(.sidebar)
         .refreshable { model.refreshAll() }

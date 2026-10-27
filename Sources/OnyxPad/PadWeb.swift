@@ -23,8 +23,18 @@ public final class PadWebTab: ObservableObject, Identifiable {
     public var hostView: AnyObject?
     var observations: [NSKeyValueObservation] = []
 
+    /// A page an agent sent (`show_html`), shown as is.
+    public let html: String?
+
     public init(url: URL) {
         self.url = url
+        self.html = nil
+    }
+
+    public init(page: PadPage) {
+        self.url = URL(string: "about:blank")!
+        self.html = page.html
+        self.title = page.title
     }
 
     public var label: String {
@@ -60,13 +70,21 @@ struct PadWebView: UIViewRepresentable {
         let tab = self.tab
         tab.observations = [
             view.observe(\.title, options: [.new]) { [weak tab] web, _ in
-                DispatchQueue.main.async { tab?.title = web.title }
+                DispatchQueue.main.async {
+                    if let title = web.title, !title.isEmpty { tab?.title = title }
+                }
             },
             view.observe(\.url, options: [.new]) { [weak tab] web, _ in
-                DispatchQueue.main.async { if let url = web.url { tab?.url = url } }
+                DispatchQueue.main.async {
+                    if let url = web.url, url.scheme != "about" { tab?.url = url }
+                }
             },
         ]
-        view.load(URLRequest(url: tab.url))
+        if let html = tab.html {
+            view.loadHTMLString(html, baseURL: nil)
+        } else {
+            view.load(URLRequest(url: tab.url))
+        }
         tab.hostView = view
         return view
     }
@@ -112,8 +130,9 @@ struct PadWebScreen: View {
             .padding(.horizontal, 10).padding(.vertical, 6)
             PadWebView(tab: tab)
         }
-        .onAppear { address = tab.url.absoluteString }
-        .onChange(of: tab.url) { _, url in address = url.absoluteString }
+        // An agent's page has no address worth showing.
+        .onAppear { address = tab.html == nil ? tab.url.absoluteString : "" }
+        .onChange(of: tab.url) { _, url in if url.scheme != "about" { address = url.absoluteString } }
     }
 
     private func go() {

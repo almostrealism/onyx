@@ -1,6 +1,7 @@
 import XCTest
 @testable import OnyxCore
 @testable import OnyxPad
+@testable import OnyxSSH
 
 /// The iPad's model, without a device: which hosts it lists and how it
 /// reaches them, what a listing means, the palette, and the tabs.
@@ -227,5 +228,72 @@ final class PadWebAndNotifierTests: XCTestCase {
         XCTAssertEqual(PadNotifier.posted.count, 1)
         PadNotifier.isFrontmost = true
         PadNotifier.reset()
+    }
+}
+
+/// Agents reaching an iPad: the same handler a Mac runs, with the iPad's
+/// tools behind it.
+final class PadAgentsTests: XCTestCase {
+
+    private func handler(_ agents: PadAgents) -> MCPMessageHandler {
+        MCPMessageHandler(tools: PadMCPTools(agents: agents), claudeSessions: ClaudeSessionManager())
+    }
+
+    private func send(_ json: String, to handler: MCPMessageHandler) -> [String: Any]? {
+        guard let reply = handler.handleMessage(Data(json.utf8)) else { return nil }
+        return try? JSONSerialization.jsonObject(with: reply) as? [String: Any]
+    }
+
+    private func drain() { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+
+    private func agents() -> PadAgents {
+        PadAgents(transport: NIOTransport(knownHosts: KnownHostsStore(url: nil), identities: { _ in ([], []) }))
+    }
+
+    func testTheIPadListsItsToolsAndTheSharedOnes() throws {
+        let reply = try XCTUnwrap(send(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#, to: handler(agents())))
+        let tools = try XCTUnwrap((reply["result"] as? [String: Any])?["tools"] as? [[String: Any]])
+        XCTAssertEqual(Set(tools.compactMap { $0["name"] as? String }),
+                       ["notify", "show_html", "show_text", "onyx_guide", "onyx_status"])
+    }
+
+    func testANotificationIsNeverAnswered() {
+        XCTAssertNil(send(#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{}}"#, to: handler(agents())))
+    }
+
+    func testNotifyArrivesAsAnAlert() throws {
+        let agents = agents()
+        let reply = try XCTUnwrap(send("""
+            {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"notify",
+             "arguments":{"title":"Build done","body":"green","host":"build","session":"ci"}}}
+            """, to: handler(agents)))
+        XCTAssertEqual((reply["result"] as? [String: Any])?["isError"] as? Bool, false)
+        drain()
+        XCTAssertEqual(agents.alerts.first?.title, "Build done")
+        XCTAssertEqual(agents.alerts.first?.session, "ci")
+        XCTAssertEqual(agents.alerts.first?.urgent, true, "urgent unless the agent says otherwise")
+    }
+
+    func testTextBecomesAnEscapedPageAndAPathIsRefused() throws {
+        let agents = agents()
+        _ = send("""
+            {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"show_text",
+             "arguments":{"slot":0,"title":"Log","content":"<b>not bold</b> & done"}}}
+            """, to: handler(agents))
+        drain()
+        let page = try XCTUnwrap(agents.pendingPage)
+        XCTAssertTrue(page.html.contains("&lt;b&gt;not bold&lt;/b&gt; &amp; done"), page.html)
+        XCTAssertTrue(agents.take(page))
+        XCTAssertFalse(agents.take(page), "one window shows it")
+
+        let refused = try XCTUnwrap(send("""
+            {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"show_html",
+             "arguments":{"slot":0,"title":"x","file":"/tmp/x.html"}}}
+            """, to: handler(agents)))
+        XCTAssertEqual((refused["result"] as? [String: Any])?["isError"] as? Bool, true)
+    }
+
+    func testTheDefaultPortIsTheBridges() {
+        XCTAssertEqual(agents().remotePort, Int(MCPSocketServer.defaultRemotePort))
     }
 }

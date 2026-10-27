@@ -447,7 +447,9 @@ final class NIOTerminalAndForwardTests: XCTestCase {
 
         let bound = try transport.forwardRemotePort(0, on: host, toLocalPort: localPort)
         XCTAssertGreaterThan(bound, 0)
-        let out = transport.runCommand("echo through-the-tunnel | nc -w 2 127.0.0.1 \(bound)", on: host,
+        // stdin held open a moment: nc may quit at its EOF before the
+        // reply arrives, which under load it sometimes did.
+        let out = transport.runCommand("(echo through-the-tunnel; sleep 1) | nc -w 2 127.0.0.1 \(bound)", on: host,
                                        timeout: 15, label: "t")
         XCTAssertTrue(out.stdout.contains("through-the-tunnel"), "\(out.stdout) \(out.stderr)\n\(sshd.log)")
     }

@@ -54,6 +54,8 @@ public enum SessionListing: Equatable {
 public final class PadModel: ObservableObject {
 
     public let phone: TodayModel
+    /// Agents on the hosts reaching this iPad.
+    public let agents: PadAgents
     @Published public private(set) var hosts: [PadHost] = []
     @Published public private(set) var listings: [UUID: SessionListing] = [:]
     /// Session id → tmux's last activity, for "active 3m ago".
@@ -70,6 +72,7 @@ public final class PadModel: ObservableObject {
 
     public init(phone: TodayModel) {
         self.phone = phone
+        agents = PadAgents(transport: phone.transport)
         let sync = SharedStateSync.shared
         sync.$sharedHosts.combineLatest(sync.$sharedRoutes, phone.$home)
             .receive(on: RunLoop.main)
@@ -79,6 +82,12 @@ public final class PadModel: ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
         startPolling()
+        agents.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        #if os(iOS)
+        agents.start()
+        #endif
     }
 
     /// A file beside the phone's own (Application Support/Onyx).
@@ -152,7 +161,10 @@ public final class PadModel: ObservableObject {
             let parsed = TmuxSessions.parse(out.stdout, source: .host(hostID: host.id))
             DispatchQueue.main.async {
                 self.inFlight.remove(host.id)
-                self.listings[host.id] = Self.listing(for: out, parsed: parsed.map(\.session))
+                let listing = Self.listing(for: out, parsed: parsed.map(\.session))
+                self.listings[host.id] = listing
+                // A host that answered can reach back.
+                if case .listed = listing { self.agents.reachAgents(on: host) }
                 for (session, when) in parsed { if let when { self.activity[session.id] = when } }
             }
         }

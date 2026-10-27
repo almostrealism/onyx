@@ -60,6 +60,11 @@ Draft — still being assembled.
   place), git for the folder you're in, the session's note — the Mac's own
   monitor, git and editor underneath. Web tabs from ⌘K, and a notification
   when a terminal rings while you're in another app.
+- **Agents reach the iPad while it's open**: their alerts as a banner (and
+  a notification when you're in another app), their pages as tabs, and
+  Claude's permission prompts as a sheet you answer with ⏎ or ⎋. A host's
+  agents reach one Onyx at a time — a connected Mac usually holds the
+  port, and the iPad's sidebar says so.
 - **Set up every host for iPad** (Settings → Shared state, once Sync to
   iPhone and iPad is on) installs the Onyx key on each host and checks the
   iPad's client can sign in, then shares how to reach it — address and
