@@ -117,9 +117,18 @@ first (`xcrun simctl privacy booted grant calendar com.onyx.today`, and
 
 These need an Apple developer account and can't be done from the code:
 
-1. **A team.** Set `DEVELOPMENT_TEAM` on the `TodayApp` target (Signing &
-   Capabilities), or pass it to `xcodebuild`. Change the bundle id if
-   `com.onyx.today` isn't yours to register.
+1. **Signing: `./package-ios.sh`, run as the user whose developer account
+   signs Onyx.** With no arguments it builds a development build and
+   installs it on the iPad (or iPhone) connected to this Mac;
+   `--testflight` archives and uploads to App Store Connect; `--list` shows
+   the devices. It uses Xcode's automatic signing, which needs Xcode signed
+   in as that user (Settings → Accounts) or an App Store Connect API key
+   (`ONYX_ASC_KEY_PATH`, `_ID`, `_ISSUER_ID`). The team comes from
+   `~/.onyx-notary.conf` (package.sh saved it) or `ONYX_TEAM_ID`; the bundle
+   id is `com.onyx.today` unless `ONYX_IOS_BUNDLE_ID` says otherwise. It
+   shares its keychain unlock and version with package.sh
+   (`scripts/lib/packaging.sh`), and keeps its DerivedData in the caller's
+   home, because the checkout is shared between accounts.
 2. **The keychain group, on both apps.** The iPhone app's entitlements list
    `$(AppIdentifierPrefix)com.onyx.shared` first. For the Onyx key and the
    home host to reach the phone through iCloud Keychain, the **Mac app's**
@@ -127,8 +136,10 @@ These need an Apple developer account and can't be done from the code:
    provisioning profile embedded in the app. Until then the Mac keeps its
    secrets in a file (`SecretStore` says so, and Settings shows "pair your
    phone with the code"), and the pairing code is how a phone gets them.
-3. **TestFlight.** Archive (`Product → Archive`, or `xcodebuild archive`)
-   and upload with the team's App Store Connect access.
+3. **TestFlight.** `./package-ios.sh --testflight`, once the app exists in
+   App Store Connect (Apps → + → New App, with the bundle id — the first
+   archive registers it, and the script says so when the record is
+   missing).
 4. **A device.** Everything above was run in the iOS simulator — pairing
    from a link, signing in with the Onyx key, SFTP and the atomic upload,
    tmux over the built-in client on the iPad — not yet on a phone or an
