@@ -54,7 +54,72 @@ extension AppState {
         [
             "-o", "ControlMaster=no",
             "-o", "ControlPath=\(sshControlPath(for: host))",
-        ] + Self.testSSHOptions
+        ] + Self.testSSHOptions + tunnelArgs(for: host)
+    }
+
+    // MARK: - Tunnels
+
+    /// `-o ProxyCommand=…` for a host reached through another
+    /// (`HostConfig.tunnelHostID`); nothing for one reached directly.
+    ///
+    /// Only the pair's masters ever use it — everything else rides a
+    /// master — but every builder carries it, so that the fallback ssh
+    /// makes when a mux socket is gone goes through the tunnel too,
+    /// rather than straight at an address that means something else (or
+    /// nothing) on this Mac's network. Comes AFTER the host's own
+    /// ControlPath: the orphan reaper reads the first one in the args.
+    func tunnelArgs(for host: HostConfig) -> [String] {
+        guard let tunnel = HostTunnel.tunnelHost(of: host, in: hosts) else { return [] }
+        return ["-o", "ProxyCommand=" + Self.tunnelProxyCommand(
+            through: tunnel, controlPath: sshControlPath(for: tunnel),
+            extraOptions: Self.testSSHOptions)]
+    }
+
+    /// The command that carries a connection on through `tunnel`: an
+    /// `ssh -W` riding the tunnel host's active master as a mux channel,
+    /// so reaching a host through another never opens a connection to
+    /// the tunnel host beyond its pair's two.
+    ///
+    /// `ProxyCommand=/usr/bin/false` inside is what holds that line. A mux
+    /// client whose socket is gone connects on its own instead — a third
+    /// connection to the tunnel host, kept open as long as the tunneled
+    /// one lasts. With it, a dead socket fails the attempt at once, and
+    /// the pair tries again once the tunnel host is back.
+    ///
+    /// ssh runs this with /bin/sh and expands `%` tokens in it first:
+    /// every argument is single-quoted, and a literal `%` doubled.
+    static func tunnelProxyCommand(through tunnel: HostConfig, controlPath: String,
+                                   extraOptions: [String] = []) -> String {
+        var args = ["/usr/bin/ssh",
+                    "-o", "ControlMaster=no",
+                    "-o", "ControlPath=\(controlPath)",
+                    "-o", "ProxyCommand=/usr/bin/false",
+                    "-o", "BatchMode=yes",
+                    "-o", "StrictHostKeyChecking=accept-new"] + extraOptions
+        if tunnel.ssh.port != 22 { args += ["-p", "\(tunnel.ssh.port)"] }
+        if !tunnel.ssh.identityFile.isEmpty { args += ["-i", tunnel.ssh.identityFile] }
+        args.append(tunnel.ssh.user.isEmpty ? tunnel.ssh.host : "\(tunnel.ssh.user)@\(tunnel.ssh.host)")
+        let quoted = args.map { arg -> String in
+            let escaped = arg.replacingOccurrences(of: "%", with: "%%")
+                .replacingOccurrences(of: "'", with: "'\\''")
+            return "'\(escaped)'"
+        }
+        // -W's own %h:%p are the tokens ssh is meant to fill in.
+        return (quoted + ["-W", "%h:%p"]).joined(separator: " ")
+    }
+
+    /// Whether a connection to `host` can be attempted right now: always
+    /// for a host reached directly; for a tunneled one, only once the
+    /// tunnel host's pair is up. Never a direct attempt instead — a host
+    /// someone set up to be reached through another isn't meant to be
+    /// reached any other way.
+    func tunnelReady(for host: HostConfig) -> Bool {
+        switch HostTunnel.chain(to: host, in: hosts) {
+        case .failure: return false
+        case .success(let path):
+            guard let nearest = path.last else { return true }
+            return hostUsable(nearest)
+        }
     }
 
     /// Extra `-o` options for every utility ssh and scp. Tests point these
@@ -232,7 +297,7 @@ extension AppState {
         var args: [String] = [
             "-o", "ControlMaster=no",
             "-o", "ControlPath=\(sshControlPath(for: host))",
-        ]
+        ] + tunnelArgs(for: host)
         args.append("-o"); args.append("ConnectTimeout=\(connectTimeout)")
         args.append("-o"); args.append("StrictHostKeyChecking=accept-new")
         if host.ssh.port != 22 {
@@ -253,7 +318,7 @@ extension AppState {
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
             "-o", "StrictHostKeyChecking=accept-new",
-        ]
+        ] + tunnelArgs(for: host)
         if host.ssh.port != 22 {
             args.append("-P"); args.append("\(host.ssh.port)")
         }
@@ -773,6 +838,9 @@ extension AppState {
             keyPath = h.ssh.identityFile
             identityFlag = "-i \(h.ssh.identityFile) "
         }
+        // A tunneled host is reached the same way here as everywhere else.
+        let tunnelFlag = tunnelArgs(for: h).isEmpty ? ""
+            : "-o \(Self.shellQuote(tunnelArgs(for: h)[1])) "
 
         let sessName = sanitizedSession(activeSession?.name ?? h.ssh.tmuxSession)
 
@@ -798,14 +866,14 @@ extension AppState {
         echo "→ Installing key on \(userHost)..."; \
         echo "  You will be asked for your password ONE TIME."; \
         echo ""; \
-        ssh-copy-id \(identityFlag)\(portFlag)\(userHost); \
+        ssh-copy-id \(identityFlag)\(portFlag)\(tunnelFlag)\(userHost); \
         if [ $? -eq 0 ]; then \
             echo ""; \
             echo "✓ Key installed successfully!"; \
             echo "→ Connecting..."; \
             echo ""; \
             sleep 1; \
-            exec ssh \(portFlag)\(identityFlag)-t -o StrictHostKeyChecking=accept-new \(userHost) \
+            exec ssh \(portFlag)\(identityFlag)\(tunnelFlag)-t -o StrictHostKeyChecking=accept-new \(userHost) \
                 "exec \\$SHELL -lc '\(extraPath) tmux new-session -A -s \(sessName)'"; \
         else \
             echo ""; \

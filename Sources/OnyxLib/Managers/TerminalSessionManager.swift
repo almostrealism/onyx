@@ -1358,8 +1358,10 @@ class OnyxTerminalView: NSView {
 
         OnyxLog.session.info("probing host: \(host.label, privacy: .public)")
 
-        // nc reachability via the central executor.
-        guard RemoteExec.shared.ncReachable(host: host.ssh.host,
+        // nc reachability via the central executor. Not for a host reached
+        // through another: its address means nothing from here, which is
+        // why it has a tunnel — the ssh probe below goes through it.
+        guard host.tunnelHostID != nil || RemoteExec.shared.ncReachable(host: host.ssh.host,
                                             port: host.ssh.port,
                                             timeout: 3) else {
             OnyxLog.session.error("probe: \(host.label, privacy: .public) unreachable (nc -z failed)")

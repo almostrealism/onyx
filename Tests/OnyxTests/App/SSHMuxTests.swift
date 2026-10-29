@@ -103,3 +103,73 @@ final class SSHMuxTests: XCTestCase {
                       "utility ControlPath must be a pair slot path, got: \(path)")
     }
 }
+
+/// A host reached through another: every builder carries the tunnel, after
+/// the host's own ControlPath, and the tunnel rides the tunnel host's pair.
+final class SSHTunnelArgsTests: XCTestCase {
+
+    private func hosts() -> (AppState, HostConfig, HostConfig) {
+        let state = AppState()
+        let gateway = HostConfig(label: "gateway",
+                                 ssh: SSHConfig(host: "gw.example", user: "ops", port: 2222,
+                                                identityFile: "~/keys/it's 100%"))
+        let inner = HostConfig(label: "inner", ssh: SSHConfig(host: "10.0.0.5", user: "root"),
+                               tunnelHostID: gateway.id)
+        state.hosts = [.localhost, gateway, inner]
+        return (state, gateway, inner)
+    }
+
+    private func proxyCommand(in args: [String]) -> String? {
+        args.first { $0.hasPrefix("ProxyCommand=") }.map { String($0.dropFirst("ProxyCommand=".count)) }
+    }
+
+    func testADirectHostHasNoTunnel() {
+        let (state, gateway, _) = hosts()
+        XCTAssertNil(proxyCommand(in: state.sshBaseArgs(for: gateway)))
+        XCTAssertNil(proxyCommand(in: state.sshSessionArgs(for: gateway)))
+    }
+
+    func testEveryBuilderCarriesTheTunnel() {
+        let (state, _, inner) = hosts()
+        for args in [state.sshBaseArgs(for: inner), state.sshSessionArgs(for: inner),
+                     state.scpBaseArgs(for: inner),
+                     state.scpCommand(localPath: "/tmp/a", remotePath: "a", host: inner).args] {
+            XCTAssertNotNil(proxyCommand(in: args), "\(args)")
+            // The orphan reaper reads the FIRST ControlPath= as the
+            // process's own; the tunnel's comes later, inside the command.
+            let own = args.firstIndex { $0.hasPrefix("ControlPath=") }
+            let tunnel = args.firstIndex { $0.hasPrefix("ProxyCommand=") }
+            XCTAssertLessThan(own ?? .max, tunnel ?? .min)
+        }
+    }
+
+    /// Through the tunnel host's own master, never a connection of its own.
+    func testTheTunnelRidesTheTunnelHostsPair() {
+        let (state, gateway, inner) = hosts()
+        let command = proxyCommand(in: state.sshBaseArgs(for: inner))!
+        XCTAssertTrue(command.contains("'ControlMaster=no'"))
+        XCTAssertTrue(command.contains("'ControlPath=\(state.sshControlPath(for: gateway))'"))
+        XCTAssertTrue(command.contains("'ProxyCommand=/usr/bin/false'"),
+                      "a dead socket must fail, not open a third connection to the tunnel host")
+        XCTAssertTrue(command.contains("'-p' '2222'"))
+        XCTAssertTrue(command.contains("'ops@gw.example'"))
+        XCTAssertTrue(command.hasSuffix(" -W %h:%p"))
+    }
+
+    /// ssh expands % and runs the command in /bin/sh.
+    func testTheTunnelSurvivesQuotesAndPercents() {
+        let (state, _, inner) = hosts()
+        let command = proxyCommand(in: state.sshBaseArgs(for: inner))!
+        XCTAssertTrue(command.contains(#"'~/keys/it'\''s 100%%'"#), command)
+    }
+
+    func testATunneledHostWaitsForItsTunnelHost() {
+        let (state, gateway, inner) = hosts()
+        // No pair has come up in a test.
+        XCTAssertFalse(state.tunnelReady(for: inner))
+        XCTAssertTrue(state.tunnelReady(for: gateway))
+        var orphan = inner
+        orphan.tunnelHostID = UUID()
+        XCTAssertFalse(state.tunnelReady(for: orphan), "never direct when the tunnel host is gone")
+    }
+}

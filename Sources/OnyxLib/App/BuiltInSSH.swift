@@ -82,6 +82,11 @@ final class OpenSSHConfigResolver {
     }
 
     func resolve(_ host: HostConfig) throws -> ResolvedHost {
+        // Same rule as ProxyJump: refuse rather than connect to the
+        // address directly, which is not where this host is.
+        if host.tunnelHostID != nil {
+            throw Unsupported(description: "is reached through another host, which the built-in client can't follow yet")
+        }
         let args = Self.arguments(for: host)
         let key = args.joined(separator: " ")
         lock.lock()

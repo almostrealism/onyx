@@ -218,6 +218,17 @@ public final class ConnectionPairRegistry: ObservableObject {
         p.masterExtraArgs = { [weak self] in
             self?.appState?.mcpMasterForwardingFlags() ?? []
         }
+        // A host reached through another rides that host's pair.
+        p.tunnelArgs = { [weak self] in
+            guard let appState = self?.appState,
+                  let current = appState.hosts.first(where: { $0.id == hostID }) else { return [] }
+            return appState.tunnelArgs(for: current)
+        }
+        p.tunnelReady = { [weak self] in
+            guard let appState = self?.appState,
+                  let current = appState.hosts.first(where: { $0.id == hostID }) else { return true }
+            return appState.tunnelReady(for: current)
+        }
         pairs[host.id] = p
         return p
     }

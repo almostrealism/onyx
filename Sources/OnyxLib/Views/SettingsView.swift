@@ -658,7 +658,7 @@ private struct HostRow: View {
 
                     if host.id != HostConfig.localhostID {
                         let display = host.ssh.user.isEmpty ? host.ssh.host : "\(host.ssh.user)@\(host.ssh.host)"
-                        Text(display.isEmpty ? "not configured" : display)
+                        Text((display.isEmpty ? "not configured" : display) + tunnelSummary)
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.gray.opacity(0.4))
                     }
@@ -706,6 +706,8 @@ private struct HostRow: View {
                     OnyxTextField(label: "Host", text: $sshHost, placeholder: "192.168.1.100")
                     OnyxTextField(label: "User", text: $user, placeholder: "root")
 
+                    tunnelField
+
                     HStack(spacing: 12) {
                         OnyxTextField(label: "Port", text: $port, placeholder: "22")
                             .frame(width: 80)
@@ -752,6 +754,52 @@ private struct HostRow: View {
         }
         .background(Color.white.opacity(0.04))
         .cornerRadius(6)
+    }
+
+    /// " via jump" for a host reached through another, or why it can't be.
+    private var tunnelSummary: String {
+        guard host.tunnelHostID != nil else { return "" }
+        switch HostTunnel.chain(to: host, in: appState.hosts) {
+        case .success(let path): return " via " + path.reversed().map(\.label).joined(separator: " via ")
+        case .failure(.missing): return " — its tunnel host was removed"
+        case .failure(.loop): return " — tunnel hosts loop"
+        }
+    }
+
+    /// Which host this one is reached through: directly, or any other
+    /// host that isn't itself reached through this one.
+    @ViewBuilder
+    private var tunnelField: some View {
+        let candidates = HostTunnel.candidates(for: host, in: appState.hosts)
+        VStack(alignment: .leading, spacing: 3) {
+            Text("REACH THROUGH")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.5))
+                .tracking(1)
+            Picker("", selection: Binding(
+                get: { host.tunnelHostID },
+                set: { id in updateHost { $0.tunnelHostID = id } }
+            )) {
+                Text("Directly").tag(UUID?.none)
+                ForEach(candidates) { other in
+                    Text(other.label).tag(UUID?.some(other.id))
+                }
+                // Keep a choice that's no longer offered on the menu, so
+                // the picker doesn't silently show "Directly".
+                if let id = host.tunnelHostID, !candidates.contains(where: { $0.id == id }) {
+                    Text("(unavailable)").tag(UUID?.some(id))
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            if host.tunnelHostID != nil {
+                Text("Onyx connects to the host chosen here and has it carry the connection on, so Host is the address as THAT host sees it — a name or IP on its network.")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.5))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Per-host code-intelligence (jdtls) controls — extracted to keep the

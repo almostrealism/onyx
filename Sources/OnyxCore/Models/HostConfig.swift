@@ -60,20 +60,27 @@ public struct HostConfig: Codable, Identifiable, Hashable {
     /// everything else. Nothing about pausing is automatic: only the user
     /// sets and clears it, in Settings.
     public var paused: Bool
+    /// The host this one is reached THROUGH, for a machine on a network
+    /// only that host can see: Onyx connects to the tunnel host and asks
+    /// it to carry the connection on (`ssh -W`, riding the tunnel host's
+    /// own connection pair). Nil — the usual — connects directly. See
+    /// `HostTunnel`.
+    public var tunnelHostID: UUID?
 
     /// Create a new instance.
     public init(id: UUID = UUID(), label: String, ssh: SSHConfig = SSHConfig(),
                 codeIntel: CodeIntelConfig = CodeIntelConfig(),
-                paused: Bool = false) {
+                paused: Bool = false, tunnelHostID: UUID? = nil) {
         self.id = id
         self.label = label
         self.ssh = ssh
         self.codeIntel = codeIntel
         self.paused = paused
+        self.tunnelHostID = tunnelHostID
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, label, ssh, codeIntel, paused
+        case id, label, ssh, codeIntel, paused, tunnelHostID
     }
 
     /// Tolerant decode: `codeIntel` was added later, so existing hosts.json
@@ -87,6 +94,7 @@ public struct HostConfig: Codable, Identifiable, Hashable {
         self.codeIntel = try c.decodeIfPresent(CodeIntelConfig.self, forKey: .codeIntel)
             ?? CodeIntelConfig()
         self.paused = try c.decodeIfPresent(Bool.self, forKey: .paused) ?? false
+        self.tunnelHostID = try c.decodeIfPresent(UUID.self, forKey: .tunnelHostID)
     }
 
     /// Is local.

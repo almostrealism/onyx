@@ -611,6 +611,13 @@ public final class ConnectionPair {
     /// they belong to the master).
     public var masterExtraArgs: () -> [String] = { [] }
 
+    /// `-o ProxyCommand=…` for a host reached through another
+    /// (`AppState.tunnelArgs`), and whether that host is up. A tunneled
+    /// pair waits for its tunnel host rather than trying the address
+    /// directly.
+    public var tunnelArgs: () -> [String] = { [] }
+    public var tunnelReady: () -> Bool = { true }
+
     private func establish(slot index: Int) {
         lock.lock()
         guard slots[index].phase == .dead || slots[index].phase == .absent else {
@@ -618,6 +625,14 @@ public final class ConnectionPair {
             return
         }
         guard !isSleeping, networkAvailable else {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        // Outside the lock: it reads the tunnel host's pair.
+        guard tunnelReady() else { return }
+        lock.lock()
+        guard slots[index].phase == .dead || slots[index].phase == .absent else {
             lock.unlock()
             return
         }
@@ -650,6 +665,9 @@ public final class ConnectionPair {
         if h.ssh.port != 22 { args += ["-p", "\(h.ssh.port)"] }
         if !h.ssh.identityFile.isEmpty { args += ["-i", h.ssh.identityFile] }
         args += masterExtraArgs()
+        // After this slot's own ControlPath: the orphan reaper reads the
+        // first one.
+        args += tunnelArgs()
         args.append(uh)
 
         OnyxLog.ssh.notice("""
