@@ -27,6 +27,11 @@ public final class TodayCalendarStore: ObservableObject {
 
     @Published public private(set) var access: Access = .notRequested
     @Published public private(set) var events: [TodayEvent] = []
+    /// Every event calendar EventKit shows us, hidden or not — for the
+    /// choice in Settings, and to tell "no events" from "no calendars".
+    @Published public private(set) var calendars: [CalendarChoice] = []
+    /// What the agenda pane leaves out (`CalendarChoice.id`s).
+    public private(set) var hidden: Set<String> = []
 
     private let store = EKEventStore()
     private var timer: Timer?
@@ -53,8 +58,24 @@ public final class TodayCalendarStore: ObservableObject {
         }
     }
 
+    /// Leave these calendars out, from now on.
+    public func setHidden(_ ids: Set<String>) {
+        guard ids != hidden else { return }
+        hidden = ids
+        refresh()
+    }
+
+    /// The calendars that are drawn from, of those EventKit shows.
+    public var shownCalendarCount: Int {
+        calendars.filter { !hidden.contains($0.id) }.count
+    }
+
     private func granted() {
         access = .granted
+        // A store made before access was granted can go on answering as
+        // though it had none — no calendars, so no events, ever — until
+        // it's told to read again.
+        store.reset()
         refresh()
         changeObserver = NotificationCenter.default.addObserver(
             forName: .EKEventStoreChanged, object: store, queue: .main
@@ -68,14 +89,31 @@ public final class TodayCalendarStore: ObservableObject {
 
     public func refresh() {
         guard access == .granted else { return }
+        let hidden = self.hidden
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
             let cal = Calendar.current
             let start = cal.startOfDay(for: Date())
             guard let end = cal.date(byAdding: .day, value: 1, to: start) else { return }
-            let predicate = self.store.predicateForEvents(withStart: start, end: end, calendars: nil)
-            let events = self.store.events(matching: predicate).map(Self.event(from:))
-            DispatchQueue.main.async { self.events = TodayEvent.ordered(events) }
+            let all = self.store.calendars(for: .event)
+            let choices = all.map {
+                CalendarChoice(title: $0.title, source: $0.source?.title ?? "",
+                               colorHex: $0.cgColor.flatMap(Self.hex(of:)))
+            }
+            let shown = all.filter {
+                !hidden.contains(CalendarChoice.key(source: $0.source?.title ?? "", title: $0.title))
+            }
+            var events: [TodayEvent] = []
+            // An empty list means every calendar to EventKit, so nothing
+            // shown has to be asked for as nothing.
+            if !shown.isEmpty {
+                let predicate = self.store.predicateForEvents(withStart: start, end: end, calendars: shown)
+                events = self.store.events(matching: predicate).map(Self.event(from:))
+            }
+            DispatchQueue.main.async {
+                self.calendars = choices
+                self.events = TodayEvent.ordered(events)
+            }
         }
     }
 

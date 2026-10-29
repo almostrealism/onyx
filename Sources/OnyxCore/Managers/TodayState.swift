@@ -39,6 +39,14 @@ public final class TodayState: ObservableObject {
         appearanceStore.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+        // Which calendars the agenda pane draws from. `$config` delivers
+        // the new value; objectWillChange fires before it's set.
+        appearanceStore.$config
+            .map { Set($0.hiddenCalendars) }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { TodayCalendarStore.shared.setHidden($0) }
+            .store(in: &cancellables)
     }
 
     // MARK: - What the sections show

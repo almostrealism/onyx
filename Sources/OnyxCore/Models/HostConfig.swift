@@ -224,6 +224,11 @@ public struct AppearanceConfig: Codable {
     /// Whether the monitor's agenda pane shows Reminders or today's
     /// calendar. `A` while the overlay is up, or click the pane's header.
     public var agendaPane: AgendaPane = .reminders
+    /// Calendars the agenda pane leaves out, as `CalendarChoice.id`s.
+    /// Empty — every calendar — by default, and a list of what's left OUT
+    /// rather than what's in, so a calendar added later shows up without a
+    /// trip to Settings. Per device: each one has its own accounts.
+    public var hiddenCalendars: [String] = []
     /// Which SSH client shared-state sync uses.
     public var sshEngine: SSHEngine = .openSSH
     /// How far an agent's alert travels on this Mac, beyond the indicator
@@ -333,7 +338,7 @@ public struct AppearanceConfig: Codable {
         case searchFileTypeIDs, remindersDueSoonOnly, simpleShowSidePanel
         case showAllContainers, prDraftFilter, hasSeenWalkthrough
         case showMenuBarItem, externalDelivery
-        case agendaPane, sshEngine
+        case agendaPane, sshEngine, hiddenCalendars
         // Stored under a new name since 0.20, when the default became
         // off. Every config saved before then wrote `true` whether or not
         // anyone chose it, so the old key can't tell a choice from the
@@ -370,5 +375,6 @@ public struct AppearanceConfig: Codable {
         self.externalDelivery           = try c.decodeIfPresent(ExternalDelivery.self, forKey: .externalDelivery)         ?? .urgentOnly
         self.agendaPane                 = try c.decodeIfPresent(AgendaPane.self,     forKey: .agendaPane)                 ?? .reminders
         self.sshEngine                  = try c.decodeIfPresent(SSHEngine.self,      forKey: .sshEngine)                  ?? .openSSH
+        self.hiddenCalendars            = try c.decodeIfPresent([String].self,       forKey: .hiddenCalendars)            ?? []
     }
 }

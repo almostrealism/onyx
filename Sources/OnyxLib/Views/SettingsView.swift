@@ -115,7 +115,10 @@ struct SettingsView: View {
             SSHClientSettingsSection(appState: appState)
                 .padding(.top, 12)
         case .monitor: monitorPane
-        case .reminders: RemindersSettingsPane(appState: appState, reminders: remindersManager)
+        case .reminders:
+            RemindersSettingsPane(appState: appState, reminders: remindersManager)
+            CalendarSettingsSection(appState: appState)
+                .padding(.top, 12)
         case .pullRequests: pullRequestsPane
         case .pageWatches: PageWatchSettingsSection()
         case .alerts: AlertForwardingSettingsSection(appState: appState)

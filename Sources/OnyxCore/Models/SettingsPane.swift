@@ -34,7 +34,7 @@ public enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         case .appearance: return "Appearance"
         case .hosts: return "Hosts"
         case .monitor: return "Monitor"
-        case .reminders: return "Reminders"
+        case .reminders: return "Reminders & Calendar"
         case .pullRequests: return "Pull Requests"
         case .pageWatches: return "Page Watches"
         case .alerts: return "Alerts"

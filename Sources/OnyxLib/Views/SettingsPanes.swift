@@ -293,3 +293,97 @@ private struct ReorderDropDelegate: DropDelegate {
         return true
     }
 }
+
+// MARK: - Calendar
+
+/// Which calendars the agenda pane shows, by account. Every one is on
+/// until it's turned off, so a calendar added later appears by itself.
+struct CalendarSettingsSection: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject private var calendar = TodayCalendarStore.shared
+
+    private var hidden: Set<String> { Set(appState.appearance.hiddenCalendars) }
+
+    private func setShown(_ choice: CalendarChoice, _ shown: Bool) {
+        var ids = appState.appearance.hiddenCalendars.filter { $0 != choice.id }
+        if !shown { ids.append(choice.id) }
+        appState.appearance.hiddenCalendars = ids
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                header("CALENDAR")
+                Spacer()
+                if !hidden.isEmpty {
+                    Button("Show all") { appState.appearance.hiddenCalendars = [] }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(appState.accentColor)
+                }
+            }
+            switch calendar.access {
+            case .notRequested:
+                note("Asking for calendar access…")
+            case .denied:
+                note("Onyx doesn't have access to Calendars. Allow it in System Settings → Privacy & Security → Calendars, then reopen Settings.")
+            case .granted:
+                if calendar.calendars.isEmpty {
+                    note("The Calendar app has no calendars Onyx can read. A calendar you use only in a browser — Google, Outlook — isn't here until its account is added in System Settings → Internet Accounts, with Calendars turned on.")
+                } else {
+                    note("The agenda pane (A on the monitor) shows today's events from the calendars ticked here.")
+                    ForEach(CalendarChoice.grouped(calendar.calendars), id: \.source) { group in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(group.source.isEmpty ? "Other" : group.source)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.gray.opacity(0.7))
+                                .padding(.top, 6)
+                            ForEach(group.calendars) { choice in
+                                row(choice)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear { calendar.activate() }
+    }
+
+    private func row(_ choice: CalendarChoice) -> some View {
+        let shown = !hidden.contains(choice.id)
+        return Button(action: { setShown(choice, !shown) }) {
+            HStack(spacing: 10) {
+                Image(systemName: shown ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 12))
+                    .foregroundColor(shown ? appState.accentColor : .gray.opacity(0.6))
+                Circle()
+                    .fill(choice.colorHex.map { Color(hex: $0) } ?? .gray)
+                    .frame(width: 8, height: 8)
+                Text(choice.title)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(shown ? .white : .white.opacity(0.5))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(.white.opacity(0.7))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func header(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundColor(Color.onyxBlue.opacity(0.7))
+            .tracking(2)
+    }
+}

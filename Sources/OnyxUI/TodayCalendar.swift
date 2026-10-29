@@ -134,6 +134,8 @@ public struct CalendarEventList: View {
         self.emptyText = emptyText
     }
 
+    @ObservedObject private var store = TodayCalendarStore.shared
+
     public var body: some View {
         switch access {
         case .notRequested:
@@ -141,7 +143,13 @@ public struct CalendarEventList: View {
         case .denied:
             message("Calendar access not granted. Allow Onyx in System Settings → Privacy & Security → Calendars.")
         case .granted:
-            if events.isEmpty {
+            if events.isEmpty && store.calendars.isEmpty {
+                // EventKit shows only what the Calendar app has. A Google
+                // or Exchange calendar used in a browser isn't there.
+                message(Self.noCalendars)
+            } else if events.isEmpty && store.shownCalendarCount == 0 {
+                message("Every calendar is turned off in Settings → Reminders & Calendar.")
+            } else if events.isEmpty {
                 message(emptyText)
             } else {
                 VStack(alignment: .leading, spacing: 5) {
@@ -150,6 +158,12 @@ public struct CalendarEventList: View {
             }
         }
     }
+
+    #if os(macOS)
+    private static let noCalendars = "No calendars to show. Onyx sees what the Calendar app sees: add your calendar's account in System Settings → Internet Accounts."
+    #else
+    private static let noCalendars = "No calendars to show. Onyx sees what the Calendar app sees: add your calendar's account in Settings → Apps → Calendar → Calendar Accounts."
+    #endif
 
     private func row(_ event: TodayEvent) -> some View {
         let timing = event.timing(at: now)

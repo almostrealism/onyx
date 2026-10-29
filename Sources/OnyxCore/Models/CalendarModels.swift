@@ -66,3 +66,32 @@ public struct TodayEvent: Identifiable, Equatable {
         ordered(events).filter { $0.timing(at: now) != .past }
     }
 }
+
+/// One calendar the agenda pane can draw from, for choosing in Settings.
+public struct CalendarChoice: Identifiable, Equatable, Hashable {
+    /// The account it belongs to ("iCloud", "Google", an Exchange
+    /// address, "On My Mac") and its name, joined: what the choice is
+    /// saved under. A name rather than EventKit's identifier, which
+    /// changes whenever an account is removed and added back, and is
+    /// different on every device.
+    public var id: String { Self.key(source: source, title: title) }
+    public let title: String
+    public let source: String
+    public let colorHex: String?
+
+    public init(title: String, source: String, colorHex: String? = nil) {
+        self.title = title; self.source = source; self.colorHex = colorHex
+    }
+
+    public static func key(source: String, title: String) -> String {
+        "\(source)\u{1F}\(title)"
+    }
+
+    /// Grouped by account, in the order the Calendar app's sidebar uses:
+    /// accounts by name, calendars by name within each.
+    public static func grouped(_ calendars: [CalendarChoice]) -> [(source: String, calendars: [CalendarChoice])] {
+        Dictionary(grouping: calendars, by: \.source)
+            .map { (source: $0.key, calendars: $0.value.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }) }
+            .sorted { $0.source.localizedCaseInsensitiveCompare($1.source) == .orderedAscending }
+    }
+}
