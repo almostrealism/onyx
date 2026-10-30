@@ -75,28 +75,14 @@ final class PageWatchEvaluationTests: XCTestCase {
         XCTAssertEqual(PageWatch(label: "x", url: "https://e.com", intervalMinutes: 60).intervalMinutes, 60)
     }
 
-    // MARK: - The preset
+    // MARK: - A disappearing notice
 
-    /// The preset watches Apple's own "coming later" notice rather than
-    /// the string "512GB", which is already on that page three times —
-    /// twice as a storage size, once inside the notice itself. Watching
-    /// for it to APPEAR would fire instantly and mean nothing.
-    func testMacStudioPresetWatchesTheNoticeDisappearing() {
-        let preset = PageWatch.macStudioUltraMemory()
-        XCTAssertEqual(preset.trigger, .disappears)
-        XCTAssertTrue(preset.text.contains("512GB memory option"))
-        XCTAssertTrue(preset.url.contains("apple.com"))
-        XCTAssertTrue(preset.isRunnable)
-        XCTAssertNotEqual(preset.text, "512GB",
-                          "the bare string is already on the page and would cry wolf")
-    }
-
-    /// A full run of the sequence the preset expects to live through:
-    /// baseline while Apple still says "coming late October", quiet polls
-    /// for weeks, then the notice goes and it fires exactly once.
-    func testPresetLifecycleFiresOnceWhenTheNoticeGoes() {
+    /// A full run of the sequence a "disappears" watch lives through:
+    /// baseline while the notice is still there, quiet polls for weeks,
+    /// then the notice goes and it fires exactly once.
+    func testDisappearsLifecycleFiresOnceWhenTheNoticeGoes() {
         var state = WatchState()
-        let trigger = PageWatch.macStudioUltraMemory().trigger
+        let trigger = WatchTrigger.disappears
 
         // First sighting: notice present, no news.
         XCTAssertFalse(state.evaluate(trigger: trigger, present: true, hash: "1"))
@@ -108,7 +94,7 @@ final class PageWatchEvaluationTests: XCTestCase {
             state.present = true
         }
 
-        // Launch day.
+        // The notice goes.
         XCTAssertTrue(state.evaluate(trigger: trigger, present: false, hash: "5"))
         state.present = false
 

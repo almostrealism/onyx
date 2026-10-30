@@ -46,7 +46,7 @@ public enum WatchTrigger: String, Codable, CaseIterable, Equatable {
 public struct PageWatch: Identifiable, Codable, Equatable {
     public var id: UUID
     /// What the user calls it — shown when it fires, so it should read
-    /// like the news itself ("Mac Studio 512GB").
+    /// like the news itself ("Tickets on sale").
     public var label: String
     public var url: String
     public var trigger: WatchTrigger
@@ -150,30 +150,5 @@ public struct WatchEntry: Identifiable, Codable, Equatable {
     public init(watch: PageWatch, state: WatchState = WatchState()) {
         self.watch = watch
         self.state = state
-    }
-}
-
-// MARK: - Presets
-
-public extension PageWatch {
-    /// The watch this whole feature was built for.
-    ///
-    /// Apple's Mac Studio configurator carries its own countdown: a
-    /// footer note reading "512GB memory option for M5 Ultra coming late
-    /// October", and a memory `variantOrder` that lists everything up to
-    /// 256gb and stops. Watching for that footer to DISAPPEAR is the
-    /// precise signal, and it's better than watching for "512GB" to
-    /// appear — that string is already on the page three times, twice as
-    /// a storage size and once in the notice itself.
-    ///
-    /// If Apple reworders the notice this goes quiet rather than wrong;
-    /// the watch list shows the last check time, so a watch that has
-    /// stopped meaning anything is visible rather than silently useless.
-    static func macStudioUltraMemory() -> PageWatch {
-        PageWatch(label: "Mac Studio — 512GB M5 Ultra",
-                  url: "https://www.apple.com/shop/buy-mac/mac-studio",
-                  trigger: .disappears,
-                  text: "512GB memory option for M5 Ultra coming late October",
-                  intervalMinutes: 15)
     }
 }

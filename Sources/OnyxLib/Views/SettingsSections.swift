@@ -500,16 +500,6 @@ struct PageWatchSettingsSection: View {
                 WatchRow(entry: entry)
             }
 
-            if store.entries.isEmpty {
-                Button(action: { store.add(.macStudioUltraMemory()) }) {
-                    Text("+ Watch for the 512GB M5 Ultra Mac Studio")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(Color.onyxBlue.opacity(0.8))
-                }
-                .buttonStyle(.plain)
-                .help("Apple's configurator carries a footer reading \"512GB memory option for M5 Ultra coming late October\". This watches for that line to disappear, which is when the option goes orderable.")
-            }
-
             Divider().background(Color.white.opacity(0.06)).padding(.vertical, 2)
 
             watchField("Name", text: $label, placeholder: "What to call it")
