@@ -142,11 +142,55 @@ final class StorageKeyResolutionTests: XCTestCase {
         XCTAssertEqual(keys[0], SessionIdentity.storageKey(for: s, host: host))
         XCTAssertEqual(keys[1], s.id)
     }
+
+    // MARK: - Removing a host
+
+    /// Removing one host must take only its own favorites. It used to keep
+    /// only favorites whose key was a live session's id, and identity keys
+    /// never are — so removing any host emptied the whole bar.
+    func testRemovingAHostKeepsEveryOtherHostsFavorites() {
+        let other = HostConfig(label: "gpu", ssh: SSHConfig(host: "gpu.example.com", user: "me"))
+        let offline = HostConfig(label: "nas", ssh: SSHConfig(host: "nas.example.com", user: "me"))
+        let state = makeState(host: host)
+        state.hosts += [other, offline]
+        let gone = session("api", on: host)
+        let kept = session("train", on: other)
+        let notListed = session("backup", on: offline)
+        state.allSessions = [gone, kept]   // the offline host lists nothing right now
+
+        FavoritesStore.shared.entries = [
+            FavoriteEntry(sessionID: SessionIdentity.storageKey(for: gone, host: host)),
+            FavoriteEntry(sessionID: SessionIdentity.storageKey(for: kept, host: other)),
+            FavoriteEntry(sessionID: SessionIdentity.storageKey(for: notListed, host: offline)),
+            FavoriteEntry(sessionID: session("logs", on: offline).id),   // a legacy spelling
+        ]
+
+        state.removeHost(host.id)
+
+        XCTAssertEqual(FavoritesStore.shared.entries.map(\.sessionID), [
+            SessionIdentity.storageKey(for: kept, host: other),
+            SessionIdentity.storageKey(for: notListed, host: offline),
+            session("logs", on: offline).id,
+        ])
+    }
+
+    /// Two host entries can be one machine-and-account (an alias and its
+    /// address, say). Removing one mustn't take favorites the other shows.
+    func testRemovingADuplicateHostKeepsTheSharedFavorites() {
+        let twin = HostConfig(label: "build too", ssh: SSHConfig(host: "build.example.com", user: "me"))
+        let state = makeState(host: host)
+        state.hosts.append(twin)
+        let s = session("api", on: host)
+        state.allSessions = [s, session("api", on: twin)]
+        let key = SessionIdentity.storageKey(for: s, host: host)
+        FavoritesStore.shared.entries = [FavoriteEntry(sessionID: key)]
+
+        state.removeHost(host.id)
+
+        XCTAssertEqual(FavoritesStore.shared.entries.map(\.sessionID), [key])
+    }
 }
 
-/// Step 2: the migration itself. The property that matters is not "the
-/// keys changed" — it's that everything still resolves afterwards, which
-/// is precisely what nobody checked last time.
 final class StorageKeyMigrationTests: XCTestCase {
 
     private let host = HostConfig(label: "build",

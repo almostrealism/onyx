@@ -669,6 +669,9 @@ public class AppState: ObservableObject {
                 self.sshMuxStop(for: host)
             }
         }
+        // Decide which favorites go BEFORE the host does: an identity key
+        // can only be worked out while the host is still in the list.
+        let doomedFavorites = favoriteKeys(goingWith: hostID)
         hosts.removeAll { $0.id == hostID }
         // Stop any language servers for this host (removeHost runs on the main thread).
         MainActor.assumeIsolated { lsp.shutdown(hostID: hostID) }
@@ -676,9 +679,7 @@ public class AppState: ObservableObject {
         let removedSessionIDs = Set(allSessions.filter { $0.source.hostID == hostID }.map { $0.id })
         sessionConnectionStates = sessionConnectionStates.filter { !removedSessionIDs.contains($0.key) }
         allSessions.removeAll { $0.source.hostID == hostID }
-        favoriteEntries.removeAll { entry in
-            allSessions.first(where: { $0.id == entry.sessionID }) == nil
-        }
+        favoriteEntries.removeAll { doomedFavorites.contains($0.sessionID) }
         // Clear key setup state if it was for the removed host
         if keySetupHostID == hostID {
             needsKeySetup = false
@@ -691,6 +692,25 @@ public class AppState: ObservableObject {
         }
         saveHosts()
         saveFavorites()
+    }
+
+    /// The favorite keys that leave with a host: its sessions' legacy ids
+    /// (they carry its UUID) and, unless another host is the same
+    /// machine-and-account, their identity keys.
+    ///
+    /// Only these. Removing a host used to keep just the favorites whose key
+    /// was a live session's id — and favorites are stored under identity
+    /// keys, which never are, so removing ANY host emptied the bar, along
+    /// with the favorites of every host that was paused or offline.
+    func favoriteKeys(goingWith hostID: UUID) -> Set<String> {
+        let sessions = allSessions.filter { $0.source.hostID == hostID }
+        var keys = Set(sessions.map(\.id))
+        if let host = hosts.first(where: { $0.id == hostID }) {
+            let machine = SessionIdentity.key(for: host)
+            let shared = hosts.contains { $0.id != hostID && SessionIdentity.key(for: $0) == machine }
+            if !shared { keys.formUnion(sessions.map { storageKey(for: $0) }) }
+        }
+        return keys
     }
 
     /// Update host.
