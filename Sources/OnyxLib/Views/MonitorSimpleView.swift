@@ -233,7 +233,18 @@ struct SimpleSidePanel: View {
     @ObservedObject var reminders: RemindersManager
     let accentColor: Color
 
+    /// Scrolls like the full layout's columns (indicators hidden, wheel
+    /// and trackpad only): the column is held to the chart area, and a
+    /// long list used to run under that edge with no way to reach it.
     var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            content
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.bottom, 8)   // a little slack at the scroll end
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 20) {
             SimpleSessionNotes(appState: appState, accentColor: accentColor)
             if Self.hasClaudeSessions(appState) {
@@ -247,7 +258,6 @@ struct SimpleSidePanel: View {
                                      listOrder: appState.appearance.remindersLists)
             }
             SimplePullRequests(today: appState.today, accentColor: accentColor)
-            Spacer(minLength: 0)
         }
     }
 
