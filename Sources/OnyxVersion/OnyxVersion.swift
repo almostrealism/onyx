@@ -54,5 +54,7 @@ public enum OnyxVersion {
     /// 5 — a hook that can't ask tmux itself (Claude started with `su -`
     ///     inside another account's tmux) sends its ancestor pids in
     ///     `onyx_origin.pids`, and the desktop finds the pane they belong to.
-    public static let bridgeProtocol = 5
+    /// 6 — hooks include `SessionEnd`, and events carry the tmux pane
+    ///     (`onyx_origin.pane`), so a Claude that quits leaves the list.
+    public static let bridgeProtocol = 6
 }

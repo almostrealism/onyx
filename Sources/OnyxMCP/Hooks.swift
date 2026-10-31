@@ -35,7 +35,7 @@ import Glibc
 enum ClaudeHooks {
 
     /// The events Onyx listens to.
-    static let events = ["PreToolUse", "PostToolUse", "SessionStart", "Stop", "PermissionRequest"]
+    static let events = ["PreToolUse", "PostToolUse", "SessionStart", "SessionEnd", "Stop", "PermissionRequest"]
 
     /// Claude Code's user settings file. `CLAUDE_CONFIG_DIR` moves it.
     static func settingsPath(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
@@ -262,6 +262,7 @@ enum ClaudeHooks {
         }
         if environment["TMUX"] != nil, let session = tmuxSession(pane: environment["TMUX_PANE"]) {
             out["session"] = session
+            if let pane = environment["TMUX_PANE"], !pane.isEmpty { out["pane"] = pane }
         } else {
             let pids = ancestorPIDs()
             if !pids.isEmpty { out["pids"] = pids }

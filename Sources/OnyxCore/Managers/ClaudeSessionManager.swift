@@ -55,25 +55,40 @@ public struct HookOrigin: Equatable, Hashable {
     /// when the hook couldn't ask tmux (Claude under `su -` in another
     /// account's tmux). Onyx looks the pane up; see `TmuxPaneLookup`.
     public let pids: [Int]
+    /// The tmux pane (`%12`), when the hook could see one. One pane runs
+    /// one Claude at a time, so a new session from the same pane replaces
+    /// the last — the one that quit without saying so.
+    public let pane: String?
 
-    public init(machine: String, user: String? = nil, session: String? = nil, pids: [Int] = []) {
+    public init(machine: String, user: String? = nil, session: String? = nil, pids: [Int] = [],
+                pane: String? = nil) {
         self.machine = machine
         self.user = user
         self.session = session
         self.pids = pids
+        self.pane = pane
     }
 
     /// From the event's `onyx_origin`.
     public init?(_ raw: Any?) {
         guard let dict = raw as? [String: Any],
               let machine = dict["machine"] as? String, !machine.isEmpty else { return nil }
+        let pane = (dict["pane"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         self.init(machine: machine, user: dict["user"] as? String, session: dict["session"] as? String,
-                  pids: (dict["pids"] as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } ?? [])
+                  pids: (dict["pids"] as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } ?? [],
+                  pane: pane)
     }
 
     /// The same origin, with the session Onyx found for it.
     public func with(session: String) -> HookOrigin {
-        HookOrigin(machine: machine, user: user, session: session, pids: pids)
+        HookOrigin(machine: machine, user: user, session: session, pids: pids, pane: pane)
+    }
+
+    /// Whether `other` is the same tmux pane: same machine, account and
+    /// pane. False when either doesn't know its pane.
+    public func samePane(as other: HookOrigin) -> Bool {
+        guard let pane, pane == other.pane else { return false }
+        return machine == other.machine && user == other.user
     }
 
     /// Whether Onyx should look the session up.
@@ -289,6 +304,8 @@ public class ClaudeSessionManager: ObservableObject {
             return handleStop(event, sessionId: sessionId)
         case "SessionStart":
             return handleSessionStart(event, sessionId: sessionId)
+        case "SessionEnd":
+            return handleSessionEnd(sessionId: sessionId)
         case "Notification":
             return handleNotification(event, sessionId: sessionId)
         default:
@@ -307,8 +324,28 @@ public class ClaudeSessionManager: ObservableObject {
             var activity = ClaudeActivity(id: sessionId, lastSeen: Date(), status: .idle)
             activity.origin = self.sessions[sessionId]?.origin
             self.sessions[sessionId] = activity
+            // Quit and start Claude again and the new one has a new id. The
+            // old one is gone, whether or not its SessionEnd arrived (a
+            // killed Claude, or a host whose hooks predate it).
+            if let origin = activity.origin {
+                for (id, other) in self.sessions where id != sessionId {
+                    if let theirs = other.origin, theirs.samePane(as: origin) { self.forget(id) }
+                }
+            }
         }
         return ["continue": true]
+    }
+
+    /// Claude quit, or `/clear` started a new session.
+    private func handleSessionEnd(sessionId: String) -> [String: Any] {
+        DispatchQueue.main.async { self.forget(sessionId) }
+        return ["continue": true]
+    }
+
+    /// Drop a session that has ended. Main only.
+    private func forget(_ sessionId: String) {
+        sessions[sessionId] = nil
+        paneLookups[sessionId] = nil
     }
 
     private func handlePreToolUse(_ event: [String: Any], sessionId: String) -> [String: Any] {

@@ -71,7 +71,7 @@ final class BridgeHooksTests: XCTestCase {
         XCTAssertEqual(permission.first?["timeout"] as? Int, 120, "a permission request waits on a person")
         XCTAssertEqual(commands(s, "PreToolUse"), ["my-hook", "/opt/onyx/OnyxMCP --hook PreToolUse"],
                        "the user's own hook survives, and ours appears once after two installs")
-        for event in ["PostToolUse", "SessionStart", "Stop", "PermissionRequest"] {
+        for event in ["PostToolUse", "SessionStart", "SessionEnd", "Stop", "PermissionRequest"] {
             XCTAssertEqual(commands(s, event), ["/opt/onyx/OnyxMCP --hook \(event)"])
         }
     }
@@ -133,6 +133,24 @@ final class BridgeHooksTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: s).write(to: path)
         let partial = try run(["--hooks-status"], env: env).out
         XCTAssertTrue(partial.hasPrefix("HOOKS_PARTIAL") && partial.contains("Stop"), partial)
+    }
+
+    /// Hooks written before SessionEnd was one of ours are PARTIAL, which
+    /// is what gets the host's hooks reinstalled. Without it a Claude that
+    /// quits stays in the list.
+    func testAnInstallFromBeforeSessionEndIsPartial() throws {
+        let (env, home) = try sandbox()
+        _ = try run(["--install-hooks"], env: env)
+        let path = home.appendingPathComponent(".claude/settings.json")
+        var s = try settings(home)
+        var hooks = s["hooks"] as? [String: Any] ?? [:]
+        hooks["SessionEnd"] = nil
+        s["hooks"] = hooks
+        try JSONSerialization.data(withJSONObject: s).write(to: path)
+
+        let partial = try run(["--hooks-status"], env: env).out
+        XCTAssertEqual(partial.trimmingCharacters(in: .whitespacesAndNewlines),
+                       "HOOKS_PARTIAL missing SessionEnd")
     }
 
     // MARK: - Running

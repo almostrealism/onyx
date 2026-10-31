@@ -107,6 +107,59 @@ final class ClaudeHookDiagnosticsTests: XCTestCase {
                        "no tmux session → the machine")
     }
 
+    // MARK: - Sessions that end
+
+    private func event(_ name: String, _ id: String, pane: String? = nil,
+                       machine: String = "spark") -> [String: Any] {
+        var origin: [String: Any] = ["machine": machine, "user": "me", "session": "work"]
+        if let pane { origin["pane"] = pane }
+        return ["hook_event_name": name, "session_id": id, "onyx_origin": origin]
+    }
+
+    /// Quitting Claude sends SessionEnd; the session leaves the list
+    /// instead of sitting there for five minutes.
+    func testSessionEndRemovesTheSession() {
+        let manager = ClaudeSessionManager()
+        _ = manager.processHookEvent(event("SessionStart", "a", pane: "%3"))
+        _ = manager.processHookEvent(event("SessionEnd", "a", pane: "%3"))
+        drainMain()
+        XCTAssertNil(manager.sessions["a"])
+        XCTAssertTrue(manager.activeSessions.isEmpty)
+    }
+
+    /// Open, quit, open, quit, open: one session, not three — even when
+    /// no SessionEnd arrives (a killed Claude, or a host whose hooks
+    /// predate it). One pane runs one Claude at a time.
+    func testANewSessionInTheSamePaneReplacesTheOld() {
+        let manager = ClaudeSessionManager()
+        for id in ["a", "b", "c"] {
+            _ = manager.processHookEvent(event("SessionStart", id, pane: "%3"))
+        }
+        drainMain()
+        XCTAssertEqual(manager.activeSessions.map(\.id), ["c"])
+    }
+
+    /// Two Claudes in one tmux session — different panes, or the same pane
+    /// id on another machine — are two sessions. An origin without a pane
+    /// (an older bridge, or no tmux) replaces nothing.
+    func testOtherPanesAndUnknownPanesAreKept() {
+        let manager = ClaudeSessionManager()
+        _ = manager.processHookEvent(event("SessionStart", "a", pane: "%3"))
+        _ = manager.processHookEvent(event("SessionStart", "b", pane: "%4"))
+        _ = manager.processHookEvent(event("SessionStart", "c", pane: "%3", machine: "gpu"))
+        _ = manager.processHookEvent(event("SessionStart", "d"))
+        _ = manager.processHookEvent(event("SessionStart", "e"))
+        drainMain()
+        XCTAssertEqual(Set(manager.sessions.keys), ["a", "b", "c", "d", "e"])
+    }
+
+    func testThePaneSurvivesTheSessionLookup() {
+        let origin = HookOrigin(machine: "m", user: "u", pids: [7], pane: "%9")
+        XCTAssertEqual(origin.with(session: "work").pane, "%9")
+        XCTAssertEqual(HookOrigin(["machine": "m", "pane": "%9"])?.pane, "%9")
+        XCTAssertNil(HookOrigin(["machine": "m", "pane": ""])?.pane)
+    }
+
     func testEventsFromOldBridgesAreCountedNotLost() {
         let manager = ClaudeSessionManager()
         _ = manager.processHookEvent(["hook_event_name": "PreToolUse", "session_id": "abcdef1234", "tool_name": "Read"])
