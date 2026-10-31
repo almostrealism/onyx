@@ -25,8 +25,7 @@ export interface Release {
 export const RELEASES: Release[] = [
   {
     version: '0.20',
-    date: null,
-    upcoming: true,
+    date: '2026-10-30',
     summary:
       'Today’s calendar in the monitor, editing files in place, hosts reached through other hosts, and settings that follow you between Macs.',
     highlights: [
