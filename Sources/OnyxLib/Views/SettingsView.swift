@@ -125,8 +125,10 @@ struct SettingsView: View {
         case .claudeCode: ClaudeHooksSettingsSection(appState: appState)
         case .sharedState:
             SharedStateSettingsSection(appState: appState)
-            DeviceSyncSettingsSection(appState: appState)
-                .padding(.top, 12)
+            if DeviceSyncSettingsSection.shown {
+                DeviceSyncSettingsSection(appState: appState)
+                    .padding(.top, 12)
+            }
         case .files: SearchFilterSettingsSection(appState: appState)
         case .flowtree: FlowtreeSettingsSection()
         }

@@ -1,6 +1,12 @@
 # Onyx 0.20
 
-Draft — still being assembled.
+## Before you update
+
+- **Update every Mac that shares a home host.** 0.20 adds hosts and
+  settings to the shared state, and an Onyx older than 0.20 trims fields it
+  doesn't know when it writes the file back. From 0.20 on, they're kept.
+- **Reinstall the bridge on your hosts** when CONNECTIONS says "update
+  available" (bridge protocol 5, below).
 
 ## Finding what Onyx can do
 
@@ -18,13 +24,12 @@ Draft — still being assembled.
   calendar in the monitor, the file browser as a tree, cycling the side
   panel's width, What's New and the walkthrough.
 
-## Shared state, your other Macs, and your phone
+## Shared state and your other Macs
 
 - **API tokens are in the Keychain now**, not in Onyx's preferences file.
   Your GitHub, GitLab, Timing and flowtree tokens move over the first time
-  they're used. In a build that can use iCloud Keychain they reach your
-  other devices that way; otherwise they stay on this Mac. They still
-  never travel in the shared state.
+  they're used. They stay on this Mac, and they still never travel in the
+  shared state.
 - **More of your settings follow you between Macs** through the home host:
   the PR draft filter, which reminder lists show and whether only items
   due soon do, the agenda pane, the extra clocks and the 12-hour clock,
@@ -37,38 +42,35 @@ Draft — still being assembled.
   trimmed** by an older one. Fields and settings it doesn't know are kept.
 - **A built-in SSH client.** Settings → Hosts → SSH client can move
   shared-state sync — or every remote call except terminals: git, files,
-  stats, docker — onto Onyx's own SSH client, the one the iPhone app uses,
-  instead of OpenSSH. It reads your ~/.ssh/config and
+  stats, docker — onto Onyx's own SSH client instead of OpenSSH. It reads your ~/.ssh/config and
   known_hosts, signs in with an Ed25519 or ECDSA key (not RSA, not through
   ssh-agent), and refuses a host reached through ProxyJump rather than
   connecting around it. OpenSSH stays the default.
-- **Sync to iPhone and iPad** (Settings → Shared state). Turning it on
-  makes an SSH key for Onyx, adds it to the home host's authorized_keys
-  (the line ends `onyx-sync`), checks that the phone's SSH client can sign
-  in with it, and puts it in iCloud Keychain with the host's address and
-  host key. A build that can't use iCloud Keychain shows a pairing code —
-  a QR code the iPhone camera opens, or text to paste. Turning it off
-  takes the key off the host and out of the Keychain.
 
-## Onyx on iPad
+## Hosts
 
-- **Your tmux sessions on an iPad.** The iOS app shows, on an iPad, every
-  host your Macs share with its tmux sessions, in real terminals over the
-  app's own SSH client — tabs per window, ⌘K to jump anywhere, the
-  session's note beside it, ⌘. for Esc. Today is one of its views.
-- **The host beside the terminal**: its monitor, its files (edit in
-  place), git for the folder you're in, the session's note — the Mac's own
-  monitor, git and editor underneath. Web tabs from ⌘K, and a notification
-  when a terminal rings while you're in another app.
-- **Agents reach the iPad while it's open**: their alerts as a banner (and
-  a notification when you're in another app), their pages as tabs, and
-  Claude's permission prompts as a sheet you answer with ⏎ or ⎋. A host's
-  agents reach one Onyx at a time — a connected Mac usually holds the
-  port, and the iPad's sidebar says so.
-- **Set up every host for iPad** (Settings → Shared state, once Sync to
-  iPhone and iPad is on) installs the Onyx key on each host and checks the
-  iPad's client can sign in, then shares how to reach it — address and
-  host key, never the key — through the home host.
+- **Reach a host through another.** Settings → Hosts → edit a host →
+  **Reach through** picks any host you've already added as its tunnel
+  host. Host, port and user are then as the tunnel host sees them — a name
+  or address on its network. The connection rides the tunnel host's
+  existing connection, so the tunnel host still gets no more than its two.
+  A tunneled host waits while its tunnel host is down or paused, and is
+  never tried directly. Chains work (A through B through C); the picker
+  leaves out choices that would loop. The host list shows "via <host>",
+  and says so when a tunnel host has been removed. Key setup goes through
+  the tunnel too. The built-in SSH client doesn't follow tunnels yet;
+  those hosts stay on OpenSSH.
+- **Removing a host no longer clears every favorite.** It kept only the
+  favorites it could match to a session's internal id, which none of them
+  were since favorites moved to user@host keys — so removing any host
+  emptied the bar, and a paused or offline host's favorites went with it.
+  Now only the removed host's own favorites go.
+
+## Page watches
+
+- **The "512GB M5 Ultra Mac Studio" preset is gone.** That option has
+  shipped. A watch you made from it stays in your list until you delete
+  it.
 
 ## Side panel
 
@@ -190,6 +192,15 @@ Draft — still being assembled.
   dimmed and the current event highlighted. Simple mode shows only what's
   left of the day. Onyx asks for calendar access the first time you switch
   to the calendar, not at launch.
+- **Choose which calendars the agenda pane shows.** Settings → Reminders
+  & Calendar lists every calendar this Mac can see, grouped by account,
+  each with a checkbox. All are on by default, and a calendar added later
+  shows up without a trip to Settings. The choice is per Mac. If the list
+  is empty, the pane now says so: Onyx sees only the calendars in
+  Calendar.app, so a Google or Outlook calendar you only use in a browser
+  needs adding in System Settings → Internet Accounts. Calendars that
+  arrived after access was granted no longer stay invisible until a
+  relaunch.
 - **Edit files from the file browser.** Open a text file and click Edit.
   It opens in a full-window editor; ⌘S saves it back to the host. Esc
   closes, and asks first if there are unsaved changes. Before saving, Onyx

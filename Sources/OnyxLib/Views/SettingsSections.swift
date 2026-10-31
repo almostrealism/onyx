@@ -925,6 +925,14 @@ struct ClaudeHooksSettingsSection: View {
 /// asked for, inline — no popover (CLAUDE.md: a popover that changes size
 /// crashes the app) — and hidden again with one click.
 struct DeviceSyncSettingsSection: View {
+    /// Whether Settings offers it. The iOS app isn't released yet, and this
+    /// puts a key on your hosts for it — so it shows only where it's
+    /// already on, or with `defaults write com.onyx.terminal ShowDeviceSync
+    /// -bool true` for testing the app.
+    static var shown: Bool {
+        DeviceSyncManager.shared.isOn || UserDefaults.standard.bool(forKey: "ShowDeviceSync")
+    }
+
     @ObservedObject var appState: AppState
     @ObservedObject private var sync = SharedStateSync.shared
     @ObservedObject private var device = DeviceSyncManager.shared
@@ -1126,7 +1134,7 @@ struct SSHClientSettingsSection: View {
             .labelsHidden()
             .frame(maxWidth: 320, alignment: .leading)
 
-            Text("Built-in is Onyx's own SSH client — the one the iPhone and iPad apps use. It reads your ~/.ssh/config and known_hosts and signs in with your Ed25519 or ECDSA key (never RSA, and not through ssh-agent); a host reached through ProxyJump is refused rather than connected to directly. \"For everything\" moves git, files, stats, docker and shared state onto it; terminals stay on OpenSSH. OpenSSH is the default, and switching back takes effect at once.")
+            Text("Built-in is Onyx's own SSH client, in the app rather than /usr/bin/ssh. It reads your ~/.ssh/config and known_hosts and signs in with your Ed25519 or ECDSA key (never RSA, and not through ssh-agent); a host reached through ProxyJump is refused rather than connected to directly. \"For everything\" moves git, files, stats, docker and shared state onto it; terminals stay on OpenSSH. OpenSSH is the default, and switching back takes effect at once.")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.4))
                 .fixedSize(horizontal: false, vertical: true)

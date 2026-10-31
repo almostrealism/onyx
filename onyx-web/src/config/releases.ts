@@ -24,6 +24,23 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.20',
+    date: null,
+    upcoming: true,
+    summary:
+      'Today’s calendar in the monitor, editing files in place, hosts reached through other hosts, and settings that follow you between Macs.',
+    highlights: [
+      'The monitor’s agenda pane can show today’s calendar instead of Reminders, and Settings chooses which calendars it includes.',
+      'Edit a file from the file browser and save it back to the host; the browser can also show folders as a tree, and ⌘V pastes files copied in Finder.',
+      'Reach a host through another: pick a tunnel host, and the connection rides that host’s existing one.',
+      'More settings follow you between Macs through the home host, and API tokens move into the Keychain.',
+      'Up to three Timing projects at once, with agent hours from flowtree beside your own.',
+      'Shift-Return makes a new line in Claude Code, and ⇧⇥ belongs to the terminal by default.',
+      'Removing a host no longer clears every favorite.',
+      'What’s New after an update, and one-line tips where new features live.',
+    ],
+  },
+  {
     version: '0.19',
     date: '2026-10-15',
     summary:
