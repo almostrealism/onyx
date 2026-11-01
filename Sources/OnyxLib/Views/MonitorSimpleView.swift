@@ -445,7 +445,7 @@ struct MonitorWorkloadStrip: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: items.map(\.id))
-        .onChange(of: items.map(\.id)) { ids in shownBefore = Set(ids) }
+        .onChange(of: items.map(\.id)) { _, ids in shownBefore = Set(ids) }
     }
 
     private var sources: [MonitorStripSource] {

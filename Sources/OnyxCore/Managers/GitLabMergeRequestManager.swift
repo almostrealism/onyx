@@ -15,7 +15,6 @@
 
 import Foundation
 import Combine
-import OnyxCore
 
 public final class GitLabMergeRequestManager: ObservableObject {
 

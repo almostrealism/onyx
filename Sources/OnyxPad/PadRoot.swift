@@ -151,7 +151,7 @@ struct PadWindow: View {
             Button(action: { showingPalette = true }) {
                 Label("Go to…", systemImage: "magnifyingglass")
             }
-            if let terminal = workspace.current {
+            if workspace.current != nil {
                 Button(action: { showingNote.toggle() }) {
                     Label("Panel", systemImage: "sidebar.right")
                 }

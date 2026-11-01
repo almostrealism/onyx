@@ -24,7 +24,10 @@
 
 import Foundation
 import Combine
-import OnyxCore
+// @preconcurrency: this @MainActor type hands a transport and a HostConfig
+// to a background queue (`runRemote`). Both are used from background
+// queues everywhere else in the app, which predates Sendable checking.
+@preconcurrency import OnyxCore
 
 @MainActor
 public final class LSPManager: ObservableObject {

@@ -64,7 +64,7 @@ enum ClaudeHooks {
             // up to its 60-second default, and a hook that blocked cost
             // that on every tool call. The bridge enforces its own 3s
             // deadline (HookWatchdog); this is the backstop.
-            var entry: [String: Any] = ["type": "command", "command": "\(binaryPath) --hook \(event)",
+            let entry: [String: Any] = ["type": "command", "command": "\(binaryPath) --hook \(event)",
                                         "timeout": event == "PermissionRequest" ? 120 : 5]
 
             var matchers = hooks[event] as? [[String: Any]] ?? []

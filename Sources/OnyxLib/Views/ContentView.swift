@@ -58,7 +58,7 @@ public struct ContentView: View {
         guard hostWindow?.isKeyWindow == true, !appState.showSetup,
               !appState.showWalkthrough, !appState.showWhatsNew else { return }
         if appState.appearance.hasSeenWalkthrough {
-            withAnimation(.easeOut(duration: 0.3)) {
+            _ = withAnimation(.easeOut(duration: 0.3)) {
                 appState.openWhatsNew(evenIfNothingNew: false)
             }
             return
