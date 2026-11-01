@@ -378,6 +378,9 @@ extension AppState {
         // And the hook path, to name the tmux session of a Claude started
         // under `su -`, which its own hooks can't.
         registerPaneLookup()
+        // Matched sessions: learn hosts' hostnames and catch Claudes whose
+        // SessionEnd never arrived.
+        startClaudeMatching()
         // Same rationale for the menu bar item, which shows the same
         // alerts against the same sessions. Never under XCTest: a test
         // process has no business putting an icon in the user's menu bar.

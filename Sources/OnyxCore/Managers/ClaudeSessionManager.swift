@@ -538,19 +538,61 @@ public class ClaudeSessionManager: ObservableObject {
         return ""
     }
 
+    /// How long a Claude stays listed after its last event when nothing
+    /// will say it ended.
+    public static let quietLimit: TimeInterval = 300
+
+    /// How long a Claude that WILL say it ended is believed after its last
+    /// event, in case it never does and nothing checks.
+    public static let endingLimit: TimeInterval = 12 * 3600
+
     /// Active sessions sorted by last seen (most recent first)
     public var activeSessions: [ClaudeActivity] {
-        let cutoff = Date().addingTimeInterval(-300) // hide sessions idle > 5 min
+        let cutoff = Date().addingTimeInterval(-Self.quietLimit)
         return sessions.values
             .filter { $0.lastSeen > cutoff }
             .sorted { $0.lastSeen > $1.lastSeen }
     }
 
+    /// Every Claude believed still running: heard from in the last five
+    /// minutes, or — from a bridge that reports its pane (protocol 6, the
+    /// one that also sends `SessionEnd`) — not yet ended. A quiet Claude
+    /// sitting at its prompt is still there; what ends it is `SessionEnd`,
+    /// a new Claude in its pane, or `ended(_:)` after a pane check.
+    public var liveSessions: [ClaudeActivity] {
+        let now = Date()
+        return sessions.values
+            .filter { Self.isLive($0, at: now) }
+            .sorted { $0.lastSeen > $1.lastSeen }
+    }
+
+    static func isLive(_ activity: ClaudeActivity, at now: Date) -> Bool {
+        let quiet = now.timeIntervalSince(activity.lastSeen)
+        return quiet < (Self.reportsItsEnd(activity) ? Self.endingLimit : Self.quietLimit)
+    }
+
+    /// Whether a Claude's hooks will tell us when it ends.
+    public static func reportsItsEnd(_ activity: ClaudeActivity) -> Bool {
+        activity.origin?.pane != nil
+    }
+
+    /// Claudes found to have ended without saying so — their pane closed
+    /// or went back to a shell while their `SessionEnd` couldn't reach us.
+    public func ended(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        DispatchQueue.main.async {
+            for id in ids { self.forget(id) }
+        }
+    }
+
     /// Garbage collect old sessions
     public func gc() {
-        let cutoff = Date().addingTimeInterval(-3600) // 1 hour
+        let now = Date()
+        let cutoff = now.addingTimeInterval(-3600) // 1 hour
         DispatchQueue.main.async {
-            self.sessions = self.sessions.filter { $0.value.lastSeen > cutoff }
+            self.sessions = self.sessions.filter {
+                Self.isLive($0.value, at: now) || $0.value.lastSeen > cutoff
+            }
             self.recentTools = self.recentTools.filter { $0.date > cutoff }
         }
     }

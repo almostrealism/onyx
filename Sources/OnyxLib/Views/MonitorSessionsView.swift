@@ -12,6 +12,12 @@ struct ClaudeSessionsSection: View {
 
     private var manager: ClaudeSessionManager { appState.claudeSessions }
 
+    /// Only the Claudes no session claims: a matched one is listed with
+    /// its session instead (see docs/claude-matched-sessions-plan.md).
+    private var unmatched: [ClaudeActivity] {
+        appState.unmatchedClaudes(appState.claudeMatches)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -25,7 +31,7 @@ struct ClaudeSessionsSection: View {
 
                 Spacer()
 
-                Text("\(manager.activeSessions.count)")
+                Text("\(unmatched.count)")
                     .monitorFont(size: 10)
                     .foregroundColor(.gray.opacity(0.4))
             }
@@ -76,8 +82,8 @@ struct ClaudeSessionsSection: View {
                 .cornerRadius(6)
             }
 
-            // Active sessions
-            let active = manager.activeSessions
+            // Claudes no session claims
+            let active = unmatched
             ForEach(Array(active.prefix(maxShown))) { session in
                 HStack(spacing: 8) {
                     Circle()
@@ -96,31 +102,7 @@ struct ClaudeSessionsSection: View {
                         .help(session.origin.map { "\($0.label)\nClaude session \(session.id)" }
                               ?? "Claude session \(session.id)")
 
-                    switch session.status {
-                    case .running(let tool):
-                        Text(tool)
-                            .monitorFont(size: 11, weight: .medium)
-                            .foregroundColor(.white.opacity(0.8))
-                        if let input = session.toolInput, !input.isEmpty {
-                            Text(input)
-                                .monitorFont(size: 10)
-                                .foregroundColor(.gray.opacity(0.5))
-                                .lineLimit(1)
-                        }
-                    case .waitingPermission:
-                        Text("waiting for permission")
-                            .monitorFont(size: 11)
-                            .foregroundColor(Color.onyxAmber)
-                            .modifier(PulseModifier())
-                    case .idle:
-                        Text("idle")
-                            .monitorFont(size: 11)
-                            .foregroundColor(.gray.opacity(0.4))
-                    case .stopped:
-                        Text("stopped")
-                            .monitorFont(size: 11)
-                            .foregroundColor(.gray.opacity(0.3))
-                    }
+                    ClaudeStatusText(activity: session)
 
                     Spacer()
 
@@ -163,98 +145,183 @@ struct ClaudeSessionsSection: View {
     }
 }
 
-/// Lists the user-supplied status notes attached to currently-existing
-/// sessions, ordered like the favorites bar. Hides itself entirely when
-/// there are no notes so the monitor doesn't carry a dead heading.
-/// One rendered session-note row: the note plus the ⌘N that actually
-/// reaches it. Shared by the detailed overlay and simple mode's side
-/// panel so the two can't disagree about what order sessions come in.
+/// What one Claude is doing, in a few words: the tool it's running (and
+/// on what), "waiting for permission", or "idle".
+struct ClaudeStatusText: View {
+    let activity: ClaudeActivity
+    /// Tint for the tool name — purple where it sits under a session, to
+    /// say whose line this is.
+    var toolColor: Color = .white.opacity(0.8)
+
+    var body: some View {
+        switch activity.status {
+        case .running(let tool):
+            Text(tool)
+                .monitorFont(size: 11, weight: .medium)
+                .foregroundColor(toolColor)
+            if let input = activity.toolInput, !input.isEmpty {
+                Text(input)
+                    .monitorFont(size: 10)
+                    .foregroundColor(.gray.opacity(0.5))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        case .waitingPermission:
+            Text("waiting for permission")
+                .monitorFont(size: 11)
+                .foregroundColor(Color.onyxAmber)
+                .modifier(PulseModifier())
+        case .idle:
+            Text("idle")
+                .monitorFont(size: 11)
+                .foregroundColor(.gray.opacity(0.4))
+        case .stopped:
+            Text("waiting for you")
+                .monitorFont(size: 11)
+                .foregroundColor(.gray.opacity(0.45))
+        }
+    }
+}
+
+/// A matched session's second line: what its Claude is doing, in Claude's
+/// purple. With several Claudes, the one that most needs you speaks and
+/// the rest are a count.
+struct ClaudeActivityLine: View {
+    let claudes: [ClaudeActivity]
+
+    var body: some View {
+        if let lead = Self.lead(of: claudes) {
+            HStack(spacing: 5) {
+                Image(systemName: "brain")
+                    .monitorFont(size: 9, design: .default)
+                    .foregroundColor(lead.status == .waitingPermission ? Color.onyxAmber : Color.onyxPurple)
+                ClaudeStatusText(activity: lead, toolColor: Color.onyxPurple.opacity(0.9))
+                if claudes.count > 1 {
+                    Text("+\(claudes.count - 1)")
+                        .monitorFont(size: 9)
+                        .foregroundColor(Color.onyxPurple.opacity(0.6))
+                        .help("\(claudes.count) Claudes in this session")
+                }
+            }
+            .lineLimit(1)
+            .help(lead.origin.map { "\($0.label)\nClaude session \(lead.id)" } ?? "Claude session \(lead.id)")
+        }
+    }
+
+    /// The Claude to show: waiting for permission first, then running,
+    /// then the most recently heard from.
+    static func lead(of claudes: [ClaudeActivity]) -> ClaudeActivity? {
+        func rank(_ c: ClaudeActivity) -> Int {
+            switch c.status {
+            case .waitingPermission: return 0
+            case .running: return 1
+            case .idle, .stopped: return 2
+            }
+        }
+        return claudes.min { a, b in
+            rank(a) != rank(b) ? rank(a) < rank(b) : a.lastSeen > b.lastSeen
+        }
+    }
+}
+
+/// One row of the sessions list: a session with a note, a session a
+/// Claude is matched to, or both. Shared by the detailed overlay and
+/// simple mode's side panel so the two can't disagree about which
+/// sessions are listed or in what order.
 struct SessionNoteEntry {
     let session: TmuxSession
-    let note: SessionNote
+    /// The user's note; nil for a session listed only for its Claudes.
+    let note: SessionNote?
     /// Favorites-bar position (1-based) — nil when this session isn't a
     /// favorite of this window and therefore has no ⌘N shortcut.
     let shortcut: Int?
+    /// The Claudes matched to this session, most recent first.
+    let claudes: [ClaudeActivity]
+    /// Terminal output or Claude hook, whichever came last.
+    let lastActivity: Date?
+
+    /// What the row is called: the note, else the session.
+    var title: String { note?.text ?? session.displayLabel }
 }
 
+/// Every session worth a row: the noted ones, because a note is the user
+/// saying "I care about this one", and the matched ones, because a Claude
+/// at work there says the same.
+///
 /// Ordered to match the favorites bar at the bottom of the window: this
-/// window's favorites first in bar order, then any other noted session by
-/// most recent output. Free function rather than a method so simple mode
-/// gets the identical ordering without inheriting the whole section view.
+/// window's favorites first in bar order, then the rest by most recent
+/// activity. Free function rather than a method so simple mode gets the
+/// identical ordering without inheriting the whole section view.
 func orderedSessionNotes(appState: AppState,
-                         store: SessionNotesStore = .shared) -> [SessionNoteEntry] {
+                         store: SessionNotesStore = .shared,
+                         matches: ClaudeMatches? = nil) -> [SessionNoteEntry] {
+    let matches = matches ?? appState.claudeMatches
     let noted = store.activeNotes(in: appState.allSessions,
                                   keys: { appState.storageKeys(for: $0) })
-    let byID = Dictionary(noted.map { ($0.session.id, $0) },
-                          uniquingKeysWith: { first, _ in first })
+    let notes = Dictionary(noted.map { ($0.session.id, $0.note) },
+                           uniquingKeysWith: { first, _ in first })
+    let listed = appState.allSessions.filter {
+        notes[$0.id] != nil || !matches.claudes(in: $0.id).isEmpty
+    }
+    var seen = Set<String>()
+    let sessions = listed.filter { seen.insert($0.id).inserted }
+    func entry(_ session: TmuxSession, shortcut: Int?) -> SessionNoteEntry {
+        SessionNoteEntry(session: session, note: notes[session.id], shortcut: shortcut,
+                         claudes: matches.claudes(in: session.id),
+                         lastActivity: appState.lastActivity(for: session, in: matches))
+    }
+
+    let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     var rows: [SessionNoteEntry] = []
     var placed = Set<String>()
     for (idx, fav) in appState.favoriteSessions.enumerated() {
         guard let hit = byID[fav.id] else { continue }
-        rows.append(SessionNoteEntry(session: hit.session, note: hit.note,
-                                     shortcut: idx < 9 ? idx + 1 : nil))
+        rows.append(entry(hit, shortcut: idx < 9 ? idx + 1 : nil))
         placed.insert(fav.id)
     }
-    let lastActivity: ((session: TmuxSession, note: SessionNote)) -> Date = {
-        TerminalActivityStore.shared.lastOutput(for: $0.session.id) ?? $0.note.updated
-    }
-    let rest = noted
-        .filter { !placed.contains($0.session.id) }
-        .sorted { lastActivity($0) > lastActivity($1) }
-    rows.append(contentsOf: rest.map {
-        SessionNoteEntry(session: $0.session, note: $0.note, shortcut: nil)
-    })
+    let rest = sessions
+        .filter { !placed.contains($0.id) }
+        .map { entry($0, shortcut: nil) }
+        .sorted { ($0.lastActivity ?? $0.note?.updated ?? .distantPast)
+                    > ($1.lastActivity ?? $1.note?.updated ?? .distantPast) }
+    rows.append(contentsOf: rest)
     return rows
 }
 
 struct SessionNotesSection: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var store = SessionNotesStore.shared
+    /// Observed so each row's clock is current: the rows are built here.
+    @ObservedObject private var activity = TerminalActivityStore.shared
 
-    /// Ordered to match the favorites bar at the bottom of the window:
-    /// this window's favorites first in bar order, then any other noted
-    /// session by most recent terminal output.
-    ///
     /// The shortcut number is the session's position in the FAVORITES bar,
-    /// never its position in this list. A favorite with no note is skipped
+    /// never its position in this list. A favorite with no row is skipped
     /// here but still owns its number — that mismatch (press ⌘4, land on
     /// the 5th favorite) is exactly what the badges exist to prevent.
-    private var orderedEntries: [SessionNoteEntry] {
-        orderedSessionNotes(appState: appState, store: store)
-    }
-
-    /// Most recent terminal output, falling back to when the note itself was
-    /// touched for a session that hasn't printed anything yet.
-    private func lastActivity(_ entry: (session: TmuxSession, note: SessionNote)) -> Date {
-        TerminalActivityStore.shared.lastOutput(for: entry.session.id) ?? entry.note.updated
-    }
-
     var body: some View {
-        let entries = orderedEntries
+        let entries = orderedSessionNotes(appState: appState, store: store)
         if !entries.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("SESSION NOTES")
+                    Text("SESSIONS")
                         .monitorFont(size: 10, weight: .medium)
                         .foregroundColor(appState.accentColor)
                         .tracking(2)
                     Spacer()
-                    Text("⌘; to add")
+                    Text("⌘; to add a note")
                         .monitorFont(size: 9)
                         .foregroundColor(.gray.opacity(0.3))
                 }
                 ForEach(entries, id: \.session.id) { entry in
                     SessionNoteRow(
-                        session: entry.session,
-                        note: entry.note,
-                        shortcut: entry.shortcut,
+                        entry: entry,
                         isActive: appState.activeSession?.id == entry.session.id,
                         accentColor: appState.accentColor,
                         alertKey: appState.storageKey(for: entry.session),
                         // jumpToSession, not switchToSession: it routes through
                         // the terminal pool (so the session's view actually
                         // activates) and drops the overlays covering it —
-                        // clicking a note always means "take me there".
+                        // clicking a row always means "take me there".
                         onTap: { appState.jumpToSession(entry.session,
                                                         dismissIfAlreadyActive: false)
                         }
@@ -266,16 +333,15 @@ struct SessionNotesSection: View {
 }
 
 private struct SessionNoteRow: View {
-    let session: TmuxSession
-    let note: SessionNote
-    /// Favorites-bar position, when this session has a ⌘N shortcut.
-    let shortcut: Int?
+    let entry: SessionNoteEntry
     let isActive: Bool
     let accentColor: Color
     /// Storage key for this session, so alerts can be looked up.
     let alertKey: String?
     let onTap: () -> Void
     @Environment(\.monitorFontScale) private var fontScale
+
+    private var session: TmuxSession { entry.session }
 
     var body: some View {
         Button(action: onTap) {
@@ -287,25 +353,35 @@ private struct SessionNoteRow: View {
                     .frame(width: 3)
                 // ⌘N badge, same number as the favorites bar. Reserve the
                 // slot even for non-favorites so note text stays aligned.
-                Text(shortcut.map { "⌘\($0)" } ?? "")
+                Text(entry.shortcut.map { "⌘\($0)" } ?? "")
                     .monitorFont(size: 10, weight: .medium)
                     .foregroundColor(isActive ? accentColor : .gray.opacity(0.45))
                     .frame(width: 22 * fontScale, alignment: .leading)
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(note.text)
+                    Text(entry.title)
                         .monitorFont(size: 12, weight: isActive ? .medium : .regular)
-                        .foregroundColor(isActive ? .white : .white.opacity(0.85))
+                        .foregroundColor(entry.note == nil
+                                         ? (isActive ? accentColor : accentColor.opacity(0.85))
+                                         : (isActive ? .white : .white.opacity(0.85)))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 6) {
-                        Text(session.displayLabel)
-                            .monitorFont(size: 10)
-                            .foregroundColor(isActive ? accentColor : accentColor.opacity(0.7))
-                        Text(note.updated, style: .relative)
-                            .monitorFont(size: 9)
-                            .foregroundColor(.gray.opacity(0.4))
+                    if !entry.claudes.isEmpty {
+                        // Matched: the second line is what Claude is doing.
+                        // The session's name moves into the first line when
+                        // there's no note, and is a hover away when there is.
+                        ClaudeActivityLine(claudes: entry.claudes)
+                            .help(session.displayLabel)
+                    } else if let note = entry.note {
+                        HStack(spacing: 6) {
+                            Text(session.displayLabel)
+                                .monitorFont(size: 10)
+                                .foregroundColor(isActive ? accentColor : accentColor.opacity(0.7))
+                            Text(note.updated, style: .relative)
+                                .monitorFont(size: 9)
+                                .foregroundColor(.gray.opacity(0.4))
+                        }
                     }
                 }
                 Spacer(minLength: 0)
@@ -314,8 +390,8 @@ private struct SessionNoteRow: View {
                 // of work this row is.
                 SessionAlertIndicator(sessionKey: alertKey, accentColor: accentColor,
                                       size: 11 * fontScale)
-                // Terminal-output activity: how long since this session last
-                // produced output. Green when it just printed something, gray
+                // How long since this session last did anything — terminal
+                // output, or a Claude's hook. Green when it just did, gray
                 // "idle" once it's been quiet — so a test run that finished
                 // (or hung) stands out from one still churning.
                 activityIndicator
@@ -338,13 +414,13 @@ private struct SessionNoteRow: View {
         .buttonStyle(.plain)
     }
 
-    /// Time-since-last-output chip. A TimelineView re-evaluates it every few
-    /// seconds so the color drifts active → idle as a session goes quiet,
-    /// even when no new output (hence no store update) is arriving.
+    /// Time-since-last-activity chip. A TimelineView re-evaluates it every
+    /// few seconds so the color drifts active → idle as a session goes
+    /// quiet, even when nothing new is arriving.
     @ViewBuilder
     private var activityIndicator: some View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
-            if let last = TerminalActivityStore.shared.lastOutput(for: session.id) {
+            if let last = entry.lastActivity {
                 let idle = context.date.timeIntervalSince(last)
                 let color = monitorSessionActivityColor(idle)
                 // Deliberately larger than everything else in the overlay:
@@ -363,7 +439,7 @@ private struct SessionNoteRow: View {
                 .padding(.vertical, 2)
                 .background(color.opacity(0.12))
                 .cornerRadius(4)
-                .help(idle < 15 ? "Producing output now"
+                .help(idle < 15 ? "Active now"
                                 : "Quiet for \(Int(idle))s — likely idle")
             }
         }

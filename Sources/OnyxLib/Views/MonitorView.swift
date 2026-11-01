@@ -108,9 +108,10 @@ struct MonitorView: View {
     /// work for anyone with the muscle memory. Listing every key trained
     /// people to read past the line entirely.
     /// Whether there is anything to show under CLAUDE SESSIONS.
+    /// Matched Claudes are listed with their sessions, so only the
+    /// unmatched ones (and permission requests) count here.
     private var hasClaudeSessions: Bool {
-        !appState.claudeSessions.activeSessions.isEmpty
-            || !appState.claudeSessions.pendingPermissions.isEmpty
+        SimpleSidePanel.hasClaudeSessions(appState)
     }
 
     private var shortcutHint: String {

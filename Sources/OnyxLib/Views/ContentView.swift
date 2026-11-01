@@ -1453,6 +1453,23 @@ private struct FavoriteBarChip: View {
     private var isActive: Bool { appState.activeSession?.id == session.id }
     private var hasNote: Bool { appState.note(for: session) != nil }
 
+    /// A Claude matched to this session: a purple mark, amber and pulsing
+    /// while one waits for permission — the state you'd come back for.
+    @ViewBuilder
+    private var claudeMark: some View {
+        let claudes = appState.claudeMatches.claudes(in: session.id)
+        if !claudes.isEmpty {
+            let waiting = claudes.contains { $0.status == .waitingPermission }
+            let running = claudes.contains { if case .running = $0.status { return true }; return false }
+            Image(systemName: running || waiting ? "brain.fill" : "brain")
+                .font(.system(size: sz(9)))
+                .foregroundColor(waiting ? Color.onyxAmber : Color.onyxPurple.opacity(running ? 0.95 : 0.6))
+                .modifier(PulseIf(active: waiting))
+                .help(waiting ? "Claude is waiting for permission"
+                              : running ? "Claude is working here" : "Claude is open here")
+        }
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             Button(action: { appState.jumpToSession(session) }) {
@@ -1466,6 +1483,7 @@ private struct FavoriteBarChip: View {
                         .font(.system(size: sz(10), weight: isActive ? .medium : .regular,
                                       design: .monospaced))
                         .foregroundColor(isActive ? appState.accentColor : .gray.opacity(0.5))
+                    claudeMark
                 }
                 .padding(.leading, 8)
                 .padding(.vertical, 3)
@@ -1494,5 +1512,13 @@ private struct FavoriteBarChip: View {
         .cornerRadius(4)
         .sessionContextMenu(session, appState: appState)
         .onHover { hovering = $0 }
+    }
+}
+
+/// `PulseModifier`, only while `active`.
+private struct PulseIf: ViewModifier {
+    let active: Bool
+    func body(content: Content) -> some View {
+        if active { content.modifier(PulseModifier()) } else { content }
     }
 }

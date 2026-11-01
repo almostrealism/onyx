@@ -261,9 +261,11 @@ struct SimpleSidePanel: View {
         }
     }
 
+    /// Whether CLAUDE SESSIONS has anything to list: a permission request,
+    /// or a Claude no session claims.
     static func hasClaudeSessions(_ appState: AppState) -> Bool {
-        !appState.claudeSessions.activeSessions.isEmpty
-            || !appState.claudeSessions.pendingPermissions.isEmpty
+        !appState.claudeSessions.pendingPermissions.isEmpty
+            || !appState.unmatchedClaudes(appState.claudeMatches).isEmpty
     }
 
     /// The column's width at a given UI font scale.
@@ -356,19 +358,24 @@ struct SimpleSessionNotes: View {
                         }) {
                             HStack(alignment: .firstTextBaseline, spacing: 7) {
                                 Circle()
-                                    .fill(dotColor(for: entry.session, now: context.date))
+                                    .fill(dotColor(for: entry, now: context.date))
                                     .frame(width: 7, height: 7)
                                 if let n = entry.shortcut {
                                     Text("⌘\(n)")
                                         .monitorFont(size: 9)
                                         .foregroundColor(.gray.opacity(0.45))
                                 }
-                                Text(entry.note.text)
-                                    .monitorFont(size: 13)
-                                    .foregroundColor(appState.activeSession?.id == entry.session.id
-                                                     ? .white.opacity(0.95) : .white.opacity(0.8))
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.title)
+                                        .monitorFont(size: 13)
+                                        .foregroundColor(titleColor(entry))
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                    // Matched: what its Claude is doing.
+                                    if !entry.claudes.isEmpty {
+                                        ClaudeActivityLine(claudes: entry.claudes)
+                                    }
+                                }
                                 Spacer(minLength: 0)
                             }
                             .contentShape(Rectangle())
@@ -386,13 +393,19 @@ struct SimpleSessionNotes: View {
         }
     }
 
-    /// Gray when the session has never reported output — an unknown
+    /// Gray when the session has never reported activity — an unknown
     /// state reads as "not working", which is the safe way round.
-    private func dotColor(for session: TmuxSession, now: Date) -> Color {
-        guard let last = activity.lastOutput(for: session.id) else {
-            return .gray.opacity(0.45)
-        }
+    private func dotColor(for entry: SessionNoteEntry, now: Date) -> Color {
+        guard let last = entry.lastActivity else { return .gray.opacity(0.45) }
         return monitorSessionActivityColor(now.timeIntervalSince(last))
+    }
+
+    /// A note in white; a session listed only for its Claudes by name, in
+    /// the accent, so the two read differently at a glance.
+    private func titleColor(_ entry: SessionNoteEntry) -> Color {
+        let active = appState.activeSession?.id == entry.session.id
+        if entry.note == nil { return accentColor.opacity(active ? 1 : 0.8) }
+        return active ? .white.opacity(0.95) : .white.opacity(0.8)
     }
 }
 
@@ -527,13 +540,12 @@ struct SimpleSessionActivityStrip: View {
     @ObservedObject private var activity = TerminalActivityStore.shared
 
     var body: some View {
-        let entries = notesStore.activeNotes(in: appState.allSessions,
-                                             keys: { appState.storageKeys(for: $0) })
-            .filter { activity.lastOutput(for: $0.session.id) != nil }
+        let entries = orderedSessionNotes(appState: appState, store: notesStore)
+            .filter { $0.lastActivity != nil }
         if !entries.isEmpty {
             HStack(spacing: 8) {
                 ForEach(entries, id: \.session.id) { entry in
-                    SimpleSessionActivityPill(session: entry.session, note: entry.note)
+                    SimpleSessionActivityPill(entry: entry)
                 }
             }
         } else {
@@ -543,12 +555,11 @@ struct SimpleSessionActivityStrip: View {
 }
 
 private struct SimpleSessionActivityPill: View {
-    let session: TmuxSession
-    let note: SessionNote
+    let entry: SessionNoteEntry
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
-            if let last = TerminalActivityStore.shared.lastOutput(for: session.id) {
+            if let last = entry.lastActivity {
                 let idle = context.date.timeIntervalSince(last)
                 Image(systemName: monitorSessionActivityIcon(idle))
                     .font(.system(size: 15))
@@ -557,9 +568,16 @@ private struct SimpleSessionActivityPill: View {
                     .padding(.horizontal, 11)
                     .padding(.vertical, 7)
                     .background(Color.white.opacity(0.04))
+                    // A matched session's pill says so, in Claude's purple.
+                    .overlay(alignment: .topTrailing) {
+                        if !entry.claudes.isEmpty {
+                            Circle().fill(Color.onyxPurple).frame(width: 5, height: 5)
+                                .padding(3)
+                        }
+                    }
                     .cornerRadius(5)
-                    .help("\(session.displayLabel) — \(note.text)\n"
-                          + (idle < 15 ? "producing output" : "quiet for \(Int(idle))s"))
+                    .help("\(entry.session.displayLabel) — \(entry.title)\n"
+                          + (idle < 15 ? "active now" : "quiet for \(Int(idle))s"))
             }
         }
     }

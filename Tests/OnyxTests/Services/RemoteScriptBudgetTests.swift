@@ -77,6 +77,19 @@ final class RemoteScriptBudgetTests: XCTestCase {
         XCTAssertFalse(TmuxPaneLookup.script.contains("*"), "an unmatched glob is fatal in zsh")
     }
 
+    /// Matched sessions: the hostname a host's hooks will report, and the
+    /// pane check that ends Claudes whose SessionEnd never arrived. Fixed
+    /// text, sent on a timer to every host with a quiet matched Claude.
+    func testTheMatchedSessionScriptsFitAndAreSafeInteractively() {
+        let (state, host) = makeState()
+        assertFits(payload(ClaudePaneCheck.script, state: state, host: host), "the Claude pane check")
+        assertFits(payload(HostMachineNames.script, state: state, host: host), "the hostname probe")
+        for script in [ClaudePaneCheck.script, HostMachineNames.script] {
+            XCTAssertFalse(script.contains("!"), "history expansion eats the line")
+            XCTAssertFalse(script.contains("*"), "an unmatched glob is fatal in zsh")
+        }
+    }
+
     // MARK: - The monitor
 
     /// The one that broke every Mac. Stats are polled per host per tick, so
