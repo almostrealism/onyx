@@ -143,6 +143,20 @@ public final class TodayState: ObservableObject {
         Self.ordered(visiblePullRequests()) { prPipelines.runs(for: $0) }
     }
 
+    /// The ordered PRs that have a pipeline to show — simple mode's
+    /// column and the Today page, which exist to show CI state. A PR whose
+    /// workflows are all switched off in "CI on open PRs" (or that has no
+    /// runs at all) has nothing for them to say, so it isn't listed there;
+    /// the full overlay still lists every PR.
+    public func pullRequestsWithPipelines() -> [PullRequest] {
+        Self.withPipelines(orderedPullRequests()) { prPipelines.runs(for: $0) }
+    }
+
+    static func withPipelines(_ prs: [PullRequest],
+                              runs: (PullRequest) -> [PRPipelineRun]) -> [PullRequest] {
+        prs.filter { !runs($0).isEmpty }
+    }
+
     static func visible(_ prs: [PullRequest], filter: PRDraftFilter) -> [PullRequest] {
         prs.filter { filter.keeps($0) }
     }

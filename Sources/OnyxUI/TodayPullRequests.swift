@@ -15,7 +15,8 @@ import OnyxCore
 /// the across-the-room view, so each PR gets one line and the only
 /// pipeline shown is the one the PR is most recently busy with. A PR with
 /// nothing running says "passed" or "failed" instead, because a branch
-/// name on its own answers nothing.
+/// name on its own answers nothing — and a PR with no pipeline to show
+/// (every workflow switched off, or none run) isn't listed at all.
 public struct SimplePullRequests: View {
     @ObservedObject var today: TodayState
     @ObservedObject private var ghManager = PullRequestManager.shared
@@ -40,11 +41,11 @@ public struct SimplePullRequests: View {
     /// The PRs this section lists, in its order — what the bottom strip
     /// checks so it doesn't show a job the panel already shows.
     public static func shown(today: TodayState) -> [PullRequest] {
-        Array(today.orderedPullRequests().prefix(maxShown))
+        Array(today.pullRequestsWithPipelines().prefix(maxShown))
     }
 
     public var body: some View {
-        let prs = today.orderedPullRequests()
+        let prs = today.pullRequestsWithPipelines()
         if !prs.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 Text("OPEN PRs")

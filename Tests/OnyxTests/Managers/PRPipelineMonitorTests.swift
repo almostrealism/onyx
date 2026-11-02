@@ -508,6 +508,23 @@ final class CompactPRLineTests: XCTestCase {
                        [2, 1])
     }
 
+    /// Simple mode's column is for CI state: a PR whose workflows are all
+    /// switched off has none to show, so it isn't listed there — and the
+    /// order of the rest is the full list's.
+    func testAPRWithNoPipelineToShowLeavesTheSimpleColumn() {
+        let hidden = pr(1, branch: "chore/deps")
+        let failing = pr(2, branch: "fix/broken")
+        let busy = pr(3, branch: "fix/live")
+        let byPR: [String: [PRPipelineRun]] = [
+            failing.id: [run("CI", job: nil, overall: .failure)],
+            busy.id: [run("CI", job: job("test", .running, at: 5))],
+        ]
+        let runs = { (pr: PullRequest) in byPR[pr.id] ?? [] }
+        let ordered = TodayState.ordered([hidden, failing, busy], runs: runs)
+        XCTAssertEqual(ordered.map(\.number), [3, 2, 1], "the full list keeps every PR")
+        XCTAssertEqual(TodayState.withPipelines(ordered, runs: runs).map(\.number), [3, 2])
+    }
+
     /// The column is wider now, and widening it must not have quietly
     /// raised the window size the panel needs — the share is what's
     /// pinned, so the threshold stays where it was.

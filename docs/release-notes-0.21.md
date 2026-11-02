@@ -21,3 +21,7 @@ Draft — still being assembled.
   place. A Claude that quit while your Mac was asleep is noticed within
   a couple of minutes of reconnecting.
 
+- **Simple mode's PR list shows only PRs with CI to show.** A PR whose
+  workflows are all switched off in "CI on open PRs" (or that has run
+  none) leaves simple mode's column and the iPhone's Today page; the full
+  overlay still lists every PR.
