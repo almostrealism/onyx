@@ -75,7 +75,9 @@ public enum FleetSeries {
     public static let bucketSeconds: TimeInterval = 10
     /// How many hosts the stacked layout will draw. Past this the rows
     /// are too short to read, which defeats the point of having them.
-    public static let defaultLimit = 5
+    /// Six, not five: simple mode lays the stacks out two columns of
+    /// three, and an even count fills that grid.
+    public static let defaultLimit = 6
 
     /// Build the ranked, de-duplicated, aligned series for the fleet
     /// layouts.
@@ -83,7 +85,7 @@ public enum FleetSeries {
     /// `hosts` supplies the SSH identity behind each stream so two host
     /// entries pointing at the same machine collapse to one row — a
     /// common setup (same box, different default tmux session) that would
-    /// otherwise draw the same chart twice and burn two of five slots.
+    /// otherwise draw the same chart twice and burn two of six slots.
     ///
     /// Local hosts are excluded: these layouts are about the machines you
     /// can't see, and your own Mac is already the subject of every other

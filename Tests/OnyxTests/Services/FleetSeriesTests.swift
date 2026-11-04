@@ -295,4 +295,11 @@ final class FleetSeriesTests: XCTestCase {
         XCTAssertEqual(narrow.cpu.max(), 5)
         XCTAssertEqual(wide.cpu.max(), 60)
     }
+
+    /// Six hosts fill simple mode's two-by-three grid exactly.
+    func testTheDefaultLimitFillsTheSimpleGrid() {
+        XCTAssertEqual(FleetSeries.defaultLimit, 6)
+        let grid = MonitorChartLayout.fleetGrid(hosts: FleetSeries.defaultLimit, maxRows: 3)
+        XCTAssertEqual(grid.columns * grid.rows, FleetSeries.defaultLimit)
+    }
 }

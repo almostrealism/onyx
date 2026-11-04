@@ -25,3 +25,5 @@ Draft — still being assembled.
   workflows are all switched off in "CI on open PRs" (or that has run
   none) leaves simple mode's column and the iPhone's Today page; the full
   overlay still lists every PR.
+- **The fleet layouts show the top six hosts, not five**, so simple
+  mode's side-by-side fleet is a full two-by-three grid.
