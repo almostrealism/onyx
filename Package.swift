@@ -18,6 +18,8 @@ let package = Package(
         .library(name: "OnyxUI", targets: ["OnyxUI"]),
         .library(name: "OnyxToday", targets: ["OnyxToday"]),
         .library(name: "OnyxPad", targets: ["OnyxPad"]),
+        // The session widget, for the extension in Apps/OnyxWidget.
+        .library(name: "OnyxWidgetKit", targets: ["OnyxWidgetKit"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
@@ -99,6 +101,13 @@ let package = Package(
             ],
             path: "Sources/OnyxPad"
         ),
+        // The session widget: the snapshot the app writes, the deep link,
+        // and the widget's timeline and views. Dependency-free, so the
+        // extension (Apps/OnyxWidget) links nothing else.
+        .target(
+            name: "OnyxWidgetKit",
+            path: "Sources/OnyxWidgetKit"
+        ),
         .target(
             name: "OnyxLib",
             dependencies: [
@@ -108,6 +117,7 @@ let package = Package(
                 "OnyxSSH",
                 "OnyxVersion",
                 "OnyxAppKitShims",
+                "OnyxWidgetKit",
             ],
             path: "Sources/OnyxLib"
         ),
@@ -133,7 +143,8 @@ let package = Package(
         ),
         .testTarget(
             name: "OnyxTests",
-            dependencies: ["OnyxCore", "OnyxUI", "OnyxLib", "OnyxSSH", "OnyxToday", "OnyxPad", "OnyxVersion"],
+            dependencies: ["OnyxCore", "OnyxUI", "OnyxLib", "OnyxSSH", "OnyxToday", "OnyxPad", "OnyxVersion",
+                           "OnyxWidgetKit"],
             path: "Tests/OnyxTests"
         ),
         .testTarget(

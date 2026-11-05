@@ -27,6 +27,7 @@ on:
       - 'Sources/OnyxUI/**'
       - 'Sources/OnyxToday/**'
       - 'Sources/OnyxPad/**'
+      - 'Sources/OnyxWidgetKit/**'
       - 'Apps/**'
       - 'Sources/OnyxVersion/**'
       - 'Package.swift'
@@ -39,6 +40,7 @@ on:
       - 'Sources/OnyxUI/**'
       - 'Sources/OnyxToday/**'
       - 'Sources/OnyxPad/**'
+      - 'Sources/OnyxWidgetKit/**'
       - 'Apps/**'
       - 'Sources/OnyxVersion/**'
       - 'Package.swift'
@@ -96,6 +98,25 @@ jobs:
         run: |
           xcodebuild -project Apps/OnyxToday/OnyxToday.xcodeproj -scheme TodayApp \
             -destination "generic/platform=iOS Simulator" \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+  widget:
+    # The Mac's session widget extension (Apps/OnyxWidget), unsigned.
+    # SwiftPM can't build an app extension, so `swift build` never sees
+    # this project; without this job it could break unnoticed until the
+    # next package.sh. package.sh signs it with the team's App Group.
+    name: "Session widget extension (macOS)"
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          xcodebuild -project Apps/OnyxWidget/OnyxWidget.xcodeproj -scheme OnyxWidget \
+            -configuration Release \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO \
             build

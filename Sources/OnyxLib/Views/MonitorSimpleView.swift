@@ -2,6 +2,7 @@ import SwiftUI
 import EventKit
 import OnyxCore
 import OnyxUI
+import OnyxWidgetKit
 
 // MARK: - Simple Monitor view
 //
@@ -520,9 +521,12 @@ struct SimpleContainerPill: View {
 /// session has been quiet long enough to read as idle. Shared by the full
 /// session-notes rows and the simple-mode activity strip.
 func monitorSessionActivityColor(_ idleSeconds: TimeInterval) -> Color {
-    if idleSeconds < 15 { return Color.onyxGreen }
-    if idleSeconds < 120 { return Color.onyxAmber }
-    return .gray.opacity(0.45)
+    // The thresholds are the widget's too (SessionActivityLevel).
+    switch SessionActivityLevel.of(idleSeconds: idleSeconds) {
+    case .active: return Color.onyxGreen
+    case .recent: return Color.onyxAmber
+    case .quiet, .unknown: return .gray.opacity(0.45)
+    }
 }
 
 /// Waveform while actively printing, "asleep" once quiet.

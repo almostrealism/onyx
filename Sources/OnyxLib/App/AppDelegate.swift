@@ -37,6 +37,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(false, forKey: key)
         }
         ShortcutManager.setupMenuShortcuts()
+        // The session widget's links (onyx://session?id=…).
+        SessionLinkRouter.install()
     }
 
     /// Application did finish launching.

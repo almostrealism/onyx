@@ -35,6 +35,19 @@
          Without this string the Apple event is denied outright, with no
          dialog and nothing in the UI to fix. Used only for the iMessage
          alert-forwarding route (Settings -> ALERTS ON YOUR PHONE). -->
+    <!-- onyx://session?id=… — what a click on the session widget opens
+         (SessionLinkRouter). -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>ai.almostrealism.onyx.session</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>onyx</string>
+            </array>
+        </dict>
+    </array>
     <key>NSAppleEventsUsageDescription</key>
     <string>Onyx sends you an iMessage when an agent needs your attention, so the alert reaches your phone and watch.</string>
 </dict>

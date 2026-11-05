@@ -17,6 +17,23 @@ public class ShortcutManager {
         lock.unlock()
     }
 
+    /// Every open window and its state.
+    public static func registeredWindows() -> [(window: NSWindow, state: AppState)] {
+        lock.lock()
+        let entries = windowAppStates
+        lock.unlock()
+        return entries.compactMap { number, getter in
+            guard let window = NSApp.window(withWindowNumber: number), let state = getter() else { return nil }
+            return (window, state)
+        }
+    }
+
+    /// The key window's state, else any open window's.
+    public static func anyAppState() -> AppState? {
+        let windows = registeredWindows()
+        return (windows.first { $0.window.isKeyWindow } ?? windows.first)?.state
+    }
+
     /// Unregister when window closes.
     public static func unregister(window: NSWindow) {
         lock.lock()

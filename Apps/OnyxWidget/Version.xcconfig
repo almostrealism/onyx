@@ -1,0 +1,6 @@
+// The widget extension's version: the same number as every other Onyx
+// (Sources/OnyxVersion/OnyxVersion.swift). VersionParityTests fails when
+// the two disagree; macOS warns about an extension whose version isn't
+// its app's.
+MARKETING_VERSION = 0.20
+CURRENT_PROJECT_VERSION = 1

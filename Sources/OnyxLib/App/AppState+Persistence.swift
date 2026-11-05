@@ -381,6 +381,7 @@ extension AppState {
         // Matched sessions: learn hosts' hostnames and catch Claudes whose
         // SessionEnd never arrived.
         startClaudeMatching()
+        startSessionWidget()
         // Same rationale for the menu bar item, which shows the same
         // alerts against the same sessions. Never under XCTest: a test
         // process has no business putting an icon in the user's menu bar.

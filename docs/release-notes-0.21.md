@@ -43,3 +43,8 @@ Draft — still being assembled.
   old copies are left where they were. macOS ties privacy permissions to
   the identifier, so it will ask once more for Reminders, Calendars,
   notifications and Messages.
+- **A desktop widget for your sessions.** "Onyx Sessions" (small, medium
+  or large) lists your noted sessions and the ones with a Claude, what
+  each Claude is doing — amber when one is waiting for permission — and
+  how long each has been quiet. Click a session to open it in Onyx. It
+  says so when Onyx isn't running rather than showing old status as live.

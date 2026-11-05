@@ -274,6 +274,59 @@ PLIST
             --sign "$IDENTITY" "$nested"
     done
 
+    # The session widget (Apps/OnyxWidget, docs/compact-window-and-widget-plan.md).
+    #
+    # A widget is an app extension, which SwiftPM can't build, so Xcode
+    # builds it unsigned and it is signed here with everything else. It
+    # must be sandboxed, and it reads what the app writes through an App
+    # Group named for the signing TEAM — so the group is only known now,
+    # from the identity's "(TEAMID)". Without Xcode or a team the app
+    # still ships; it just has no widget, and says so.
+    SIGN_TEAM=$(printf '%s' "$IDENTITY" | sed -n 's/.*(\([A-Z0-9]\{10\}\)).*/\1/p')
+    SIGN_TEAM="${SIGN_TEAM:-${ONYX_TEAM_ID:-}}"
+    if [ -n "$SIGN_TEAM" ] && [ "${ONYX_SKIP_WIDGET:-0}" != "1" ] && command -v xcodebuild >/dev/null 2>&1; then
+        APP_GROUP="$SIGN_TEAM.ai.almostrealism.onyx"
+        echo "  Building the session widget..."
+        WIDGET_DD="$DIST_DIR/widget-build"
+        if xcodebuild -project Apps/OnyxWidget/OnyxWidget.xcodeproj -scheme OnyxWidget \
+                -configuration Release -derivedDataPath "$WIDGET_DD" \
+                -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+                MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+                build >"$DIST_DIR/widget-build.log" 2>&1; then
+            mkdir -p "$APP_BUNDLE/Contents/PlugIns"
+            rm -rf "$APP_BUNDLE/Contents/PlugIns/OnyxWidget.appex"
+            cp -R "$WIDGET_DD/Build/Products/Release/OnyxWidget.appex" "$APP_BUNDLE/Contents/PlugIns/"
+            WIDGET_ENTITLEMENTS="$DIST_DIR/widget.entitlements"
+            cat > "$WIDGET_ENTITLEMENTS" <<WPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>$APP_GROUP</string>
+    </array>
+</dict>
+</plist>
+WPLIST
+            echo "  Signing OnyxWidget.appex (group $APP_GROUP)..."
+            codesign --force --options runtime --timestamp \
+                --entitlements "$WIDGET_ENTITLEMENTS" \
+                --sign "$IDENTITY" "$APP_BUNDLE/Contents/PlugIns/OnyxWidget.appex"
+            # The app writes into the same group's container.
+            /usr/libexec/PlistBuddy -c "Add :com.apple.security.application-groups array" \
+                -c "Add :com.apple.security.application-groups:0 string $APP_GROUP" "$ENTITLEMENTS"
+        else
+            echo "  WARNING: the session widget didn't build — shipping without it." >&2
+            echo "           See $DIST_DIR/widget-build.log" >&2
+            tail -5 "$DIST_DIR/widget-build.log" >&2
+        fi
+    else
+        echo "  NOTE: no session widget in this build (needs Xcode and a team-signed identity)."
+    fi
+
     codesign --force --options runtime --timestamp \
         --entitlements "$ENTITLEMENTS" \
         --sign "$IDENTITY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"

@@ -4,8 +4,8 @@ Two ways to keep sessions in view while doing something else:
 
 1. **The compact window** (⇧⌘D) — built. The whole window becomes simple
    mode's side panel and shrinks to sit at the side of the screen.
-2. **A macOS widget** — planned here, not built. Session status on the
-   desktop or in Notification Center, with Onyx's window closed or hidden.
+2. **A macOS widget** — built. Session status on the desktop or in
+   Notification Center, with Onyx's window closed or hidden.
    It doesn't include reminders or the calendar, which have their own
    widgets.
 
@@ -84,7 +84,7 @@ animated AppKit resizes have done to us (CLAUDE.md, NSPopover).
   and saving the frame on move and resize.
 - `KeyboardShortcuts`: ⇧⌘D, and the key guard while compact.
 
-## 2. The session widget (planned)
+## 2. The session widget
 
 ### What it shows
 
@@ -164,14 +164,50 @@ This is the costly part. None of it can be done in the SPM build alone.
   matching iOS widget could reuse the extension's views. Its data would
   come from the home host, the way Today's does, rather than from a Mac.
 
-### Decisions needed before building
+### Decisions made
 
-1. **Where the extension lives:** a new `Apps/OnyxWidget` project, or a
-   macOS target in `Apps/OnyxToday`. Recommended: a new project. The iOS
-   project's settings are tuned for the phone, and a Mac-only extension
-   beside them complicates both.
-2. **The App Group name.** It's permanent once shipped: changing it
-   strands every installed widget's data.
-3. **Whether clicking a row should open the session** (the `onyx://` URL
-   scheme). Recommended: yes. It's what makes the widget a shortcut and
-   not just a picture.
+1. **The extension lives in its own project, `Apps/OnyxWidget`,** not
+   beside the iOS app. Its only Swift file is the `@main` WidgetBundle.
+   Everything else is the package's `OnyxWidgetKit`: the snapshot, the
+   pacing, the deep link, the timeline and the views. It is
+   dependency-free, so the extension links nothing else (≈330KB), and
+   the tests can render it.
+2. **The App Group is `<TEAMID>.ai.almostrealism.onyx`.** It is permanent
+   once shipped. Neither side stores the team. Each process reads it from
+   its own code signature (`SessionWidgetStore.signingTeamID`), so a build
+   that isn't team-signed (`swift run`, `./run.sh`, an ad-hoc DMG) has no
+   group and simply doesn't feed a widget.
+3. **Clicking a row opens its session** through `onyx://session?id=<id>`.
+   The scheme is registered in the app's Info.plist. `SessionLinkRouter`
+   takes `kAEGetURL` itself, from `applicationWillFinishLaunching`, so
+   SwiftUI never opens a new window for it. A click that launches Onyx
+   arrives before any window has listed its sessions, so an unknown id is
+   retried for 30 seconds. The small widget opens its first row.
+
+### As built
+
+- **Pacing:** `SessionWidgetPacing` is pure and tested. Every 10 seconds
+  the app builds the rows from the same `orderedSessionNotes` the side
+  panel uses. It writes the file only when the rows change, plus a
+  heartbeat every 5 minutes. It asks WidgetKit to reload:
+  - at once, when a Claude starts waiting for permission;
+  - at most once a minute, for any other change to a row;
+  - at most every 5 minutes, when only the clocks moved.
+- **Between reloads** the widget's timeline already carries an entry for
+  each moment a dot changes color, and one for the moment the heartbeat
+  goes stale. The per-row clock is `Text(_, style: .timer)`, which WidgetKit
+  keeps running.
+- **Sizes:**
+  - small: three rows, no clocks;
+  - medium: four rows;
+  - large: nine rows.
+- **Packaging:** `package.sh --sign` builds the extension with xcodebuild
+  (unsigned), copies it to `Contents/PlugIns`, and signs it first with the
+  sandbox and the group for the identity's team. It also adds the group
+  to the app's entitlements. Without Xcode or a team the DMG ships with no
+  widget and says so. CI builds the extension in `core-ios.yaml`'s
+  `widget` job.
+- **Not verified on this machine:** macOS registers a widget only from a
+  Developer ID–signed app in /Applications. The first real check is a
+  `./package.sh --sign` build, installed and launched once. After that,
+  "Onyx Sessions" should appear in the widget gallery (Edit Widgets).

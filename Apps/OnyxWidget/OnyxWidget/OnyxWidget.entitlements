@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- A widget extension must be sandboxed. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- Where the app leaves the snapshot (SessionWidgetStore). The same
+	     group, with the team substituted, is in package.sh's entitlements
+	     for the app and for this extension when it signs them. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(TeamIdentifierPrefix)ai.almostrealism.onyx</string>
+	</array>
+</dict>
+</plist>
