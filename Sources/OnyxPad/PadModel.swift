@@ -65,7 +65,7 @@ public final class PadModel: ObservableObject {
     private var poll: Timer?
     private var frontmost = true
     private var cancellables: Set<AnyCancellable> = []
-    private let queue = DispatchQueue(label: "com.onyx.pad.sessions", qos: .utility, attributes: .concurrent)
+    private let queue = DispatchQueue(label: "ai.almostrealism.onyx.pad.sessions", qos: .utility, attributes: .concurrent)
 
     /// How often the sessions are listed again while the app is in front.
     public static let pollInterval: TimeInterval = 20

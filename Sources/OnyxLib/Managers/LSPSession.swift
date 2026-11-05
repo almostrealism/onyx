@@ -41,7 +41,7 @@ final class LSPSession: @unchecked Sendable {
     var onExit: (() -> Void)?
 
     /// Serial queue for timeout fallbacks so they never race the reader's lock.
-    private let timeoutQueue = DispatchQueue(label: "com.onyx.lsp.timeout")
+    private let timeoutQueue = DispatchQueue(label: "ai.almostrealism.onyx.lsp.timeout")
 
     init(cmd: String, args: [String]) {
         self.cmd = cmd

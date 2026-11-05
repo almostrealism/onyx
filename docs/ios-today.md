@@ -70,7 +70,7 @@ On an iPad (simulator, two demo hosts on this Mac, one not yet set up):
 
 | Part | What it is |
 | --- | --- |
-| `Apps/OnyxToday/` | The Xcode project: the `@main` entry point, the icon, Info.plist additions (the `onyx-today://` pairing link), entitlements, and `Version.xcconfig` (kept equal to `OnyxVersion` by `VersionParityTests`). Target `TodayApp`, product "Onyx Today", bundle id `com.onyx.today`. |
+| `Apps/OnyxToday/` | The Xcode project: the `@main` entry point, the icon, Info.plist additions (the `onyx-today://` pairing link), entitlements, and `Version.xcconfig` (kept equal to `OnyxVersion` by `VersionParityTests`). Target `TodayApp`, product "Onyx Today", bundle id `ai.almostrealism.onyx.today`. |
 | `Sources/OnyxPad` | The iPad: `PadModel` (hosts, routes, session listings, the palette), `PadTerminal`/`PadWorkspace` (open terminals and web tabs, per window), `PadTools` (the side panel's managers, and their `RemoteEnvironment`), `PadRoot` and `PadToolViews` (the window), `PadTerminalView` and `PadWeb` (SwiftTerm's and WebKit's UIKit views; placeholders on the Mac), `PadNotifier`, `PadAgents` (the MCP server, the forwards, alerts and pages) and `PadAgentViews` (the permission sheet, the banner, the AGENTS section). |
 | `Sources/OnyxToday` | `TodayModel` (the app's state, and its `SharedStateEnvironment`), `TodayPage`, `PairingView`, `TodaySettingsView`. Builds on macOS too, so `swift build` checks it. |
 | `Sources/OnyxUI` | The Today sections, shared with the Mac's simple mode. |
@@ -96,7 +96,7 @@ simulator can't tap "Open" on a pairing link, so a Debug build also reads
 a code from the environment —
 
 ```
-SIMCTL_CHILD_ONYX_TODAY_PAIRING_CODE='onyx1:…' xcrun simctl launch booted com.onyx.today
+SIMCTL_CHILD_ONYX_TODAY_PAIRING_CODE='onyx1:…' xcrun simctl launch booted ai.almostrealism.onyx.today
 ```
 
 — and the simulator's 127.0.0.1 is the Mac. On an iPad simulator,
@@ -110,7 +110,7 @@ skips the notification prompt, which the simulator can't answer (and which
 outlives the app until the simulator reboots). Run the demo sshd
 with `SetEnv HOME=… TMUX_TMPDIR=…` so the sessions it shows are its own, not
 your account's. Grant calendar and reminders
-first (`xcrun simctl privacy booted grant calendar com.onyx.today`, and
+first (`xcrun simctl privacy booted grant calendar ai.almostrealism.onyx.today`, and
 `reminders`), or the permission prompts sit over the page.
 
 ## What shipping needs (not in the repo)
@@ -125,12 +125,12 @@ These need an Apple developer account and can't be done from the code:
    in as that user (Settings → Accounts) or an App Store Connect API key
    (`ONYX_ASC_KEY_PATH`, `_ID`, `_ISSUER_ID`). The team comes from
    `~/.onyx-notary.conf` (package.sh saved it) or `ONYX_TEAM_ID`; the bundle
-   id is `com.onyx.today` unless `ONYX_IOS_BUNDLE_ID` says otherwise. It
+   id is `ai.almostrealism.onyx.today` unless `ONYX_IOS_BUNDLE_ID` says otherwise. It
    shares its keychain unlock and version with package.sh
    (`scripts/lib/packaging.sh`), and keeps its DerivedData in the caller's
    home, because the checkout is shared between accounts.
 2. **The keychain group, on both apps.** The iPhone app's entitlements list
-   `$(AppIdentifierPrefix)com.onyx.shared` first. For the Onyx key and the
+   `$(AppIdentifierPrefix)ai.almostrealism.onyx.shared` first. For the Onyx key and the
    home host to reach the phone through iCloud Keychain, the **Mac app's**
    entitlements must list the same group first — which on macOS needs a
    provisioning profile embedded in the app. Until then the Mac keeps its

@@ -175,7 +175,7 @@ public final class CPUStreamStore: ObservableObject {
     private var weeklyHoursValue: Double?
     private var weeklyProjectsValue: [WeeklyProjectShare]?
     private let lock = NSLock()
-    private let writerQueue = DispatchQueue(label: "com.onyx.cpu-stream-writer")
+    private let writerQueue = DispatchQueue(label: "ai.almostrealism.onyx.cpu-stream-writer")
     private var pendingWriteWorkItem: DispatchWorkItem?
 
     /// Override for tests — when non-nil, replaces `Date().timeIntervalSince1970`

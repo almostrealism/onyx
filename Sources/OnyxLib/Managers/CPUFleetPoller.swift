@@ -70,7 +70,7 @@ public final class CPUFleetPoller {
 
     private weak var appState: AppState?
     private var timer: Timer?
-    private let queue = DispatchQueue(label: "com.onyx.cpu-fleet-poller",
+    private let queue = DispatchQueue(label: "ai.almostrealism.onyx.cpu-fleet-poller",
                                       qos: .utility, attributes: .concurrent)
 
     /// `hostID:containerName` → last time CPU >= 1%. Guarded by `stateLock`

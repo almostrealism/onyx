@@ -148,8 +148,12 @@ This is the costly part. None of it can be done in the SPM build alone.
   covers it with the app.
 - **An App Group.** Both the app and the extension need the
   `com.apple.security.application-groups` entitlement with a
-  Team-ID-prefixed group (`<TEAMID>.com.onyx.terminal`, after the app's bundle id). That form
+  Team-ID-prefixed group (`<TEAMID>.ai.almostrealism.onyx`, after the app's bundle id). That form
   works for Developer ID distribution without a provisioning profile.
+  The `group.ai.almostrealism.onyx` form also works, and is the one an iOS
+  app can share, but on macOS 15 and later it needs a provisioning profile
+  embedded in the Mac app. Bundle ids never carry the team prefix; app
+  groups and keychain groups do.
   The app itself stays unsandboxed; only the extension must be sandboxed.
 - **Signed builds only.** macOS registers a widget only from a signed app
   in an Applications folder. `swift run` and `./run.sh` will never show

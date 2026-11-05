@@ -215,6 +215,8 @@ public final class InMemorySecretBackend: SecretBackend {
 /// iCloud Keychain: the data-protection keychain, synchronizable.
 public final class KeychainSecretBackend: SecretBackend {
 
+    /// The items' NAME, not a bundle id: it stays as it is when the apps'
+    /// identifiers change, or every phone loses its synced secrets.
     public static let service = "com.almostrealism.onyx"
 
     public init() {}

@@ -37,3 +37,9 @@ Draft — still being assembled.
   corner button, or clicking a session) brings back the full window.
   Each shape remembers its own size and place, per window, across
   launches.
+- **Onyx's identifier is now `ai.almostrealism.onyx`** (it was
+  `com.onyx.terminal`). On first launch Onyx copies your settings, window
+  positions and browser-tab logins across from the old identifier; the
+  old copies are left where they were. macOS ties privacy permissions to
+  the identifier, so it will ask once more for Reminders, Calendars,
+  notifications and Messages.

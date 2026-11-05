@@ -927,7 +927,7 @@ struct ClaudeHooksSettingsSection: View {
 struct DeviceSyncSettingsSection: View {
     /// Whether Settings offers it. The iOS app isn't released yet, and this
     /// puts a key on your hosts for it — so it shows only where it's
-    /// already on, or with `defaults write com.onyx.terminal ShowDeviceSync
+    /// already on, or with `defaults write ai.almostrealism.onyx ShowDeviceSync
     /// -bool true` for testing the app.
     static var shown: Bool {
         DeviceSyncManager.shared.isOn || UserDefaults.standard.bool(forKey: "ShowDeviceSync")

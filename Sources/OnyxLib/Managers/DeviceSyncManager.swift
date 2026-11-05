@@ -47,7 +47,7 @@ public final class DeviceSyncManager: ObservableObject {
     /// Which host the setup is on, while it runs.
     @Published public private(set) var settingUp: String?
 
-    private let queue = DispatchQueue(label: "com.onyx.device-sync", qos: .utility)
+    private let queue = DispatchQueue(label: "ai.almostrealism.onyx.device-sync", qos: .utility)
     private let secrets: SecretStore
     private var routesURL: URL?
 

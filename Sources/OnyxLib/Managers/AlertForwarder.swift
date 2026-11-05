@@ -29,7 +29,7 @@ public final class AlertForwarder: ObservableObject {
     @Published public private(set) var lastAttempt: Date?
 
     private let session: URLSession
-    private let queue = DispatchQueue(label: "com.onyx.alert-forwarder", qos: .utility)
+    private let queue = DispatchQueue(label: "ai.almostrealism.onyx.alert-forwarder", qos: .utility)
 
     private init() {
         let config = URLSessionConfiguration.ephemeral

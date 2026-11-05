@@ -7,7 +7,7 @@
     <key>CFBundleDisplayName</key>
     <string>Onyx</string>
     <key>CFBundleIdentifier</key>
-    <string>com.onyx.terminal</string>
+    <string>ai.almostrealism.onyx</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <!-- Placeholder. install.sh and package.sh stamp the real value from

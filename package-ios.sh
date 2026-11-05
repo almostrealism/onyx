@@ -18,7 +18,7 @@
 #
 #   ONYX_TEAM_ID         Apple Developer team ID. Defaults to the one
 #                        package.sh saved in ~/.onyx-notary.conf.
-#   ONYX_IOS_BUNDLE_ID   Defaults to com.onyx.today. Change it if that id
+#   ONYX_IOS_BUNDLE_ID   Defaults to ai.almostrealism.onyx.today. Change it if that id
 #                        isn't yours to register.
 #   ONYX_IOS_DEVICE      The device to install on (name or UDID, from
 #                        --list). Defaults to the only one connected.
@@ -104,7 +104,7 @@ if [ -z "$TEAM_ID" ]; then
     ask TEAM_ID "  Apple Developer team ID: "
     [ -n "$TEAM_ID" ] || { echo "  A team ID is needed to sign." >&2; exit 1; }
 fi
-BUNDLE_ID="${ONYX_IOS_BUNDLE_ID:-com.onyx.today}"
+BUNDLE_ID="${ONYX_IOS_BUNDLE_ID:-ai.almostrealism.onyx.today}"
 
 AUTH_ARGS=()
 if [ -n "${ONYX_ASC_KEY_PATH:-}" ]; then

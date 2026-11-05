@@ -13,7 +13,7 @@
 //            maintenance per host, ever — a stuck ssh call stalls only
 //            its own host).
 //
-// Console filter for trace: subsystem:com.onyx category:ssh
+// Console filter for trace: subsystem:ai.almostrealism.onyx category:ssh
 //
 
 import Foundation
@@ -52,7 +52,7 @@ public final class ConnectionPairRegistry: ObservableObject {
     /// of burning 45s keepalive timeouts; on restore they validate and
     /// rebuild at once.
     private var pathMonitor: NWPathMonitor?
-    private let pathMonitorQueue = DispatchQueue(label: "com.onyx.pair.nwpath", qos: .utility)
+    private let pathMonitorQueue = DispatchQueue(label: "ai.almostrealism.onyx.pair.nwpath", qos: .utility)
     private var sleepObserver: Any?
     private var wakeObserver: Any?
 
@@ -384,7 +384,7 @@ public final class ConnectionPairRegistry: ObservableObject {
     private func hostQueue(for hostID: UUID) -> DispatchQueue {
         lock.lock(); defer { lock.unlock() }
         if let q = hostQueues[hostID] { return q }
-        let q = DispatchQueue(label: "com.onyx.pair.host.\(hostID.uuidString.prefix(8))",
+        let q = DispatchQueue(label: "ai.almostrealism.onyx.pair.host.\(hostID.uuidString.prefix(8))",
                               qos: .userInitiated)
         hostQueues[hostID] = q
         return q

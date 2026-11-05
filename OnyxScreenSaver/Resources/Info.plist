@@ -7,7 +7,7 @@
     <key>CFBundleExecutable</key>
     <string>Onyx</string>
     <key>CFBundleIdentifier</key>
-    <string>com.onyx.screensaver</string>
+    <string>ai.almostrealism.onyx.screensaver</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

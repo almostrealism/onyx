@@ -7,6 +7,9 @@ struct OnyxApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
+        // First, before anything reads a setting or opens a web view: a
+        // user upgrading from `com.onyx.terminal` keeps their ~/Library state.
+        LegacyBundleMigration.runIfNeeded()
         if let iconURL = Self.appIconURL(), let icon = NSImage(contentsOf: iconURL) {
             NSApplication.shared.applicationIconImage = icon
         }

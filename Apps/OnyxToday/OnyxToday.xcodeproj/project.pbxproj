@@ -216,7 +216,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.onyx.today;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.almostrealism.onyx.today;
 				PRODUCT_MODULE_NAME = TodayApp;
 				PRODUCT_NAME = "Onyx Today";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -251,7 +251,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.onyx.today;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.almostrealism.onyx.today;
 				PRODUCT_MODULE_NAME = TodayApp;
 				PRODUCT_NAME = "Onyx Today";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

@@ -8,7 +8,7 @@
 	     this app through iCloud Keychain (docs/ios-plan.md). -->
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)com.onyx.shared</string>
+		<string>$(AppIdentifierPrefix)ai.almostrealism.onyx.shared</string>
 	</array>
 </dict>
 </plist>

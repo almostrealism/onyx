@@ -123,7 +123,7 @@ public final class SharedStateSync: ObservableObject {
     /// `lastSync` records success and is what the status line reads.
     private var lastAttemptAt: Date?
     private let lock = NSLock()
-    private let queue = DispatchQueue(label: "com.onyx.shared-state", qos: .utility)
+    private let queue = DispatchQueue(label: "ai.almostrealism.onyx.shared-state", qos: .utility)
     private var timer: Timer?
     private var watches: Set<AnyCancellable> = []
     private var pushPending = false

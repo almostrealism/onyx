@@ -23,7 +23,7 @@
 // traffic, and rotation that never yanks a connection out from under
 // attached terminals.
 //
-// Console filter for trace: subsystem:com.onyx category:ssh
+// Console filter for trace: subsystem:ai.almostrealism.onyx category:ssh
 //
 
 import Foundation

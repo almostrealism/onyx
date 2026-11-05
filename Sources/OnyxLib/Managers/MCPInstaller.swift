@@ -105,7 +105,7 @@ public final class MCPInstaller: ObservableObject {
     /// Set after a successful install; the UI shows it once and clears it.
     @Published public var multiUserHint: MultiUserHint?
 
-    private let queue = DispatchQueue(label: "com.onyx.mcp-installer", qos: .utility)
+    private let queue = DispatchQueue(label: "ai.almostrealism.onyx.mcp-installer", qos: .utility)
 
     private init() {}
 
