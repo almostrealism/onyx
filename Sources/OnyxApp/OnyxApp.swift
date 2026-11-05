@@ -46,8 +46,9 @@ struct OnyxApp: App {
 
     var body: some Scene {
         WindowGroup {
+            // Its minimum size is ContentView's own: it depends on whether
+            // the window is compact (⇧⌘D).
             ContentView()
-                .frame(minWidth: 600, minHeight: 400)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 900, height: 600)

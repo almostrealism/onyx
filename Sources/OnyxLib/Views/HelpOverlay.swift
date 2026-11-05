@@ -25,6 +25,7 @@ struct HelpOverlay: View {
         .init(keys: "⌘K", label: "Command palette"),
         .init(keys: "⌘/", label: "This help screen"),
         .init(keys: "`", label: "Toggle the monitor overlay"),
+        .init(keys: "⇧⌘D", label: "Compact window: just sessions, reminders or calendar, and PRs — and back"),
         .init(keys: "⌘,", label: "Settings"),
         .init(keys: "⌘E", label: "Toggle notes  ·  ⇧⌘E new note"),
         .init(keys: "⌘O", label: "File browser  ·  ⇧⌘O full-window"),

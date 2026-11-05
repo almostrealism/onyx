@@ -9,6 +9,7 @@ public extension Notification.Name {
     static let createNote = Notification.Name("createNote")
     static let toggleCommandPalette = Notification.Name("toggleCommandPalette")
     static let toggleMonitor = Notification.Name("toggleMonitor")
+    static let toggleCompactWindow = Notification.Name("toggleCompactWindow")
     static let openSettings = Notification.Name("openSettings")
     static let escapePressed = Notification.Name("escapePressed")
     static let toggleMonitorInterval = Notification.Name("toggleMonitorInterval")
@@ -134,7 +135,7 @@ extension AppState {
     /// field editor pulled out from under it and the app hung.
     /// (A browser tab is in `keyboardOwnedElsewhere`, so it covers too.)
     public var terminalIsCovered: Bool {
-        showMonitor || keyboardOwnedElsewhere
+        showMonitor || compactMode || keyboardOwnedElsewhere
     }
 
     /// Whether the active session is a browser tab rather than a terminal.
@@ -251,6 +252,14 @@ public class AppState: ObservableObject {
             }
         }
     }
+    /// The compact window (⇧⌘D): the whole window is simple mode's side
+    /// panel — sessions, today's reminders or calendar, PRs — at a size
+    /// that can sit beside other work. The terminal stays connected
+    /// underneath, hidden as it is under the monitor. ContentView swaps
+    /// the window between its compact and full frames when this changes
+    /// (`CompactWindow`), so anything that sets it gets the right shape.
+    @Published public var compactMode = false
+
     /// When true, the monitor renders the "simple" layout: same headline
     /// row, but giant CPU/MEM/GPU charts below, a compact strip of the
     /// top-CPU containers along the bottom, and a small weekly Timing
@@ -600,6 +609,10 @@ public class AppState: ObservableObject {
     /// Create a new instance.
     public init() {
         self.windowIndex = WindowIndexPool.shared.claim()
+        // A window left compact comes back compact (its frame is restored
+        // with it); set before any view sees the state, so nothing reads
+        // it as a switch and resizes the window.
+        self.compactMode = WindowModeFrames.isCompact(window: windowIndex)
         // Forward shared favorites store changes to this AppState's publisher
         // so SwiftUI views update when favorites change from any window
         favoritesCancellable = FavoritesStore.shared.objectWillChange.sink { [weak self] _ in
@@ -1075,6 +1088,9 @@ public class AppState: ObservableObject {
         if !alreadyActive {
             switchToSession = session
         }
+        // Going to a session from the compact window means going to it:
+        // the window comes back full size, with the session in front.
+        if compactMode { compactMode = false }
         guard !alreadyActive || dismissIfAlreadyActive else { return }
         showMonitor = false
         showSessionManager = false

@@ -60,6 +60,10 @@ struct CommandPaletteView: View {
                 appState.showCommandPalette = false
                 appState.showMonitor.toggle()
             },
+            PaletteAction(title: "Compact Window", shortcut: "⇧⌘D") {
+                appState.showCommandPalette = false
+                NotificationCenter.default.post(name: .toggleCompactWindow, object: nil)
+            },
             PaletteAction(title: "Edit Session Note", shortcut: "⌘;") {
                 appState.showCommandPalette = false
                 NotificationCenter.default.post(name: .editSessionNote, object: nil)

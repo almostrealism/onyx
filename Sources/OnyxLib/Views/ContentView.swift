@@ -100,7 +100,7 @@ public struct ContentView: View {
                 // would make the overlay darker than the terminal instead
                 // of more transparent.
                 Color(nsColor: NSColor(white: 0.04, alpha: 1.0))
-                    .opacity(appState.showMonitor ? 0 : appState.appearance.windowOpacity)
+                    .opacity(appState.showMonitor || appState.compactMode ? 0 : appState.appearance.windowOpacity)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
 
@@ -112,7 +112,7 @@ public struct ContentView: View {
                                 appState: appState,
                                 browserManager: appState.browserManager,
                                 hasOverlay: hasOverlay,
-                                monitorActive: appState.showMonitor
+                                monitorActive: appState.showMonitor || appState.compactMode
                             )
 
                             // Terminal text mode — selectable text overlay
@@ -128,6 +128,13 @@ public struct ContentView: View {
                             // its own opacity-driven tint, no vibrancy needed.
                             if appState.showMonitor {
                                 MonitorView(appState: appState)
+                                    .transition(.opacity)
+                            }
+
+                            // The compact window (⇧⌘D) — over the monitor
+                            // too, since it IS the window while it's on.
+                            if appState.compactMode {
+                                CompactWindowView(appState: appState)
                                     .transition(.opacity)
                             }
 
@@ -297,7 +304,7 @@ public struct ContentView: View {
             }
 
             // Favorites bar — outside terminal area at the bottom
-            if !appState.showSetup && !showStartupAnimation {
+            if !appState.showSetup && !showStartupAnimation && !appState.compactMode {
                 FavoritesBar(appState: appState)
             }
         }
@@ -321,6 +328,10 @@ public struct ContentView: View {
             AppDelegate.styleWindow(window)
         })
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The window's minimum size, by shape: the full layout needs room
+        // for a terminal; the compact one is a column.
+        .frame(minWidth: appState.compactMode ? WindowModeFrames.compactMinSize.width : 600,
+               minHeight: appState.compactMode ? WindowModeFrames.compactMinSize.height : 400)
         .onAppear {
             appState.loadConfig()
             rightPanelFraction = CGFloat(PanelSplit.load(window: appState.windowIndex))
@@ -367,16 +378,38 @@ public struct ContentView: View {
             saveRightPanelFraction()
         }
         .modifier(ContentViewNotifications(appState: appState, updateWindowTitle: updateWindowTitle, hostWindow: hostWindow))
+        .modifier(ContentViewCompactNotifications(appState: appState, hostWindow: hostWindow))
         .onChange(of: hostWindow) { _, window in
             if let window = window {
                 ShortcutManager.register(window: window, appState: appState)
+                if appState.compactMode { CompactWindow.restore(window, windowIndex: appState.windowIndex) }
             }
+        }
+        .onChange(of: appState.compactMode) { _, compact in
+            guard let window = hostWindow else { return }
+            CompactWindow.apply(compact: compact, to: window, windowIndex: appState.windowIndex,
+                                compactWidth: CompactWindowView.width(
+                                    fontScale: appState.appearance.uiFontSize / 12.0))
+        }
+        // Each shape remembers where the user last left it — moved or
+        // resized by hand, not only when the shape is switched.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndLiveResizeNotification)) { note in
+            rememberFrame(of: note.object as? NSWindow)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMoveNotification)) { note in
+            rememberFrame(of: note.object as? NSWindow)
         }
         .onDisappear {
             if let window = hostWindow {
                 ShortcutManager.unregister(window: window)
             }
         }
+    }
+
+    private func rememberFrame(of window: NSWindow?) {
+        guard let window, window === hostWindow, !window.styleMask.contains(.fullScreen) else { return }
+        WindowModeFrames.save(window.frame, as: appState.compactMode ? .compact : .full,
+                              window: appState.windowIndex)
     }
 
     private func updateWindowTitle() {
@@ -567,12 +600,28 @@ private struct ContentViewMonitorNotifications: ViewModifier {
                 appState.handleRemindersDueSoonKey()
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleAgendaPane)) { _ in
-                guard isKeyWindow, appState.showMonitor else { return }
+                guard isKeyWindow, appState.showMonitor || appState.compactMode else { return }
                 appState.handleAgendaKey()
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleSimpleSidePanel)) { _ in
                 guard isKeyWindow, appState.showMonitor else { return }
                 appState.handleSidePanelKey()
+            }
+    }
+}
+
+/// ⇧⌘D, the compact window.
+private struct ContentViewCompactNotifications: ViewModifier {
+    @ObservedObject var appState: AppState
+    var hostWindow: NSWindow?
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .toggleCompactWindow)) { _ in
+                // Not from full screen: there is no window shape to change.
+                guard hostWindow?.isKeyWindow == true,
+                      hostWindow?.styleMask.contains(.fullScreen) != true else { return }
+                appState.compactMode.toggle()
             }
     }
 }

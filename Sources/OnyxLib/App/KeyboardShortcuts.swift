@@ -77,6 +77,14 @@ public class ShortcutManager {
                 return nil
             }
 
+            // Cmd+Shift+D → the compact window: just simple mode's side
+            // panel, at a size that sits beside other work, and back.
+            // D because D is the side panel's own key in the monitor.
+            if flags == [.command, .shift] && chars.lowercased() == "d" {
+                NotificationCenter.default.post(name: .toggleCompactWindow, object: nil)
+                return nil
+            }
+
             // Cmd+Shift+F → jump to file search (focused on the last favorite,
             // or search the current selection if there is one)
             if flags.contains([.command, .shift]) && chars.lowercased() == "f" {
@@ -297,6 +305,19 @@ public class ShortcutManager {
             // When a right panel has focus, the user expects to type into
             // it — the orange focus ring makes this visually clear.
             let rightPanelHasFocus = (state?.focusedComponent == .rightPanel)
+
+            // The compact window hides the terminal for as long as it's
+            // on — hours, beside other work — so a key meant for the
+            // terminal must not reach a shell nobody can see. A keeps its
+            // meaning (Reminders ↔ calendar); ⌘ chords go on as usual.
+            if state?.compactMode == true && !hasRealTextInput && !textFieldHasKeyboard
+                && !flags.contains(.command) && !flags.contains(.control) {
+                if flags.isEmpty && event.keyCode == 0 {        // A → agenda pane
+                    NotificationCenter.default.post(name: .toggleAgendaPane, object: nil)
+                }
+                return nil
+            }
+
             if monitorVisibleInWindow && !hasRealTextInput && !rightPanelHasFocus && flags.isEmpty {
                 switch event.keyCode {
                 case 17: // T → toggle interval

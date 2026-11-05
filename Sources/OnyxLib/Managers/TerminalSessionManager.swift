@@ -1038,7 +1038,7 @@ class OnyxTerminalView: NSView {
 
             // Never intercept scroll events when an overlay is visible —
             // the overlay's ScrollView needs to receive them.
-            if self.appState.showMonitor || self.appState.showSettings
+            if self.appState.showMonitor || self.appState.compactMode || self.appState.showSettings
                 || self.appState.showCommandPalette || self.appState.showSessionManager
                 || self.appState.showSetup || self.appState.activeRightPanel != nil {
                 return event

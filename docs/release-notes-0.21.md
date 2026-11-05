@@ -31,3 +31,9 @@ Draft — still being assembled.
   Only a plain click does it (not a drag or a double click, and not the
   click that brings Onyx forward), and only web and mail links open from
   the terminal; ⌘-click still works as before.
+- **A compact window (⇧⌘D).** The whole window becomes simple mode's side
+  panel — sessions and their Claudes, today's reminders or calendar, PRs
+  — small enough to sit at the side of the screen. ⇧⌘D again (or the
+  corner button, or clicking a session) brings back the full window.
+  Each shape remembers its own size and place, per window, across
+  launches.
