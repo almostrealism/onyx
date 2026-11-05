@@ -361,28 +361,88 @@ class OnyxTerminalView: NSView {
         }
     }
 
-    // MARK: - URL Detection (Cmd+click)
+    // MARK: - Links (click, or Cmd+click)
 
-    /// Monitor for Cmd+click on terminal text to detect and open URLs
+    /// Where a plain click on the terminal began, for the link check at
+    /// mouse-up: the cell, and whether the window was already key — the
+    /// click that brings Onyx forward must not also open a link under it.
+    private var linkClickStart: (col: Int, row: Int, windowWasKey: Bool)?
+
+    /// Links in the terminal open on a click.
+    ///
+    /// A plain click opens one only when it is plainly a click on it: one
+    /// press and release in the same cell, no selection made, in a window
+    /// that was already in front. A drag that ends on a URL, a double
+    /// click selecting it, or the click that activates the window does
+    /// what it always did. The click is still passed on — tmux gets its
+    /// press AND release, so it isn't left thinking a button is held.
+    /// Cmd+click opens a link from anywhere, and is consumed, as before.
     private func installCmdClickMonitor() {
-        cmdClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+        cmdClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
             guard let self = self else { return event }
-            // Only handle Cmd+click (no other modifiers)
-            guard event.modifierFlags.contains(.command) else { return event }
             guard let tv = self.terminalView,
                   let window = tv.window,
-                  event.window === window else { return event }
-
-            // Check the click is in the terminal area
+                  event.window === window,
+                  !self.appState.terminalIsCovered else {
+                self.linkClickStart = nil
+                return event
+            }
             let loc = tv.convert(event.locationInWindow, from: nil)
-            guard tv.bounds.contains(loc) else { return event }
+            guard tv.bounds.contains(loc), let cell = self.cell(at: event) else {
+                self.linkClickStart = nil
+                return event
+            }
 
-            // Try to detect a URL at the click position
-            if self.openURLAtPosition(event: event) {
-                return nil  // consumed — don't pass to SwiftTerm
+            if event.type == .leftMouseDown {
+                self.linkClickStart = event.modifierFlags.contains(.command)
+                    ? nil : (cell.col, cell.row, window.isKeyWindow)
+                return event
+            }
+
+            let start = self.linkClickStart
+            self.linkClickStart = nil
+            if event.modifierFlags.contains(.command) {
+                if let url = self.link(atColumn: cell.col, row: cell.row) {
+                    NSWorkspace.shared.open(url)
+                    return nil  // consumed — don't pass to SwiftTerm
+                }
+                return event
+            }
+            let flags = event.modifierFlags.intersection([.shift, .option, .control])
+            if flags.isEmpty, event.clickCount == 1,
+               let start, start.windowWasKey,
+               start.col == cell.col, start.row == cell.row,
+               !tv.selectionActive,
+               let url = self.link(atColumn: cell.col, row: cell.row) {
+                NSWorkspace.shared.open(url)
             }
             return event
         }
+    }
+
+    /// The terminal cell under a mouse event, in screen coordinates.
+    private func cell(at event: NSEvent) -> (col: Int, row: Int)? {
+        guard let tv = terminalView else { return nil }
+        let point = tv.convert(event.locationInWindow, from: nil)
+        let cols = CGFloat(tv.terminal.cols)
+        let rows = CGFloat(tv.terminal.rows)
+        guard point.x >= 0, point.y >= 0, cols > 0, rows > 0,
+              tv.frame.width > 0, tv.frame.height > 0 else { return nil }
+        let col = Int(point.x / (tv.frame.width / cols))
+        let row = Int((tv.frame.height - point.y) / (tv.frame.height / rows))
+        guard col < tv.terminal.cols, row < tv.terminal.rows else { return nil }
+        return (col, row)
+    }
+
+    /// The link at a screen cell: an OSC 8 hyperlink, or a URL in the
+    /// text — SwiftTerm's own detection, which follows a URL across a
+    /// wrapped line. Only web and mail links: a click must not run
+    /// whatever a `file:` or custom scheme in some output points at.
+    func link(atColumn col: Int, row: Int) -> URL? {
+        guard let tv = terminalView,
+              let text = tv.terminal.link(at: .screen(Position(col: col, row: row)),
+                                          mode: .explicitAndImplicit) else { return nil }
+        return TerminalLinks.openable(text)
     }
 
     /// Extract all visible text from the terminal buffer (all rows)
@@ -404,58 +464,6 @@ class OnyxTerminalView: NSView {
         // Remove trailing empty lines
         while lines.last?.isEmpty == true { lines.removeLast() }
         return lines.joined(separator: "\n")
-    }
-
-    /// Extract the full line of text at a terminal grid row from the active terminal view
-    private func terminalLineText(at row: Int) -> String? {
-        guard let tv = terminalView else { return nil }
-        let terminal = tv.terminal!
-        guard row >= 0 && row < terminal.rows else { return nil }
-        guard terminal.getLine(row: row) != nil else { return nil }
-        // Build string from CharData
-        var text = ""
-        for col in 0..<terminal.cols {
-            if let cd = terminal.getCharData(col: col, row: row) {
-                let ch = cd.getCharacter()
-                text.append(ch == "\u{0}" ? " " : ch)
-            }
-        }
-        return text
-    }
-
-    /// Detect and open a URL at a grid position in the terminal. Returns true if a URL was found.
-    @discardableResult
-    func openURLAtPosition(event: NSEvent) -> Bool {
-        guard let tv = terminalView else { return false }
-        let point = tv.convert(event.locationInWindow, from: nil)
-        guard point.x >= 0 && point.y >= 0 else { return false }
-
-        let cols = CGFloat(tv.terminal.cols)
-        let rows = CGFloat(tv.terminal.rows)
-        guard cols > 0 && rows > 0 && tv.frame.width > 0 && tv.frame.height > 0 else { return false }
-        let cellW = tv.frame.width / cols
-        let cellH = tv.frame.height / rows
-        let col = Int(point.x / cellW)
-        let row = Int((tv.frame.height - point.y) / cellH)
-
-        guard let lineText = terminalLineText(at: row) else { return false }
-        guard !lineText.isEmpty else { return false }
-
-        // Use NSDataDetector to find URLs in the line
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return false }
-        let nsLine = lineText as NSString
-        let range = NSRange(location: 0, length: nsLine.length)
-
-        for match in detector.matches(in: lineText, range: range) {
-            guard let url = match.url else { continue }
-            let matchRange = match.range
-            // Check if the clicked column falls within this URL
-            if col >= matchRange.location && col < matchRange.location + matchRange.length {
-                NSWorkspace.shared.open(url)
-                return true
-            }
-        }
-        return false
     }
 
     /// Monitors all mouseDown events in the window to manage first responder.
@@ -1475,9 +1483,11 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
 
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 
-    /// Handle OSC 8 explicit hyperlinks (Cmd+click on links emitted by terminal apps)
+    /// SwiftTerm's own Cmd+click on a link. Held to the same schemes as
+    /// a click (`TerminalLinks`): an OSC 8 link's target is invisible, so
+    /// a program's output must not be able to open anything it likes.
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
-        if let url = URL(string: link), url.scheme != nil {
+        if let url = TerminalLinks.openable(link) {
             NSWorkspace.shared.open(url)
         }
     }

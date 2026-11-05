@@ -27,3 +27,7 @@ Draft — still being assembled.
   overlay still lists every PR.
 - **The fleet layouts show the top six hosts, not five**, so simple
   mode's side-by-side fleet is a full two-by-three grid.
+- **Links in the terminal open with a click** — no copy mode, no ⌘.
+  Only a plain click does it (not a drag or a double click, and not the
+  click that brings Onyx forward), and only web and mail links open from
+  the terminal; ⌘-click still works as before.
