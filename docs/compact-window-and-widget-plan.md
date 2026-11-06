@@ -22,8 +22,12 @@ one. Compact shows exactly what the simple monitor's left column shows:
 - today's reminders or calendar (`A` switches, as in the monitor);
 - open PRs that have CI to show.
 
-It uses the monitor's tint. The terminal stays connected underneath and
-hidden, as it is under the monitor. D was chosen because D is the side
+It uses the monitor's tint, and nothing else of the window is drawn: not
+the monitor (even when it was open when the window went compact; its
+charts and clock behind the column made both illegible), not the right
+panel, and not the terminal's overlays. Claude's permission banners are
+the exception, since they need an answer wherever you are. The terminal
+stays connected underneath and hidden, as it is under the monitor. D was chosen because D is the side
 panel's own key in the monitor.
 
 ### Each shape has its own frame

@@ -116,7 +116,7 @@ public struct ContentView: View {
                             )
 
                             // Terminal text mode — selectable text overlay
-                            if appState.showTerminalText {
+                            if appState.showTerminalText && !appState.compactMode {
                                 TerminalTextOverlay(appState: appState)
                                     .transition(.opacity)
                             }
@@ -126,25 +126,32 @@ public struct ContentView: View {
                             // it can never show through — a privacy shield in
                             // both windowed and fullscreen. The overlay draws
                             // its own opacity-driven tint, no vibrancy needed.
-                            if appState.showMonitor {
+                            //
+                            // Not under the compact window: it would draw its
+                            // charts and clock behind the side panel, which
+                            // made both illegible. Leaving compact brings it
+                            // back, since `showMonitor` is untouched.
+                            if appState.showMonitor && !appState.compactMode {
                                 MonitorView(appState: appState)
                                     .transition(.opacity)
                             }
 
-                            // The compact window (⇧⌘D) — over the monitor
-                            // too, since it IS the window while it's on.
+                            // The compact window (⇧⌘D) — the side panel and
+                            // nothing else of this window's, apart from
+                            // Claude's permission banners below.
                             if appState.compactMode {
                                 CompactWindowView(appState: appState)
                                     .transition(.opacity)
                             }
 
                             // Connection error overlay (only for active session's host)
-                            if appState.activeSessionHasError {
+                            if appState.activeSessionHasError && !appState.compactMode {
                                 ConnectionErrorOverlay(appState: appState)
                             }
 
                             // Reconnecting indicator (only for active session's host)
-                            if appState.isActiveSessionReconnecting && !appState.activeSessionHasError {
+                            if appState.isActiveSessionReconnecting && !appState.activeSessionHasError
+                                && !appState.compactMode {
                                 ReconnectingOverlay(accentColor: appState.accentColor)
                             }
 
@@ -190,7 +197,7 @@ public struct ContentView: View {
                         .modifier(FocusOutline(active: appState.focusedComponent == .terminal, show: appState.showFocusOutline))
 
                         // RIGHT: Side panel with draggable divider
-                        if let panel = appState.activeRightPanel {
+                        if !appState.compactMode, let panel = appState.activeRightPanel {
                             PanelDivider(accent: appState.accentColor,
                                          containerWidth: geo.size.width,
                                          containerMinX: geo.frame(in: .global).minX,
