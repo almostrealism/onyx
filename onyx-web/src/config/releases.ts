@@ -24,6 +24,22 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.21',
+    date: null,
+    upcoming: true,
+    summary:
+      'Keeping sessions in view from elsewhere: a compact window that is just the side panel, and a desktop widget — plus Claudes that join the session they run in.',
+    highlights: [
+      'A compact window (⇧⌘D): the whole window becomes simple mode’s side panel, small enough to sit beside other work.',
+      'Onyx Sessions, a desktop widget: your sessions, what each Claude is doing, and your open PRs’ CI where there’s room.',
+      'A Claude running in one of your tmux sessions joins that session in the list, and leaves it when Claude quits.',
+      'Links in the terminal open with a plain click.',
+      'The menu bar lists pipelines by their PR’s title.',
+      'GPU charts are half as tall, and the fleet layouts show six hosts.',
+      'Onyx’s identifier is now ai.almostrealism.onyx; settings come across, but macOS asks for permissions once more.',
+    ],
+  },
+  {
     version: '0.20',
     date: '2026-10-30',
     summary:
