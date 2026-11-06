@@ -393,6 +393,7 @@ public struct ContentView: View {
             }
         }
         .onChange(of: appState.compactMode) { _, compact in
+            if compact { FeatureTipStore.shared.used("window.compact") }
             guard let window = hostWindow else { return }
             CompactWindow.apply(compact: compact, to: window, windowIndex: appState.windowIndex,
                                 compactWidth: CompactWindowView.width(

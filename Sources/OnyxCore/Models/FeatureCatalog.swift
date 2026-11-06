@@ -110,6 +110,21 @@ public enum FeatureCatalog {
                 detail: "In the detailed layout it switches to the simple one with the panel showing, instead of quietly changing a setting you can't see.",
                 tip: "D shows the side panel", keys: ["D"],
                 place: nil),
+        Feature(id: "window.compact", since: "0.21",
+                title: "A compact window: just the side panel",
+                detail: "⇧⌘D turns the window into simple mode's side panel — sessions and their Claudes, today's agenda, PRs — small enough to sit beside other work. ⇧⌘D again, or clicking a session, brings the full window back.",
+                tip: "⇧⌘D makes this window just the side panel", keys: ["⇧⌘D"],
+                place: nil),
+        Feature(id: "widget.sessions", since: "0.21",
+                title: "Your sessions as a desktop widget",
+                detail: "Right-click the desktop, choose Edit Widgets, and add Onyx Sessions: your sessions, what each Claude is doing, and your open PRs' CI where there's room. Click a session to open it.",
+                tip: "Add Onyx Sessions from the desktop's Edit Widgets", keys: [],
+                place: nil),
+        Feature(id: "terminal.click-links", since: "0.21",
+                title: "Links in the terminal open with a click",
+                detail: "A plain click on a web or mail link opens it — no copy mode, no ⌘. A drag still selects, and the click that brings Onyx forward doesn't open anything.",
+                tip: "Click a link to open it", keys: [],
+                place: nil),
     ]
 
     public static func feature(_ id: String) -> Feature? {
