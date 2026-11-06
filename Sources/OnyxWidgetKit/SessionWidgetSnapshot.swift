@@ -56,6 +56,35 @@ public struct SessionWidgetRow: Codable, Hashable, Identifiable {
     }
 }
 
+/// One open PR in the widget: simple mode's PR line — the branch, and the
+/// job its CI is busy with or the verdict once it's done.
+public struct PRWidgetRow: Codable, Hashable, Identifiable {
+
+    public enum State: String, Codable, Hashable {
+        case running, queued, failed, passed
+    }
+
+    /// `PullRequest.id`.
+    public let id: String
+    /// The branch, as the app's PR line labels it.
+    public let branch: String
+    public let title: String
+    /// Where a click goes: the PR's page.
+    public let url: String
+    public let state: State
+    /// The job's name, or "failed" / "passed".
+    public let text: String
+
+    public init(id: String, branch: String, title: String, url: String, state: State, text: String) {
+        self.id = id
+        self.branch = branch
+        self.title = title
+        self.url = url
+        self.state = state
+        self.text = text
+    }
+}
+
 public struct SessionWidgetSnapshot: Codable, Equatable {
     public static let currentVersion = 1
 
@@ -65,12 +94,19 @@ public struct SessionWidgetSnapshot: Codable, Equatable {
     /// When the app last said it was running, rows changed or not.
     public var heartbeatAt: Date
     public var rows: [SessionWidgetRow]
+    /// Open PRs with CI to show, in simple mode's order. Optional so a
+    /// file from a build that didn't write them still reads.
+    public var pullRequests: [PRWidgetRow]?
 
-    public init(generatedAt: Date, heartbeatAt: Date, rows: [SessionWidgetRow]) {
+    public init(generatedAt: Date, heartbeatAt: Date, rows: [SessionWidgetRow],
+                pullRequests: [PRWidgetRow] = []) {
         self.generatedAt = generatedAt
         self.heartbeatAt = heartbeatAt
         self.rows = rows
+        self.pullRequests = pullRequests
     }
+
+    public var prs: [PRWidgetRow] { pullRequests ?? [] }
 
     /// Past this without a heartbeat the app isn't running (or can't
     /// write), and the widget says so instead of passing old rows off as
@@ -182,9 +218,9 @@ public enum SessionWidgetStore {
 /// When the app writes the file and when it asks WidgetKit to reload.
 ///
 /// WidgetKit rations reloads, so they're kept for changes worth seeing:
-/// at once when a Claude starts waiting for permission, at most once a
-/// minute for anything else in a row, and at most every five minutes
-/// when only the clocks moved. The file itself is cheap and is written on
+/// at once when a Claude starts waiting for permission or a PR's CI
+/// fails, at most once a minute for anything else in a row, and at most
+/// every five minutes when only the clocks moved. The file itself is cheap and is written on
 /// any change, plus a heartbeat so the widget can tell a quiet app from
 /// one that isn't running.
 public struct SessionWidgetPacing {
@@ -194,6 +230,8 @@ public struct SessionWidgetPacing {
 
     public private(set) var written: [SessionWidgetRow]?
     public private(set) var reloaded: [SessionWidgetRow]?
+    public private(set) var writtenPRs: [PRWidgetRow]?
+    public private(set) var reloadedPRs: [PRWidgetRow]?
     public private(set) var lastWrite: Date?
     public private(set) var lastReload: Date?
 
@@ -204,26 +242,31 @@ public struct SessionWidgetPacing {
         public var reload: Bool
     }
 
-    public mutating func step(_ rows: [SessionWidgetRow], now: Date) -> Decision {
-        let changed = rows != written
+    public mutating func step(_ rows: [SessionWidgetRow], prs: [PRWidgetRow] = [],
+                              now: Date) -> Decision {
+        let changed = rows != written || prs != writtenPRs
         let heartbeatDue = lastWrite.map { now.timeIntervalSince($0) >= Self.heartbeatInterval } ?? true
         let write = changed || heartbeatDue
 
         var reload = false
-        if rows != reloaded {
+        if rows != reloaded || prs != reloadedPRs {
             let shown = reloaded ?? []
+            let shownPRs = reloadedPRs ?? []
             let newlyWaiting = rows.contains { row in
                 row.claude == .waitingPermission
                     && !shown.contains { $0.id == row.id && $0.claude == .waitingPermission }
             }
+            let newlyFailed = prs.contains { pr in
+                pr.state == .failed && !shownPRs.contains { $0.id == pr.id && $0.state == .failed }
+            }
             let sinceReload = lastReload.map { now.timeIntervalSince($0) } ?? .infinity
-            let onlyClocks = rows.map(\.withoutClock) == shown.map(\.withoutClock)
-            reload = newlyWaiting
+            let onlyClocks = prs == shownPRs && rows.map(\.withoutClock) == shown.map(\.withoutClock)
+            reload = newlyWaiting || newlyFailed
                 || (!onlyClocks && sinceReload >= Self.reloadInterval)
                 || (onlyClocks && sinceReload >= Self.clockReloadInterval)
         }
-        if write { written = rows; lastWrite = now }
-        if reload { reloaded = rows; lastReload = now }
+        if write { written = rows; writtenPRs = prs; lastWrite = now }
+        if reload { reloaded = rows; reloadedPRs = prs; lastReload = now }
         return Decision(write: write, reload: reload)
     }
 }

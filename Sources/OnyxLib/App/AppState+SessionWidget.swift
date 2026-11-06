@@ -1,8 +1,8 @@
 //
 // AppState+SessionWidget.swift
 //
-// Responsibility: Feed the session widget — turn the sessions list into
-//                 the snapshot the widget reads, write it to the shared
+// Responsibility: Feed the session widget — turn the sessions list and
+//                 simple mode's open PRs into the snapshot the widget reads, write it to the shared
 //                 App Group container, and ask WidgetKit to reload when a
 //                 change is worth one (`SessionWidgetPacing`). And open a
 //                 session from the widget's `onyx://session?id=` links.
@@ -21,6 +21,8 @@ extension AppState {
     static let sessionWidgetTick: TimeInterval = 10
     /// The most rows any widget size shows.
     static let sessionWidgetRows = 12
+    /// The most PRs any widget size shows (the extra-large's column).
+    static let sessionWidgetPRs = 14
 
     /// The widget's rows: the sessions list, as this window orders it.
     func sessionWidgetRows() -> [SessionWidgetRow] {
@@ -48,6 +50,29 @@ extension AppState {
         }
     }
 
+    /// The widget's PRs: simple mode's column, the same PRs in the same
+    /// order — those with CI to show.
+    func sessionWidgetPRs() -> [PRWidgetRow] {
+        let ci = today.prPipelines
+        return Self.widgetPRs(today.pullRequestsWithPipelines()) { ci.runs(for: $0) }
+    }
+
+    static func widgetPRs(_ prs: [PullRequest],
+                          runs: (PullRequest) -> [PRPipelineRun]) -> [PRWidgetRow] {
+        Array(prs.compactMap { pr -> PRWidgetRow? in
+            guard let status = PRPipelineRun.lineStatus(runs(pr)) else { return nil }
+            let state: PRWidgetRow.State
+            switch status {
+            case .running: state = .running
+            case .queued: state = .queued
+            case .failed: state = .failed
+            case .passed: state = .passed
+            }
+            return PRWidgetRow(id: pr.id, branch: PRJobStripSource.branchLabel(pr), title: pr.title,
+                               url: pr.url, state: state, text: status.text)
+        }.prefix(sessionWidgetPRs))
+    }
+
     /// Start feeding the widget, once per app. Only a build signed by a
     /// team has a container to share; any other does nothing.
     func startSessionWidget() {
@@ -66,9 +91,11 @@ extension AppState {
         guard let url = SessionWidgetWork.fileURL else { return }
         let now = Date()
         let rows = sessionWidgetRows()
-        let decision = SessionWidgetWork.pacing.step(rows, now: now)
+        let prs = sessionWidgetPRs()
+        let decision = SessionWidgetWork.pacing.step(rows, prs: prs, now: now)
         guard decision.write else { return }
-        let snapshot = SessionWidgetSnapshot(generatedAt: now, heartbeatAt: now, rows: rows)
+        let snapshot = SessionWidgetSnapshot(generatedAt: now, heartbeatAt: now, rows: rows,
+                                             pullRequests: prs)
         DispatchQueue.global(qos: .utility).async {
             do {
                 try SessionWidgetStore.write(snapshot, to: url)

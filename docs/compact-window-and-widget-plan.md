@@ -203,8 +203,18 @@ This is the costly part. None of it can be done in the SPM build alone.
   keeps running.
 - **Sizes:**
   - small: three rows, no clocks;
-  - medium: four rows;
-  - large: nine rows.
+  - medium: up to four rows;
+  - large: up to nine rows;
+  - extra large: the sessions, and the open PRs in a column beside them.
+- **Open PRs, space permitting.** The snapshot also carries simple mode's
+  PR list: the PRs with CI to show, in its order, each a branch and the
+  job it's busy with or "failed"/"passed" (`PRPipelineRun.lineStatus`,
+  shared with `SimplePRLine`). A click opens the PR. What fits is
+  counted in lines (`SessionsWidgetPlan`, measured inside macOS's 16pt
+  margins): sessions come first and PRs take what's left. The large
+  keeps room for three PRs whatever the sessions, and the small never
+  shows them. A PR that starts failing reloads the widget at once, like
+  a Claude that starts waiting; any other PR change waits for the minute.
 - **Packaging:** `package.sh --sign` builds the extension with xcodebuild
   (unsigned), copies it to `Contents/PlugIns`, and signs it first with the
   sandbox and the group for the identity's team. It also adds the group

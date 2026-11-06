@@ -91,32 +91,39 @@ public struct SimplePRLine: View {
 
                 Spacer(minLength: 6)
 
-                if let job = PRPipelineRun.mostRecentlyActive(runs)?.activeJob {
+                switch PRPipelineRun.lineStatus(runs) {
+                case .running(let job):
                     // The job alone. The workflow's name cost the branch
                     // its characters and told you little: job names are
                     // rarely shared between workflows, and the settled
                     // verdict below never named one either. Hover for it.
-                    Text(job.name)
-                        .monitorFont(size: 12)
-                        .foregroundColor(job.state == .running
-                                         ? Color.onyxBlue.opacity(0.9)
-                                         : Color.onyxAmber.opacity(0.85))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .layoutPriority(2)
-                } else if let settled = PRPipelineRun.settledSummary(runs) {
+                    jobText(job, color: Color.onyxBlue.opacity(0.9))
+                case .queued(let job):
+                    jobText(job, color: Color.onyxAmber.opacity(0.85))
+                case let settled?:
                     Text(settled.text)
                         .monitorFont(size: 11)
-                        .foregroundColor(settled.failing
+                        .foregroundColor(settled == .failed
                                          ? Color.onyxRed.opacity(0.85)
                                          : Color.onyxGreen.opacity(0.7))
                         .layoutPriority(1)
+                case nil:
+                    EmptyView()
                 }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(tooltip)
+    }
+
+    private func jobText(_ job: String, color: Color) -> some View {
+        Text(job)
+            .monitorFont(size: 12)
+            .foregroundColor(color)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .layoutPriority(2)
     }
 
     /// The title, and the workflow the shown job belongs to.

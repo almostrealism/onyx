@@ -18,6 +18,11 @@ final class SessionWidgetTests: XCTestCase {
                          lastActivity: ago.map { now.addingTimeInterval(-$0) }, shortcut: nil)
     }
 
+    private func pr(_ id: String, _ state: PRWidgetRow.State, _ text: String? = nil) -> PRWidgetRow {
+        PRWidgetRow(id: id, branch: "branch-\(id)", title: "PR \(id)", url: "https://github.com/o/r/pull/1",
+                    state: state, text: text ?? state.rawValue)
+    }
+
     // MARK: - The file
 
     func testASnapshotRoundTripsThroughItsFile() throws {
@@ -28,6 +33,17 @@ final class SessionWidgetTests: XCTestCase {
                                              rows: [row("a", claude: .waitingPermission)])
         try SessionWidgetStore.write(snapshot, to: url)
         XCTAssertEqual(SessionWidgetStore.read(from: url), snapshot)
+    }
+
+    /// A file from a build that wrote no PRs still reads, with none.
+    func testAFileWithoutPRsStillReads() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("onyx-widget-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let json = #"{"version":1,"generatedAt":0,"heartbeatAt":0,"rows":[]}"#
+        try Data(json.utf8).write(to: url)
+        let read = try XCTUnwrap(SessionWidgetStore.read(from: url))
+        XCTAssertEqual(read.prs, [])
     }
 
     func testTheGroupIsTheTeamPrefixedAppID() {
@@ -79,6 +95,19 @@ final class SessionWidgetTests: XCTestCase {
 
     /// Only the clocks moved: the file is written, the reload waits five
     /// minutes — the widget's own entries already fade the dots.
+    func testANewlyFailedPRReloadsAtOnce() {
+        var pacing = SessionWidgetPacing()
+        _ = pacing.step([row("a")], prs: [pr("1", .running, "build")], now: now)
+        // A job moving on waits for the minute…
+        XCTAssertEqual(pacing.step([row("a")], prs: [pr("1", .running, "test")], now: now.addingTimeInterval(10)),
+                       .init(write: true, reload: false))
+        // …a failure doesn't.
+        XCTAssertEqual(pacing.step([row("a")], prs: [pr("1", .failed)], now: now.addingTimeInterval(20)),
+                       .init(write: true, reload: true))
+        XCTAssertEqual(pacing.step([row("a")], prs: [pr("1", .running, "retry")], now: now.addingTimeInterval(80)),
+                       .init(write: true, reload: true))
+    }
+
     func testOnlyClocksMovingReloadsRarely() {
         var pacing = SessionWidgetPacing()
         _ = pacing.step([row("a", ago: 30)], now: now)
@@ -140,7 +169,96 @@ final class SessionWidgetTests: XCTestCase {
         XCTAssertEqual(rows[1].moreClaudes, 1)
     }
 
+    // MARK: - What fits
+
+    private func plan(_ sessions: [Int], prs: Int, _ family: WidgetFamily) -> SessionsWidgetPlan {
+        SessionsWidgetPlan.plan(sessionLines: sessions, prCount: prs,
+                                budget: SessionsWidgetPlan.budget(for: family))
+    }
+
+    /// Sessions first; PRs only where there's room.
+    func testPRsFillWhatSessionsLeave() {
+        // A full medium stays sessions.
+        XCTAssertEqual(plan([2, 2, 2, 2, 2], prs: 5, .systemMedium), .init(sessions: 3, prs: 0))
+        XCTAssertEqual(plan([2, 2, 2, 2], prs: 5, .systemMedium), .init(sessions: 3, prs: 0))
+        XCTAssertEqual(plan([1, 1, 1, 1], prs: 5, .systemMedium), .init(sessions: 4, prs: 1))
+        // Two sessions leave three lines: a header and two PRs, or a header,
+        // one PR and "+N more".
+        XCTAssertEqual(plan([2, 2], prs: 2, .systemMedium), .init(sessions: 2, prs: 2))
+        XCTAssertEqual(plan([2, 2], prs: 9, .systemMedium), .init(sessions: 2, prs: 1))
+        // Never PRs in the small.
+        XCTAssertEqual(plan([2], prs: 4, .systemSmall), .init(sessions: 1, prs: 0))
+        // No PRs, nothing kept for them.
+        XCTAssertEqual(plan(Array(repeating: 2, count: 12), prs: 0, .systemLarge).sessions, 8)
+    }
+
+    /// The large keeps room for a few PRs however many sessions there are,
+    /// and gives them more when sessions don't need it.
+    func testTheLargeKeepsRoomForPRs() {
+        let many = Array(repeating: 2, count: 12)
+        let busy = plan(many, prs: 8, .systemLarge)
+        XCTAssertEqual(busy.prs, 3)
+        XCTAssertEqual(busy.sessions, 6)
+        let few = plan([2, 2], prs: 8, .systemLarge)
+        XCTAssertEqual(few, .init(sessions: 2, prs: 6))
+    }
+
+    /// Whatever the mix, the plan never spends more lines than it has.
+    func testAPlanFitsItsBudget() {
+        for family in [WidgetFamily.systemSmall, .systemMedium, .systemLarge] {
+            let budget = SessionsWidgetPlan.budget(for: family)
+            for n in 0...12 {
+                for prs in 0...10 {
+                    let lines = (0..<n).map { $0 % 3 == 0 ? 1 : 2 }
+                    let p = plan(lines, prs: prs, family)
+                    var used = n == 0 ? 1 : lines.prefix(p.sessions).reduce(0, +) + (p.sessions < n ? 1 : 0)
+                    if p.prs > 0 { used += 1 + p.prs + (p.prs < prs ? 1 : 0) }
+                    XCTAssertLessThanOrEqual(used, budget.lines, "\(family) \(n) sessions \(prs) PRs")
+                    XCTAssertLessThanOrEqual(p.sessions, budget.maxSessions)
+                }
+            }
+        }
+    }
+
+    /// The PRs are simple mode's: those with CI to show, saying what it's doing.
+    func testPRRowsSayWhatTheirCIIsDoing() {
+        let prs = (1...3).map {
+            PullRequest(repoFullName: "o/r", number: $0, title: "PR \($0)",
+                        url: "https://github.com/o/r/pull/\($0)", openCommentThreads: 0,
+                        mergeStatus: .unknown, headBranch: "branch-\($0)")
+        }
+        let runs: [Int: [PRPipelineRun]] = [
+            1: [PRPipelineRun(id: "r1", prID: "p1", name: "CI", overall: .running, runNumber: 1, attempt: 1,
+                              url: nil, updatedAt: now,
+                              activeJob: .init(name: "build", state: .running, since: now))],
+            2: [PRPipelineRun(id: "r2", prID: "p2", name: "CI", overall: .failure, runNumber: 1, attempt: 1,
+                              url: nil, updatedAt: now)],
+        ]
+        let rows = AppState.widgetPRs(prs) { runs[$0.number] ?? [] }
+        XCTAssertEqual(rows.map(\.state), [.running, .failed])
+        XCTAssertEqual(rows.map(\.text), ["build", "failed"])
+        XCTAssertEqual(rows.first?.url, "https://github.com/o/r/pull/1")
+    }
+
     // MARK: - Drawing
+
+    private func busyRows() -> [SessionWidgetRow] {
+        (0..<12).map { (i: Int) -> SessionWidgetRow in
+            let plain = i % 3 == 0
+            return SessionWidgetRow(id: "s\(i)", title: "session \(i)",
+                                    detail: plain ? nil : "running Bash",
+                                    claude: plain ? nil : .running,
+                                    lastActivity: now.addingTimeInterval(-Double(i) * 50),
+                                    shortcut: i < 9 ? i + 1 : nil)
+        }
+    }
+
+    private func busyPRs() -> [PRWidgetRow] {
+        let states: [PRWidgetRow.State] = [.running, .queued, .failed, .passed]
+        return (0..<10).map { (i: Int) -> PRWidgetRow in
+            pr("\(i)", states[i % 4], i % 4 < 2 ? "integration-tests" : nil)
+        }
+    }
 
     /// Every size draws, with rows, with none, stale, and before the app
     /// has written anything.
@@ -152,16 +270,25 @@ final class SessionWidgetTests: XCTestCase {
             SessionWidgetSnapshot(generatedAt: now, heartbeatAt: now.addingTimeInterval(-3600),
                                   rows: SessionWidgetSnapshot.sample(at: now).rows),
             nil,
+            // Busy: more sessions and PRs than any size has room for.
+            SessionWidgetSnapshot(generatedAt: now, heartbeatAt: now, rows: busyRows(), pullRequests: busyPRs()),
+            // One session and a few PRs: room for both everywhere but small.
+            SessionWidgetSnapshot(generatedAt: now, heartbeatAt: now,
+                                  rows: Array(SessionWidgetSnapshot.sample(at: now).rows.prefix(1)),
+                                  pullRequests: SessionWidgetSnapshot.sample(at: now).prs),
         ]
         let sizes: [(WidgetFamily, CGSize)] = [(.systemSmall, CGSize(width: 170, height: 170)),
                                                (.systemMedium, CGSize(width: 364, height: 170)),
-                                               (.systemLarge, CGSize(width: 364, height: 382))]
+                                               (.systemLarge, CGSize(width: 364, height: 382)),
+                                               (.systemExtraLarge, CGSize(width: 772, height: 382))]
         let out = ProcessInfo.processInfo.environment["ONYX_WIDGET_RENDER_DIR"].map(URL.init(fileURLWithPath:))
         for (i, snapshot) in cases.enumerated() {
             for (family, size) in sizes {
                 let view = SessionsWidgetView(entry: SessionsEntry(date: now, snapshot: snapshot), family: family)
+                    // WidgetKit's own content margins on macOS, so a
+                    // render is as tight as the desktop.
+                    .padding(16)
                     .frame(width: size.width, height: size.height)
-                    .padding(12)
                     .background(Color.black)
                 let renderer = ImageRenderer(content: view)
                 renderer.scale = 2

@@ -111,6 +111,17 @@ extension PRPipelineRun {
         }
     }
 
+    /// What a one-line PR row shows: the job it's most recently busy
+    /// with, else the settled verdict — or nil, nothing to show. Simple
+    /// mode's column and the session widget both draw this.
+    public static func lineStatus(_ runs: [PRPipelineRun]) -> PRLineStatus? {
+        if let job = mostRecentlyActive(runs)?.activeJob {
+            return job.state == .running ? .running(job: job.name) : .queued(job: job.name)
+        }
+        guard let settled = settledSummary(runs) else { return nil }
+        return settled.failing ? .failed : .passed
+    }
+
     /// One word for a PR whose CI isn't doing anything right now, or nil
     /// when there is nothing to say at all.
     ///
@@ -121,6 +132,23 @@ extension PRPipelineRun {
         if runs.contains(where: \.needsAttention) { return ("failed", true) }
         if runs.contains(where: { $0.overall == .success }) { return ("passed", false) }
         return nil
+    }
+}
+
+/// See `PRPipelineRun.lineStatus`.
+public enum PRLineStatus: Equatable {
+    case running(job: String)
+    case queued(job: String)
+    case failed
+    case passed
+
+    /// The job's name, or the verdict's word.
+    public var text: String {
+        switch self {
+        case .running(let job), .queued(let job): return job
+        case .failed: return "failed"
+        case .passed: return "passed"
+        }
     }
 }
 
