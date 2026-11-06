@@ -149,12 +149,20 @@ final class PRPipelineMonitorTests: XCTestCase {
     }
 
     /// A PR's CI shows up in the menu without being tracked — that is
-    /// the point — and names the PR so it reads as "the CI on #12".
-    func testAPRRunIsListedAndNamesItsPR() {
+    /// the point — titled by its PR, with the workflow and "repo#12"
+    /// (alike on every line) in the tooltip.
+    func testAPRRunIsListedByItsPRsTitle() {
         let entries = MenuBarController.pipelineEntries(tracked: [], prRuns: [run()], prs: [pr()])
         XCTAssertEqual(entries.count, 1)
-        XCTAssertEqual(entries.first?.title, "CI · acme/api#12")
+        XCTAssertEqual(entries.first?.title, "Fix the thing")
+        XCTAssertEqual(entries.first?.tooltip, "CI · acme/api#12 — open the run in your browser")
         XCTAssertEqual(entries.first?.url, "https://github.com/acme/api/actions/runs/30")
+    }
+
+    /// Before its PR has loaded, a run still says what it is.
+    func testARunWithoutItsPRFallsBackToTheWorkflow() {
+        let entries = MenuBarController.pipelineEntries(tracked: [], prRuns: [run()], prs: [])
+        XCTAssertEqual(entries.first?.title, "CI")
     }
 
     /// The same run tracked by hand AND found on the PR is one line.
@@ -174,6 +182,7 @@ final class PRPipelineMonitorTests: XCTestCase {
     }
 
     func testTheRetryIsSpelledOutInTheMenu() {
+        XCTAssertEqual(MenuBarController.prTitleLine(run(attempt: 3), pr: pr()), "Fix the thing  ↻ attempt 3")
         XCTAssertTrue(MenuBarController.prRunLine(run(attempt: 3), pr: pr()).contains("attempt 3"))
         XCTAssertFalse(MenuBarController.prRunLine(run(attempt: 1), pr: pr()).contains("attempt"))
     }

@@ -27,6 +27,9 @@ Draft — still being assembled.
   overlay still lists every PR.
 - **The fleet layouts show the top six hosts, not five**, so simple
   mode's side-by-side fleet is a full two-by-three grid.
+- **The menu bar's pipelines are listed by PR title.** The workflow and
+  "repo#12", which read almost the same on every line, moved to the
+  tooltip; a PR's runs sit together.
 - **GPU charts are half as tall**, with the same size squares and half as
   many: a GPU is usually off, drawing, or maxed, and doesn't need CPU-sized
   detail to say so. CPU and memory get the room.

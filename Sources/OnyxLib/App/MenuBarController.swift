@@ -273,8 +273,8 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     ///
     /// The menu bar is where you look when you don't want to switch to the
     /// app, and "did CI go green" is the other question in that category.
-    /// One line each: a status glyph, the workflow, and the attempt when
-    /// it is a re-run — a pipeline on its third try is a different thing
+    /// One line each: a status glyph, the PR's title (a tracked pipeline's
+    /// workflow, when it isn't on a PR), and the attempt when it is a re-run — a pipeline on its third try is a different thing
     /// from one on its first, and that is invisible on the run's own page
     /// until you open it.
     private func addPipelines(to menu: NSMenu) {
@@ -329,16 +329,31 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         for run in prRuns {
             if let url = run.url, !seenURLs.insert(url).inserted { continue }
             let pr = byID[run.prID]
+            // The PR's title is what tells one line from the next; the
+            // workflow and "repo#12" were near-identical on every line,
+            // so they're the tooltip. Sorted by title, so a PR's runs sit
+            // together.
             entries.append(PipelineEntry(
-                title: prRunLine(run, pr: pr), url: run.url, overall: run.overall,
-                tooltip: (pr.map { "\($0.title) — open the run in your browser" }
-                          ?? "open the run in your browser"),
-                sortName: run.name))
+                title: prTitleLine(run, pr: pr), url: run.url, overall: run.overall,
+                tooltip: "\(prRunLine(run, pr: pr)) — open the run in your browser",
+                sortName: pr?.title ?? run.name))
         }
         return entries.sorted { a, b in
             if rank(a.overall) != rank(b.overall) { return rank(a.overall) < rank(b.overall) }
             return a.sortName.localizedCaseInsensitiveCompare(b.sortName) == .orderedAscending
         }
+    }
+
+    /// "Fix the thing  ↻ attempt 2" — the PR's title, and the attempt when
+    /// it is a re-run. A run whose PR isn't known yet falls back to
+    /// `prRunLine`.
+    static func prTitleLine(_ run: PRPipelineRun, pr: PullRequest?) -> String {
+        guard let pr else { return prRunLine(run, pr: nil) }
+        var line = pr.title
+        if run.isRetry, let attempt = run.attempt {
+            line += "  ↻ attempt \(attempt)"
+        }
+        return clip(line, 64)
     }
 
     /// "CI · acme/api#12  ↻ attempt 2" — the workflow, the PR it's on,
