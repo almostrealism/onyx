@@ -32,20 +32,56 @@ public enum MonitorChartLayout {
         lineHeight(10, fontScale: fontScale) + 4
     }
 
+    // MARK: The GPU chart
+
+    /// A GPU chart is half the height a chart in its place would be.
+    /// In practice a GPU is off, doing some ordinary drawing, or maxed by
+    /// a compute job — three states, where a CPU's load is a real shape
+    /// worth the height. The room goes to the charts beside it.
+    public static let gpuScale: CGFloat = 0.5
+
+    /// And half the grid's rows, so the squares stay the size they were.
+    /// That's the difference from memory, whose chart was halved by
+    /// shrinking its squares: memory keeps all 20 levels, just smaller.
+    /// The GPU gives levels up. Each square still reads as clearly as
+    /// before, and 10% steps are finer than anything a GPU's load says.
+    public static let gpuRows = 10
+
     // MARK: Simple mode, one host
 
     /// CPU above, MEM/GPU side by side under it (when either is shown),
     /// split from `available` with the titles and the stack's spacing
-    /// paid for first.
-    public static func singleHost(available: CGFloat, hasSubRow: Bool,
+    /// paid for first. The GPU is `gpuScale` of the row; with no memory
+    /// beside it the row itself shrinks and CPU takes the difference.
+    public static func singleHost(available: CGFloat, hasMemory: Bool, hasGPU: Bool,
                                   spacing: CGFloat = 8,
-                                  fontScale: CGFloat) -> (cpu: CGFloat, sub: CGFloat) {
+                                  fontScale: CGFloat) -> (cpu: CGFloat, memory: CGFloat, gpu: CGFloat) {
         let title = chartTitleHeight(fontScale: fontScale)
-        guard hasSubRow else {
-            return (max(40, available - title), 0)
+        guard hasMemory || hasGPU else {
+            return (max(40, available - title), 0, 0)
         }
         let bodies = max(0, available - 2 * title - spacing)
-        return (max(40, bodies * 0.57), max(30, bodies * 0.43))
+        let row = max(30, bodies * 0.43)
+        let gpu = hasGPU ? max(15, (row * gpuScale).rounded(.down)) : 0
+        let sub = hasMemory ? row : gpu
+        return (max(40, bodies - sub), hasMemory ? row : 0, gpu)
+    }
+
+    // MARK: Detailed overlay, the narrow column
+
+    /// MEM and GPU stacked under the CPU in `total` points (the old fixed
+    /// 100), the GPU at `gpuScale` of what it had and memory taking the rest.
+    public static func detailedSubCharts(total: CGFloat = 100, hasMemory: Bool, hasGPU: Bool,
+                                         spacing: CGFloat = 16) -> (memory: CGFloat, gpu: CGFloat) {
+        switch (hasMemory, hasGPU) {
+        case (true, true):
+            let bodies = total - spacing
+            let gpu = (bodies / 2 * gpuScale).rounded(.down)
+            return (bodies - gpu, gpu)
+        case (true, false): return (total, 0)
+        case (false, true): return (0, (total * gpuScale).rounded(.down))
+        case (false, false): return (0, 0)
+        }
     }
 
     // MARK: Fleet, one chart stack per host
@@ -73,8 +109,10 @@ public enum MonitorChartLayout {
     }
 
     /// The body height of each chart in a column of `rows` host stacks,
-    /// each a header line and `chartsPerHost` charts.
+    /// each a header line and `chartsPerHost` charts — `gpuCharts` of them
+    /// GPU charts, which are `gpuScale` of the returned height.
     public static func fleetChartHeight(available: CGFloat, rows: Int, chartsPerHost: Int,
+                                        gpuCharts: Int = 0,
                                         rowSpacing: CGFloat, innerSpacing: CGFloat,
                                         fontScale: CGFloat, minChartHeight: CGFloat) -> CGFloat {
         guard rows > 0, chartsPerHost > 0 else { return minChartHeight }
@@ -82,18 +120,20 @@ public enum MonitorChartLayout {
         let title = chartTitleHeight(fontScale: fontScale)
         let perRowFixed = header + CGFloat(chartsPerHost) * (title + innerSpacing)
         let fixed = CGFloat(rows) * perRowFixed + CGFloat(rows - 1) * rowSpacing
-        let bodies = (available - fixed) / CGFloat(rows * chartsPerHost)
+        let units = CGFloat(chartsPerHost) - CGFloat(gpuCharts) * (1 - gpuScale)
+        let bodies = (available - fixed) / (CGFloat(rows) * units)
         return max(minChartHeight, bodies.rounded(.down))
     }
 
     // MARK: Fleet, merged
 
-    /// Merged CPU (and GPU) chart bodies and the per-host memory bodies,
+    /// Merged CPU and GPU chart bodies and the per-host memory bodies,
     /// from `available`. Memory keeps at most 30% (and 110pt, scaled); the
-    /// merged charts are the headline and split what's left.
+    /// merged charts are the headline and split what's left, the GPU
+    /// taking `gpuScale` of the CPU's height.
     public static func fleetMerged(available: CGFloat, hasGPU: Bool, hasMemory: Bool,
                                    spacing: CGFloat = 10,
-                                   fontScale: CGFloat) -> (chart: CGFloat, memory: CGFloat) {
+                                   fontScale: CGFloat) -> (cpu: CGFloat, gpu: CGFloat, memory: CGFloat) {
         let title = chartTitleHeight(fontScale: fontScale)
         // The "FLEET MAX — N HOSTS" line, and the GPU slot — a chart, or
         // the two-line "no GPU" note, about a title's worth less.
@@ -113,8 +153,9 @@ public enum MonitorChartLayout {
         }
         if hasGPU { fixed += title + spacing }
 
-        let charts = hasGPU ? 2 : 1
-        let chart = max(30, ((available - fixed) / CGFloat(charts)).rounded(.down))
-        return (chart, memory)
+        let units = hasGPU ? 1 + gpuScale : 1
+        let cpu = max(30, ((available - fixed) / units).rounded(.down))
+        let gpu = hasGPU ? max(15, (cpu * gpuScale).rounded(.down)) : 0
+        return (cpu, gpu, memory)
     }
 }

@@ -377,20 +377,16 @@ struct MonitorView: View {
                                 let gpuData = monitor.bucketedGPU()
                                 let hasMem = !memData.isEmpty && monitor.showMemoryChart
                                 let hasGpu = !gpuData.isEmpty
-                                let subChartHeight: CGFloat = 100
+                                let sub = MonitorChartLayout.detailedSubCharts(hasMemory: hasMem, hasGPU: hasGpu)
 
-                                if hasMem && hasGpu {
-                                    let halfHeight = (subChartHeight - 16) / 2
+                                if hasMem {
                                     GridChart(title: "MEMORY", values: memData,
-                                              accentColor: Color.onyxAmber, height: halfHeight)
+                                              accentColor: Color.onyxAmber, height: sub.memory)
+                                }
+                                if hasGpu {
                                     GridChart(title: "GPU", values: gpuData,
-                                              accentColor: Color.onyxPurple, height: halfHeight)
-                                } else if hasMem {
-                                    GridChart(title: "MEMORY", values: memData,
-                                              accentColor: Color.onyxAmber, height: subChartHeight)
-                                } else if hasGpu {
-                                    GridChart(title: "GPU", values: gpuData,
-                                              accentColor: Color.onyxPurple, height: subChartHeight)
+                                              accentColor: Color.onyxPurple, height: sub.gpu,
+                                              rows: MonitorChartLayout.gpuRows)
                                 }
                                 }
 
@@ -594,7 +590,8 @@ struct GridChart: View {
     let values: [Double] // 0-100 per bucket
     let accentColor: Color
     var height: CGFloat = 100
-    let rows = 20
+    /// Grid rows. The GPU chart uses `MonitorChartLayout.gpuRows`.
+    var rows = 20
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {

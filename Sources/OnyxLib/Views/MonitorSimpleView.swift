@@ -53,13 +53,12 @@ struct SimpleMonitorBody: View {
                 titledTimingTiles: (timing.isConfigured && timing.groups.count > 1) || timing.agents != nil,
                 fontScale: fontScale)
             let chartArea = max(0, geo.size.height - bottomStripHeight - 16)
-            let showsSubRow = (monitor.showMemoryChart && !monitor.bucketedMemory().isEmpty)
-                || !monitor.bucketedGPU().isEmpty
-            let single = MonitorChartLayout.singleHost(available: chartArea,
-                                                       hasSubRow: showsSubRow,
-                                                       fontScale: fontScale)
+            let single = MonitorChartLayout.singleHost(
+                available: chartArea,
+                hasMemory: monitor.showMemoryChart && !monitor.bucketedMemory().isEmpty,
+                hasGPU: !monitor.bucketedGPU().isEmpty,
+                fontScale: fontScale)
             let cpuHeight = single.cpu
-            let subHeight = single.sub
 
             // The side panel — sessions above today's reminders — takes a
             // fixed column down the LEFT, sharing an edge with the
@@ -118,22 +117,25 @@ struct SimpleMonitorBody: View {
 
                     // MEM and GPU side by side. Render whichever are
                     // available; if neither, the row is just empty space.
+                    // The GPU is the shorter of the two, sitting on the
+                    // row's baseline so both time axes end level.
                     let memData = monitor.showMemoryChart ? monitor.bucketedMemory() : []
                     let gpuData = monitor.bucketedGPU()
                     let hasMem = !memData.isEmpty && monitor.showMemoryChart
                     let hasGpu = !gpuData.isEmpty
                     if hasMem || hasGpu {
-                        HStack(spacing: 12) {
+                        HStack(alignment: .bottom, spacing: 12) {
                             if hasMem {
                                 GridChart(title: "MEMORY", values: memData,
                                           accentColor: Color.onyxAmber,
-                                          height: subHeight)
+                                          height: single.memory)
                                     .frame(maxWidth: .infinity)
                             }
                             if hasGpu {
                                 GridChart(title: "GPU", values: gpuData,
                                           accentColor: Color.onyxPurple,
-                                          height: subHeight)
+                                          height: single.gpu,
+                                          rows: MonitorChartLayout.gpuRows)
                                     .frame(maxWidth: .infinity)
                             }
                         }

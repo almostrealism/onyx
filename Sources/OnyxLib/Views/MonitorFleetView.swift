@@ -69,7 +69,7 @@ struct FleetStackedCharts: View {
             let innerSpacing: CGFloat = 3
             let chartHeight = MonitorChartLayout.fleetChartHeight(
                 available: availableHeight, rows: grid.rows, chartsPerHost: perHost,
-                rowSpacing: rowSpacing, innerSpacing: innerSpacing,
+                gpuCharts: showGPU ? 1 : 0, rowSpacing: rowSpacing, innerSpacing: innerSpacing,
                 fontScale: fontScale, minChartHeight: minChartHeight)
 
             HStack(alignment: .top, spacing: 20) {
@@ -83,7 +83,9 @@ struct FleetStackedCharts: View {
                                           accentColor: Color.onyxBlue, height: chartHeight)
                                 if showGPU {
                                     GridChart(title: "GPU", values: host.gpu ?? [],
-                                              accentColor: Color.onyxPurple, height: chartHeight)
+                                              accentColor: Color.onyxPurple,
+                                              height: (chartHeight * MonitorChartLayout.gpuScale).rounded(.down),
+                                              rows: MonitorChartLayout.gpuRows)
                                 }
                                 if showMem {
                                     GridChart(title: "MEM", values: host.mem ?? [],
@@ -134,7 +136,6 @@ struct FleetMergedCharts: View {
             let sizes = MonitorChartLayout.fleetMerged(
                 available: availableHeight, hasGPU: !gpu.isEmpty,
                 hasMemory: !memHosts.isEmpty, fontScale: fontScale)
-            let chartHeight = sizes.chart
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("FLEET MAX — \(series.count) HOST\(series.count == 1 ? "" : "S")")
@@ -143,10 +144,11 @@ struct FleetMergedCharts: View {
                     .tracking(2)
 
                 GridChart(title: "CPU · MAX ACROSS HOSTS", values: cpu,
-                          accentColor: Color.onyxBlue, height: chartHeight)
+                          accentColor: Color.onyxBlue, height: sizes.cpu)
                 if !gpu.isEmpty {
                     GridChart(title: "GPU · MAX ACROSS HOSTS", values: gpu,
-                              accentColor: Color.onyxPurple, height: chartHeight)
+                              accentColor: Color.onyxPurple, height: sizes.gpu,
+                              rows: MonitorChartLayout.gpuRows)
                 } else {
                     // Say so rather than just leaving a gap. A missing chart
                     // is indistinguishable from a broken one, and this exact
