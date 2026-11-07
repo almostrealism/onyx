@@ -25,8 +25,7 @@ export interface Release {
 export const RELEASES: Release[] = [
   {
     version: '0.21',
-    date: null,
-    upcoming: true,
+    date: '2026-11-07',
     summary:
       'Keeping sessions in view from elsewhere: a compact window that is just the side panel, and a desktop widget — plus Claudes that join the session they run in.',
     highlights: [
