@@ -74,7 +74,9 @@ except Exception:
     devices = []
 for d in devices:
     hw, props, conn = d.get("hardwareProperties", {}), d.get("deviceProperties", {}), d.get("connectionProperties", {})
-    if hw.get("platform") != "iOS" or hw.get("reality") != "physical":
+    # A device that isn't paired yet reports no "reality" at all, so only
+    # skip one that says it's something else (a simulator).
+    if hw.get("platform") != "iOS" or hw.get("reality", "physical") != "physical":
         continue
     print("\t".join([hw.get("udid", ""), props.get("name", ""), hw.get("marketingName", hw.get("deviceType", "")),
                      props.get("osVersionNumber", ""), conn.get("pairingState", ""), conn.get("transportType", "") or "-",
@@ -92,6 +94,12 @@ if [ "$MODE" = "list" ]; then
         printf '%s\n' "$DEVS" | while IFS="$(printf '\t')" read -r u n m o p t dm; do
             printf '  %-27s %-20s %-22s %-6s %-9s %-10s %s\n' "$u" "$n" "$m" "$o" "$p" "$t" "$dm"
         done
+        if printf '%s\n' "$DEVS" | cut -f5 | grep -qvx paired; then
+            echo ""
+            echo "  Trust isn't the pairing Xcode installs through: an unpaired device"
+            echo "  is paired when ./package-ios.sh installs to it, or by hand with"
+            echo "  xcrun devicectl manage pair --device <UDID>, and asks on the device."
+        fi
     fi
     rm -f "$DEVICES_JSON"; exit 0
 fi
@@ -188,8 +196,19 @@ if [ "$MODE" = "install" ]; then
     fi
     UDID="$(printf '%s' "$LINE" | cut -f1)"
     NAME="$(printf '%s' "$LINE" | cut -f2)"
+    PAIRING="$(printf '%s' "$LINE" | cut -f5)"
     DEVMODE="$(printf '%s' "$LINE" | cut -f7)"
     echo "  Device: $NAME ($UDID)"
+    # Tapping Trust pairs the device for Finder and backups; Xcode's
+    # installs need a second, CoreDevice pairing, which the Mac must ask for.
+    if [ "$PAIRING" != "paired" ]; then
+        echo "  Pairing with $NAME: unlock it and accept the prompt there..."
+        if ! xcrun devicectl manage pair --device "$UDID"; then
+            echo "  Pairing didn't complete. Unlock $NAME, keep it on this screen" >&2
+            echo "  and run this again." >&2
+            exit 1
+        fi
+    fi
     if [ "$DEVMODE" != "yes" ]; then
         echo "  NOTE: Developer Mode looks off on $NAME. The install will be refused"
         echo "        until it's on: Settings → Privacy & Security → Developer Mode"
