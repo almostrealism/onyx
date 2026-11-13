@@ -83,9 +83,10 @@ for d in devices:
     # skip one that says it's something else (a simulator).
     if hw.get("platform") != "iOS" or hw.get("reality", "physical") != "physical":
         continue
-    # It reports no UDID or name either; devicectl takes its identifier
-    # instead. No field may be empty: `read` collapses empty tab fields.
-    print("\t".join([hw.get("udid") or d.get("identifier") or "-", props.get("name") or "-",
+    # It reports no UDID or name either. devicectl takes its serial number
+    # instead; not its "identifier", which differs between accounts on the
+    # same Mac. No field may be empty: `read` collapses empty tab fields.
+    print("\t".join([hw.get("udid") or hw.get("serialNumber") or d.get("identifier") or "-", props.get("name") or "-",
                      hw.get("marketingName") or hw.get("productType") or hw.get("deviceType") or "-",
                      props.get("osVersionNumber") or "-", conn.get("pairingState") or "-",
                      conn.get("transportType") or "-",
