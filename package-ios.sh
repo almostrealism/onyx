@@ -73,13 +73,22 @@ try:
 except Exception:
     devices = []
 for d in devices:
-    hw, props, conn = d.get("hardwareProperties", {}), d.get("deviceProperties", {}), d.get("connectionProperties", {})
+    # Xcode 27 moved everything under "properties" and keeps the old
+    # dictionaries as deprecated copies; read the new one first.
+    new = d.get("properties", {})
+    hw = {**d.get("hardwareProperties", {}), **new.get("hardware", {})}
+    props = {**d.get("deviceProperties", {}), **new.get("device", {})}
+    conn = {**d.get("connectionProperties", {}), **new.get("connection", {})}
     # A device that isn't paired yet reports no "reality" at all, so only
     # skip one that says it's something else (a simulator).
     if hw.get("platform") != "iOS" or hw.get("reality", "physical") != "physical":
         continue
-    print("\t".join([hw.get("udid", ""), props.get("name", ""), hw.get("marketingName", hw.get("deviceType", "")),
-                     props.get("osVersionNumber", ""), conn.get("pairingState", ""), conn.get("transportType", "") or "-",
+    # It reports no UDID or name either; devicectl takes its identifier
+    # instead. No field may be empty: `read` collapses empty tab fields.
+    print("\t".join([hw.get("udid") or d.get("identifier") or "-", props.get("name") or "-",
+                     hw.get("marketingName") or hw.get("productType") or hw.get("deviceType") or "-",
+                     props.get("osVersionNumber") or "-", conn.get("pairingState") or "-",
+                     conn.get("transportType") or "-",
                      "yes" if props.get("developerModeStatus") == "enabled" else "no"]))
 PY
 }
@@ -90,9 +99,9 @@ if [ "$MODE" = "list" ]; then
         echo "  No iPhone or iPad is known to this Mac. Connect one by cable and"
         echo "  tap Trust on it."
     else
-        printf '  %-27s %-20s %-22s %-6s %-9s %-10s %s\n' UDID NAME MODEL IOS PAIRING TRANSPORT DEVMODE
+        printf '  %-36s %-20s %-22s %-6s %-9s %-10s %s\n' UDID NAME MODEL IOS PAIRING TRANSPORT DEVMODE
         printf '%s\n' "$DEVS" | while IFS="$(printf '\t')" read -r u n m o p t dm; do
-            printf '  %-27s %-20s %-22s %-6s %-9s %-10s %s\n' "$u" "$n" "$m" "$o" "$p" "$t" "$dm"
+            printf '  %-36s %-20s %-22s %-6s %-9s %-10s %s\n' "$u" "$n" "$m" "$o" "$p" "$t" "$dm"
         done
         if printf '%s\n' "$DEVS" | cut -f5 | grep -qvx paired; then
             echo ""
