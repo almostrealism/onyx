@@ -269,6 +269,68 @@ struct PRWorkflowSettingsSection: View {
     }
 }
 
+/// Which labels open PRs show. Offers the labels the app has seen on open
+/// PRs, each in its color; nothing is on by default — see LabelFilterStore.
+struct PRLabelSettingsSection: View {
+    @ObservedObject private var filter = LabelFilterStore.shared
+    @ObservedObject private var ghManager = PullRequestManager.shared
+    @ObservedObject private var glManager = GitLabMergeRequestManager.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("LABELS ON OPEN PRs")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Color.onyxBlue.opacity(0.7))
+                .tracking(2)
+
+            Text("Switch on the labels worth seeing — the ones you or your agents use to say something about a PR. The overlay shows them by name in their colors; simple mode shows the color alone, as a dot.")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+
+            let names = filter.offered()
+            if names.isEmpty {
+                Text(ghManager.isLoading || glManager.isLoading
+                     ? "Looking at your open PRs…"
+                     : "No labels seen yet — they appear here once an open PR carries one.")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            } else {
+                let colors = filter.colors
+                ForEach(names, id: \.self) { name in
+                    Toggle(isOn: Binding(get: { filter.isIncluded(name) },
+                                         set: { filter.setIncluded(name, $0) })) {
+                        HStack(spacing: 6) {
+                            PRLabelDot(label: PRLabel(name: name, colorHex: colors[name] ?? ""),
+                                       size: 8)
+                            Text(name)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.75))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .tint(Color.onyxBlue)
+                }
+                Text(Self.summary(included: filter.included.count, offered: names.count))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.4))
+                    .padding(.top, 2)
+            }
+        }
+    }
+
+    static func summary(included: Int, offered: Int) -> String {
+        included == 0
+            ? "Showing none of \(offered) — no labels appear on your PRs yet"
+            : "Showing \(included) of \(offered)"
+    }
+}
+
 /// Compact "only my PRs/MRs" switch with the auto-detected username shown
 /// once it's resolved. Shared by the GitHub and GitLab settings sections.
 struct MineOnlyToggle: View {

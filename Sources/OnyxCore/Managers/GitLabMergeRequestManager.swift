@@ -92,6 +92,7 @@ public final class GitLabMergeRequestManager: ObservableObject {
             self.inFlight = false
             self.isLoading = false
             self.lastError = firstError
+            LabelFilterStore.shared.noteSeen(collected.flatMap(\.labels))
             self.mergeRequests = collected.sorted {
                 if $0.repoFullName != $1.repoFullName { return $0.repoFullName < $1.repoFullName }
                 return $0.number > $1.number
@@ -155,6 +156,9 @@ public final class GitLabMergeRequestManager: ObservableObject {
             URLQueryItem(name: "state", value: "opened"),
             URLQueryItem(name: "per_page", value: "50"),
             URLQueryItem(name: "order_by", value: "updated_at"),
+            // Labels as {name, color} rather than bare names: the color
+            // is what simple mode shows.
+            URLQueryItem(name: "with_labels_details", value: "true"),
         ]
         // `created_by_me` is server-side "mine", so it works even before
         // we've resolved the username locally.
@@ -202,7 +206,8 @@ public final class GitLabMergeRequestManager: ObservableObject {
                             hasConflicts: mr.has_conflicts ?? false),
                         headBranch: mr.source_branch,
                         author: mr.author?.username,
-                        apiSaysDraft: mr.draft ?? mr.work_in_progress ?? false
+                        apiSaysDraft: mr.draft ?? mr.work_in_progress ?? false,
+                        labels: mr.labels ?? []
                     )
                 }
                 completion(.success(mrs))
@@ -261,6 +266,7 @@ public final class GitLabMergeRequestManager: ObservableObject {
         let work_in_progress: Bool?
         let blocking_discussions_resolved: Bool?
         let author: GitLabUser?
+        let labels: [PRLabel]?
     }
     private struct MRReferences: Decodable {
         let full: String?

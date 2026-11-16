@@ -561,6 +561,8 @@ struct SettingsView: View {
 
         // Also across both forges: which workflows a PR shows under itself.
         PRWorkflowSettingsSection()
+        // And which of their labels it shows.
+        PRLabelSettingsSection()
 
         GitHubSettingsSection()
         GitLabSettingsSection()

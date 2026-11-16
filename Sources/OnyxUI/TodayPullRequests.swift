@@ -25,6 +25,7 @@ public struct SimplePullRequests: View {
     /// Observed so switching a workflow on in Settings lands here too —
     /// `ci.runs(for:)` reads the filter, and the filter is what changed.
     @ObservedObject private var workflowFilter = WorkflowFilterStore.shared
+    @ObservedObject private var labelFilter = LabelFilterStore.shared
     let accentColor: Color
 
     public init(today: TodayState, accentColor: Color) {
@@ -54,7 +55,8 @@ public struct SimplePullRequests: View {
                     .tracking(2)
 
                 ForEach(Array(prs.prefix(maxShown))) { pr in
-                    SimplePRLine(pr: pr, runs: ci.runs(for: pr), accentColor: accentColor)
+                    SimplePRLine(pr: pr, runs: ci.runs(for: pr), labels: labelFilter.shown(pr),
+                                 accentColor: accentColor)
                 }
 
                 if prs.count > maxShown {
@@ -67,16 +69,22 @@ public struct SimplePullRequests: View {
     }
 }
 
-/// One PR: branch on the left, what it's doing on the right.
+/// One PR: branch on the left, then its labels as dots, and what it's
+/// doing on the right.
 public struct SimplePRLine: View {
     @Environment(\.openURL) private var openURL
     let pr: PullRequest
     let runs: [PRPipelineRun]
+    /// The labels the user chose to see. Color only: a line this narrow
+    /// can't spare even a letter per label. Hover names them.
+    let labels: [PRLabel]
     let accentColor: Color
 
-    public init(pr: PullRequest, runs: [PRPipelineRun], accentColor: Color) {
+    public init(pr: PullRequest, runs: [PRPipelineRun], labels: [PRLabel] = [],
+                accentColor: Color) {
         self.pr = pr
         self.runs = runs
+        self.labels = labels
         self.accentColor = accentColor
     }
 
@@ -88,6 +96,15 @@ public struct SimplePRLine: View {
                     .foregroundColor(.white.opacity(0.85))
                     .lineLimit(1)
                     .truncationMode(.middle)
+
+                if !labels.isEmpty {
+                    // Never squeezed: the branch truncates before a dot
+                    // goes. Centered on the text, not its baseline.
+                    PRLabelDots(labels: labels)
+                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 3 }
+                        .fixedSize()
+                        .layoutPriority(3)
+                }
 
                 Spacer(minLength: 6)
 
@@ -126,11 +143,14 @@ public struct SimplePRLine: View {
             .layoutPriority(2)
     }
 
-    /// The title, and the workflow the shown job belongs to.
+    /// The title, its labels, and the workflow the shown job belongs to.
     private var tooltip: String {
-        guard let run = PRPipelineRun.mostRecentlyActive(runs),
-              let job = run.activeJob else { return pr.title }
-        return "\(pr.title)\n\(run.name) · \(job.name)"
+        var lines = [pr.title]
+        if !labels.isEmpty { lines.append(labels.map(\.name).joined(separator: ", ")) }
+        if let run = PRPipelineRun.mostRecentlyActive(runs), let job = run.activeJob {
+            lines.append("\(run.name) · \(job.name)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     public static func branchLabel(_ pr: PullRequest) -> String {

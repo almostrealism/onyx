@@ -42,6 +42,9 @@ public struct SharedState: Codable, Equatable {
     /// it follows the user between machines the way tracked pipelines
     /// do. Sorted, so two copies with the same choice compare equal.
     public var prWorkflows: [String]
+    /// PR label names the user has switched on (see LabelFilterStore),
+    /// for the same reason, and sorted the same way.
+    public var prLabels: [String]
     /// When this copy was written, for the status line.
     public var updated: Date
     /// Which Mac wrote it, so the status line can say "last written by
@@ -70,6 +73,7 @@ public struct SharedState: Codable, Equatable {
                 githubPipelines: [String] = [],
                 gitlabPipelines: [String] = [],
                 prWorkflows: [String] = [],
+                prLabels: [String] = [],
                 updated: Date = Date(),
                 writtenBy: String = "",
                 hosts: [HostConfig] = [],
@@ -81,6 +85,7 @@ public struct SharedState: Codable, Equatable {
         self.githubPipelines = githubPipelines
         self.gitlabPipelines = gitlabPipelines
         self.prWorkflows = prWorkflows.sorted()
+        self.prLabels = prLabels.sorted()
         self.updated = updated
         self.writtenBy = writtenBy
         self.hosts = hosts
@@ -104,6 +109,7 @@ public struct SharedState: Codable, Equatable {
         githubPipelines = try c.decodeIfPresent([String].self, forKey: .githubPipelines) ?? []
         gitlabPipelines = try c.decodeIfPresent([String].self, forKey: .gitlabPipelines) ?? []
         prWorkflows = (try c.decodeIfPresent([String].self, forKey: .prWorkflows) ?? []).sorted()
+        prLabels = (try c.decodeIfPresent([String].self, forKey: .prLabels) ?? []).sorted()
         updated = try c.decodeIfPresent(Date.self, forKey: .updated) ?? .distantPast
         writtenBy = try c.decodeIfPresent(String.self, forKey: .writtenBy) ?? ""
         hosts = (try? c.decodeIfPresent([HostConfig].self, forKey: .hosts)) ?? []
@@ -132,6 +138,7 @@ public struct SharedState: Codable, Equatable {
         try c.encode(githubPipelines, forKey: .githubPipelines)
         try c.encode(gitlabPipelines, forKey: .gitlabPipelines)
         try c.encode(prWorkflows, forKey: .prWorkflows)
+        try c.encode(prLabels, forKey: .prLabels)
         try c.encode(updated, forKey: .updated)
         try c.encode(writtenBy, forKey: .writtenBy)
         try c.encode(hosts, forKey: .hosts)
@@ -141,7 +148,7 @@ public struct SharedState: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case notes, favorites, githubPipelines, gitlabPipelines, prWorkflows, updated, writtenBy
-        case hosts, routes, settings
+        case hosts, routes, settings, prLabels
     }
 
     public static let empty = SharedState(updated: .distantPast)
@@ -160,7 +167,7 @@ public struct SharedState: Codable, Equatable {
     public var isEmpty: Bool {
         notes.isEmpty && favorites.isEmpty
             && githubPipelines.isEmpty && gitlabPipelines.isEmpty
-            && prWorkflows.isEmpty
+            && prWorkflows.isEmpty && prLabels.isEmpty
     }
 
     /// Whether two copies carry the same content. Deliberately ignores
@@ -171,7 +178,7 @@ public struct SharedState: Codable, Equatable {
         notes == other.notes && favorites == other.favorites
             && githubPipelines == other.githubPipelines
             && gitlabPipelines == other.gitlabPipelines
-            && prWorkflows == other.prWorkflows
+            && prWorkflows == other.prWorkflows && prLabels == other.prLabels
             && hosts == other.hosts && routes == other.routes && settings == other.settings
             && unknownFields == other.unknownFields
     }
@@ -202,6 +209,9 @@ public enum SharedStateMerge {
             prWorkflows: mergeNames(base: base?.prWorkflows,
                                     local: local.prWorkflows,
                                     remote: remote.prWorkflows),
+            prLabels: mergeNames(base: base?.prLabels,
+                                 local: local.prLabels,
+                                 remote: remote.prLabels),
             updated: Date(),
             writtenBy: local.writtenBy,
             hosts: hosts,

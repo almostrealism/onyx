@@ -741,6 +741,30 @@ final class SharedStateWorkflowChoiceTests: XCTestCase {
         XCTAssertEqual(SharedStateMerge.merge(base: nil, local: local, remote: remote).prWorkflows,
                        ["CI", "Lint"])
     }
+
+    // MARK: - PR labels, which travel the same way
+
+    func testTheLabelChoiceRoundTripsAndOlderFilesDecode() throws {
+        let old = #"{"notes":{},"prWorkflows":["CI"]}"#
+        XCTAssertEqual(try JSONDecoder().decode(SharedState.self, from: Data(old.utf8)).prLabels, [])
+
+        let state = SharedState(prLabels: ["needs-human", "agent: ready"])
+        let back = try JSONDecoder().decode(SharedState.self, from: JSONEncoder().encode(state))
+        XCTAssertEqual(back.prLabels, ["agent: ready", "needs-human"])
+    }
+
+    func testALabelChoiceIsContentAndAChange() {
+        XCTAssertFalse(SharedState(prLabels: ["ready"]).isEmpty)
+        XCTAssertFalse(SharedState(prLabels: ["ready"]).sameContent(as: SharedState()))
+        XCTAssertTrue(SharedState(prLabels: ["a", "b"]).sameContent(as: SharedState(prLabels: ["b", "a"])))
+    }
+
+    func testTheFullMergeCarriesTheLabelChoice() {
+        let merged = SharedStateMerge.merge(base: SharedState(prLabels: ["a", "b"]),
+                                            local: SharedState(prLabels: ["a"]),
+                                            remote: SharedState(prLabels: ["a", "b", "c"]))
+        XCTAssertEqual(merged.prLabels, ["a", "c"], "b switched off here, c on there")
+    }
 }
 
 /// What the shared state grew for the iPhone and iPad (docs/ios-plan.md):

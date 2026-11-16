@@ -113,6 +113,7 @@ public final class PullRequestManager: ObservableObject {
             if mineOnly, !me.isEmpty {
                 collected = collected.filter { ($0.author ?? "").lowercased() == me }
             }
+            LabelFilterStore.shared.noteSeen(collected.flatMap(\.labels))
             self.pullRequests = collected.sorted {
                 if $0.repoFullName != $1.repoFullName { return $0.repoFullName < $1.repoFullName }
                 return $0.number > $1.number
@@ -160,6 +161,7 @@ public final class PullRequestManager: ObservableObject {
             isDraft
             headRefName
             author { login }
+            labels(first: 20) { nodes { name color } }
             reviewThreads(first: 100) {
               nodes { isResolved }
             }
@@ -197,6 +199,7 @@ public final class PullRequestManager: ObservableObject {
                 isDraft
                 headRefName
                 author { login }
+                labels(first: 20) { nodes { name color } }
                 reviewThreads(first: 50) {
                   nodes { isResolved }
                 }
@@ -266,7 +269,8 @@ public final class PullRequestManager: ObservableObject {
                                                                mergeable: node.mergeable),
                         headBranch: node.headRefName,
                         author: node.author?.login,
-                        apiSaysDraft: node.isDraft ?? false
+                        apiSaysDraft: node.isDraft ?? false,
+                        labels: node.labels?.nodes ?? []
                     )
                 }
                 completion(.success(prs))
@@ -327,7 +331,11 @@ public final class PullRequestManager: ObservableObject {
         let isDraft: Bool?
         let headRefName: String?
         let author: Author?
+        let labels: LabelList?
         let reviewThreads: ThreadList?
+    }
+    private struct LabelList: Decodable {
+        let nodes: [PRLabel]?
     }
     private struct Author: Decodable {
         let login: String?

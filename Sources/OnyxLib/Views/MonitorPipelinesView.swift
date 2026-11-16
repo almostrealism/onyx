@@ -16,6 +16,7 @@ struct PullRequestsSection: View {
     /// Observed so a workflow switched on in Settings appears at once —
     /// `ci.runs(for:)` reads the filter, but the filter is what changed.
     @ObservedObject private var workflowFilter = WorkflowFilterStore.shared
+    @ObservedObject private var labelFilter = LabelFilterStore.shared
 
     /// GitHub PRs then GitLab MRs, each already filtered/sorted by its
     /// own manager. Rows carry a provider badge so the source is clear.
@@ -63,6 +64,7 @@ struct PullRequestsSection: View {
                 } else {
                     ForEach(merged) { pr in
                         PullRequestRow(pr: pr, runs: ci.runs(for: pr),
+                                       labels: labelFilter.shown(pr),
                                        accentColor: appState.accentColor)
                     }
                 }
@@ -89,6 +91,8 @@ private struct PullRequestRow: View {
     let pr: PullRequest
     /// The latest CI on the PR's branch, fetched with no tracking needed.
     let runs: [PRPipelineRun]
+    /// The labels the user chose to see (LabelFilterStore).
+    let labels: [PRLabel]
     let accentColor: Color
 
     var body: some View {
@@ -132,6 +136,12 @@ private struct PullRequestRow: View {
                             }
                             .foregroundColor(.gray.opacity(0.5))
                         }
+                    }
+                    if !labels.isEmpty {
+                        FlowLayout(spacing: 4, lineSpacing: 3) {
+                            ForEach(labels, id: \.name) { PRLabelChip(label: $0) }
+                        }
+                        .padding(.top, 2)
                     }
                 }
                 Spacer(minLength: 0)

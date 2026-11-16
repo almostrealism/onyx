@@ -184,6 +184,7 @@ public final class SharedStateSync: ObservableObject {
                    GitLabConfigStore.shared.objectWillChange.map { _ in () },
                    FlowtreeConfigStore.shared.objectWillChange.map { _ in () },
                    WorkflowFilterStore.shared.includedChanged,
+                   LabelFilterStore.shared.includedChanged,
                    // Only the shared settings: the appearance config also
                    // holds which session each window last showed, which
                    // changes all day and is nobody else's business.
@@ -486,6 +487,7 @@ public final class SharedStateSync: ObservableObject {
                     githubPipelines: GitHubConfigStore.shared.pipelineURLs,
                     gitlabPipelines: GitLabConfigStore.shared.pipelineURLs,
                     prWorkflows: WorkflowFilterStore.shared.includedList,
+                    prLabels: LabelFilterStore.shared.includedList,
                     updated: Date(),
                     writtenBy: Self.thisMachine,
                     settings: SharedSetting.snapshot(of: AppearanceStore.shared.config))
@@ -562,6 +564,9 @@ public final class SharedStateSync: ObservableObject {
         // the overlay follows without a refresh.
         if WorkflowFilterStore.shared.includedList != state.prWorkflows {
             WorkflowFilterStore.shared.included = Set(state.prWorkflows)
+        }
+        if LabelFilterStore.shared.includedList != state.prLabels {
+            LabelFilterStore.shared.included = Set(state.prLabels)
         }
         // The settings that follow the user. Hosts are never adopted: a
         // device's host list is its own (the iPad reads them separately).

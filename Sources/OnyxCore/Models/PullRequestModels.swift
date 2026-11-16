@@ -48,6 +48,9 @@ public struct PullRequest: Identifiable, Equatable, Hashable {
     /// Author login/username. Lets the "only mine" filter work and is
     /// shown nowhere directly, but kept for filtering robustness.
     public let author: String?
+    /// Every label on it, in the forge's order. Which ones are SHOWN is
+    /// the user's choice (LabelFilterStore).
+    public let labels: [PRLabel]
 
     /// Does this title announce a draft?
     ///
@@ -66,7 +69,7 @@ public struct PullRequest: Identifiable, Equatable, Hashable {
                 repoFullName: String, number: Int, title: String, url: String,
                 openCommentThreads: Int, mergeStatus: PRMergeStatus,
                 headBranch: String? = nil, author: String? = nil,
-                apiSaysDraft: Bool = false) {
+                apiSaysDraft: Bool = false, labels: [PRLabel] = []) {
         // Either signal is enough: the API flag, or the title convention.
         self.isDraft = apiSaysDraft || Self.titleMarksDraft(title)
         self.provider = provider
@@ -78,6 +81,55 @@ public struct PullRequest: Identifiable, Equatable, Hashable {
         self.mergeStatus = mergeStatus
         self.headBranch = headBranch
         self.author = author
+        self.labels = labels
+    }
+}
+
+/// A label on a PR or MR. Its color matters as much as its name: teams
+/// (and agents) pick colors to mean things, and simple mode shows the
+/// color alone.
+public struct PRLabel: Equatable, Hashable, Codable {
+    public let name: String
+    /// Six hex digits, no "#" — GitHub's form; GitLab's "#d73a4a" is
+    /// normalized to it.
+    public let colorHex: String
+
+    public init(name: String, colorHex: String) {
+        self.name = name
+        self.colorHex = Self.normalized(colorHex)
+    }
+
+    /// "#D73A4A", "d73a4a" → "d73a4a". Anything that isn't six hex digits
+    /// (GitLab has accepted color names in the past) becomes neutral gray
+    /// rather than the white `Color(hex:)` falls back to, which would read
+    /// as a deliberate choice.
+    static func normalized(_ hex: String) -> String {
+        let h = hex.trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "#")).lowercased()
+        let isHex = h.count == 6 && h.allSatisfy { $0.isHexDigit }
+        return isHex ? h : "8a8a8a"
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, color }
+
+    /// Decodes every shape the forges send: GitHub's `{name, color}`,
+    /// GitLab's with `with_labels_details` (`{name, color: "#…"}`), and
+    /// GitLab's plain string — what an instance that ignores the
+    /// parameter returns.
+    public init(from decoder: Decoder) throws {
+        if let name = try? decoder.singleValueContainer().decode(String.self) {
+            self.init(name: name, colorHex: "")
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(name: try c.decode(String.self, forKey: .name),
+                  colorHex: try c.decodeIfPresent(String.self, forKey: .color) ?? "")
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(colorHex, forKey: .color)
     }
 }
 
