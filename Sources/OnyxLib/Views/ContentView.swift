@@ -634,7 +634,7 @@ private struct ContentViewCompactNotifications: ViewModifier {
     }
 }
 
-private struct ContentViewNotifications: ViewModifier {
+private struct ContentViewToggleNotifications: ViewModifier {
     @ObservedObject var appState: AppState
     let updateWindowTitle: () -> Void
     var hostWindow: NSWindow?
@@ -690,6 +690,23 @@ private struct ContentViewNotifications: ViewModifier {
                 guard isKeyWindow, appState.activeSession != nil else { return }
                 appState.showSessionNoteEditor = true
             }
+    }
+}
+
+private struct ContentViewNotifications: ViewModifier {
+    @ObservedObject var appState: AppState
+    let updateWindowTitle: () -> Void
+    var hostWindow: NSWindow?
+
+    private var isKeyWindow: Bool { hostWindow?.isKeyWindow == true }
+
+    func body(content: Content) -> some View {
+        content
+            // In a modifier of their own: Swift 6.4 gives up type-checking
+            // this many chained modifiers in one expression.
+            .modifier(ContentViewToggleNotifications(appState: appState,
+                                                     updateWindowTitle: updateWindowTitle,
+                                                     hostWindow: hostWindow))
             .modifier(ContentViewMonitorNotifications(appState: appState, hostWindow: hostWindow))
             .modifier(ContentViewPanelNotifications(appState: appState, hostWindow: hostWindow))
             .modifier(ContentViewOverlayNotifications(appState: appState, hostWindow: hostWindow))
