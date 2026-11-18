@@ -240,6 +240,24 @@ final class SessionWidgetTests: XCTestCase {
         XCTAssertEqual(rows.first?.url, "https://github.com/o/r/pull/1")
     }
 
+    /// A PR's chosen labels reach the widget as their colors, in order;
+    /// a file written before labels existed still reads.
+    func testWidgetPRsCarryTheChosenLabelsColors() throws {
+        let now = Date()
+        let pr = PullRequest(repoFullName: "o/r", number: 1, title: "PR", url: "https://x",
+                             openCommentThreads: 0, mergeStatus: .unknown, headBranch: "b",
+                             labels: [PRLabel(name: "ready", colorHex: "0E8A16"),
+                                      PRLabel(name: "size/S", colorHex: "ededed")])
+        let run = PRPipelineRun(id: "r", prID: "p", name: "CI", overall: .failure, runNumber: 1,
+                                attempt: 1, url: nil, updatedAt: now)
+        let rows = AppState.widgetPRs([pr], labels: { $0.labels.filter { $0.name == "ready" } }) { _ in [run] }
+        XCTAssertEqual(rows.first?.labelColors, ["0e8a16"])
+
+        let old = #"{"id":"p","branch":"b","title":"t","url":"u","state":"failed","text":"failed"}"#
+        let decoded = try JSONDecoder().decode(PRWidgetRow.self, from: Data(old.utf8))
+        XCTAssertNil(decoded.labelColors)
+    }
+
     // MARK: - Drawing
 
     private func busyRows() -> [SessionWidgetRow] {

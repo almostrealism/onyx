@@ -74,14 +74,20 @@ public struct PRWidgetRow: Codable, Hashable, Identifiable {
     public let state: State
     /// The job's name, or "failed" / "passed".
     public let text: String
+    /// The colors of the labels the user chose to see (six hex digits
+    /// each), in the PR's order — dots, as in simple mode. Optional so a
+    /// file from a build that didn't write them still reads.
+    public let labelColors: [String]?
 
-    public init(id: String, branch: String, title: String, url: String, state: State, text: String) {
+    public init(id: String, branch: String, title: String, url: String, state: State, text: String,
+                labelColors: [String] = []) {
         self.id = id
         self.branch = branch
         self.title = title
         self.url = url
         self.state = state
         self.text = text
+        self.labelColors = labelColors
     }
 }
 

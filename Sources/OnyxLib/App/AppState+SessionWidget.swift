@@ -54,10 +54,14 @@ extension AppState {
     /// order — those with CI to show.
     func sessionWidgetPRs() -> [PRWidgetRow] {
         let ci = today.prPipelines
-        return Self.widgetPRs(today.pullRequestsWithPipelines()) { ci.runs(for: $0) }
+        let labels = LabelFilterStore.shared
+        return Self.widgetPRs(today.pullRequestsWithPipelines(), labels: { labels.shown($0) }) {
+            ci.runs(for: $0)
+        }
     }
 
     static func widgetPRs(_ prs: [PullRequest],
+                          labels: (PullRequest) -> [PRLabel] = { _ in [] },
                           runs: (PullRequest) -> [PRPipelineRun]) -> [PRWidgetRow] {
         Array(prs.compactMap { pr -> PRWidgetRow? in
             guard let status = PRPipelineRun.lineStatus(runs(pr)) else { return nil }
@@ -69,7 +73,8 @@ extension AppState {
             case .passed: state = .passed
             }
             return PRWidgetRow(id: pr.id, branch: PRJobStripSource.branchLabel(pr), title: pr.title,
-                               url: pr.url, state: state, text: status.text)
+                               url: pr.url, state: state, text: status.text,
+                               labelColors: labels(pr).map(\.colorHex))
         }.prefix(sessionWidgetPRs))
     }
 

@@ -91,6 +91,14 @@ enum WidgetPalette {
     static let purple = Color(red: 0xC0 / 255, green: 0x6B / 255, blue: 0xFF / 255)
     static let red = Color(red: 0xFF / 255, green: 0x6B / 255, blue: 0x6B / 255)
 
+    /// Six hex digits ("d73a4a") as a color; anything else is gray.
+    static func color(hex: String) -> Color {
+        guard hex.count == 6, let v = UInt32(hex, radix: 16) else { return .gray }
+        return Color(red: Double((v >> 16) & 0xFF) / 255,
+                     green: Double((v >> 8) & 0xFF) / 255,
+                     blue: Double(v & 0xFF) / 255)
+    }
+
     static func pr(_ state: PRWidgetRow.State) -> Color {
         switch state {
         case .running: return accent.opacity(0.9)
@@ -402,6 +410,22 @@ struct PRWidgetRowView: View {
                 .foregroundColor(.white.opacity(0.85))
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if let colors = pr.labelColors, !colors.isEmpty {
+                // The chosen labels as color alone, like simple mode's
+                // PR line (OnyxUI's PRLabelDots, restated: the extension
+                // links only this target). The branch truncates first.
+                HStack(spacing: 3) {
+                    ForEach(Array(colors.enumerated()), id: \.offset) { _, hex in
+                        Circle()
+                            .fill(WidgetPalette.color(hex: hex))
+                            .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 0.5))
+                            .frame(width: 6, height: 6)
+                    }
+                }
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 3 }
+                .fixedSize()
+                .layoutPriority(2)
+            }
             Spacer(minLength: 6)
             Text(pr.text)
                 .font(.system(size: pr.state == .running || pr.state == .queued ? 11 : 10))
@@ -427,7 +451,7 @@ extension SessionWidgetSnapshot {
             PRWidgetRow(id: "p1", branch: "feature/widget", title: "Session widget", url: "https://github.com",
                         state: .running, text: "build-macos"),
             PRWidgetRow(id: "p2", branch: "fix/flaky", title: "Fix the flaky test", url: "https://github.com",
-                        state: .failed, text: "failed"),
+                        state: .failed, text: "failed", labelColors: ["d93f0b"]),
             PRWidgetRow(id: "p3", branch: "docs/tour", title: "Docs", url: "https://github.com",
                         state: .passed, text: "passed"),
         ])
