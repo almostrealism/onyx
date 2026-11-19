@@ -24,6 +24,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.22',
+    date: null,
+    upcoming: true,
+    summary:
+      'PR labels in their colors: pick the ones that matter — the ones your agents leave — and see them at a glance.',
+    highlights: [
+      'Choose which GitHub and GitLab labels to see in Settings → Pull Requests; nothing is shown until you switch one on.',
+      'The overlay shows each chosen label by name, in its color, under the PR’s title.',
+      'Simple mode, the desktop widget and the iPhone’s Today page show each as a tiny colored dot after the branch.',
+      'Your label choice follows you between Macs through shared state.',
+    ],
+  },
+  {
     version: '0.21',
     date: '2026-11-07',
     summary:
