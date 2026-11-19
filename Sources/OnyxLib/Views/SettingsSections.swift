@@ -301,7 +301,10 @@ struct PRLabelSettingsSection: View {
                 let colors = filter.colors
                 ForEach(names, id: \.self) { name in
                     Toggle(isOn: Binding(get: { filter.isIncluded(name) },
-                                         set: { filter.setIncluded(name, $0) })) {
+                                         set: {
+                                             filter.setIncluded(name, $0)
+                                             if $0 { FeatureTipStore.shared.used("prs.labels") }
+                                         })) {
                         HStack(spacing: 6) {
                             PRLabelDot(label: PRLabel(name: name, colorHex: colors[name] ?? ""),
                                        size: 8)

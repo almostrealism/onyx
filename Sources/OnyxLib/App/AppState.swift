@@ -1255,7 +1255,7 @@ public class AppState: ObservableObject {
     /// The features What's New can demonstrate rather than describe.
     public static let demonstrableFeatures: Set<String> = [
         "monitor.calendar", "files.tree", "files.paste", "terminal.ctrl-tab", "panel.divider",
-        "window.compact",
+        "window.compact", "prs.labels",
     ]
 
     /// "Show me": close What's New and put the feature on screen.
@@ -1278,6 +1278,9 @@ public class AppState: ObservableObject {
         case "window.compact":
             // As ⇧⌘D: a full-screen window has no shape to change.
             if NSApp.keyWindow?.styleMask.contains(.fullScreen) != true { compactMode = true }
+        case "prs.labels":
+            settingsPane = .pullRequests
+            showSettings = true
         default:
             break
         }

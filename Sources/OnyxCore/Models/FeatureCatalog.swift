@@ -125,6 +125,11 @@ public enum FeatureCatalog {
                 detail: "A plain click on a web or mail link opens it — no copy mode, no ⌘. A drag still selects, and the click that brings Onyx forward doesn't open anything.",
                 tip: "Click a link to open it", keys: [],
                 place: nil),
+        Feature(id: "prs.labels", since: "0.22",
+                title: "PR labels, in their colors",
+                detail: "Choose the labels worth seeing in Settings → Pull Requests — say, the ones your agents leave to say what they think of a PR. The overlay shows them by name in their colors; simple mode, the widget and the iPhone show each as a tiny colored dot.",
+                tip: "Pick the PR labels to show in Settings → Pull Requests", keys: [],
+                place: nil),
     ]
 
     public static func feature(_ id: String) -> Feature? {
