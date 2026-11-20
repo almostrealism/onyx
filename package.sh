@@ -58,6 +58,21 @@ echo ""
 
 # ---------------------------------------------------------------- build
 echo "  Building (release)..."
+# The Metal toolchain (SwiftTerm's shaders) is a cryptex mounted under a
+# random name that changes with each mount — after every restart — and
+# the cached build plans remember the old one: "unable to spawn process
+# '…/MetalToolchain-v27…/metal'". Drop the plans when they name a mount
+# that's gone; they're rebuilt in seconds.
+PLANS=".build/out/Intermediates.noindex/XCBuildData"
+if [ -d "$PLANS" ]; then
+    for m in $(grep -rhoE '/var/run/com\.apple\.security\.cryptexd/mnt/[^/"]+' "$PLANS" 2>/dev/null | sort -u); do
+        if [ ! -d "$m" ]; then
+            echo "  (the Metal toolchain moved since the last build; clearing cached build plans)"
+            rm -rf ".build/out/Intermediates.noindex/XCBuildData"
+            break
+        fi
+    done
+fi
 swift build -c release
 
 echo "  Assembling $APP_NAME.app..."
