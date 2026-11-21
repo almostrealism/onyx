@@ -4,6 +4,7 @@ import Hero from '../components/sections/Hero.astro';
 import Overlay from '../components/sections/Overlay.astro';
 import Work from '../components/sections/Work.astro';
 import Agents from '../components/sections/Agents.astro';
+import Everywhere from '../components/sections/Everywhere.astro';
 import Alerts from '../components/sections/Alerts.astro';
 import Connection from '../components/sections/Connection.astro';
 import Features from '../components/sections/Features.astro';
@@ -12,14 +13,15 @@ import Footer from '../components/sections/Footer.astro';
 ---
 
 <Layout
-  title="Onyx — the workspace for everything you're waiting on"
-  description="A macOS overlay that keeps your SSH sessions connected and shows what's due today, what your sessions are doing, which pull requests are blocked and which builds are red — in one keystroke."
+  title="Onyx — mission control for your agents, PRs and pipelines"
+  description="A macOS overlay that watches every Claude on every machine, every open pull request and its CI, and every pipeline at once, and shows which one needs you. Over SSH terminals that stay connected."
 >
   <main>
     <Hero />
     <Overlay />
     <Work />
     <Agents />
+    <Everywhere />
     <Alerts />
     <Connection />
     <Features />

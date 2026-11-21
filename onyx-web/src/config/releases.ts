@@ -32,7 +32,7 @@ export const RELEASES: Release[] = [
     highlights: [
       'Choose which GitHub and GitLab labels to see in Settings → Pull Requests; nothing is shown until you switch one on.',
       'The overlay shows each chosen label by name, in its color, under the PR’s title.',
-      'Simple mode, the desktop widget and the iPhone’s Today page show each as a tiny colored dot after the branch.',
+      'Simple mode, the compact window and the desktop widget show each as a tiny colored dot after the branch.',
       'Your label choice follows you between Macs through shared state.',
     ],
   },

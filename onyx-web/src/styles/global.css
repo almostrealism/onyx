@@ -27,6 +27,8 @@
   --color-ok: #6bff8e;
   --color-warn: #ffd06b;
   --color-bad: #ff6b6b;
+  /* Claude, as the app marks it — a session with a Claude in it */
+  --color-claude: #c06bff;
 
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;

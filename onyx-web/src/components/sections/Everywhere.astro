@@ -1,0 +1,103 @@
+---
+// The overlay is one place to look; these are the others. Each ships in
+// the current build. Sample data in the drawings.
+---
+
+<section class="mx-auto max-w-5xl px-4 py-20 sm:px-6 sm:py-24">
+  <div class="max-w-2xl">
+    <p class="font-mono text-[10px] tracking-[0.2em] text-accent-primary uppercase">
+      Always in view
+    </p>
+    <h2 class="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
+      You don't have to be looking at Onyx to be watching
+    </h2>
+    <p class="mt-4 text-text-secondary">
+      The same sessions, Claudes, PRs and pipelines follow you to the edge of the screen,
+      the desktop, the menu bar and your other Macs, so the one that needs you can find you
+      while you're working in something else.
+    </p>
+  </div>
+
+  <div class="mt-12 grid items-start gap-6 lg:grid-cols-2">
+    <!-- Compact window -->
+    <div class="rounded-xl border border-border-subtle bg-bg-secondary/40 p-5 sm:p-6">
+      <p class="font-mono text-[10px] tracking-wide text-accent-primary uppercase">
+        Compact window &middot; ⇧⌘D
+      </p>
+      <h3 class="mt-3 font-medium">The side panel, on its own</h3>
+      <p class="mt-2.5 text-sm leading-relaxed text-text-secondary">
+        One shortcut shrinks a window to just simple mode's panel: sessions, what each
+        Claude is doing, today's agenda, open PRs with their CI. Park it at the edge of the
+        screen beside your editor. Each shape remembers its own size and place.
+      </p>
+    </div>
+
+    <!-- Widget -->
+    <div class="rounded-xl border border-border-subtle bg-bg-secondary/40 p-5 sm:p-6">
+      <p class="font-mono text-[10px] tracking-wide text-accent-primary uppercase">
+        Desktop widget
+      </p>
+      <h3 class="mt-3 font-medium">Onyx Sessions, on the desktop</h3>
+      <p class="mt-2.5 text-sm leading-relaxed text-text-secondary">
+        Your sessions and their Claudes, turning amber when one is waiting for you, and your
+        PRs' CI with their label dots where there's room. Click a session and it opens.
+      </p>
+      <div class="mt-4 rounded-2xl border border-border-subtle bg-bg-primary/80 p-4 font-mono text-[10px]">
+        <p class="flex items-baseline gap-2">
+          <span class="h-1.5 w-1.5 rounded-full bg-claude"></span>
+          <span class="text-text-secondary">api</span>
+          <span class="truncate text-claude/80">Edit retry.ts</span>
+        </p>
+        <p class="mt-1.5 flex items-baseline gap-2">
+          <span class="h-1.5 w-1.5 rounded-full bg-warn"></span>
+          <span class="text-warn">billing</span>
+          <span class="text-warn/80">waiting for permission</span>
+        </p>
+        <p class="mt-1.5 flex items-baseline gap-2">
+          <span class="h-1.5 w-1.5 rounded-full bg-claude"></span>
+          <span class="text-text-secondary">infra</span>
+          <span class="truncate text-claude/80">Bash terraform plan</span>
+        </p>
+        <div class="mt-3 border-t border-border-subtle pt-2.5">
+          <p class="flex items-center gap-2">
+            <span class="min-w-0 flex-1 truncate font-sans text-text-secondary">Retry policy for the ingest queue</span>
+            <span class="h-[6px] w-[6px] rounded-full" style="background:#c06bff"></span>
+            <span class="text-accent-primary">integration</span>
+          </p>
+          <p class="mt-1 flex items-center gap-2">
+            <span class="min-w-0 flex-1 truncate font-sans text-text-secondary">Billing settings page</span>
+            <span class="h-[6px] w-[6px] rounded-full" style="background:#ff6b6b"></span>
+            <span class="text-bad">failed</span>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Menu bar -->
+    <div class="rounded-xl border border-border-subtle bg-bg-secondary/40 p-5 sm:p-6">
+      <p class="font-mono text-[10px] tracking-wide text-accent-primary uppercase">
+        Menu bar
+      </p>
+      <h3 class="mt-3 font-medium">Failures first, from anywhere</h3>
+      <p class="mt-2.5 text-sm leading-relaxed text-text-secondary">
+        Sessions with notes and their unread agent alerts, and every tracked pipeline, red
+        ones at the top with their retry attempt and listed by their PR's title. It's one
+        click away from any app.
+      </p>
+    </div>
+
+    <!-- Every Mac -->
+    <div class="rounded-xl border border-border-subtle bg-bg-secondary/40 p-5 sm:p-6">
+      <p class="font-mono text-[10px] tracking-wide text-accent-primary uppercase">
+        Every Mac you use
+      </p>
+      <h3 class="mt-3 font-medium">One picture, on the desk and the laptop</h3>
+      <p class="mt-2.5 text-sm leading-relaxed text-text-secondary">
+        Session notes, favorites, tracked pipelines, which workflows and labels you follow,
+        and your shared settings sync through a host you choose, merged carefully so neither
+        Mac loses anything. Open the laptop and it's watching the same work. No account and
+        no cloud service: it's a file on your own machine.
+      </p>
+    </div>
+  </div>
+</section>

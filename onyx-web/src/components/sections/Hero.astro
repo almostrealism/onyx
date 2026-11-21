@@ -1,6 +1,36 @@
 ---
 import { REPO_URL, REQUIREMENTS } from '../../config/site';
 import { LATEST, downloadURL } from '../../config/releases';
+
+// The hero illustration is simple mode: the side panel Onyx keeps beside
+// the terminal. Invented sample data drawn with CSS, not a screenshot —
+// but every kind of line in it is one the app draws.
+type Claude = { state: 'running' | 'permission' | 'waiting'; tool?: string; input?: string; more?: number };
+const sessions: { key: string; name: string; host: string; note?: string; claude?: Claude; live?: boolean }[] = [
+  { key: '⌘1', name: 'api', host: 'workstation', claude: { state: 'running', tool: 'Edit', input: 'src/ingest/retry.ts' } },
+  { key: '⌘2', name: 'billing', host: 'workstation', claude: { state: 'permission' } },
+  { key: '⌘3', name: 'infra', host: 'build-02', claude: { state: 'running', tool: 'Bash', input: 'terraform plan', more: 1 } },
+  { key: '⌘4', name: 'trainer', host: 'gpu-01', note: 'epoch 14/40 — ETA 2h', live: true },
+  { key: '⌘5', name: 'console', host: 'workstation', claude: { state: 'running', tool: 'Read', input: 'app/routes/settings.tsx' } },
+  { key: '⌘6', name: 'docs', host: 'build-02', claude: { state: 'waiting' } },
+  { key: '⌘7', name: 'evals', host: 'gpu-01', claude: { state: 'running', tool: 'Bash', input: 'pytest -k regression' } },
+];
+
+type PR = { title: string; branch: string; status: { kind: 'running' | 'queued' | 'failed' | 'passed'; job?: string }; labels?: string[] };
+const prs: PR[] = [
+  { title: 'Retry policy for the ingest queue', branch: 'ingest-retry', status: { kind: 'running', job: 'integration' }, labels: ['#c06bff'] },
+  { title: 'Billing settings page', branch: 'feat/billing', status: { kind: 'failed' }, labels: ['#ff6b6b'] },
+  { title: 'Pin the runner image', branch: 'runner-pin', status: { kind: 'queued', job: 'build-arm64' } },
+  { title: 'Cut eval time in half', branch: 'evals-shard', status: { kind: 'running', job: 'shard 3/8' }, labels: ['#c06bff', '#ffd06b'] },
+  { title: 'Terraform 1.9', branch: 'tf-1.9', status: { kind: 'passed' }, labels: ['#6bff8e'] },
+  { title: 'Docs for the export API', branch: 'docs/export', status: { kind: 'passed' } },
+];
+
+const pipelines = [
+  { mark: '✕', color: 'text-bad', name: 'deploy · prod', meta: 'attempt 2' },
+  { mark: '◐', color: 'text-accent-primary', name: 'nightly evals', meta: '5 of 9' },
+  { mark: '●', color: 'text-ok', name: 'release 4.2', meta: '11m' },
+];
 ---
 
 <section class="relative overflow-hidden">
@@ -13,49 +43,52 @@ import { LATEST, downloadURL } from '../../config/releases';
   >
   </div>
 
-  <div class="relative mx-auto max-w-5xl px-4 pt-24 sm:px-6 pb-20 sm:pt-32 sm:pb-24">
-    <p class="font-mono text-xs tracking-[0.2em] text-accent-primary/80 uppercase">
-      A workspace for getting things done
-    </p>
+  <div class="relative mx-auto max-w-6xl px-4 pt-24 pb-20 sm:px-6 sm:pt-32 sm:pb-24">
+    <div class="max-w-3xl">
+      <p class="font-mono text-xs tracking-[0.2em] text-accent-primary/80 uppercase">
+        Mission control for work you've handed off
+      </p>
 
-    <h1 class="mt-6 text-4xl leading-[1.1] font-bold tracking-tight sm:text-6xl">
-      Everything you're waiting on,<br />
-      <span class="accent-text">one keystroke away.</span>
-    </h1>
+      <h1 class="mt-6 text-4xl leading-[1.1] font-bold tracking-tight sm:text-6xl">
+        A dozen agents. Thirty pull requests.<br />
+        <span class="accent-text">One glance.</span>
+      </h1>
 
-    <p class="mt-7 max-w-2xl text-lg leading-relaxed text-text-secondary">
-      More of the work is being done by something that isn't you — an agent, a
-      pipeline, a training run, a reviewer. Onyx is a jet-black overlay that drops
-      over whatever you're doing and shows the state of all of it at once: what's
-      due today, which sessions are still producing output, which pull requests are
-      blocked, which builds are red, and how the machines are holding up.
-    </p>
+      <p class="mt-7 max-w-2xl text-lg leading-relaxed text-text-secondary">
+        Run Claude in every tmux session on every machine you have, keep a stack of pull
+        requests moving through CI across GitHub and GitLab, and still know at any moment
+        which one needs you. Onyx watches all of it: what each agent is doing right now,
+        which one is waiting for permission, which job each PR is on, which pipeline just
+        went red.
+      </p>
 
-    <p class="mt-4 max-w-2xl text-lg leading-relaxed text-text-secondary">
-      Underneath it, terminals that are already connected. Close the lid, change
-      networks, walk away for a day — come back and start typing.
-    </p>
+      <p class="mt-4 max-w-2xl text-lg leading-relaxed text-text-secondary">
+        Underneath it, terminals that are already connected to all those machines. Close the
+        lid, change networks, walk away for a day, and they're live again the moment you're
+        back.
+      </p>
 
-    <div class="mt-10 flex flex-wrap items-center gap-4">
-      <a
-        href={downloadURL(LATEST.version)}
-        class="accent-glow rounded-lg bg-accent-primary px-6 py-3 font-medium text-bg-primary transition hover:bg-accent-glow"
-      >
-        Download for Mac
-      </a>
-      <a
-        href={REPO_URL}
-        class="rounded-lg border border-border-subtle px-6 py-3 font-medium text-text-secondary transition hover:border-border-hover hover:text-text-primary"
-      >
-        Source on GitHub
-      </a>
+      <div class="mt-10 flex flex-wrap items-center gap-4">
+        <a
+          href={downloadURL(LATEST.version)}
+          class="accent-glow rounded-lg bg-accent-primary px-6 py-3 font-medium text-bg-primary transition hover:bg-accent-glow"
+        >
+          Download for Mac
+        </a>
+        <a
+          href={REPO_URL}
+          class="rounded-lg border border-border-subtle px-6 py-3 font-medium text-text-secondary transition hover:border-border-hover hover:text-text-primary"
+        >
+          Source on GitHub
+        </a>
+      </div>
+
+      <p class="mt-5 font-mono text-xs text-text-muted">
+        v{LATEST.version} &middot; {REQUIREMENTS.os} &middot; {REQUIREMENTS.arch} &middot; free and open source
+      </p>
     </div>
 
-    <p class="mt-5 font-mono text-xs text-text-muted">
-      v{LATEST.version} &middot; {REQUIREMENTS.os} &middot; {REQUIREMENTS.arch} &middot; free and open source
-    </p>
-
-    <!-- The thing itself: a terminal, with the overlay's status line under it. -->
+    <!-- The thing itself: simple mode — the side panel, and the terminal beside it. -->
     <div
       class="mt-16 overflow-hidden rounded-xl border border-border-subtle bg-bg-secondary/80 shadow-2xl backdrop-blur"
     >
@@ -63,34 +96,126 @@ import { LATEST, downloadURL } from '../../config/releases';
         <span class="h-2.5 w-2.5 rounded-full bg-bad/60"></span>
         <span class="h-2.5 w-2.5 rounded-full bg-warn/60"></span>
         <span class="h-2.5 w-2.5 rounded-full bg-ok/60"></span>
-        <span class="ml-3 font-mono text-xs text-text-muted">onyx — workstation — main</span>
+        <span class="ml-3 font-mono text-xs text-text-muted">onyx — workstation — api</span>
       </div>
-      <div class="space-y-1.5 px-4 py-5 font-mono text-[12px] leading-relaxed sm:px-5 sm:py-6 sm:text-[13px]">
-        <p class="text-text-muted">
-          <span class="text-accent-primary">you@workstation</span>
-          <span class="text-text-secondary">~/src/api</span>
-          <span class="text-ok">main</span>
-        </p>
-        <p class="text-text-secondary">$ swift test</p>
-        <p class="text-text-muted">Executed 854 tests, with 0 failures</p>
-        <p class="text-text-secondary">
-          $ <span class="inline-block h-4 w-2 translate-y-0.5 bg-accent-primary/80 [animation:blink_1.1s_step-end_infinite]"></span>
-        </p>
-      </div>
-      <div
-        class="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border-subtle px-4 py-3 font-mono text-[10px] sm:px-5 sm:text-[11px] text-text-muted"
-      >
-        <span><span class="text-ok">●</span> connected</span>
-        <span>CPU 12%</span>
-        <span>MEM 34.2 GB</span>
-        <span>GPU 61%</span>
-        <span><span class="text-bad">4</span> today</span>
-        <span><span class="text-warn">2</span> PRs</span>
-        <span class="text-accent-primary">⌘1 api</span>
-        <span>⌘2 trainer</span>
-        <span>⌘3 logs</span>
+
+      <div class="grid md:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+        <!-- Side panel -->
+        <div class="border-b border-border-subtle p-4 font-mono md:border-r md:border-b-0 sm:p-5">
+          <p class="text-[10px] tracking-[0.2em] text-text-muted uppercase">Sessions</p>
+          <ul class="mt-3 space-y-2.5">
+            {
+              sessions.map((s, i) => (
+                <li class={`rounded px-2 py-1 ${i === 0 ? 'bg-accent-primary/5' : ''}`}>
+                  <p class="flex items-baseline gap-1.5 text-[11px]">
+                    <span class="text-[9px] text-text-muted/60">{s.key}</span>
+                    <span class={i === 0 ? 'text-accent-primary' : 'text-text-secondary'}>{s.name}</span>
+                    {s.claude && (
+                      <span
+                        class={`h-1.5 w-1.5 translate-y-[-1px] rounded-full ${s.claude.state === 'permission' ? 'bg-warn [animation:pulse_1.4s_ease-in-out_infinite]' : s.claude.state === 'waiting' ? 'bg-claude/50' : 'bg-claude'}`}
+                        title="A Claude is in this session"
+                      />
+                    )}
+                    {s.live && <span class="h-1.5 w-1.5 translate-y-[-1px] rounded-full bg-ok" />}
+                    <span class="ml-auto text-[9px] text-text-muted/60">{s.host}</span>
+                  </p>
+                  {s.claude?.state === 'running' && (
+                    <p class="mt-0.5 flex min-w-0 items-baseline gap-1.5 pl-6 text-[10px]">
+                      <span class="text-claude/90">{s.claude.tool}</span>
+                      <span class="truncate text-text-muted">{s.claude.input}</span>
+                      {s.claude.more && <span class="text-[9px] text-claude/60">+{s.claude.more}</span>}
+                    </p>
+                  )}
+                  {s.claude?.state === 'permission' && (
+                    <p class="mt-0.5 pl-6 text-[10px] text-warn [animation:pulse_1.4s_ease-in-out_infinite]">
+                      waiting for permission
+                    </p>
+                  )}
+                  {s.claude?.state === 'waiting' && (
+                    <p class="mt-0.5 pl-6 text-[10px] text-text-muted">waiting for you</p>
+                  )}
+                  {s.note && <p class="mt-0.5 pl-6 text-[10px] text-text-muted">{s.note}</p>}
+                </li>
+              ))
+            }
+          </ul>
+
+          <p class="mt-6 text-[10px] tracking-[0.2em] text-text-muted uppercase">
+            Open PRs <span class="tracking-normal normal-case">&middot; 23</span>
+          </p>
+          <ul class="mt-3 space-y-1.5">
+            {
+              prs.map((pr) => (
+                <li class="flex min-w-0 items-center gap-1.5 text-[10px]">
+                  <span class="min-w-0 flex-1 truncate font-sans text-[11px] text-text-secondary">{pr.title}</span>
+                  {pr.labels && (
+                    <span class="flex shrink-0 gap-[3px]">
+                      {pr.labels.map((c) => (
+                        <span class="h-[6px] w-[6px] rounded-full ring-[0.5px] ring-white/25" style={`background:${c}`} />
+                      ))}
+                    </span>
+                  )}
+                  {pr.status.kind === 'running' && <span class="shrink-0 text-accent-primary">{pr.status.job}</span>}
+                  {pr.status.kind === 'queued' && <span class="shrink-0 text-warn/90">{pr.status.job}</span>}
+                  {pr.status.kind === 'failed' && <span class="shrink-0 text-bad">failed</span>}
+                  {pr.status.kind === 'passed' && <span class="shrink-0 text-ok/80">passed</span>}
+                </li>
+              ))
+            }
+          </ul>
+
+          <p class="mt-6 text-[10px] tracking-[0.2em] text-text-muted uppercase">Pipelines</p>
+          <ul class="mt-3 space-y-1.5">
+            {
+              pipelines.map((p) => (
+                <li class="flex items-baseline gap-2 text-[10px]">
+                  <span class={p.color}>{p.mark}</span>
+                  <span class="text-text-secondary">{p.name}</span>
+                  <span class="ml-auto text-text-muted">{p.meta}</span>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+
+        <!-- Terminal -->
+        <div class="flex flex-col">
+          <div class="flex-1 space-y-1.5 px-4 py-5 font-mono text-[12px] leading-relaxed sm:px-5 sm:py-6 sm:text-[13px]">
+            <p class="text-text-muted">
+              <span class="text-claude">●</span>
+              <span class="text-text-secondary">Update(src/ingest/retry.ts)</span>
+            </p>
+            <p class="pl-4 text-text-muted">⎿ Added jittered backoff, capped at 30s</p>
+            <p class="text-text-muted">
+              <span class="text-claude">●</span>
+              <span class="text-text-secondary">Bash(npm test -- ingest)</span>
+            </p>
+            <p class="pl-4 text-text-muted">⎿ 48 passed</p>
+            <p class="pt-2 text-text-secondary">
+              The retry policy now backs off with jitter. Pushing to <span class="text-ok">ingest-retry</span> —
+              CI will pick it up.
+            </p>
+            <p class="pt-2 text-text-secondary">
+              &gt; <span class="inline-block h-4 w-2 translate-y-0.5 bg-accent-primary/80 [animation:blink_1.1s_step-end_infinite]"></span>
+            </p>
+          </div>
+          <div
+            class="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border-subtle px-4 py-3 font-mono text-[10px] text-text-muted sm:px-5 sm:text-[11px]"
+          >
+            <span><span class="text-ok">●</span> connected</span>
+            <span>CPU 47%</span>
+            <span>MEM 34.2 GB</span>
+            <span>GPU 61%</span>
+            <span class="text-accent-primary">⌘1 api</span>
+            <span>⌘2 billing <span class="text-warn">●</span></span>
+            <span>⌘3 infra</span>
+          </div>
+        </div>
       </div>
     </div>
+    <p class="mt-4 text-center font-mono text-[11px] text-text-muted">
+      Simple mode &middot; illustration with sample data
+    </p>
   </div>
 </section>
 
@@ -98,5 +223,9 @@ import { LATEST, downloadURL } from '../../config/releases';
   @keyframes blink {
     0%, 100% { opacity: 1; }
     50% { opacity: 0; }
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
   }
 </style>
