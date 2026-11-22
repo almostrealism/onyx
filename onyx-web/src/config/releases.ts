@@ -25,8 +25,7 @@ export interface Release {
 export const RELEASES: Release[] = [
   {
     version: '0.22',
-    date: null,
-    upcoming: true,
+    date: '2026-11-22',
     summary:
       'PR labels in their colors: pick the ones that matter — the ones your agents leave — and see them at a glance.',
     highlights: [
