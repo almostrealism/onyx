@@ -754,6 +754,23 @@ extension AppState {
         return ("/usr/bin/ssh", args)
     }
 
+    /// The terminal that installs tmux on a host that hasn't got it
+    /// (`TmuxInstall.terminalScript`). Interactive on purpose, like
+    /// `sshCommand`: sudo or su asks for a password, and the user answers
+    /// it there. Rides the host's pair like every other terminal.
+    public func tmuxInstallCommand(host h: HostConfig, plan: TmuxInstallPlan) -> (String, [String])? {
+        guard let script = TmuxInstall.terminalScript(plan) else { return nil }
+        if h.isLocal {
+            let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+            return (shell, ["-lc", script])
+        }
+        var args = sshSessionArgs(for: h)
+        args.append("-t")
+        args.append(sshUserHost(for: h))
+        args.append("exec $SHELL -lc '\(script)'")
+        return ("/usr/bin/ssh", args)
+    }
+
     /// Build the command to attach to a tmux session inside a docker container
     public func dockerTmuxCommand(host h: HostConfig, container: String, sessionName: String) -> (String, [String]) {
         let safeContainer = sanitizedContainer(container)

@@ -54,6 +54,15 @@ final class RemoteScriptBudgetTests: XCTestCase {
                           file: file, line: line)
     }
 
+    // MARK: - The tmux probe
+
+    /// Fixed size — it names nothing from the host — but it lists every
+    /// package manager, and that list is the thing that would grow.
+    func testTmuxProbeFits() {
+        let (state, host) = makeState()
+        assertFits(payload(TmuxInstall.probeScript, state: state, host: host), "the tmux probe")
+    }
+
     // MARK: - The file editor
 
     /// Scales with the path: a deep directory and a long file name.

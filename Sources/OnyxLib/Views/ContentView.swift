@@ -1111,17 +1111,25 @@ struct ConnectionErrorOverlay: View {
         appState.activeSessionConnectionState.isHostPaused
     }
 
+    /// The host has no tmux: explain, and offer to install it.
+    private var tmuxPlan: TmuxInstallPlan? {
+        appState.activeSessionConnectionState.tmuxInstallPlan
+    }
+
     private var tint: Color {
+        if tmuxPlan != nil { return appState.accentColor }
         if isPaused { return Color.onyxAmber }
         return appState.needsKeySetup ? appState.accentColor : Color.onyxRed
     }
 
     private var symbol: String {
+        if tmuxPlan != nil { return "shippingbox" }
         if isPaused { return "pause.circle.fill" }
         return appState.needsKeySetup ? "key.fill" : "wifi.exclamationmark"
     }
 
     private var title: String {
+        if tmuxPlan != nil { return "TMUX NOT INSTALLED" }
         if isPaused { return "HOST PAUSED" }
         return appState.needsKeySetup ? "SSH KEY REQUIRED" : "CONNECTION FAILED"
     }
@@ -1147,7 +1155,9 @@ struct ConnectionErrorOverlay: View {
                     .lineSpacing(4)
                     .frame(maxWidth: 460)
 
-                if isPaused {
+                if let plan = tmuxPlan {
+                    TmuxInstallActions(appState: appState, plan: plan)
+                } else if isPaused {
                     Button(action: { appState.showSettings = true }) {
                         HStack(spacing: 8) {
                             Image(systemName: "slider.horizontal.3")
@@ -1189,6 +1199,7 @@ struct ConnectionErrorOverlay: View {
 
                 Text(isPaused
                      ? "⌘, → Settings → HOSTS"
+                     : tmuxPlan != nil ? "Installed it yourself? ⌘K → Reconnect SSH"
                      : "⌘K → Reconnect SSH  |  ⌘, → Edit Settings")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(appState.accentColor.opacity(0.5))
@@ -1207,6 +1218,98 @@ struct ConnectionErrorOverlay: View {
     }
 }
 
+/// The tmux overlay's buttons: install it (shown with the exact command
+/// it will run, so nothing happens on the host that the user didn't
+/// see), or — when Onyx doesn't know how — where to find out, and check
+/// again once it's done.
+struct TmuxInstallActions: View {
+    @ObservedObject var appState: AppState
+    let plan: TmuxInstallPlan
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if let command = plan.command {
+                Text(command)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.6))
+                    .textSelection(.enabled)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: 460)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(5)
+
+                HStack(spacing: 10) {
+                    Button(action: { appState.tmuxInstallRequest = plan }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.down.circle")
+                                .font(.system(size: 12))
+                            Text("Install tmux")
+                                .font(.system(.body, design: .monospaced))
+                        }
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(appState.accentColor)
+                        .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
+
+                    copyButton(command)
+                }
+                .padding(.top, 4)
+            } else {
+                HStack(spacing: 10) {
+                    if let help = plan.helpURL, let url = URL(string: help) {
+                        Button(action: { NSWorkspace.shared.open(url) }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "safari")
+                                    .font(.system(size: 12))
+                                Text(help == "https://brew.sh" ? "Get Homebrew" : "How to install tmux")
+                                    .font(.system(.body, design: .monospaced))
+                            }
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 10)
+                            .background(appState.accentColor)
+                            .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Button(action: { appState.reconnectRequested = true }) {
+                        Text("Check again")
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundColor(appState.accentColor)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .overlay(RoundedRectangle(cornerRadius: 6)
+                                .stroke(appState.accentColor.opacity(0.5), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    private func copyButton(_ command: String) -> some View {
+        Button(action: {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(command, forType: .string)
+        }) {
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: 12))
+                .foregroundColor(appState.accentColor)
+                .padding(10)
+                .overlay(RoundedRectangle(cornerRadius: 6)
+                    .stroke(appState.accentColor.opacity(0.5), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .help("Copy the command, to run it yourself")
+    }
+}
+
 struct FavoritesBar: View {
     @ObservedObject var appState: AppState
 
@@ -1217,6 +1320,7 @@ struct FavoritesBar: View {
         case .connected: return Color.onyxGreen
         case .reattaching: return Color.onyxAmber
         case .failed, .needsKeySetup: return Color.onyxRed
+        case .tmuxMissing: return Color.onyxAmber
         // Paused is a deliberate state, not a fault — gray, not red.
         case .hostPaused: return .gray.opacity(0.6)
         }
@@ -1235,6 +1339,8 @@ struct FavoritesBar: View {
             return "SSH key setup required"
         case .hostPaused(let label):
             return "\(label) is paused — un-pause it in Settings to connect"
+        case .tmuxMissing(let plan):
+            return "\(plan.hostLabel) needs tmux installed"
         }
     }
 

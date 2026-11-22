@@ -126,12 +126,16 @@ public enum SessionConnectionState: Equatable {
     /// something to retry — the app is deliberately not connecting, and
     /// only the user can change that.
     case hostPaused(hostLabel: String)
+    /// The host has no tmux, so it can't have a session. Not retried —
+    /// every attempt would exit 127 the same way. The plan says whether
+    /// Onyx can install it, and how.
+    case tmuxMissing(TmuxInstallPlan)
 
     /// Keystrokes must not silently go into a dead terminal.
     public var shouldGateInput: Bool {
         switch self {
         case .connected: return false
-        case .reattaching, .failed, .needsKeySetup, .hostPaused: return true
+        case .reattaching, .failed, .needsKeySetup, .hostPaused, .tmuxMissing: return true
         }
     }
 
@@ -144,7 +148,7 @@ public enum SessionConnectionState: Equatable {
     /// Show the connection-error overlay.
     public var showErrorOverlay: Bool {
         switch self {
-        case .failed, .needsKeySetup, .hostPaused: return true
+        case .failed, .needsKeySetup, .hostPaused, .tmuxMissing: return true
         case .connected, .reattaching: return false
         }
     }
@@ -154,6 +158,12 @@ public enum SessionConnectionState: Equatable {
     public var isHostPaused: Bool {
         if case .hostPaused = self { return true }
         return false
+    }
+
+    /// The host needs tmux installed — the overlay offers to do it.
+    public var tmuxInstallPlan: TmuxInstallPlan? {
+        if case .tmuxMissing(let plan) = self { return plan }
+        return nil
     }
 
     /// User-facing message for the error overlay, if any.
@@ -167,6 +177,8 @@ public enum SessionConnectionState: Equatable {
                 Nothing is lost — favorites, notes and sessions are all kept.
                 Open Settings → HOSTS and un-pause \(label) to reconnect.
                 """
+        case .tmuxMissing(let plan):
+            return plan.message
         case .connected, .reattaching:
             return nil
         }

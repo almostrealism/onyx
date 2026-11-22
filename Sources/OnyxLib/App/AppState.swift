@@ -458,6 +458,9 @@ public class AppState: ObservableObject {
 
     // Host being edited for key setup
     @Published public var keySetupHostID: UUID?
+    /// The overlay's Install tmux, picked up by the terminal view
+    /// (`startTmuxInstall`) like `keySetupInProgress`.
+    @Published public var tmuxInstallRequest: TmuxInstallPlan?
 
     private var favoritesCancellable: AnyCancellable?
     private var appearanceCancellable: AnyCancellable?

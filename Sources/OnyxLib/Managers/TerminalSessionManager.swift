@@ -68,6 +68,10 @@ class OnyxTerminalView: NSView {
     private var currentFontName: String = "SF Mono"
     var lastStartTime: Date?
     var isKeySetup = false
+    /// The front view is installing tmux (`startTmuxInstall`), not a session.
+    var isTmuxInstall = false
+    /// The plan being run, so a failed install can say so.
+    var tmuxInstallPlan: TmuxInstallPlan?
 
     // Connection pool: session ID -> pooled terminal view
     var pool: [String: PoolEntry] = [:]
@@ -230,7 +234,7 @@ class OnyxTerminalView: NSView {
     /// is dead or parked in `.failed`, reattach — once per pair
     /// generation for failed states (a fresh connection = a fresh try).
     private func autoHealFromPairRecovery(_ healthMap: [UUID: HostHealth]) {
-        guard hasStarted, !isKeySetup else { return }
+        guard hasStarted, !isKeySetup, !isTmuxInstall else { return }
         guard let active = appState.activeSession, !active.source.isLocal else { return }
         guard let health = healthMap[active.source.hostID], health.state.isUsable else { return }
         let hostID = active.source.hostID
@@ -296,6 +300,10 @@ class OnyxTerminalView: NSView {
             reconnect()
         case .reattaching:
             // The recovery-wait timer handles it.
+            break
+        case .tmuxMissing:
+            // A fresh connection doesn't install tmux. The overlay's
+            // Install or Check again is the way out.
             break
         }
     }
@@ -1119,7 +1127,7 @@ class OnyxTerminalView: NSView {
 
     // MARK: - Terminal View Factory
 
-    private func createTerminalView(scrollback: Int = 10000) -> LocalProcessTerminalView {
+    func createTerminalView(scrollback: Int = 10000) -> LocalProcessTerminalView {
         let tv = LocalProcessTerminalView(frame: bounds)
         tv.terminal.options.scrollback = scrollback
         tv.autoresizingMask = [.width, .height]
@@ -1493,6 +1501,11 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
     }
 
     func processTerminated(source: TerminalView, exitCode: Int32?) {
+        if isTmuxInstall, pool["__tmux_install__"]?.terminalView === source {
+            isTmuxInstall = false
+            tmuxInstallEnded(exitCode: exitCode)
+            return
+        }
         let wasKeySetup = isKeySetup
         isKeySetup = false
 
@@ -1614,6 +1627,12 @@ extension OnyxTerminalView: LocalProcessTerminalViewDelegate {
             // session command itself — reconnect() gives up after a few.
             if let start = self.lastStartTime, Date().timeIntervalSince(start) < 5.0 {
                 self.rapidDeaths += 1
+                // "command not found" on the first instant death: most
+                // likely no tmux on that host — ask before retrying.
+                if self.rapidDeaths == 1, let session = self.appState.activeSession,
+                   self.checkForTmuxAfterInstantDeath(of: session, exitCode: exitCode) {
+                    return
+                }
             } else {
                 self.rapidDeaths = 0
             }

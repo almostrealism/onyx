@@ -104,6 +104,11 @@ public final class PadTerminal: ObservableObject, Identifiable {
         guard terminal === remote else { return }
         remote = nil
         switch end {
+        case .exited(let code) where code == 127:
+            // "command not found": the attach is tmux, so tmux is missing.
+            state = .ended("\(host.label) doesn't have tmux, which Onyx needs to keep sessions running. "
+                           + "Open this host in Onyx on your Mac and it will offer to install tmux for you, "
+                           + "or install it there with the system's package manager.")
         case .exited(let code):
             state = .ended(code == 0 ? "Detached from \(session.name)." : "\(session.name) ended (exit \(code)).")
         case .failed(let why):

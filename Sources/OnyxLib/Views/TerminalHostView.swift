@@ -30,6 +30,12 @@ struct TerminalHostView: NSViewRepresentable {
             }
             nsView.softRefreshSessions()
         }
+        if let plan = appState.tmuxInstallRequest {
+            DispatchQueue.main.async {
+                appState.tmuxInstallRequest = nil
+            }
+            nsView.startTmuxInstall(plan)
+        }
         if appState.keySetupInProgress {
             DispatchQueue.main.async {
                 appState.keySetupInProgress = false

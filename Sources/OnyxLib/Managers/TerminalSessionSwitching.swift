@@ -523,7 +523,15 @@ extension OnyxTerminalView {
         setSessionState(.reattaching(reason: "connection lost", since: Date()), for: target.id)
 
         guard let host = appState.host(for: target.source.hostID), !host.isLocal else {
-            // Local session — nothing to wait for; just respawn.
+            // Local session — nothing to wait for; just respawn. But not
+            // forever: a local session that dies instantly every time
+            // (no tmux on this Mac was one) respawned every 0.3s.
+            if rapidDeaths >= maxRapidDeaths {
+                setSessionState(.failed(error: "The session on this Mac keeps ending right after it starts.\n⌘K → Reconnect SSH to try again."),
+                                for: target.id)
+                clearPendingStatus(for: target.id)
+                return
+            }
             performReconnect(targetSession: target)
             return
         }
