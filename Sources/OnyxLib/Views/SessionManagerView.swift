@@ -60,41 +60,7 @@ struct SessionManagerView: View {
                         }
 
                         // All sessions grouped by host
-                        ForEach(appState.hostGroupedSessions) { hostGroup in
-                            HostHeader(hostGroup: hostGroup, appState: appState)
-
-                            ForEach(hostGroup.groups) { group in
-                                if group.source.isDocker {
-                                    SessionGroupHeader(group: group, appState: appState)
-                                }
-
-                                ForEach(group.sessions, id: \.id) { session in
-                                    SessionRow(session: session, appState: appState)
-                                        .id("row-\(session.id)")
-                                }
-                            }
-
-                            if hostGroup.groups.isEmpty {
-                                if appState.isEnumeratingSessions {
-                                    HStack(spacing: 6) {
-                                        ProgressView()
-                                            .scaleEffect(0.5)
-                                            .colorScheme(.dark)
-                                        Text("Loading sessions...")
-                                            .font(.system(size: sz(11), design: .monospaced))
-                                            .foregroundColor(.gray.opacity(0.3))
-                                    }
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 4)
-                                } else {
-                                    Text("No sessions")
-                                        .font(.system(size: sz(11), design: .monospaced))
-                                        .foregroundColor(.gray.opacity(0.3))
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 4)
-                                }
-                            }
-                        }
+                        HostGroupedSessionRows(appState: appState)
 
                         if appState.allSessions.isEmpty && !appState.isEnumeratingSessions {
                             Text("No sessions found")
@@ -177,6 +143,64 @@ struct SessionManagerView: View {
     private func cancelNewSession() {
         appState.showNewSessionPrompt = false
         newSessionName = ""
+    }
+}
+
+// MARK: - Host groups
+
+/// Every host's sessions, its containers one line each beneath it. Its own
+/// view so a test can render the rows (ImageRenderer draws nothing inside
+/// a ScrollView).
+struct HostGroupedSessionRows: View {
+    @ObservedObject var appState: AppState
+
+    private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
+
+    var body: some View {
+        ForEach(appState.hostGroupedSessions) { hostGroup in
+            HostHeader(hostGroup: hostGroup, appState: appState)
+
+            ForEach(hostGroup.groups) { group in
+                if group.source.isDocker {
+                    // A container is ONE line: click it for
+                    // its logs, the icon for its processes.
+                    // Its own tmux sessions sit beneath it,
+                    // indented, so they read as its own.
+                    ContainerRow(group: group, appState: appState)
+                    ForEach(group.sessions.filter { !$0.source.isUtility }, id: \.id) { session in
+                        SessionRow(session: session, appState: appState,
+                                   indent: ContainerRow.childIndent)
+                            .id("row-\(session.id)")
+                    }
+                } else {
+                    ForEach(group.sessions, id: \.id) { session in
+                        SessionRow(session: session, appState: appState)
+                            .id("row-\(session.id)")
+                    }
+                }
+            }
+
+            if hostGroup.groups.isEmpty {
+                if appState.isEnumeratingSessions {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .colorScheme(.dark)
+                        Text("Loading sessions...")
+                            .font(.system(size: sz(11), design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.3))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 4)
+                } else {
+                    Text("No sessions")
+                        .font(.system(size: sz(11), design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.3))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 4)
+                }
+            }
+        }
     }
 }
 
@@ -339,7 +363,10 @@ private struct HostHeader: View {
                     .foregroundColor(.gray.opacity(0.25))
             }
 
-            let available = hostGroup.groups.flatMap(\.sessions).filter { !$0.unavailable }.count
+            // Sessions, not containers' logs and processes, which are no
+            // longer rows of their own.
+            let available = hostGroup.groups.flatMap(\.sessions)
+                .filter { !$0.unavailable && !$0.source.isUtility }.count
             if available > 0 {
                 Text("\(available)")
                     .font(.system(size: sz(9), design: .monospaced))
@@ -526,41 +553,121 @@ private struct SourceButton: View {
     }
 }
 
-private struct SessionGroupHeader: View {
+/// A docker container, in one line — it used to be three (a header,
+/// then "logs" and "processes" rows that sat LEFT of the header they
+/// belonged to, level with the host's own sessions). Most of the time a
+/// container is something you glance past, so it costs one row:
+///
+///   ▣ api-worker                        ≡ ★
+///
+/// Clicking the name opens its logs — the header did nothing before, and
+/// logs are what a container is usually opened for. The ≡ opens its
+/// processes. Favorites for either are in the right-click menu, and a
+/// star shows when either one is a favorite.
+private struct ContainerRow: View {
     let group: SessionGroup
     @ObservedObject var appState: AppState
+    @State private var hovering = false
+
+    /// Past the host's own sessions, so a container reads as inside the host.
+    static let indent: CGFloat = 22
+    /// A container's own tmux sessions, past the container.
+    static let childIndent: CGFloat = 22
 
     private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
+
+    private var name: String { group.source.containerName ?? group.source.displayName }
+    private var logs: TmuxSession? {
+        group.sessions.first { $0.source.isDockerLogs && !$0.unavailable }
+    }
+    private var processes: TmuxSession? {
+        group.sessions.first { $0.source.isDockerTop && !$0.unavailable }
+    }
+    private func isActive(_ session: TmuxSession?) -> Bool {
+        guard let session else { return false }
+        return appState.activeSession?.id == session.id
+    }
+    private var favorited: Bool {
+        [logs, processes].compactMap { $0 }.contains { appState.isFavorited($0) }
+    }
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "shippingbox")
-                .font(.system(size: sz(8)))
-                .foregroundColor(appState.accentColor.opacity(0.4))
+                .font(.system(size: sz(9)))
+                .foregroundColor(isActive(logs) ? appState.accentColor : appState.accentColor.opacity(0.4))
 
-            Text(group.source.displayName.uppercased())
-                .font(.system(size: sz(8), weight: .medium, design: .monospaced))
-                .foregroundColor(.gray.opacity(0.4))
-                .tracking(1)
+            Text(name)
+                .font(.system(size: sz(11), weight: isActive(logs) ? .medium : .regular, design: .monospaced))
+                .foregroundColor(isActive(logs) ? appState.accentColor : .gray.opacity(0.6))
+                .lineLimit(1)
+                .truncationMode(.middle)
 
-            Spacer()
+            if hovering, logs != nil, !isActive(logs) {
+                Text("logs")
+                    .font(.system(size: sz(9), design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.35))
+                    .italic()
+            }
 
-            let available = group.sessions.filter { !$0.unavailable }.count
-            if available > 0 {
-                Text("\(available)")
-                    .font(.system(size: sz(8), design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.3))
+            Spacer(minLength: 4)
+
+            if favorited {
+                Image(systemName: "star.fill")
+                    .font(.system(size: sz(8)))
+                    .foregroundColor(Color.onyxAmber.opacity(0.7))
+                    .help("Its logs or processes are a favorite")
+            }
+
+            if let processes {
+                Button(action: { appState.jumpToSession(processes) }) {
+                    Image(systemName: "list.number")
+                        .font(.system(size: sz(9)))
+                        .foregroundColor(isActive(processes) ? appState.accentColor : .gray.opacity(hovering ? 0.6 : 0.3))
+                        .frame(width: sz(16), height: sz(14))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("\(name)'s processes")
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 6)
-        .padding(.bottom, 2)
+        .padding(.leading, Self.indent)
+        .padding(.trailing, 14)
+        .padding(.vertical, 3)
+        .background(isActive(logs) || isActive(processes) ? appState.accentColor.opacity(0.08) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let logs { appState.jumpToSession(logs) }
+        }
+        .onHover { hovering = $0 }
+        .help(logs == nil ? name : "\(name) — click for its logs")
+        .contextMenu {
+            if let logs {
+                Button("Open Logs") { appState.jumpToSession(logs) }
+            }
+            if let processes {
+                Button("Open Processes") { appState.jumpToSession(processes) }
+            }
+            if logs != nil || processes != nil { Divider() }
+            if let logs {
+                Button(appState.isFavorited(logs) ? "Unfavorite Logs" : "Favorite Logs") {
+                    appState.toggleFavorite(logs)
+                }
+            }
+            if let processes {
+                Button(appState.isFavorited(processes) ? "Unfavorite Processes" : "Favorite Processes") {
+                    appState.toggleFavorite(processes)
+                }
+            }
+        }
     }
 }
 
 private struct SessionRow: View {
     let session: TmuxSession
     @ObservedObject var appState: AppState
+    /// Extra leading space: a container's own sessions sit under it.
+    var indent: CGFloat = 0
     @State private var hovering = false
 
     private func sz(_ base: CGFloat) -> CGFloat { appState.uiSize(base) }
@@ -575,20 +682,6 @@ private struct SessionRow: View {
 
     private var isFavoritedAnyWindow: Bool {
         appState.isFavorited(session)
-    }
-
-    private var isUtility: Bool {
-        session.source.isUtility
-    }
-
-    private var utilityIcon: String {
-        if session.source.isDockerTop { return "list.number" }
-        return "doc.text"
-    }
-
-    private var utilityLabel: String {
-        if session.source.isDockerTop { return "processes" }
-        return "logs"
     }
 
     private var sessionConfidence: Double {
@@ -624,25 +717,6 @@ private struct SessionRow: View {
                     .lineLimit(1)
 
                 Spacer()
-            } else if isUtility {
-                Image(systemName: utilityIcon)
-                    .font(.system(size: sz(9)))
-                    .foregroundColor(isActive ? appState.accentColor.opacity(0.7) : .gray.opacity(0.4))
-
-                Text(utilityLabel)
-                    .font(.system(size: sz(11), weight: isActive ? .medium : .regular, design: .monospaced))
-                    .foregroundColor(isActive ? appState.accentColor : .gray.opacity(0.5))
-                    .italic()
-                    .lineLimit(1)
-
-                Spacer()
-
-                Button(action: { appState.toggleFavorite(session) }) {
-                    Image(systemName: isFavorited ? "star.fill" : (isFavoritedAnyWindow ? "star.leadinghalf.filled" : "star"))
-                        .font(.system(size: sz(10)))
-                        .foregroundColor(isFavorited ? Color.onyxAmber : (isFavoritedAnyWindow ? Color.onyxAmber.opacity(0.4) : .gray.opacity(0.3)))
-                }
-                .buttonStyle(.plain)
             } else {
                 Circle()
                     .fill(isActive ? appState.accentColor : Color.clear)
@@ -682,7 +756,8 @@ private struct SessionRow: View {
                                       visible: hovering, size: sz(10))
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.leading, 14 + indent)
+        .padding(.trailing, 14)
         .padding(.vertical, 5)
         .background(isActive ? appState.accentColor.opacity(0.08) : Color.clear)
         .contentShape(Rectangle())
