@@ -105,6 +105,10 @@ private struct PullRequestRow: View {
                 PRPipelineRunLine(run: run, accentColor: accentColor)
             }
         }
+        // The whole of it — title, repo, runs — shows the PR's card on
+        // hover: the full title and every failed job live there, which
+        // is what lets the row itself stay short.
+        .prDetailsOnHover(pr, runs: runs)
     }
 
     private var prButton: some View {
@@ -113,12 +117,13 @@ private struct PullRequestRow: View {
                 MergeStatusDot(status: pr.mergeStatus)
                     .padding(.top, 6)
                 VStack(alignment: .leading, spacing: 1) {
+                    // One line, always: the list is long and the overlay
+                    // is shared. Hover for the whole title (the card).
                     Text(pr.title)
                         .monitorFont(size: 12)
                         .foregroundColor(.white.opacity(0.85))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                     HStack(spacing: 6) {
                         ProviderBadge(provider: pr.provider)
                         // GitLab references MRs as !123, GitHub PRs as #123.
@@ -201,7 +206,6 @@ struct PRPipelineRunLine: View {
                                          ? Color.onyxBlue.opacity(0.85)
                                          : Color.onyxAmber.opacity(0.8))
                         .layoutPriority(2)
-                        .help(Self.jobHelp(job))
                     }
                 }
                 if !run.failedJobs.isEmpty {
@@ -221,7 +225,6 @@ struct PRPipelineRunLine: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(run.url ?? run.name)
     }
 
     /// `#412 ↻2 · 3m ago` — the attempt only when it's a re-run.

@@ -443,7 +443,9 @@ struct MonitorWorkloadStrip: View {
                                         cpuPct: CGFloat(load.cpuPercent),
                                         maxPct: CGFloat(load.maxPercent))
                 case .prJob(let activity):
-                    PRJobPill(activity: activity)
+                    let pr = (ghManager.pullRequests + glManager.mergeRequests)
+                        .first { $0.id == activity.prID }
+                    PRJobPill(activity: activity, pr: pr, runs: pr.map { ci.runs(for: $0) } ?? [])
                 }
             }
         }

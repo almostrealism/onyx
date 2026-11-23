@@ -131,7 +131,9 @@ public struct SimplePRLine: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(tooltip)
+        // Title, labels by name, every run: the card, where something
+        // hosts one (the Mac's overlay and compact window).
+        .prDetailsOnHover(pr, runs: runs)
     }
 
     private func jobText(_ job: String, color: Color) -> some View {
@@ -141,16 +143,6 @@ public struct SimplePRLine: View {
             .lineLimit(1)
             .truncationMode(.middle)
             .layoutPriority(2)
-    }
-
-    /// The title, its labels, and the workflow the shown job belongs to.
-    private var tooltip: String {
-        var lines = [pr.title]
-        if !labels.isEmpty { lines.append(labels.map(\.name).joined(separator: ", ")) }
-        if let run = PRPipelineRun.mostRecentlyActive(runs), let job = run.activeJob {
-            lines.append("\(run.name) · \(job.name)")
-        }
-        return lines.joined(separator: "\n")
     }
 
     public static func branchLabel(_ pr: PullRequest) -> String {
@@ -168,9 +160,15 @@ public struct SimplePRLine: View {
 public struct PRJobPill: View {
     @Environment(\.openURL) private var openURL
     let activity: PRJobActivity
+    /// The PR itself, when the caller has it: hovering then shows its
+    /// details card instead of a plain tooltip.
+    let pr: PullRequest?
+    let runs: [PRPipelineRun]
 
-    public init(activity: PRJobActivity) {
+    public init(activity: PRJobActivity, pr: PullRequest? = nil, runs: [PRPipelineRun] = []) {
         self.activity = activity
+        self.pr = pr
+        self.runs = runs
     }
 
     public var body: some View {
@@ -198,12 +196,27 @@ public struct PRJobPill: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("\(activity.prTitle)\n\(activity.branch)\n\(activity.workflow) · \(activity.job) — "
-              + (activity.state == .running ? "running" : "queued"))
+        .modifier(PillHover(activity: activity, pr: pr, runs: runs))
     }
 
     private func open() {
         guard let url = URL(string: activity.prURL) else { return }
         openURL(url)
+    }
+}
+
+/// The pill's hover: the PR's card when we have the PR, else a tooltip.
+private struct PillHover: ViewModifier {
+    let activity: PRJobActivity
+    let pr: PullRequest?
+    let runs: [PRPipelineRun]
+
+    func body(content: Content) -> some View {
+        if let pr {
+            content.prDetailsOnHover(pr, runs: runs)
+        } else {
+            content.help("\(activity.prTitle)\n\(activity.branch)\n\(activity.workflow) · \(activity.job) — "
+                         + (activity.state == .running ? "running" : "queued"))
+        }
     }
 }

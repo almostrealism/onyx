@@ -421,6 +421,10 @@ struct MonitorView: View {
                     .zIndex(100)
             }
         }
+        // Hovering a PR anywhere in the overlay — the detailed list, simple
+        // mode's lines, the strip's job pills — shows its details card,
+        // drawn over everything here.
+        .prDetailsHost(accentColor: appState.accentColor)
         .onReceive(NotificationCenter.default.publisher(for: .toggleMonitorInterval)) { _ in
             monitor.toggleInterval()
         }

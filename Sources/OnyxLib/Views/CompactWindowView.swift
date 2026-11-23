@@ -9,6 +9,7 @@
 
 import SwiftUI
 import OnyxCore
+import OnyxUI
 
 struct CompactWindowView: View {
     @ObservedObject var appState: AppState
@@ -51,6 +52,8 @@ struct CompactWindowView: View {
             .padding(.top, 4)
             .padding(.trailing, 6)
         }
+        // Hovering a PR shows its details card, over the window.
+        .prDetailsHost(accentColor: appState.accentColor)
         .environment(\.monitorFontScale, appState.appearance.uiFontSize / 12.0)
     }
 }
