@@ -37,10 +37,16 @@ struct FleetStackedCharts: View {
     /// rows are worth drawing at all in a cramped column.
     var minChartHeight: CGFloat = 22
     /// The most host stacks in one column; nil keeps them all in one.
-    /// Simple mode caps it so a fleet goes side by side rather than off
-    /// the bottom. The detailed overlay's column is too narrow to split
-    /// and scrolls instead.
+    /// Both layouts cap it (`MonitorChartLayout.fleetMaxRows`) so a fleet
+    /// goes side by side — six hosts as a 3×2 grid — rather than off the
+    /// bottom or down to slivers.
     var maxRows: Int? = nil
+    /// Cut the charts off at `availableHeight`. Simple mode's budget is
+    /// the screen; the detailed overlay's column scrolls, so there an
+    /// overrun should scroll rather than vanish.
+    var clipsToHeight = true
+    /// Between side-by-side columns: the detailed overlay's is narrow.
+    var columnSpacing: CGFloat = 20
     @Environment(\.monitorFontScale) private var fontScale
 
     var body: some View {
@@ -72,7 +78,7 @@ struct FleetStackedCharts: View {
                 gpuCharts: showGPU ? 1 : 0, rowSpacing: rowSpacing, innerSpacing: innerSpacing,
                 fontScale: fontScale, minChartHeight: minChartHeight)
 
-            HStack(alignment: .top, spacing: 20) {
+            HStack(alignment: .top, spacing: columnSpacing) {
                 ForEach(Array(MonitorChartLayout.columnsOf(series, columns: grid.columns).enumerated()),
                         id: \.offset) { _, column in
                     VStack(alignment: .leading, spacing: rowSpacing) {
@@ -102,7 +108,7 @@ struct FleetStackedCharts: View {
             // cut it off here rather than drawing over what's below. Only
             // where the budget is the screen — the detailed column
             // scrolls, so there an overrun just scrolls.
-            .frame(height: maxRows == nil ? nil : availableHeight, alignment: .top)
+            .frame(height: clipsToHeight ? availableHeight : nil, alignment: .top)
             .clipped()
         }
     }
@@ -276,27 +282,40 @@ private struct FleetHostHeader: View {
     let host: FleetHostSeries
     let accentColor: Color
 
+    /// Side by side, a column can be too narrow for the name and all
+    /// three readings. Drop readings — memory, then GPU — rather than
+    /// wrap the name onto a second line and push its charts down.
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            line(gpu: true, mem: true)
+            line(gpu: true, mem: false)
+            line(gpu: false, mem: false)
+            name.lineLimit(1).truncationMode(.tail)
+        }
+    }
+
+    private var name: some View {
+        Text(host.label.uppercased())
+            .monitorFont(size: 11, weight: .medium)
+            .foregroundColor(accentColor)
+            .tracking(1)
+    }
+
+    private func line(gpu showGPU: Bool, mem showMem: Bool) -> some View {
         HStack(spacing: 10) {
-            Text(host.label.uppercased())
-                .monitorFont(size: 11, weight: .medium)
-                .foregroundColor(accentColor)
-                .tracking(1)
-            Text("CPU \(Int(host.cpu.last ?? 0))%")
-                .monitorFont(size: 10)
-                .foregroundColor(.gray.opacity(0.55))
-            if let gpu = host.gpu?.last {
-                Text("GPU \(Int(gpu))%")
-                    .monitorFont(size: 10)
-                    .foregroundColor(.gray.opacity(0.55))
-            }
-            if let mem = host.mem?.last {
-                Text("MEM \(Int(mem))%")
-                    .monitorFont(size: 10)
-                    .foregroundColor(.gray.opacity(0.55))
-            }
+            name.fixedSize()
+            reading("CPU", host.cpu.last ?? 0)
+            if showGPU, let gpu = host.gpu?.last { reading("GPU", gpu) }
+            if showMem, let mem = host.mem?.last { reading("MEM", mem) }
             Spacer(minLength: 0)
         }
+    }
+
+    private func reading(_ title: String, _ value: Double) -> some View {
+        Text("\(title) \(Int(value))%")
+            .monitorFont(size: 10)
+            .foregroundColor(.gray.opacity(0.55))
+            .fixedSize()
     }
 }
 

@@ -343,15 +343,20 @@ struct MonitorView: View {
                                 }
 
                                 // `F` retargets these charts at the fleet.
-                                // The column is narrow, so the fleet views
+                                // The column scrolls, so the fleet views
                                 // get a fixed budget and their own floor on
                                 // chart height rather than the full-height
                                 // arithmetic the simple layout can afford.
+                                // Hosts go three to a column, as in simple
+                                // mode: six in one column were slivers.
                                 if appState.fleetMode == .topHosts {
                                     FleetStackedCharts(appState: appState, monitor: monitor,
                                                        accentColor: appState.accentColor,
-                                                       availableHeight: 320,
-                                                       minChartHeight: 14)
+                                                       availableHeight: Self.detailedFleetHeight,
+                                                       minChartHeight: 14,
+                                                       maxRows: MonitorChartLayout.fleetMaxRows,
+                                                       clipsToHeight: false,
+                                                       columnSpacing: 14)
                                 } else if appState.fleetMode == .fleetMax {
                                     FleetMergedCharts(appState: appState, monitor: monitor,
                                                       accentColor: appState.accentColor,
@@ -840,4 +845,12 @@ struct WatchStatusLine: View {
         if s < 86400 { return "\(s / 3600)h ago" }
         return "\(s / 86400)d ago"
     }
+}
+
+extension MonitorView {
+    /// The detailed overlay's budget for the per-host fleet charts. Three
+    /// rows of host stacks share it (`MonitorChartLayout.fleetMaxRows`),
+    /// so a chart gets a readable height without the containers and
+    /// connections below being pushed off the first screen.
+    static let detailedFleetHeight: CGFloat = 360
 }

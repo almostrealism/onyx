@@ -89,6 +89,12 @@ public enum MonitorChartLayout {
     /// Columns and rows for `hosts` host stacks, no column taller than
     /// `maxRows`. Rows are as even as they can be: five hosts are 3 + 2,
     /// not 3 + 1 + 1.
+    /// Per-host fleet charts stop at this many rows and go side by side,
+    /// in both layouts: past three, one column never fit the screen, and
+    /// in the detailed overlay six hosts in one column left every chart at
+    /// its height floor — a list of slivers.
+    public static let fleetMaxRows = 3
+
     public static func fleetGrid(hosts: Int, maxRows: Int) -> (columns: Int, rows: Int) {
         guard hosts > 0 else { return (1, 0) }
         let cap = max(1, maxRows)

@@ -166,7 +166,7 @@ struct SimpleMonitorBody: View {
 extension SimpleMonitorBody {
     /// Simple mode's per-host fleet charts stop at this many rows and go
     /// side by side: past three, one column never fit the screen.
-    static let maxFleetRows = 3
+    static let maxFleetRows = MonitorChartLayout.fleetMaxRows
 
     /// The bottom strip's height: room for its tallest member, the weekly
     /// Timing tile, plus a margin — the row is centered, so a member
